@@ -1,0 +1,14 @@
+{
+  "name": "lotto-analyzer-deploy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node start-prod.mjs",
+    "tunnel": "node start-prod.mjs --tunnel"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "http-proxy-middleware": "^3.0.0",
+    "localtunnel": "^2.0.2"
+  }
+}

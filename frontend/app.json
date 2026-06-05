@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "로또 분석기",
+    "slug": "lotto-analyzer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#121417"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#121417"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

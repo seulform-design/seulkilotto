@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lotto
+      POSTGRES_PASSWORD: lotto
+      POSTGRES_DB: lotto_research
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lotto -d lotto_research"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8100:8100"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://lotto:lotto@postgres:5432/lotto_research
+      REDIS_URL: redis://redis:6379/0
+      SEED: "42"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../backend/data:/data:ro
+    command: >
+      sh -c "alembic upgrade head &&
+             python scripts/seed_from_csv.py --csv /data/lotto_history.csv || true &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8100"
+
+volumes:
+  pgdata:

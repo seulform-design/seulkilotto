@@ -1,0 +1,18 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Dashboard → New → Blueprint → GitHub 저장소 연결
+services:
+  - type: web
+    name: lotto-analyzer
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: CRAWL_SOURCE
+        value: lottis
+      - key: HISTORY_CACHE_TTL
+        value: "300"

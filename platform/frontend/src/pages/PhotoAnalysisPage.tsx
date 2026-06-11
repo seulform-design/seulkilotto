@@ -751,10 +751,16 @@ function SavedLinesPanel({
   currentSlipLines,
   slipQueue,
   onRemoveSlip,
+  onRemoveCurrentLine,
+  onEditCurrentLine,
+  onRemoveSlipLine,
 }: {
   currentSlipLines: SavedLine[];
   slipQueue: ManualSlipInput[];
   onRemoveSlip: (index: number) => void;
+  onRemoveCurrentLine: (index: number) => void;
+  onEditCurrentLine: (index: number) => void;
+  onRemoveSlipLine: (slipIndex: number, lineIndex: number) => void;
 }) {
   const totalLines =
     currentSlipLines.length + slipQueue.reduce((sum, slip) => sum + slip.lines.length, 0);
@@ -770,38 +776,82 @@ function SavedLinesPanel({
       {currentSlipLines.length > 0 && (
         <Box>
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-            입력 중 (용지 {slipQueue.length + 1})
+            입력 중 (용지 {slipQueue.length + 1} · {currentSlipLines.length}/5줄)
           </Typography>
-          {currentSlipLines.map((line) => (
-            <Stack key={line.label} direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+          {currentSlipLines.map((line, idx) => (
+            <Stack
+              key={`current-${idx}`}
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              sx={{ mb: 0.5 }}
+            >
               <Chip label={line.label} size="small" color="primary" variant="outlined" />
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ flex: 1 }}>
                 {line.numbers.map((n) => (
                   <LottoBall key={n} number={n} size={28} />
                 ))}
               </Stack>
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => onEditCurrentLine(idx)}
+                sx={{ minWidth: 'auto', px: 1 }}
+                aria-label={`${line.label}줄 수정`}
+              >
+                수정
+              </Button>
+              <IconButton
+                size="small"
+                onClick={() => onRemoveCurrentLine(idx)}
+                aria-label={`${line.label}줄 삭제`}
+              >
+                ×
+              </IconButton>
             </Stack>
           ))}
         </Box>
       )}
       {slipQueue.map((slip, slipIdx) => (
         <Box key={`slip-${slipIdx}`}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            sx={{ mb: 0.5 }}
+          >
             <Typography variant="caption" color="text.secondary">
-              용지 {slipIdx + 1} (저장됨)
+              용지 {slipIdx + 1} (저장됨 · {slip.lines.length}줄)
             </Typography>
-            <IconButton size="small" onClick={() => onRemoveSlip(slipIdx)} aria-label="용지 삭제">
+            <IconButton
+              size="small"
+              onClick={() => onRemoveSlip(slipIdx)}
+              aria-label={`용지 ${slipIdx + 1} 전체 삭제`}
+            >
               ×
             </IconButton>
           </Stack>
-          {slip.lines.map((line) => (
-            <Stack key={`${slipIdx}-${line.label}`} direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+          {slip.lines.map((line, lineIdx) => (
+            <Stack
+              key={`${slipIdx}-${lineIdx}`}
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              sx={{ mb: 0.5 }}
+            >
               <Chip label={line.label} size="small" variant="outlined" />
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ flex: 1 }}>
                 {line.numbers.map((n) => (
                   <LottoBall key={n} number={n} size={28} />
                 ))}
               </Stack>
+              <IconButton
+                size="small"
+                onClick={() => onRemoveSlipLine(slipIdx, lineIdx)}
+                aria-label={`용지 ${slipIdx + 1} ${line.label}줄 삭제`}
+              >
+                ×
+              </IconButton>
             </Stack>
           ))}
         </Box>
@@ -918,14 +968,66 @@ export default function PhotoAnalysisPage() {
     setNotice(`${currentLabel}줄 저장 — 다음 ${GAME_LABELS[nextLines.length]}줄`);
   };
 
+  const removeCurrentLine = (idx: number) => {
+    if (idx < 0 || idx >= currentSlipLines.length) return;
+    const removedLabel = currentSlipLines[idx].label;
+    const next = currentSlipLines
+      .filter((_, i) => i !== idx)
+      .map((line, i) => ({ ...line, label: GAME_LABELS[i] }));
+    patchManual({ currentSlipLines: next });
+    setError(null);
+    setNotice(`${removedLabel}줄 삭제 — 다음 입력은 ${GAME_LABELS[next.length] ?? 'A'}줄`);
+  };
+
+  const editCurrentLine = (idx: number) => {
+    if (idx < 0 || idx >= currentSlipLines.length) return;
+    const line = currentSlipLines[idx];
+    if (picked.length > 0) {
+      const ok = window.confirm(
+        `편집 중인 번호 ${picked.length}개가 있습니다.\n` +
+          `${line.label}줄을 편집하려면 현재 선택은 사라집니다. 진행할까요?`
+      );
+      if (!ok) return;
+    }
+    const next = currentSlipLines
+      .filter((_, i) => i !== idx)
+      .map((l, i) => ({ ...l, label: GAME_LABELS[i] }));
+    patchManual({
+      currentSlipLines: next,
+      picked: [...line.numbers].sort((a, b) => a - b),
+    });
+    setError(null);
+    setNotice(`${line.label}줄을 편집합니다. 번호 수정 후 「줄 저장」을 누르세요.`);
+  };
+
+  const removeSlipLine = (slipIdx: number, lineIdx: number) => {
+    if (slipIdx < 0 || slipIdx >= slipQueue.length) return;
+    const target = slipQueue[slipIdx];
+    if (lineIdx < 0 || lineIdx >= target.lines.length) return;
+    const removedLabel = target.lines[lineIdx].label;
+    const newLines = target.lines
+      .filter((_, li) => li !== lineIdx)
+      .map((l, li) => ({ ...l, label: GAME_LABELS[li] }));
+    const nextQueue = slipQueue
+      .map((slip, si) => (si === slipIdx ? { ...slip, lines: newLines } : slip))
+      .filter((slip) => slip.lines.length > 0);
+    patchManual({ slipQueue: nextQueue });
+    setError(null);
+    setNotice(
+      newLines.length
+        ? `용지 ${slipIdx + 1}의 ${removedLabel}줄 삭제 (남은 줄: ${newLines.length})`
+        : `용지 ${slipIdx + 1}이 비어 자동 삭제됨`
+    );
+  };
+
   const runManualAnalyze = async () => {
-    const slips = [...slipQueue];
-    if (currentSlipLines.length) {
-      setError('입력 중인 용지가 있습니다. A~E 줄을 모두 저장하거나 「용지 초기화」를 누르세요.');
-      return;
+    let slips = [...slipQueue];
+    // 부분 용지(1~4줄)도 자동으로 슬립화하여 분석 — "저장이 안 됨" 결함 해소
+    if (currentSlipLines.length > 0) {
+      slips = [...slips, slipFromLines(currentSlipLines)];
     }
     if (!slips.length) {
-      setError('저장된 용지가 없습니다. 번호를 눌러 A~E 줄을 저장하세요.');
+      setError('저장된 줄이 없습니다. 번호 6개 선택 후 「줄 저장」을 누르세요.');
       return;
     }
     setLoading(true);
@@ -1181,6 +1283,9 @@ export default function PhotoAnalysisPage() {
           onRemoveSlip={(idx) =>
             patchManual({ slipQueue: slipQueue.filter((_, i) => i !== idx) })
           }
+          onRemoveCurrentLine={removeCurrentLine}
+          onEditCurrentLine={editCurrentLine}
+          onRemoveSlipLine={removeSlipLine}
         />
       </Paper>
 

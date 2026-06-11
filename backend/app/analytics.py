@@ -174,3 +174,99 @@ def generate_weighted_sets(
             f"연속번호 제외 등 조건을 완화해 보세요."
         )
     return result
+
+
+# =============================================================================
+# 4) 스마트 조합 — 다양화·역사적 필터·인기 패턴 회피
+# =============================================================================
+SUM_MIN, SUM_MAX = 100, 175
+VALID_ODD = {2, 3, 4}
+MAX_SMART_ATTEMPTS = 8000
+
+
+def _combo_dict(nums: List[int]) -> Dict:
+    return {
+        "numbers": nums,
+        "sum_total": int(sum(nums)),
+        "odd_count": sum(1 for n in nums if n % 2 == 1),
+        "even_count": sum(1 for n in nums if n % 2 == 0),
+    }
+
+
+def _passes_smart_filters(nums: List[int], exclude_consecutive: bool) -> bool:
+    if exclude_consecutive and any(nums[i + 1] - nums[i] == 1 for i in range(5)):
+        return False
+    s = sum(nums)
+    if not (SUM_MIN <= s <= SUM_MAX):
+        return False
+    odd = sum(1 for n in nums if n % 2 == 1)
+    if odd not in VALID_ODD:
+        return False
+    # 생일 구간(1~31)만 5개 이상 — 흔한 패턴 회피
+    low = sum(1 for n in nums if n <= 31)
+    if low >= 5:
+        return False
+    return True
+
+
+def _overlap_count(a: List[int], b: List[int]) -> int:
+    return len(set(a) & set(b))
+
+
+def _rarity_score(nums: List[int], df: pd.DataFrame) -> float:
+    """낮을수록 흔한 번호 조합(인기 패턴) — 높을수록 희귀."""
+    flat = df[NUMBER_COLUMNS].to_numpy().ravel()
+    counts = pd.Series(flat).value_counts()
+    total = len(df)
+    # 자주 나온 번호만 골라낸 조합은 점수 낮음
+    freq_penalty = sum(counts.get(n, 0) / max(total, 1) for n in nums)
+    low_penalty = sum(1 for n in nums if n <= 31) * 0.05
+    return round(1.0 - min(0.95, freq_penalty / 6 + low_penalty), 4)
+
+
+def generate_smart_sets(
+    df: pd.DataFrame,
+    n_sets: int = 5,
+    lookback: int = 5,
+    exclude_consecutive: bool = True,
+    max_overlap: int = 2,
+    seed: int | None = None,
+) -> Dict:
+    """다양화·역사적 필터·희귀도 기반 스마트 조합.
+
+    - 총합 100~175, 홀수 2~4개 (역대 당첨 분포 근사)
+    - 게임 간 번호 겹침 max_overlap 이하
+    - 생일 구간(1~31) 과다 집중 회피 → 동일 당첨 시 분할 가능성 완화 참고용
+    """
+    rng = np.random.default_rng(seed)
+    weights = build_weights(df, lookback=lookback)
+    unseen = find_unseen_numbers(df, lookback)
+
+    combinations: List[Dict] = []
+    attempts = 0
+
+    while len(combinations) < n_sets and attempts < MAX_SMART_ATTEMPTS:
+        attempts += 1
+        picked = sorted(int(x) for x in rng.choice(ALL_NUMBERS, size=6, replace=False, p=weights))
+        if not _passes_smart_filters(picked, exclude_consecutive):
+            continue
+        if any(_overlap_count(picked, c["numbers"]) > max_overlap for c in combinations):
+            continue
+        entry = _combo_dict(picked)
+        entry["rarity_score"] = _rarity_score(picked, df)
+        combinations.append(entry)
+
+    combinations.sort(key=lambda x: x.get("rarity_score", 0), reverse=True)
+
+    result: Dict = {
+        "unseen_numbers": unseen,
+        "combinations": combinations,
+        "strategy": "다양화+총합/홀짝 필터+희귀도",
+        "disclaimer": (
+            "로또는 독립시행 확률 게임입니다. 본 전략은 당첨 확률 자체를 높이지 않으며, "
+            "조합 다양화·흔한 패턴 회피(당첨 시 분할 참고) 목적입니다."
+        ),
+    }
+    if len(combinations) < n_sets:
+        result["warning"] = f"요청 {n_sets}조합 중 {len(combinations)}조합만 생성됐습니다."
+    return result

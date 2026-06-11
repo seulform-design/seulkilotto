@@ -174,6 +174,11 @@ def analyze_fermat(df: pd.DataFrame, recent_n: Optional[int] = None) -> Dict:
     }
 
 
+def _public_analysis(analysis: Dict) -> Dict:
+    """API 응답용 — 내부 numpy 배열(_weights 등) 제거."""
+    return {k: v for k, v in analysis.items() if not k.startswith("_")}
+
+
 def analyze_all_classic(df: pd.DataFrame, recent_n: Optional[int] = None) -> Dict[str, Dict]:
     """네 가지 패턴 분석 요약."""
     return {
@@ -305,9 +310,6 @@ def generate_by_method(
         "fermat": generate_fermat_combo,
     }
     combo = generators[m](analyses[m], rng)
-    if combo is None:
-        # 완화: 총합 필터만
-        combo = generators[m](analyses[m], rng)
     return combo, meta
 
 
@@ -385,7 +387,7 @@ def build_classic_recommendation(
         "next_draw_date": next_date,
         "method": m,
         "latest_round": int(df["round"].max()),
-        "pattern_analysis": patterns if m == "blend" else {m: patterns[m]},
+        "pattern_analysis": patterns if m == "blend" else {m: _public_analysis(patterns[m])},
         "combinations": combos,
         "warning": warning,
         "filter_rule": "총합 100~175, 홀짝 2:4|3:3|4:2",

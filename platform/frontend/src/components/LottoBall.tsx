@@ -4,12 +4,14 @@ import { getBallColor } from '../theme/colors';
 interface LottoBallProps {
   number: number;
   size?: number;
+  /** 복기 등 — 당첨번호가 아닐 때 회색 처리 */
+  dimmed?: boolean;
 }
 
-export default function LottoBall({ number, size = 44 }: LottoBallProps) {
-  const bg = getBallColor(number);
-  const isLight = number <= 10 || number > 40;
-  const textColor = isLight ? '#2A2A2A' : '#FFFFFF';
+export default function LottoBall({ number, size = 44, dimmed = false }: LottoBallProps) {
+  const bg = dimmed ? '#4a4f57' : getBallColor(number);
+  const isLight = dimmed || number <= 10 || number > 40;
+  const textColor = dimmed ? '#9ba1a9' : isLight ? '#2A2A2A' : '#FFFFFF';
 
   return (
     <Box
@@ -21,7 +23,8 @@ export default function LottoBall({ number, size = 44 }: LottoBallProps) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        boxShadow: '0 2px 6px rgba(0,0,0,0.35)',
+        boxShadow: dimmed ? '0 1px 3px rgba(0,0,0,0.25)' : '0 2px 6px rgba(0,0,0,0.35)',
+        opacity: dimmed ? 0.72 : 1,
         flexShrink: 0,
       }}
     >

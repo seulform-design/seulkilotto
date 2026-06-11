@@ -236,13 +236,23 @@ class ResearchService:
         obs = np.zeros(45)
         for _, r in df.iterrows():
             for n in row_numbers(r):
-                obs[n] += 1
-        exp = np.full(45, obs.sum() / 45)
-        chi2, p = stats.chisquare(obs[1:], exp[1:])
+                if 1 <= n <= 45:
+                    obs[n - 1] += 1
+        total = obs.sum()
+        if total <= 0:
+            return {
+                "test": "chi_square_uniformity",
+                "p_value": None,
+                "is_random_like": None,
+                "interpretation": "당첨 데이터가 없어 검정을 수행할 수 없습니다.",
+                "disclaimer": "장기 독립시행에서는 패턴 유의가 나올 수 있음",
+            }
+        exp = np.full(45, total / 45)
+        chi2, p = stats.chisquare(obs, exp)
         return {
             "test": "chi_square_uniformity",
             "p_value": round(float(p), 6),
-            "is_random_like": p > 0.05,
+            "is_random_like": bool(p > 0.05),
             "interpretation": "p>0.05 이면 번호 출현은 균등에 가깝다(우연 범위)",
             "disclaimer": "장기 독립시행에서는 패턴 유의가 나올 수 있음",
         }

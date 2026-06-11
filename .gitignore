@@ -2,9 +2,17 @@ node_modules/
 dist/
 __pycache__/
 *.py[cod]
+
+# 환경 변수: 템플릿(.env.example) 외 전부 무시
 .env
 .env.*
 !.env.example
+!platform/frontend/.env.example
+
+# 자동 생성되는 터널 메타데이터
+.tunnel-url
+deploy/.tunnel-url
+
 *.db
 .venv/
 venv/
@@ -16,3 +24,9 @@ htmlcov/
 .expo/
 lotto_research.db
 platform/backend/lotto_research.db
+backend/data/video_analysis_store.json
+
+# tsc 잔여물 (src 내 .js/.js.map)
+platform/frontend/src/**/*.js
+platform/frontend/src/**/*.js.map
+!platform/frontend/src/**/*.config.js

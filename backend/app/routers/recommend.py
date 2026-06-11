@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from ..classic_methods import METHOD_IDS, build_classic_recommendation
 from ..database import load_history
+from ..json_utils import to_jsonable
 from ..machine_analytics import build_round_recommendation
 
 router = APIRouter(prefix="/api/v1/recommend", tags=["recommend"])
@@ -114,4 +115,6 @@ def recommend_classic(
     df = load_history()
     if df.empty:
         raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
-    return build_classic_recommendation(df, method=method, seed=seed, recent_n=recent_n)
+    return to_jsonable(
+        build_classic_recommendation(df, method=method, seed=seed, recent_n=recent_n)
+    )

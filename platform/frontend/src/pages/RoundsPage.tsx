@@ -9,17 +9,21 @@ import {
   ListItemText,
   Paper,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
 import LottoBall from '../components/LottoBall';
 import OddEvenBar from '../components/OddEvenBar';
 import { v1Api } from '../api/v1Api';
 
+const PAGE_SIZE = 100;
+
 export default function RoundsPage() {
   const qc = useQueryClient();
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [jumpRound, setJumpRound] = useState('');
 
   const status = useQuery({
     queryKey: ['v1-upgrade-status'],
@@ -27,10 +31,21 @@ export default function RoundsPage() {
     refetchInterval: 60_000,
   });
 
-  const rounds = useQuery({
+  const rounds = useInfiniteQuery({
     queryKey: ['v1-rounds'],
-    queryFn: () => v1Api.listRounds(50),
+    queryFn: ({ pageParam }) => v1Api.listRounds(PAGE_SIZE, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (last) => {
+      const next = last.offset + last.limit;
+      return next < last.total ? next : undefined;
+    },
   });
+
+  const allItems = useMemo(
+    () => rounds.data?.pages.flatMap((p) => p.items) ?? [],
+    [rounds.data]
+  );
+  const totalRounds = rounds.data?.pages[0]?.total ?? 0;
 
   const roundDetail = useQuery({
     queryKey: ['v1-round', selectedRound],
@@ -120,22 +135,97 @@ export default function RoundsPage() {
       )}
 
       <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" gutterBottom>
-          회차별 당첨 내역
-        </Typography>
-        {rounds.isLoading && <CircularProgress size={24} />}
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="space-between"
+          flexWrap="wrap"
+          useFlexGap
+          sx={{ mb: 1 }}
+        >
+          <Typography variant="h6">회차별 당첨 내역</Typography>
+          <Chip
+            label={
+              totalRounds
+                ? `전체 ${totalRounds}회 · 목록 ${allItems.length}회`
+                : '로딩…'
+            }
+            color="primary"
+            size="small"
+          />
+        </Stack>
+
+        <Stack direction="row" spacing={1} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap>
+          <TextField
+            size="small"
+            label="회차 이동"
+            placeholder="예: 500"
+            value={jumpRound}
+            onChange={(e) => setJumpRound(e.target.value.replace(/\D/g, ''))}
+            sx={{ width: 120 }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && jumpRound) {
+                setSelectedRound(Number(jumpRound));
+              }
+            }}
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={!jumpRound}
+            onClick={() => jumpRound && setSelectedRound(Number(jumpRound))}
+          >
+            이동
+          </Button>
+          {rounds.hasNextPage && (
+            <>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => rounds.fetchNextPage()}
+                disabled={rounds.isFetchingNextPage}
+              >
+                {rounds.isFetchingNextPage ? '불러오는 중…' : `+${PAGE_SIZE}회 더`}
+              </Button>
+              <Button
+                variant="contained"
+                color="secondary"
+                size="small"
+                disabled={rounds.isFetchingNextPage}
+                onClick={async () => {
+                  let res = await rounds.fetchNextPage();
+                  while (res.hasNextPage) {
+                    res = await rounds.fetchNextPage();
+                  }
+                }}
+              >
+                {rounds.isFetchingNextPage
+                  ? `불러오는 중… (${allItems.length}/${totalRounds})`
+                  : `전체 ${totalRounds}회 불러오기`}
+              </Button>
+            </>
+          )}
+        </Stack>
+
+        {rounds.isLoading && <CircularProgress size={24} sx={{ mb: 1 }} />}
+        {rounds.isError && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {rounds.error instanceof Error ? rounds.error.message : '회차 목록 로드 실패'}
+          </Alert>
+        )}
+
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
           <List
             dense
             sx={{
               width: { xs: '100%', md: 280 },
-              maxHeight: 420,
+              maxHeight: 480,
               overflow: 'auto',
               bgcolor: '#262A30',
               borderRadius: 1,
             }}
           >
-            {rounds.data?.items.map((item) => (
+            {allItems.map((item) => (
               <ListItemButton
                 key={item.round}
                 selected={selectedRound === item.round}

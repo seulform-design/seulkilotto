@@ -43,7 +43,7 @@ def get_latest_draw():
 
 @router.get("/rounds")
 def list_rounds(
-    limit: int = Query(default=30, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=1500),
     offset: int = Query(default=0, ge=0),
 ):
     """회차 목록 (최신순)."""

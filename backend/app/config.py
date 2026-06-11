@@ -2,7 +2,12 @@
 
 .env 파일 또는 환경변수에서 DB 접속 정보 등을 읽어온다.
 """
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_DIR = Path(__file__).resolve().parents[1]
+_ENV_CANDIDATES = [_BACKEND_DIR / ".env", _BACKEND_DIR.parent / ".env"]
 
 
 class Settings(BaseSettings):
@@ -28,7 +33,17 @@ class Settings(BaseSettings):
     SCHEDULER_ENABLED: bool = False  # True 시 매주 토 22:30 자동 크롤
     UPGRADE_API_KEY: str = ""  # 설정 시 POST /data/upgrade 에 X-Upgrade-Key 필요
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # 용지 사진 Vision 분석 (선택 — False 이면 OpenCV 로컬 분석만 사용)
+    PHOTO_USE_VISION_API: bool = False
+    VIDEO_VISION_API_KEY: str = ""  # OPENAI_API_KEY 와 동일 키 사용 가능
+    VIDEO_VISION_MODEL: str = "gpt-4o-mini"
+    VIDEO_ANALYSIS_MAX_FRAMES: int = 36
+    PHOTO_ANALYSIS_MAX_IMAGES: int = 50
+
+    model_config = SettingsConfigDict(
+        env_file=tuple(str(p) for p in _ENV_CANDIDATES if p.exists()) or ".env",
+        env_file_encoding="utf-8",
+    )
 
 
 settings = Settings()

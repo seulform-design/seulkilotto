@@ -36,6 +36,7 @@ export interface GeneratedCombination {
   sum_total: number;
   odd_count: number;
   even_count: number;
+  rarity_score?: number | null;
 }
 
 export interface FrequencyItem {
@@ -53,6 +54,8 @@ export interface GenerateResponse {
   unseen_numbers: number[];
   combinations: GeneratedCombination[];
   warning?: string | null;
+  strategy?: string | null;
+  disclaimer?: string | null;
 }
 
 export type ClassicMethod = 'wilson' | 'gauss' | 'huygens' | 'fermat' | 'blend';
@@ -145,6 +148,78 @@ export interface RoundRecommendResponse {
   compose_rule: string;
 }
 
+// ─── EPO 타입 ────────────────────────────────────────────────────────────────
+export interface EpoHonestyMeta {
+  win_probability_per_set: number;
+  win_probability_unchanged: boolean;
+  optimization_target: string;
+  disclaimer: string;
+}
+
+export interface EpoCombination {
+  numbers: number[];
+  sum_total: number;
+  odd_count: number;
+  even_count: number;
+  high_count: number;
+  low_count: number;
+  ac_value: number;
+  max_consecutive_run: number;
+  max_same_decade: number;
+  last_digit_unique: number;
+  decade_distribution: Record<string, number>;
+  last_round_overlap: number;
+}
+
+export interface EpoHistoricalProfile {
+  rounds_analyzed: number;
+  sum_p10: number;
+  sum_p50: number;
+  sum_p90: number;
+  sum_mean: number;
+  odd_count_modes: number[];
+  high_count_modes: number[];
+  avg_ac: number;
+  p10_ac: number;
+}
+
+export interface EpoBacktestMeta {
+  epo_enabled: boolean;
+  fallback_active: boolean;
+  historical_pass_rate: number;
+  pass_threshold: number;
+  sample_size: number;
+  passed_count: number;
+  reason: string;
+}
+
+export interface EpoPipelineMeta {
+  active_mode: string;
+  candidates_attempted: number;
+  combinations_returned: number;
+  combinations_requested: number;
+  filters_applied: string[];
+  shortfall_warning: string | null;
+}
+
+export interface EpoWeightsMeta {
+  lookback_rounds: number;
+  hot_bonus: number;
+  cold_bonus: number;
+  hot_numbers: number[];
+  cold_numbers: number[];
+}
+
+export interface EpoResponse {
+  engine: string;
+  combinations: EpoCombination[];
+  profile: EpoHistoricalProfile;
+  weights: EpoWeightsMeta;
+  pipeline: EpoPipelineMeta;
+  backtest: EpoBacktestMeta;
+  honesty: EpoHonestyMeta;
+}
+
 export const v1Api = {
   getMeta: () => fetchJson<AppMeta>('/api/v1/meta'),
 
@@ -161,6 +236,22 @@ export const v1Api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ numbers }),
     }),
+
+  generateSmart: (params: {
+    nSets?: number;
+    lookback?: number;
+    excludeConsecutive?: boolean;
+    maxOverlap?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.nSets) q.set('n_sets', String(params.nSets));
+    if (params.lookback) q.set('lookback', String(params.lookback));
+    if (params.excludeConsecutive !== undefined) {
+      q.set('exclude_consecutive', String(params.excludeConsecutive));
+    }
+    if (params.maxOverlap !== undefined) q.set('max_overlap', String(params.maxOverlap));
+    return fetchJson<GenerateResponse>(`/api/v1/generate/smart?${q.toString()}`);
+  },
 
   generateWeighted: (params: {
     nSets?: number;
@@ -206,4 +297,509 @@ export const v1Api = {
     ),
 
   getRound: (round: number) => fetchJson<DrawItem>(`/api/v1/history/${round}`),
+
+  getPostOccurrenceAnalysis: (params?: { roundNo?: number; numbers?: number[]; bonus?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.roundNo) q.set('round_no', String(params.roundNo));
+    if (params?.numbers?.length) q.set('numbers', params.numbers.join(','));
+    if (params?.bonus != null) q.set('bonus', String(params.bonus));
+    const qs = q.toString();
+    return fetchJson<PostOccurrenceResponse>(
+      `/api/v1/post-occurrence/analysis${qs ? `?${qs}` : ''}`
+    );
+  },
+
+  analyzeManualSlips: async (
+    slips: ManualSlipInput[],
+    opts: { sheetIntent?: 'review' | 'current_round'; persist?: boolean } = {}
+  ) =>
+    fetchJson<PhotoAnalysisJobResult>('/api/v1/photo-analysis/manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        sheet_intent: opts.sheetIntent ?? 'current_round',
+        persist: opts.persist ?? true,
+        allow_duplicate: false,
+        slips: slips.map((slip) => ({
+          name: slip.name ?? '',
+          lines: slip.lines.map((line) => ({
+            label: line.label,
+            numbers: line.numbers,
+          })),
+        })),
+      }),
+    }),
+
+  analyzePhotos: async (
+    files: File[],
+    opts: { sheetIntent?: 'review' | 'current_round'; persist?: boolean } = {}
+  ) => {
+    const form = new FormData();
+    files.forEach((f) => form.append('files', f));
+    form.append('sheet_intent', opts.sheetIntent ?? 'current_round');
+    form.append('persist', String(opts.persist ?? true));
+    form.append('allow_duplicate', 'false');
+    return fetchJson<PhotoAnalysisJobResult>('/api/v1/photo-analysis/analyze', {
+      method: 'POST',
+      body: form,
+    });
+  },
+
+  getPhotoAnalysisAccumulated: () =>
+    fetchJson<PhotoAnalysisAccumulated>('/api/v1/photo-analysis/accumulated'),
+
+  getPhotoVisionConfig: () =>
+    fetchJson<{
+      configured: boolean;
+      has_api_key?: boolean;
+      use_vision_api?: boolean;
+      analysis_mode?: string;
+      model: string;
+      env_hint: string;
+    }>('/api/v1/photo-analysis/vision-config'),
+
+  savePhotoVisionConfig: (apiKey: string, model = 'gpt-4o-mini') =>
+    fetchJson<{ ok: boolean; configured: boolean; use_vision_api?: boolean; model: string; message: string }>(
+      '/api/v1/photo-analysis/vision-config',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: apiKey, model }),
+      }
+    ),
+
+  disablePhotoVisionConfig: () =>
+    fetchJson<{ ok: boolean; configured: boolean; use_vision_api: boolean; message: string }>(
+      '/api/v1/photo-analysis/vision-config',
+      { method: 'DELETE' }
+    ),
+
+  clearPhotoAnalysisStore: () =>
+    fetchJson<{ ok: boolean; removed: number }>('/api/v1/photo-analysis/store', {
+      method: 'DELETE',
+    }),
+
+  deletePhotoAnalysisEntry: (entryId: string) =>
+    fetchJson<{ ok: boolean; accumulated: PhotoAnalysisAccumulated }>(
+      `/api/v1/photo-analysis/store/${entryId}`,
+      { method: 'DELETE' }
+    ),
+
+  generateEpo: (params: {
+    nSets?: number;
+    lookback?: number;
+    hotBonus?: number;
+    coldBonus?: number;
+    sumMin?: number;
+    sumMax?: number;
+    maxConsecutiveRun?: number;
+    minAcValue?: number;
+    maxSameDecade?: number;
+    minLastDigitUnique?: number;
+    maxLastRoundOverlap?: number;
+    interSetMaxOverlap?: number;
+    enableBacktest?: boolean;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.nSets) q.set('n_sets', String(params.nSets));
+    if (params.lookback) q.set('lookback', String(params.lookback));
+    if (params.hotBonus != null) q.set('hot_bonus', String(params.hotBonus));
+    if (params.coldBonus != null) q.set('cold_bonus', String(params.coldBonus));
+    if (params.sumMin != null) q.set('sum_min', String(params.sumMin));
+    if (params.sumMax != null) q.set('sum_max', String(params.sumMax));
+    if (params.maxConsecutiveRun != null) q.set('max_consecutive_run', String(params.maxConsecutiveRun));
+    if (params.minAcValue != null) q.set('min_ac_value', String(params.minAcValue));
+    if (params.maxSameDecade != null) q.set('max_same_decade', String(params.maxSameDecade));
+    if (params.minLastDigitUnique != null) q.set('min_last_digit_unique', String(params.minLastDigitUnique));
+    if (params.maxLastRoundOverlap != null) q.set('max_last_round_overlap', String(params.maxLastRoundOverlap));
+    if (params.interSetMaxOverlap != null) q.set('inter_set_max_overlap', String(params.interSetMaxOverlap));
+    if (params.enableBacktest != null) q.set('enable_backtest', String(params.enableBacktest));
+    return fetchJson<EpoResponse>(`/api/v1/generate/epo?${q.toString()}`, {
+      timeoutMs: 60_000,
+    });
+  },
 };
+
+export interface ManualSlipInput {
+  name?: string;
+  lines: { label: string; numbers: number[] }[];
+}
+
+export interface PhotoAnalysisJobResult {
+  result: PhotoAnalysisResponse;
+  stored_entry_id: string | null;
+  accumulated: PhotoAnalysisAccumulated | null;
+  duplicate_skipped?: boolean;
+  duplicate_reason?: string;
+  duplicate_message?: string;
+  analysis_skipped?: boolean;
+  duplicates_removed?: number;
+}
+
+export interface PhotoAnalysisResponse {
+  video_visual_analysis: {
+    detected_round: string | null;
+    ticket_round?: string | null;
+    ticket_round_confidence?: string;
+    video_intent?: string;
+    video_intent_label?: string;
+    referenced_rounds?: string[];
+    current_round_ref?: number;
+    main_board_summary: string;
+    video_title?: string;
+    video_id?: string;
+  };
+  extracted_visual_patterns: {
+    identified_multiples: { type: string; numbers: number[] };
+    frequency_overlap_patterns?: FrequencyOverlapPatterns;
+    triple_plus_overlap?: {
+      pattern_label: string;
+      items: FrequencyOverlapItem[];
+    };
+    combo_patterns?: ComboDuplicatePatterns;
+    pattern_application?: PatternApplication;
+    draw_template?: DrawReviewTemplate | null;
+    draw_analysis?: PatternApplication;
+    photo_review_template?: SavedReviewTemplate;
+    review_reference_template?: SavedReviewTemplate;
+    line_patterns: { target_number: number; pattern_type: string }[];
+  };
+  final_predictions: {
+    strong_candidates: number[];
+    excluded_candidates: number[];
+  };
+  app_ui_message: string;
+  meta?: {
+    images_analyzed?: number;
+    duplicates_removed?: number;
+    image_names?: string[];
+    sheet_intent?: string;
+    sheet_intent_label?: string;
+    review_round_ref?: number;
+    current_round_ref?: number;
+    preview_image_base64?: string | null;
+    analysis_mode?: string;
+    vision_error?: string | null;
+    ocr_numbers_detected?: number;
+    has_transcript?: boolean;
+    text_numbers_from_meta?: number[];
+  };
+}
+
+export interface VideoVoteItem {
+  number: number;
+  votes: number;
+  video_count: number;
+}
+
+export interface FrequencyOverlapItem {
+  number: number;
+  overlap_count?: number;
+  video_votes?: number;
+  votes?: number;
+  max_overlap_count?: number;
+}
+
+export interface FrequencyOverlapTier {
+  min_count: number;
+  label: string;
+  pattern_type: string;
+  number_count?: number;
+  items: FrequencyOverlapItem[];
+}
+
+export interface FrequencyOverlapPatterns {
+  summary: string;
+  all_frequent: FrequencyOverlapItem[];
+  tiers: FrequencyOverlapTier[];
+  triple_plus_overlap?: {
+    pattern_label: string;
+    items: FrequencyOverlapItem[];
+  };
+}
+
+export type TriplePlusOverlapItem = FrequencyOverlapItem;
+
+export interface ComboDuplicateItem {
+  numbers: number[];
+  size: number;
+  repeat_count: number;
+  line_count?: number;
+  label: string;
+  sheet_indices?: number[];
+}
+
+export interface ComboVerification {
+  sheets_analyzed: number;
+  physical_sheets_detected?: number;
+  images_uploaded?: number;
+  lines_analyzed?: number;
+  avg_marks_per_sheet?: number;
+  avg_marks_per_line?: number;
+  pair_min_repeat: number;
+  triple_min_repeat: number;
+  quad_min_repeat?: number;
+  raw_pair_candidates?: number;
+  raw_triple_candidates?: number;
+  raw_quad_candidates?: number;
+  significant_pairs: number;
+  significant_triples: number;
+  significant_quads?: number;
+  same_line_tier_counts?: Record<string, number>;
+  criteria: string;
+}
+
+export interface SameLineMatch {
+  sheet_index: number;
+  line_index: number;
+  line_label: string;
+  line_id?: string;
+  line_numbers: number[];
+  overlap_count: number;
+  matching_numbers: number[];
+  prize_tier: string;
+  source_image?: string;
+}
+
+export interface CrossLineSetItem {
+  numbers: number[];
+  size: number;
+  appearance_count?: number;
+  line_count?: number;
+  repeat_count?: number;
+  locations?: string[];
+  image_indices?: number[];
+}
+
+export interface CrossLineAnalysisReport {
+  triple_sets: CrossLineSetItem[];
+  pair_sets: CrossLineSetItem[];
+  summary_opinion: string;
+  min_repeat: number;
+  line_count: number;
+  image_count: number;
+  line_label_counts?: Record<string, number>;
+  formatted_text?: string;
+  sections?: {
+    triples: string;
+    pairs: string;
+    summary: string;
+  };
+}
+
+export interface ComboDuplicatePatterns {
+  summary: string;
+  sheet_count: number;
+  line_count?: number;
+  analysis_mode?: string;
+  reference_numbers?: number[];
+  min_repeat: number;
+  combo_verification?: ComboVerification;
+  same_line_matches?: SameLineMatch[];
+  same_line_by_tier?: Record<string, SameLineMatch[]>;
+  cross_line_combos?: ComboDuplicateItem[];
+  cross_line_analysis?: CrossLineAnalysisReport;
+  pair_duplicates: ComboDuplicateItem[];
+  triple_duplicates: ComboDuplicateItem[];
+  quad_duplicates?: ComboDuplicateItem[];
+  strong_candidates?: number[];
+}
+
+export interface PatternApplication {
+  summary: string;
+  review_round?: string;
+  review_rounds?: string[];
+  review_numbers?: number[];
+  position_match_numbers?: number[];
+  number_only_matches?: number[];
+  combo_hits?: {
+    numbers: number[];
+    size: number;
+    review_repeat?: number;
+    current_sheet_hits: number;
+    sheet_indices: number[];
+  }[];
+}
+
+export interface DrawReviewTemplate {
+  source?: string;
+  ticket_round?: string;
+  ticket_rounds?: string[];
+  winning_numbers: number[];
+  bonus?: number;
+  marked_numbers: number[];
+  positions: Record<string, { row: number; col: number }>;
+  summary?: string;
+  winning_combo_reference?: {
+    pair_combos: { numbers: number[] }[];
+    triple_combos: { numbers: number[] }[];
+    pair_count: number;
+    triple_count: number;
+  };
+  combo_patterns?: ComboDuplicatePatterns;
+}
+
+export interface SavedReviewTemplate extends DrawReviewTemplate {
+  source_count?: number;
+  official_draw?: DrawReviewTemplate;
+}
+
+export interface PhotoAnalysisIntentSlice {
+  video_intent: 'review' | 'current_round';
+  video_intent_label: string;
+  ticket_round?: string;
+  total_analyses: number;
+  accumulated_combo_patterns?: ComboDuplicatePatterns;
+  saved_review_template?: SavedReviewTemplate | null;
+  draw_template?: DrawReviewTemplate;
+  pattern_ready?: boolean;
+  entries_summary: PhotoAnalysisAccumulated['entries_summary'];
+  app_ui_message: string;
+}
+
+export interface PhotoAnalysisAccumulated {
+  total_analyses: number;
+  unique_videos?: number;
+  unique_photos?: number;
+  updated_at?: string;
+  strong_candidate_votes: VideoVoteItem[];
+  excluded_candidate_votes: VideoVoteItem[];
+  multiples_votes: VideoVoteItem[];
+  identified_multiples: { type: string; numbers: number[] };
+  frequency_overlap_patterns: FrequencyOverlapPatterns;
+  triple_plus_overlap: {
+    pattern_label: string;
+    items: FrequencyOverlapItem[];
+  };
+  line_pattern_votes: { target_number: number; votes: number; pattern_type: string }[];
+  final_predictions: {
+    strong_candidates: number[];
+    excluded_candidates: number[];
+  };
+  by_ticket_round?: Record<
+    string,
+    PhotoAnalysisAccumulated & {
+      ticket_round: string;
+      analysis_count: number;
+      dominant_intent?: string;
+      dominant_intent_label?: string;
+    }
+  >;
+  by_video_intent?: Record<string, { count: number; ticket_rounds: string[] }>;
+  by_intent?: {
+    review: PhotoAnalysisIntentSlice;
+    current_round: PhotoAnalysisIntentSlice;
+  };
+  app_ui_message: string;
+  legacy_entry_count?: number;
+  accumulated_combo_patterns?: ComboDuplicatePatterns;
+  saved_review_template?: SavedReviewTemplate | null;
+  entries_summary: {
+    id: string;
+    url: string;
+    video_id?: string;
+    video_title?: string;
+    ticket_round?: string | null;
+    ticket_round_confidence?: string;
+    video_intent?: string;
+    video_intent_label?: string;
+    referenced_rounds?: string[];
+    detected_round?: string | null;
+    analyzed_at: string;
+    strong_candidates: number[];
+    frequency_overlap_patterns?: FrequencyOverlapPatterns;
+    triple_plus_overlap?: FrequencyOverlapItem[];
+  }[];
+}
+
+export interface PostOccurrenceResponse {
+  disclaimer: string;
+  warning?: string | null;
+  analysis_status?: 'ok' | 'no_eligible_data';
+  recommendation_count?: number;
+  meta: {
+    total_rounds: number;
+    latest_round: number;
+    trigger_round: number;
+    trigger_numbers: number[];
+    trigger_bonus: number;
+    data_range: string;
+  };
+  step1_combinations?: {
+    total_combo_count: number;
+    analysis_combo_count?: number;
+    note?: string;
+  };
+  step2_discovery?: {
+    total_discovery_events: number;
+    trusted_events: number;
+    low_confidence_mode: boolean;
+    no_eligible_data?: boolean;
+    min_combo_size?: number;
+    min_discovery_threshold: number;
+    high_confidence_threshold?: number;
+    excluded_single_combos?: number;
+    excluded_low_discovery_combos?: number;
+  };
+  step3_next_draw_collection?: { next_events_collected: number };
+  duplicate_pattern_analysis?: {
+    combo: number[];
+    size?: number;
+    discovery_count: number;
+    next_collection_count: number;
+    trusted: boolean;
+  }[];
+  top20_numbers?: {
+    number: number;
+    count: number;
+    rate: number;
+    score: number;
+    probability: number;
+  }[];
+  recency_analysis?: { optimized_lambda: number };
+  backtest?: {
+    window_rounds: number;
+    top6_hit_rate: number;
+    top10_hit_rate: number;
+    top15_hit_rate: number;
+    avg_hit_count: number;
+  };
+  final_ranking?: {
+    rank: number;
+    number: number;
+    score: number;
+    probability: number;
+    grade: string;
+  }[];
+  grades?: { S: number[]; A: number[]; B: number[] };
+  recommendations?: Record<
+    string,
+    { numbers: number[]; expected_score: number; risk: number }[]
+  >;
+  pattern_analysis?: {
+    sample_count?: number;
+    frequencies?: {
+      simple?: { number: number; count: number }[];
+      recent?: { number: number; count: number }[];
+    };
+    carryover?: { count?: number; rate?: number; pair_rate?: number; triple_rate?: number };
+    rates?: Record<string, number>;
+    distribution?: Record<string, unknown>;
+    number_states?: { long_absent?: number[]; overheated?: number[]; cooled?: number[] };
+  };
+  bonus_analysis?: {
+    sample_count?: number;
+    bonus_next_counts?: { number: number; count: number }[];
+    bonus_in_main_numbers?: { number: number; count: number }[];
+    bonus_repeat_count?: number;
+    main_number_top10?: { number: number; count: number; rate: number }[];
+  };
+  association_rules_top20?: {
+    antecedent: number[];
+    consequent: number;
+    confidence: number;
+    lift: number;
+  }[];
+  similar_rounds_top20?: { round: number; similarity: number; jaccard: number }[];
+  evidence?: { match_rounds_used: number; backtest_rounds: number; trusted_only: boolean };
+}

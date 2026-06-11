@@ -16,6 +16,8 @@ app.use(
     target: 'http://127.0.0.1:8000',
     changeOrigin: true,
     pathRewrite: (p) => `/api/v1${p}`,
+    proxyTimeout: 600_000,
+    timeout: 600_000,
   })
 );
 app.use(
@@ -26,6 +28,12 @@ app.use(
     pathRewrite: (p) => `/api${p}`,
   })
 );
+app.get('/health/v1', (_req, res) => {
+  fetch('http://127.0.0.1:8000/health')
+    .then((r) => r.json())
+    .then((data) => res.json(data))
+    .catch(() => res.status(502).json({ status: 'error', service: 'v1' }));
+});
 app.use(
   '/health',
   createProxyMiddleware({

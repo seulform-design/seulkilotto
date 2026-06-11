@@ -1,10 +1,10 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { Box, Typography } from '@mui/material';
 import { getBallColor } from '../theme/colors';
-export default function LottoBall({ number, size = 44 }) {
-    const bg = getBallColor(number);
-    const isLight = number <= 10 || number > 40;
-    const textColor = isLight ? '#2A2A2A' : '#FFFFFF';
+export default function LottoBall({ number, size = 44, dimmed = false }) {
+    const bg = dimmed ? '#4a4f57' : getBallColor(number);
+    const isLight = dimmed || number <= 10 || number > 40;
+    const textColor = dimmed ? '#9ba1a9' : isLight ? '#2A2A2A' : '#FFFFFF';
     return (_jsx(Box, { sx: {
             width: size,
             height: size,
@@ -13,7 +13,8 @@ export default function LottoBall({ number, size = 44 }) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.35)',
+            boxShadow: dimmed ? '0 1px 3px rgba(0,0,0,0.25)' : '0 2px 6px rgba(0,0,0,0.35)',
+            opacity: dimmed ? 0.72 : 1,
             flexShrink: 0,
         }, children: _jsx(Typography, { sx: { color: textColor, fontWeight: 700, fontSize: size * 0.4 }, children: number }) }));
 }

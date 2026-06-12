@@ -18,6 +18,7 @@ import OddEvenBar from '../components/OddEvenBar';
 import FrequencyBarChart from '../components/FrequencyBarChart';
 import TemperatureMap from '../components/TemperatureMap';
 import CoOccurrencePanel from '../components/CoOccurrencePanel';
+import FavoritesPanel from '../components/FavoritesPanel';
 import { v1Api } from '../api/v1Api';
 
 function StatChip({ label, value }: { label: string; value: string }) {
@@ -220,6 +221,9 @@ export default function DashboardPage() {
 
           {/* 번호 동반 출현 — 각 번호의 짝꿍 통계 */}
           <CoOccurrencePanel />
+
+          {/* 즐겨찾기 — localStorage 영속화 */}
+          <FavoritesPanel />
 
           {/* 내 번호 분석 */}
           <Paper sx={{ p: 2 }}>

@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import CopyButton from '../components/CopyButton';
+import ComboActions from '../components/ComboActions';
 import LottoBall from '../components/LottoBall';
 import { v1Api } from '../api/v1Api';
 import {
@@ -252,7 +252,11 @@ export default function GeneratorPage() {
                     <LottoBall key={n} number={n} size={38} />
                   ))}
                 </Stack>
-                <CopyButton numbers={combo.numbers} />
+                <ComboActions
+                  numbers={combo.numbers}
+                  source="generator"
+                  label={`가중치 ${String.fromCharCode(65 + idx)}조합`}
+                />
               </Stack>
               <MetricChips numbers={combo.numbers} />
             </Paper>

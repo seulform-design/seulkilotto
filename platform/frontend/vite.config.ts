@@ -6,6 +6,22 @@ export default defineConfig({
   define: {
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
+  build: {
+    // 청크 크기 경고 임계값 (KB). 차트 라이브러리가 커서 디폴트 500 KB 는 노이즈.
+    chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        // 벤더 청크 수동 분리 — 라이브러리는 캐시 친화적으로 별도 청크.
+        // 페이지 변경 시 벤더 청크는 재다운로드 안 됨.
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+          mui: ['@mui/material', '@emotion/react', '@emotion/styled'],
+          charts: ['echarts', 'echarts-for-react', 'recharts'],
+          query: ['@tanstack/react-query'],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

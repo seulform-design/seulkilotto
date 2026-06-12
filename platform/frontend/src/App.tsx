@@ -1,27 +1,46 @@
 /**
  * 로또 분석기 통합 앱 — 일반 기능 + 연구 대시보드
+ *
+ * 성능: 페이지는 React.lazy 로 라우트 단위 코드 스플리팅.
+ *      탭 전환 시 처음 진입한 페이지만 다운로드되어 초기 번들이 작아짐.
+ *      Suspense fallback 으로 로딩 인디케이터 노출.
  */
-import { useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import {
   AppBar,
   Box,
+  CircularProgress,
   Container,
+  Stack,
   Tab,
   Tabs,
   Toolbar,
   Typography,
 } from '@mui/material';
 import AppStatusBar from './components/AppStatusBar';
-import DashboardPage from './pages/DashboardPage';
-import GeneratorPage from './pages/GeneratorPage';
-import SmartPickPage from './pages/SmartPickPage';
-import EpoPage from './pages/EpoPage';
-import PostOccurrencePage from './pages/PostOccurrencePage';
-import ClassicRecommendPage from './pages/ClassicRecommendPage';
-import RoundsPage from './pages/RoundsPage';
-import RoundRecommendPage from './pages/RoundRecommendPage';
-import ResearchPage from './pages/ResearchPage';
-import PhotoAnalysisPage from './pages/PhotoAnalysisPage';
+
+// 라우트 단위 코드 스플리팅 — 각 페이지는 첫 진입 시 동적 import
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const GeneratorPage = lazy(() => import('./pages/GeneratorPage'));
+const SmartPickPage = lazy(() => import('./pages/SmartPickPage'));
+const EpoPage = lazy(() => import('./pages/EpoPage'));
+const PostOccurrencePage = lazy(() => import('./pages/PostOccurrencePage'));
+const ClassicRecommendPage = lazy(() => import('./pages/ClassicRecommendPage'));
+const RoundsPage = lazy(() => import('./pages/RoundsPage'));
+const RoundRecommendPage = lazy(() => import('./pages/RoundRecommendPage'));
+const ResearchPage = lazy(() => import('./pages/ResearchPage'));
+const PhotoAnalysisPage = lazy(() => import('./pages/PhotoAnalysisPage'));
+
+function PageFallback() {
+  return (
+    <Stack direction="row" alignItems="center" spacing={1.5} sx={{ py: 6, justifyContent: 'center' }}>
+      <CircularProgress size={24} />
+      <Typography variant="body2" color="text.secondary">
+        페이지 로딩 중...
+      </Typography>
+    </Stack>
+  );
+}
 
 /**
  * 탭 분류:
@@ -80,16 +99,18 @@ export default function App() {
       </AppBar>
 
       <Container maxWidth="lg" sx={{ py: 3 }}>
-        {tab === 'dashboard' && <DashboardPage />}
-        {tab === 'rounds' && <RoundsPage />}
-        {tab === 'generator' && <GeneratorPage />}
-        {tab === 'smart' && <SmartPickPage />}
-        {tab === 'epo' && <EpoPage />}
-        {tab === 'post' && <PostOccurrencePage />}
-        {tab === 'photo' && <PhotoAnalysisPage />}
-        {tab === 'recommend' && <RoundRecommendPage />}
-        {tab === 'classic' && <ClassicRecommendPage />}
-        {tab === 'research' && <ResearchPage />}
+        <Suspense fallback={<PageFallback />}>
+          {tab === 'dashboard' && <DashboardPage />}
+          {tab === 'rounds' && <RoundsPage />}
+          {tab === 'generator' && <GeneratorPage />}
+          {tab === 'smart' && <SmartPickPage />}
+          {tab === 'epo' && <EpoPage />}
+          {tab === 'post' && <PostOccurrencePage />}
+          {tab === 'photo' && <PhotoAnalysisPage />}
+          {tab === 'recommend' && <RoundRecommendPage />}
+          {tab === 'classic' && <ClassicRecommendPage />}
+          {tab === 'research' && <ResearchPage />}
+        </Suspense>
       </Container>
     </Box>
   );

@@ -2,11 +2,56 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>로또 패턴 연구 플랫폼</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#FBC400" />
+    <meta name="color-scheme" content="dark" />
+
+    <title>로또 분석기 — 통계 기반 패턴 연구</title>
+    <meta
+      name="description"
+      content="역대 회차 통계, EPO 추천 엔진, walk-forward 백테스트, 동반 출현/온도 분석, 용지 사진 분석을 한 곳에서. 모든 추천은 통계적 한계를 명시한 honesty meta 와 함께 노출됩니다."
+    />
+    <meta
+      name="keywords"
+      content="로또, 로또 분석, 로또 통계, 로또 추천, 회차 분석, 번호 빈도, EPO, 동반 출현, 온도 분석"
+    />
+    <meta name="author" content="Lotto Analyzer" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="ko_KR" />
+    <meta property="og:site_name" content="로또 분석기" />
+    <meta property="og:title" content="로또 분석기 — 통계 기반 패턴 연구" />
+    <meta
+      property="og:description"
+      content="EPO 추천 + walk-forward 백테스트 + 동반/온도 분석 + 용지 사진 분석. 모든 추천은 honest meta 와 함께 노출됩니다."
+    />
+    <meta property="og:image" content="/icon.svg" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="로또 분석기 — 통계 기반 패턴 연구" />
+    <meta
+      name="twitter:description"
+      content="EPO 추천 + walk-forward 백테스트 + 동반/온도 분석"
+    />
+    <meta name="twitter:image" content="/icon.svg" />
+
+    <!-- PWA: Add to Home Screen -->
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="로또 분석기" />
+    <meta name="mobile-web-app-capable" content="yes" />
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      이 앱은 JavaScript 가 필요합니다. 브라우저 설정에서 JavaScript 를 활성화해 주세요.
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

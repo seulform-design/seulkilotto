@@ -1,0 +1,28 @@
+{
+  "name": "로또 분석기 — 통계 기반 패턴 연구",
+  "short_name": "로또 분석기",
+  "description": "역대 회차 통계 분석, EPO 추천 엔진, walk-forward 백테스트, 동반 출현 분석, 용지 사진 분석. 모든 추천은 honesty meta 와 함께 노출됩니다.",
+  "lang": "ko",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#121417",
+  "theme_color": "#FBC400",
+  "categories": ["entertainment", "utilities", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

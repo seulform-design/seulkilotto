@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# 검색엔진은 SPA 의 routes 를 인식 못 하므로 sitemap 은 의도적으로 제공하지 않음.
+# 클라이언트 라우팅은 hash/query 기반이라 별도 노출 불요.

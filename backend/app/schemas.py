@@ -58,6 +58,31 @@ class CoOccurrenceResponse(BaseModel):
     disclaimer: str
 
 
+# --- /stats/walk-forward ------------------------------------------------------
+class WalkForwardStrategyResult(BaseModel):
+    strategy: str
+    rounds_tested: int
+    sets_generated: int
+    avg_hits_per_set: float
+    hit_distribution: dict = Field(..., description="hits(0~6) → 발생 횟수")
+    cumulative_avg: List[float] = Field(..., description="회차별 누적 평균 적중")
+    rounds_axis: List[int]
+    hit_rate_3plus: float
+    hit_rate_4plus: float
+    hit_rate_5plus: float
+    hit_rate_6: float
+
+
+class WalkForwardResponse(BaseModel):
+    start_round: int
+    end_round: int
+    rounds_evaluated: int
+    sets_per_round: int
+    baseline_avg_hits: float
+    strategies: List[WalkForwardStrategyResult]
+    disclaimer: str
+
+
 # --- /analyze/combination -----------------------------------------------------
 class CombinationRequest(BaseModel):
     numbers: List[int] = Field(..., min_length=6, max_length=6, description="분석할 6개 번호")

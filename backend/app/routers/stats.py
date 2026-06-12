@@ -11,9 +11,14 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, Query
 
-from .. import analytics, co_occurrence, temperature
+from .. import analytics, co_occurrence, temperature, walk_forward as wf
 from ..database import load_history
-from ..schemas import CoOccurrenceResponse, FrequencyResponse, TemperatureResponse
+from ..schemas import (
+    CoOccurrenceResponse,
+    FrequencyResponse,
+    TemperatureResponse,
+    WalkForwardResponse,
+)
 
 router = APIRouter(prefix="/api/v1/stats", tags=["stats"])
 
@@ -95,5 +100,64 @@ def get_co_occurrence(
             str(src): [asdict(p) for p in plist]
             for src, plist in summary.partners.items()
         },
+        "disclaimer": summary.disclaimer,
+    }
+
+
+@router.get("/walk-forward", response_model=WalkForwardResponse)
+def get_walk_forward(
+    start_round: int = Query(default=1128, ge=10, description="시뮬레이션 시작 회차"),
+    end_round: int | None = Query(default=None, description="종료 회차 (생략 시 최신)"),
+    sets_per_round: int = Query(default=5, ge=1, le=20),
+    include_epo: bool = Query(default=False, description="EPO 전략 포함 (느림)"),
+    seed: int = Query(default=42, description="재현성 시드"),
+):
+    """Walk-Forward 백테스트 — 회차 R 시점에 [1..R-1] 로 학습한 추천이
+    실제 R 에서 몇 개 맞췄는지 시계열로 측정한다.
+
+    수학적 정직 선언:
+      - 독립시행 정의상 모든 전략의 평균 적중은 베이스라인 0.8 개에 수렴.
+      - 본 백테스트의 가치는 '어떤 전략도 베이스라인을 의미 있게 이기지 않는다'
+        는 정직한 사실을 시각적으로 입증하는 것.
+    """
+    df = load_history()
+    if df.empty:
+        raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
+
+    strategies: tuple[wf.Strategy, ...] = ("uniform", "frequency")
+    if include_epo:
+        strategies = (*strategies, "epo")
+
+    summary = wf.walk_forward(
+        df,
+        start_round=start_round,
+        end_round=end_round,
+        sets_per_round=sets_per_round,
+        seed=seed,
+        strategies=strategies,
+    )
+
+    return {
+        "start_round": summary.start_round,
+        "end_round": summary.end_round,
+        "rounds_evaluated": summary.rounds_evaluated,
+        "sets_per_round": summary.sets_per_round,
+        "baseline_avg_hits": summary.baseline_avg_hits,
+        "strategies": [
+            {
+                "strategy": s.strategy,
+                "rounds_tested": s.rounds_tested,
+                "sets_generated": s.sets_generated,
+                "avg_hits_per_set": s.avg_hits_per_set,
+                "hit_distribution": {str(k): v for k, v in s.hit_distribution.items()},
+                "cumulative_avg": s.cumulative_avg,
+                "rounds_axis": s.rounds_axis,
+                "hit_rate_3plus": s.hit_rate_3plus,
+                "hit_rate_4plus": s.hit_rate_4plus,
+                "hit_rate_5plus": s.hit_rate_5plus,
+                "hit_rate_6": s.hit_rate_6,
+            }
+            for s in summary.strategies
+        ],
         "disclaimer": summary.disclaimer,
     }

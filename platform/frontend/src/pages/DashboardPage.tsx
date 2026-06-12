@@ -19,6 +19,7 @@ import FrequencyBarChart from '../components/FrequencyBarChart';
 import TemperatureMap from '../components/TemperatureMap';
 import CoOccurrencePanel from '../components/CoOccurrencePanel';
 import FavoritesPanel from '../components/FavoritesPanel';
+import WalkForwardPanel from '../components/WalkForwardPanel';
 import { v1Api } from '../api/v1Api';
 
 function StatChip({ label, value }: { label: string; value: string }) {
@@ -221,6 +222,9 @@ export default function DashboardPage() {
 
           {/* 번호 동반 출현 — 각 번호의 짝꿍 통계 */}
           <CoOccurrencePanel />
+
+          {/* Walk-Forward 백테스트 — 시계열 적중 비교 */}
+          <WalkForwardPanel />
 
           {/* 즐겨찾기 — localStorage 영속화 */}
           <FavoritesPanel />

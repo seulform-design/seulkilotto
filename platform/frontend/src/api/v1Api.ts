@@ -91,6 +91,32 @@ export interface CoOccurrenceResponse {
   disclaimer: string;
 }
 
+export type WalkForwardStrategy = 'uniform' | 'frequency' | 'epo';
+
+export interface WalkForwardStrategyResult {
+  strategy: WalkForwardStrategy;
+  rounds_tested: number;
+  sets_generated: number;
+  avg_hits_per_set: number;
+  hit_distribution: Record<string, number>;
+  cumulative_avg: number[];
+  rounds_axis: number[];
+  hit_rate_3plus: number;
+  hit_rate_4plus: number;
+  hit_rate_5plus: number;
+  hit_rate_6: number;
+}
+
+export interface WalkForwardResponse {
+  start_round: number;
+  end_round: number;
+  rounds_evaluated: number;
+  sets_per_round: number;
+  baseline_avg_hits: number;
+  strategies: WalkForwardStrategyResult[];
+  disclaimer: string;
+}
+
 export interface GenerateResponse {
   unseen_numbers: number[];
   combinations: GeneratedCombination[];
@@ -276,6 +302,24 @@ export const v1Api = {
 
   getCoOccurrence: (topN = 20) =>
     fetchJson<CoOccurrenceResponse>(`/api/v1/stats/co-occurrence?top_n=${topN}`),
+
+  getWalkForward: (params: {
+    startRound?: number;
+    endRound?: number;
+    setsPerRound?: number;
+    includeEpo?: boolean;
+    seed?: number;
+  } = {}) => {
+    const q = new URLSearchParams();
+    if (params.startRound != null) q.set('start_round', String(params.startRound));
+    if (params.endRound != null) q.set('end_round', String(params.endRound));
+    if (params.setsPerRound != null) q.set('sets_per_round', String(params.setsPerRound));
+    if (params.includeEpo) q.set('include_epo', 'true');
+    if (params.seed != null) q.set('seed', String(params.seed));
+    return fetchJson<WalkForwardResponse>(`/api/v1/stats/walk-forward?${q.toString()}`, {
+      timeoutMs: 60_000,
+    });
+  },
 
   analyzeCombination: (numbers: number[]) =>
     fetchJson<CombinationAnalysis>('/api/v1/analyze/combination', {

@@ -50,6 +50,47 @@ export interface FrequencyResponse {
   items: FrequencyItem[];
 }
 
+export type TemperatureTier = 'hot' | 'warm' | 'neutral' | 'cold' | 'frozen';
+
+export interface TemperatureItem {
+  number: number;
+  recent_count: number;
+  gap: number;
+  total_count: number;
+  score: number;
+  tier: TemperatureTier;
+  rank: number;
+}
+
+export interface TemperatureResponse {
+  lookback: number;
+  latest_round: number;
+  total_rounds: number;
+  items: TemperatureItem[];
+  tier_distribution: Record<TemperatureTier, number>;
+  tier_labels: Record<TemperatureTier, string>;
+  tier_colors: Record<TemperatureTier, string>;
+  disclaimer: string;
+}
+
+export interface CoOccurrencePartner {
+  number: number;
+  count: number;
+  confidence: number;
+  lift: number;
+  is_significant: boolean;
+}
+
+export interface CoOccurrenceResponse {
+  total_rounds: number;
+  appearance_counts: Record<string, number>;
+  baseline_confidence: number;
+  top_n: number;
+  /** Key 는 "1"~"45" 문자열, Value 는 상위 N개 동반 번호 */
+  partners: Record<string, CoOccurrencePartner[]>;
+  disclaimer: string;
+}
+
 export interface GenerateResponse {
   unseen_numbers: number[];
   combinations: GeneratedCombination[];
@@ -229,6 +270,12 @@ export const v1Api = {
     fetchJson<FrequencyResponse>(
       `/api/v1/stats/frequency${recentN ? `?recent_n=${recentN}` : ''}`
     ),
+
+  getTemperature: (lookback = 30) =>
+    fetchJson<TemperatureResponse>(`/api/v1/stats/temperature?lookback=${lookback}`),
+
+  getCoOccurrence: (topN = 20) =>
+    fetchJson<CoOccurrenceResponse>(`/api/v1/stats/co-occurrence?top_n=${topN}`),
 
   analyzeCombination: (numbers: number[]) =>
     fetchJson<CombinationAnalysis>('/api/v1/analyze/combination', {

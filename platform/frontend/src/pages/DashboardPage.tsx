@@ -16,6 +16,8 @@ import { useState } from 'react';
 import LottoBall from '../components/LottoBall';
 import OddEvenBar from '../components/OddEvenBar';
 import FrequencyBarChart from '../components/FrequencyBarChart';
+import TemperatureMap from '../components/TemperatureMap';
+import CoOccurrencePanel from '../components/CoOccurrencePanel';
 import { v1Api } from '../api/v1Api';
 
 function StatChip({ label, value }: { label: string; value: string }) {
@@ -212,6 +214,12 @@ export default function DashboardPage() {
               </>
             )}
           </Paper>
+
+          {/* 번호 온도 — Hot/Warm/Neutral/Cold/Frozen 5단계 */}
+          <TemperatureMap initialLookback={30} />
+
+          {/* 번호 동반 출현 — 각 번호의 짝꿍 통계 */}
+          <CoOccurrencePanel />
 
           {/* 내 번호 분석 */}
           <Paper sx={{ p: 2 }}>

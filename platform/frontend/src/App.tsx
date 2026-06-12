@@ -23,17 +23,28 @@ import RoundRecommendPage from './pages/RoundRecommendPage';
 import ResearchPage from './pages/ResearchPage';
 import PhotoAnalysisPage from './pages/PhotoAnalysisPage';
 
+/**
+ * 탭 분류:
+ *  - 데이터 그룹: dashboard, rounds (관찰)
+ *  - 추천 그룹: epo (권장), smart, weighted, classic, machine (5종 차별화)
+ *  - 분석 그룹: post, photo, research
+ *
+ * 라벨링 원칙:
+ *  - "AI" 단어는 ML/딥러닝 실체가 있을 때만 사용 (통계 엔진은 "통계"로 표기)
+ *  - 각 추천 탭은 핵심 알고리즘 키워드를 라벨에 포함시켜 사용자가 비교 가능하게 함
+ *  - EPO 는 가장 발전된 엔진임을 시각적 우선순위 + 권장 표시로 명시
+ */
 const TABS = [
   { id: 'dashboard', label: '대시보드' },
   { id: 'rounds', label: '회차' },
-  { id: 'generator', label: '번호 생성' },
-  { id: 'smart', label: '스마트' },
-  { id: 'epo', label: '⚡ EPO' },
-  { id: 'post', label: '후속출현 AI' },
+  { id: 'epo', label: '⚡ EPO 추천 (권장)' },
+  { id: 'smart', label: '스마트 추천' },
+  { id: 'generator', label: '가중치 추천' },
+  { id: 'classic', label: '클래식 (수학자)' },
+  { id: 'recommend', label: '추첨기 추천' },
+  { id: 'post', label: '후속 출현 통계' },
   { id: 'photo', label: '용지 분석' },
-  { id: 'recommend', label: '회차 추천' },
-  { id: 'classic', label: '클래식' },
-  { id: 'research', label: '연구 분석' },
+  { id: 'research', label: '연구 (v2)' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];

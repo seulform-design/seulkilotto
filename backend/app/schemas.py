@@ -18,6 +18,46 @@ class FrequencyResponse(BaseModel):
     items: List[FrequencyItem]
 
 
+# --- /stats/temperature ------------------------------------------------------
+class TemperatureItem(BaseModel):
+    number: int = Field(..., ge=1, le=45)
+    recent_count: int = Field(..., description="lookback 윈도우 내 출현 횟수")
+    gap: int = Field(..., description="마지막 출현 이후 경과 회차")
+    total_count: int = Field(..., description="전체 회차 누적 출현 횟수")
+    score: float = Field(..., description="합성 온도 점수 [-1, +1]")
+    tier: str = Field(..., description="hot | warm | neutral | cold | frozen")
+    rank: int = Field(..., description="1 = 가장 hot, 45 = 가장 frozen")
+
+
+class TemperatureResponse(BaseModel):
+    lookback: int
+    latest_round: int
+    total_rounds: int
+    items: List[TemperatureItem]
+    tier_distribution: dict = Field(..., description="등급별 번호 수 (각 9개)")
+    tier_labels: dict = Field(..., description="등급 → 한글/이모지 라벨")
+    tier_colors: dict = Field(..., description="등급 → 색상 HEX")
+    disclaimer: str
+
+
+# --- /stats/co-occurrence -----------------------------------------------------
+class CoOccurrencePartner(BaseModel):
+    number: int = Field(..., ge=1, le=45)
+    count: int = Field(..., description="함께 등장한 회차 수")
+    confidence: float = Field(..., description="P(이 번호 | source 출현)")
+    lift: float = Field(..., description="actual / expected (1.0 = 무작위)")
+    is_significant: bool = Field(..., description="lift>=1.2 AND count>=30")
+
+
+class CoOccurrenceResponse(BaseModel):
+    total_rounds: int
+    appearance_counts: dict = Field(..., description="번호 → 전체 출현 회차 수")
+    baseline_confidence: float = Field(..., description="무작위 베이스라인 ≈ 5/44 ≈ 11.4%")
+    top_n: int = Field(..., description="각 번호의 상위 N개 동반 번호 노출")
+    partners: dict = Field(..., description="번호 → [Partner...] 상위 N개")
+    disclaimer: str
+
+
 # --- /analyze/combination -----------------------------------------------------
 class CombinationRequest(BaseModel):
     numbers: List[int] = Field(..., min_length=6, max_length=6, description="분석할 6개 번호")

@@ -48,10 +48,12 @@ type PersistedSemiAutoState = {
   picked: number[];
   pickFlags: Record<number, 'user' | 'auto'>;
   bulkTickets: number[][];
+  /** 사용자가 그리드에서 6개씩 직접 선택해 '줄 저장' 한 줄들 (각 6개). */
+  savedLines: number[][];
 };
 
 function defaultPersistedState(): PersistedSemiAutoState {
-  return { picked: [], pickFlags: {}, bulkTickets: [] };
+  return { picked: [], pickFlags: {}, bulkTickets: [], savedLines: [] };
 }
 
 function loadSemiAutoState(): PersistedSemiAutoState {
@@ -80,7 +82,13 @@ function loadSemiAutoState(): PersistedSemiAutoState {
           .map((t) => t.filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= 45))
           .filter((t) => t.length === 6)
       : [];
-    return { picked, pickFlags, bulkTickets };
+    const savedLines: number[][] = Array.isArray(obj.savedLines)
+      ? obj.savedLines
+          .filter((t): t is number[] => Array.isArray(t))
+          .map((t) => t.filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= 45))
+          .filter((t) => t.length === 6)
+      : [];
+    return { picked, pickFlags, bulkTickets, savedLines };
   } catch {
     return defaultPersistedState();
   }
@@ -551,11 +559,14 @@ export default function SemiAutoComparePanel({
   const [picked, setPicked] = useState<number[]>(initial.picked);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkTickets, setBulkTickets] = useState<number[][]>(initial.bulkTickets);
+  /** 그리드에서 6개 직접 선택 후 '줄 저장' 으로 누적한 줄. */
+  const [savedLines, setSavedLines] = useState<number[][]>(initial.savedLines);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
-  // 영속 — picked/bulkTickets 변경 시 자동 저장
+  // 영속 — picked/bulkTickets/savedLines 변경 시 자동 저장
   useEffect(() => {
-    saveSemiAutoState({ picked, pickFlags: {}, bulkTickets });
-  }, [picked, bulkTickets]);
+    saveSemiAutoState({ picked, pickFlags: {}, bulkTickets, savedLines });
+  }, [picked, bulkTickets, savedLines]);
 
   const latest = useQuery({
     queryKey: ['v1-latest-for-semi-auto'],
@@ -701,6 +712,32 @@ export default function SemiAutoComparePanel({
 
   const reset = () => {
     setPicked([]);
+    setSaveNotice(null);
+  };
+
+  /** picked 6개 → savedLines 에 추가. 중복(같은 6-튜플)은 거부. */
+  const saveCurrentLine = () => {
+    if (picked.length !== 6) return;
+    const sorted = [...picked].sort((a, b) => a - b);
+    const key = sorted.join('-');
+    const isDup = savedLines.some((line) => [...line].sort((a, b) => a - b).join('-') === key);
+    if (isDup) {
+      setSaveNotice('⚠ 이미 저장된 동일 줄입니다.');
+      return;
+    }
+    setSavedLines((prev) => [...prev, sorted]);
+    setPicked([]);
+    setSaveNotice(`✅ 저장됨 — 누적 ${savedLines.length + 1}줄.`);
+  };
+
+  const removeSavedLine = (idx: number) => {
+    setSavedLines((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const clearSavedLines = () => {
+    if (savedLines.length === 0) return;
+    if (!window.confirm(`저장된 ${savedLines.length}줄을 모두 삭제할까요?`)) return;
+    setSavedLines([]);
   };
 
   const comparison = useMemo(
@@ -768,20 +805,30 @@ export default function SemiAutoComparePanel({
 
   return (
     <Paper sx={{ p: 2 }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+      <Stack direction="row" alignItems="flex-start" justifyContent="space-between" sx={{ mb: 1 }}>
         <Box>
           <Typography variant="subtitle1" fontWeight={700}>
             🔄 반자동 비교
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            반자동 용지의 6개 번호 입력 → 기존 데이터와 비교
+            반자동 용지의 6개 번호 입력 → 기존 데이터와 비교 (줄 저장으로 누적)
           </Typography>
         </Box>
-        {picked.length > 0 && (
-          <Button size="small" onClick={reset}>
-            초기화
+        <Stack direction="row" spacing={1}>
+          {picked.length > 0 && (
+            <Button size="small" onClick={reset}>
+              초기화
+            </Button>
+          )}
+          <Button
+            size="small"
+            variant="contained"
+            onClick={saveCurrentLine}
+            disabled={picked.length !== 6}
+          >
+            줄 저장
           </Button>
-        )}
+        </Stack>
       </Stack>
 
       <Alert severity="warning" icon={false} sx={{ mb: 1.5, fontSize: 12 }}>
@@ -848,10 +895,71 @@ export default function SemiAutoComparePanel({
         </Button>
       </Stack>
 
+      {saveNotice && (
+        <Alert
+          severity={saveNotice.startsWith('⚠') ? 'warning' : 'success'}
+          sx={{ mb: 1.5 }}
+          onClose={() => setSaveNotice(null)}
+        >
+          {saveNotice}
+        </Alert>
+      )}
+
       {picked.length > 0 && picked.length < 6 && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           {6 - picked.length}개 더 선택하면 비교 결과가 표시됩니다.
         </Typography>
+      )}
+
+      {/* 저장 누적 패널 — 자동의 SavedLinesPanel 패턴과 동일 */}
+      {savedLines.length > 0 && (
+        <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            sx={{ mb: 1 }}
+          >
+            <Typography variant="subtitle2" fontWeight={700}>
+              💾 저장 누적 — {savedLines.length}줄
+            </Typography>
+            <Button size="small" color="error" variant="text" onClick={clearSavedLines}>
+              전체 삭제
+            </Button>
+          </Stack>
+          <Stack spacing={0.75}>
+            {savedLines.map((line, idx) => (
+              <Stack
+                key={`saved-${idx}`}
+                direction="row"
+                alignItems="center"
+                spacing={0.75}
+                flexWrap="wrap"
+                useFlexGap
+              >
+                <Chip
+                  size="small"
+                  label={`${idx + 1}줄`}
+                  variant="outlined"
+                  sx={{ minWidth: 44, fontWeight: 700 }}
+                />
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ flex: 1 }}>
+                  {line.map((n) => (
+                    <LottoBall key={n} number={n} size={28} />
+                  ))}
+                </Stack>
+                <IconButton
+                  size="small"
+                  onClick={() => removeSavedLine(idx)}
+                  aria-label="삭제"
+                  sx={{ ml: 'auto' }}
+                >
+                  ×
+                </IconButton>
+              </Stack>
+            ))}
+          </Stack>
+        </Paper>
       )}
 
       {/* 비교 결과 */}

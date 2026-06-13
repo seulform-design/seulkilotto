@@ -863,18 +863,80 @@ function SavedLinesPanel({
 
 const emptySelected = (): Record<SheetIntent, SelectedFile[]> => ({ review: [], current_round: [] });
 
+// ── 매뉴얼 입력 영속화 (localStorage) ───────────────────────────
+// 사용자가 입력한 picked / currentSlipLines / slipQueue 를 영속 저장.
+// 다른 탭으로 이동했다 돌아와도, 새로고침해도 보존됨.
+// '용지 초기화' / '누적 삭제' / 사용자가 직접 비우는 경우에만 사라진다.
+const MANUAL_STORAGE_KEY = 'lotto:photoAnalysis:manual:v1';
+
+type ManualDraft = {
+  picked: number[];
+  currentSlipLines: SavedLine[];
+  slipQueue: ManualSlipInput[];
+};
+
+const emptyManualDraft = (): ManualDraft => ({
+  picked: [],
+  currentSlipLines: [],
+  slipQueue: [],
+});
+
+const emptyManualByIntent = (): Record<SheetIntent, ManualDraft> => ({
+  review: emptyManualDraft(),
+  current_round: emptyManualDraft(),
+});
+
+function loadManualByIntent(): Record<SheetIntent, ManualDraft> {
+  if (typeof window === 'undefined') return emptyManualByIntent();
+  try {
+    const raw = window.localStorage.getItem(MANUAL_STORAGE_KEY);
+    if (!raw) return emptyManualByIntent();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return emptyManualByIntent();
+    const out = emptyManualByIntent();
+    for (const key of ['review', 'current_round'] as const) {
+      const d = (parsed as Record<string, unknown>)[key];
+      if (
+        d &&
+        typeof d === 'object' &&
+        Array.isArray((d as ManualDraft).picked) &&
+        Array.isArray((d as ManualDraft).currentSlipLines) &&
+        Array.isArray((d as ManualDraft).slipQueue)
+      ) {
+        const draft = d as ManualDraft;
+        out[key] = {
+          picked: draft.picked.filter((n) => Number.isInteger(n) && n >= 1 && n <= 45),
+          currentSlipLines: draft.currentSlipLines,
+          slipQueue: draft.slipQueue,
+        };
+      }
+    }
+    return out;
+  } catch {
+    return emptyManualByIntent();
+  }
+}
+
+function saveManualByIntent(state: Record<SheetIntent, ManualDraft>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(MANUAL_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota / private mode — silent */
+  }
+}
+
 export default function PhotoAnalysisPage() {
   const [activeTab, setActiveTab] = useState<SheetIntent>('review');
   const [selectedByIntent, setSelectedByIntent] = useState<Record<SheetIntent, SelectedFile[]>>(emptySelected);
-  const emptyManualDraft = () => ({
-    picked: [] as number[],
-    currentSlipLines: [] as SavedLine[],
-    slipQueue: [] as ManualSlipInput[],
-  });
-  const [manualByIntent, setManualByIntent] = useState<Record<SheetIntent, ReturnType<typeof emptyManualDraft>>>({
-    review: emptyManualDraft(),
-    current_round: emptyManualDraft(),
-  });
+  const [manualByIntent, setManualByIntent] = useState<Record<SheetIntent, ManualDraft>>(
+    loadManualByIntent
+  );
+
+  // localStorage 영속 — 변경 시마다 자동 저장
+  useEffect(() => {
+    saveManualByIntent(manualByIntent);
+  }, [manualByIntent]);
   const [showPhotoUpload, setShowPhotoUpload] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -923,7 +985,7 @@ export default function PhotoAnalysisPage() {
   const manualDraft = manualByIntent[activeTab];
   const { picked, currentSlipLines, slipQueue } = manualDraft;
 
-  const patchManual = (patch: Partial<ReturnType<typeof emptyManualDraft>>) => {
+  const patchManual = (patch: Partial<ManualDraft>) => {
     setManualByIntent((prev) => ({
       ...prev,
       [activeTab]: { ...prev[activeTab], ...patch },
@@ -1144,7 +1206,7 @@ export default function PhotoAnalysisPage() {
       setAccumulated(null);
       setResultsByIntent({});
       setSelectedByIntent(emptySelected());
-      setManualByIntent({ review: emptyManualDraft(), current_round: emptyManualDraft() });
+      setManualByIntent(emptyManualByIntent());
       await refreshAccumulated();
     } catch (e) {
       setError(e instanceof Error ? e.message : '삭제 실패');

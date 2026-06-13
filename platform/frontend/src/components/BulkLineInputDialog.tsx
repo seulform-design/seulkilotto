@@ -6,12 +6,13 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  IconButton,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
 import { useMemo, useState } from 'react';
-import { parseBulkLines } from '../utils/bulkLineParser';
+import { parseBulkLines, type ParseError } from '../utils/bulkLineParser';
 
 interface BulkLineInputDialogProps {
   open: boolean;
@@ -31,6 +32,147 @@ A: 13, 14, 15, 16, 17, 18
 1) 19 20 21 22 23 24
 # 주석은 무시됨`;
 
+// ── 텍스트 라인 조작 헬퍼 ───────────────────────────────────────
+function splitLines(text: string): string[] {
+  return text.split(/\r?\n/);
+}
+
+function joinLines(lines: string[]): string {
+  return lines.join('\n');
+}
+
+function deleteLineAt(text: string, lineNum: number): string {
+  const lines = splitLines(text);
+  if (lineNum < 1 || lineNum > lines.length) return text;
+  lines.splice(lineNum - 1, 1);
+  return joinLines(lines);
+}
+
+function replaceLineAt(text: string, lineNum: number, newLine: string): string {
+  const lines = splitLines(text);
+  if (lineNum < 1 || lineNum > lines.length) return text;
+  lines[lineNum - 1] = newLine;
+  return joinLines(lines);
+}
+
+// ── 오류 행 컴포넌트 ─────────────────────────────────────────────
+interface ErrorRowProps {
+  error: ParseError;
+  onDelete: () => void;
+  onEdit: (newText: string) => void;
+}
+
+function ErrorRow({ error, onDelete, onEdit }: ErrorRowProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(error.raw);
+
+  const startEdit = () => {
+    setDraft(error.raw);
+    setEditing(true);
+  };
+
+  const applyEdit = () => {
+    onEdit(draft);
+    setEditing(false);
+  };
+
+  const cancelEdit = () => {
+    setDraft(error.raw);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <Stack
+        direction="row"
+        spacing={0.5}
+        alignItems="center"
+        sx={{ mb: 0.5, py: 0.5 }}
+      >
+        <Chip
+          size="small"
+          label={`줄 ${error.lineNum}`}
+          color="error"
+          sx={{ flexShrink: 0, fontWeight: 700 }}
+        />
+        <TextField
+          size="small"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          autoFocus
+          fullWidth
+          sx={{
+            '& .MuiInputBase-input': {
+              fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+              fontSize: 13,
+            },
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') applyEdit();
+            if (e.key === 'Escape') cancelEdit();
+          }}
+        />
+        <Button size="small" variant="contained" onClick={applyEdit} sx={{ flexShrink: 0 }}>
+          적용
+        </Button>
+        <Button size="small" onClick={cancelEdit} sx={{ flexShrink: 0 }}>
+          취소
+        </Button>
+      </Stack>
+    );
+  }
+
+  return (
+    <Stack
+      direction="row"
+      spacing={0.5}
+      alignItems="center"
+      sx={{ mb: 0.5, py: 0.5 }}
+    >
+      <Chip
+        size="small"
+        label={`줄 ${error.lineNum}`}
+        color="error"
+        sx={{ flexShrink: 0, fontWeight: 700 }}
+      />
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography
+          variant="caption"
+          color="error.light"
+          sx={{ display: 'block', fontWeight: 600 }}
+        >
+          {error.reason}
+        </Typography>
+        <Typography
+          variant="caption"
+          sx={{
+            display: 'block',
+            fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+            color: 'text.secondary',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {error.raw || '(빈 줄)'}
+        </Typography>
+      </Box>
+      <Button size="small" variant="text" onClick={startEdit} sx={{ flexShrink: 0, minWidth: 'auto', px: 1 }}>
+        수정
+      </Button>
+      <IconButton
+        size="small"
+        onClick={onDelete}
+        aria-label={`줄 ${error.lineNum} 삭제`}
+        sx={{ flexShrink: 0 }}
+      >
+        ×
+      </IconButton>
+    </Stack>
+  );
+}
+
+// ── 메인 다이얼로그 ──────────────────────────────────────────────
 export default function BulkLineInputDialog({
   open,
   onClose,
@@ -41,10 +183,7 @@ export default function BulkLineInputDialog({
 
   const result = useMemo(() => parseBulkLines(text), [text]);
 
-  const handleClose = () => {
-    onClose();
-  };
-
+  const handleClose = () => onClose();
   const handleClear = () => setText('');
 
   const handleConfirm = () => {
@@ -52,6 +191,28 @@ export default function BulkLineInputDialog({
     onConfirm(result.parsed.map((p) => p.numbers));
     setText('');
     onClose();
+  };
+
+  const handleDeleteLine = (lineNum: number) => {
+    setText((prev) => deleteLineAt(prev, lineNum));
+  };
+
+  const handleEditLine = (lineNum: number, newLine: string) => {
+    setText((prev) => replaceLineAt(prev, lineNum, newLine));
+  };
+
+  const handleDeleteAllErrors = () => {
+    // 오류 줄을 한 번에 삭제 — 큰 번호부터 지워야 인덱스 안정
+    const lineNumsDesc = [...result.errors]
+      .map((e) => e.lineNum)
+      .sort((a, b) => b - a);
+    setText((prev) => {
+      let working = prev;
+      for (const n of lineNumsDesc) {
+        working = deleteLineAt(working, n);
+      }
+      return working;
+    });
   };
 
   const validCount = result.parsed.length;
@@ -70,7 +231,7 @@ export default function BulkLineInputDialog({
       <DialogTitle>
         대량 줄 입력
         <Typography variant="caption" color="text.secondary" display="block">
-          텍스트 붙여넣기 → 자동 파싱 → 5줄당 1용지로 분할
+          텍스트 붙여넣기 → 자동 파싱 → 5줄당 1용지로 분할 · 오류 줄은 인라인 수정/삭제 가능
         </Typography>
       </DialogTitle>
       <DialogContent>
@@ -123,13 +284,23 @@ export default function BulkLineInputDialog({
               variant="outlined"
               label={`시도 ${result.attemptedLines}줄`}
             />
+            {errorCount > 0 && (
+              <Button
+                size="small"
+                color="error"
+                variant="outlined"
+                onClick={handleDeleteAllErrors}
+              >
+                오류 줄 전체 삭제 ({errorCount})
+              </Button>
+            )}
           </Stack>
         )}
 
         {errorCount > 0 && (
           <Box
             sx={{
-              maxHeight: 180,
+              maxHeight: 240,
               overflow: 'auto',
               bgcolor: 'action.hover',
               borderRadius: 1,
@@ -137,23 +308,24 @@ export default function BulkLineInputDialog({
               mb: 1,
             }}
           >
-            <Typography variant="caption" color="error.main" sx={{ fontWeight: 700, mb: 0.5, display: 'block' }}>
-              오류 상세 (앞 20건):
+            <Typography
+              variant="caption"
+              color="error.main"
+              sx={{ fontWeight: 700, mb: 0.5, display: 'block' }}
+            >
+              오류 상세 (앞 20건) — 각 줄을 수정하거나 삭제할 수 있습니다
             </Typography>
-            {result.errors.slice(0, 20).map((e, i) => (
-              <Typography
-                key={i}
-                variant="caption"
-                color="error.light"
-                sx={{ display: 'block', fontFamily: 'monospace' }}
-              >
-                줄 {e.lineNum}: {e.reason} — {e.raw.slice(0, 50)}
-                {e.raw.length > 50 ? '...' : ''}
-              </Typography>
+            {result.errors.slice(0, 20).map((e) => (
+              <ErrorRow
+                key={`${e.lineNum}-${e.raw}`}
+                error={e}
+                onDelete={() => handleDeleteLine(e.lineNum)}
+                onEdit={(newText) => handleEditLine(e.lineNum, newText)}
+              />
             ))}
             {errorCount > 20 && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                ... 외 {errorCount - 20}건 더 있음
+                ... 외 {errorCount - 20}건 더 있음 — 「오류 줄 전체 삭제」 또는 직접 수정 필요
               </Typography>
             )}
           </Box>

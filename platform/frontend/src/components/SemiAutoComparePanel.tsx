@@ -30,6 +30,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import BulkLineInputDialog from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
+import SavedLinesPanel, {
+  GAME_LABELS,
+  type GameLabel,
+  type SavedLine,
+} from './SavedLinesPanel';
 import {
   v1Api,
   type ComboDuplicateItem,
@@ -48,12 +53,46 @@ type PersistedSemiAutoState = {
   picked: number[];
   pickFlags: Record<number, 'user' | 'auto'>;
   bulkTickets: number[][];
-  /** 사용자가 그리드에서 6개씩 직접 선택해 '줄 저장' 한 줄들 (각 6개). */
-  savedLines: number[][];
+  /** 자동 패턴: 현재 입력 중 용지의 A~E 줄 (각 6개). */
+  semiCurrentLines: SavedLine[];
+  /** 자동 패턴: 5줄 완성된 용지들의 누적. */
+  semiSlipQueue: ManualSlipInput[];
 };
 
 function defaultPersistedState(): PersistedSemiAutoState {
-  return { picked: [], pickFlags: {}, bulkTickets: [], savedLines: [] };
+  return {
+    picked: [],
+    pickFlags: {},
+    bulkTickets: [],
+    semiCurrentLines: [],
+    semiSlipQueue: [],
+  };
+}
+
+const isGameLabel = (v: unknown): v is GameLabel =>
+  typeof v === 'string' && (GAME_LABELS as readonly string[]).includes(v);
+
+function sanitizeSavedLine(raw: unknown): SavedLine | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Partial<SavedLine>;
+  if (!isGameLabel(obj.label)) return null;
+  if (!Array.isArray(obj.numbers)) return null;
+  const numbers = obj.numbers.filter(
+    (n): n is number => Number.isInteger(n) && n >= 1 && n <= 45
+  );
+  if (numbers.length !== 6) return null;
+  return { label: obj.label, numbers };
+}
+
+function sanitizeSlipInput(raw: unknown): ManualSlipInput | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Partial<ManualSlipInput>;
+  if (!Array.isArray(obj.lines)) return null;
+  const lines = obj.lines
+    .map((line) => sanitizeSavedLine(line))
+    .filter((line): line is SavedLine => line !== null);
+  if (lines.length === 0) return null;
+  return { lines };
 }
 
 function loadSemiAutoState(): PersistedSemiAutoState {
@@ -63,7 +102,7 @@ function loadSemiAutoState(): PersistedSemiAutoState {
     if (!raw) return defaultPersistedState();
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object') return defaultPersistedState();
-    const obj = parsed as Partial<PersistedSemiAutoState>;
+    const obj = parsed as Partial<PersistedSemiAutoState> & { savedLines?: unknown };
     const picked = Array.isArray(obj.picked)
       ? obj.picked.filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= 45)
       : [];
@@ -82,13 +121,53 @@ function loadSemiAutoState(): PersistedSemiAutoState {
           .map((t) => t.filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= 45))
           .filter((t) => t.length === 6)
       : [];
-    const savedLines: number[][] = Array.isArray(obj.savedLines)
-      ? obj.savedLines
-          .filter((t): t is number[] => Array.isArray(t))
-          .map((t) => t.filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= 45))
-          .filter((t) => t.length === 6)
+
+    let semiCurrentLines: SavedLine[] = Array.isArray(obj.semiCurrentLines)
+      ? obj.semiCurrentLines
+          .map((l) => sanitizeSavedLine(l))
+          .filter((l): l is SavedLine => l !== null)
+          .slice(0, GAME_LABELS.length)
       : [];
-    return { picked, pickFlags, bulkTickets, savedLines };
+    let semiSlipQueue: ManualSlipInput[] = Array.isArray(obj.semiSlipQueue)
+      ? obj.semiSlipQueue
+          .map((s) => sanitizeSlipInput(s))
+          .filter((s): s is ManualSlipInput => s !== null)
+      : [];
+
+    // ── 마이그레이션: 직전 v1 의 평탄한 savedLines (number[][]) →
+    //    5줄씩 묶어 semiSlipQueue + 잔여 → semiCurrentLines.
+    if (
+      semiCurrentLines.length === 0 &&
+      semiSlipQueue.length === 0 &&
+      Array.isArray(obj.savedLines)
+    ) {
+      const flat = (obj.savedLines as unknown[])
+        .filter((t): t is number[] => Array.isArray(t))
+        .map((t) => t.filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= 45))
+        .filter((t) => t.length === 6);
+      const migratedSlips: ManualSlipInput[] = [];
+      for (let i = 0; i + GAME_LABELS.length <= flat.length; i += GAME_LABELS.length) {
+        migratedSlips.push({
+          lines: flat
+            .slice(i, i + GAME_LABELS.length)
+            .map((numbers, idx) => ({ label: GAME_LABELS[idx], numbers })),
+        });
+      }
+      const remainder = flat.slice(migratedSlips.length * GAME_LABELS.length);
+      semiSlipQueue = migratedSlips;
+      semiCurrentLines = remainder.map((numbers, idx) => ({
+        label: GAME_LABELS[idx],
+        numbers,
+      }));
+    }
+
+    // 라벨 재할당 — 인덱스 기준으로 강제 정렬 (저장 시 라벨 누락 가드)
+    semiCurrentLines = semiCurrentLines.map((line, idx) => ({
+      ...line,
+      label: GAME_LABELS[idx] ?? line.label,
+    }));
+
+    return { picked, pickFlags, bulkTickets, semiCurrentLines, semiSlipQueue };
   } catch {
     return defaultPersistedState();
   }
@@ -559,14 +638,30 @@ export default function SemiAutoComparePanel({
   const [picked, setPicked] = useState<number[]>(initial.picked);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkTickets, setBulkTickets] = useState<number[][]>(initial.bulkTickets);
-  /** 그리드에서 6개 직접 선택 후 '줄 저장' 으로 누적한 줄. */
-  const [savedLines, setSavedLines] = useState<number[][]>(initial.savedLines);
+  /** 현재 입력 중 용지의 A~E 줄 (자동 패턴과 동일). */
+  const [semiCurrentLines, setSemiCurrentLines] = useState<SavedLine[]>(
+    initial.semiCurrentLines
+  );
+  /** 5줄 완성된 용지 누적. */
+  const [semiSlipQueue, setSemiSlipQueue] = useState<ManualSlipInput[]>(
+    initial.semiSlipQueue
+  );
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
-  // 영속 — picked/bulkTickets/savedLines 변경 시 자동 저장
+  // 영속 — picked / bulkTickets / semiCurrentLines / semiSlipQueue
   useEffect(() => {
-    saveSemiAutoState({ picked, pickFlags: {}, bulkTickets, savedLines });
-  }, [picked, bulkTickets, savedLines]);
+    saveSemiAutoState({
+      picked,
+      pickFlags: {},
+      bulkTickets,
+      semiCurrentLines,
+      semiSlipQueue,
+    });
+  }, [picked, bulkTickets, semiCurrentLines, semiSlipQueue]);
+
+  /** 다음 저장 시 부여될 라벨 — currentSlipLines 의 크기로 결정. */
+  const currentLabel: GameLabel =
+    GAME_LABELS[semiCurrentLines.length] ?? GAME_LABELS[0];
 
   const latest = useQuery({
     queryKey: ['v1-latest-for-semi-auto'],
@@ -715,29 +810,113 @@ export default function SemiAutoComparePanel({
     setSaveNotice(null);
   };
 
-  /** picked 6개 → savedLines 에 추가. 중복(같은 6-튜플)은 거부. */
+  /** 동일 6-튜플 중복 검사 — 현재 입력 중 + 누적 용지 전체 대상. */
+  const findDuplicateLocation = (
+    sorted: number[]
+  ): { foundIn: 'current'; lineLabel: GameLabel } | { foundIn: 'queue'; slipIdx: number; lineLabel: GameLabel } | null => {
+    const key = sorted.join('-');
+    for (const line of semiCurrentLines) {
+      if ([...line.numbers].sort((a, b) => a - b).join('-') === key) {
+        return { foundIn: 'current', lineLabel: line.label };
+      }
+    }
+    for (let slipIdx = 0; slipIdx < semiSlipQueue.length; slipIdx++) {
+      for (const line of semiSlipQueue[slipIdx].lines) {
+        if ([...line.numbers].sort((a, b) => a - b).join('-') === key) {
+          return { foundIn: 'queue', slipIdx, lineLabel: line.label as GameLabel };
+        }
+      }
+    }
+    return null;
+  };
+
+  /**
+   * picked 6개 → semiCurrentLines 에 append.
+   * 5줄 완성되면 semiSlipQueue 로 묶고 currentLines 비움 (자동 패턴 동일).
+   */
   const saveCurrentLine = () => {
     if (picked.length !== 6) return;
     const sorted = [...picked].sort((a, b) => a - b);
-    const key = sorted.join('-');
-    const isDup = savedLines.some((line) => [...line].sort((a, b) => a - b).join('-') === key);
-    if (isDup) {
-      setSaveNotice('⚠ 이미 저장된 동일 줄입니다.');
+    const dup = findDuplicateLocation(sorted);
+    if (dup) {
+      const where =
+        dup.foundIn === 'current'
+          ? `입력 중인 ${dup.lineLabel}줄`
+          : `용지 ${dup.slipIdx + 1}의 ${dup.lineLabel}줄`;
+      setSaveNotice(`⚠ 이미 저장된 동일 줄입니다 (${where}).`);
       return;
     }
-    setSavedLines((prev) => [...prev, sorted]);
+    const newLine: SavedLine = { label: currentLabel, numbers: sorted };
+    const nextLines = [...semiCurrentLines, newLine];
+    if (nextLines.length >= GAME_LABELS.length) {
+      // 5줄 완성 → 용지로 묶고 입력 중 비우기
+      setSemiSlipQueue((prev) => [...prev, { lines: nextLines }]);
+      setSemiCurrentLines([]);
+      setSaveNotice(`✅ 용지 ${semiSlipQueue.length + 1}장 완성 — ${currentLabel}줄 저장 완료.`);
+    } else {
+      setSemiCurrentLines(nextLines);
+      const nextLabel = GAME_LABELS[nextLines.length];
+      setSaveNotice(`✅ ${currentLabel}줄 저장 — 다음 ${nextLabel}줄.`);
+    }
     setPicked([]);
-    setSaveNotice(`✅ 저장됨 — 누적 ${savedLines.length + 1}줄.`);
   };
 
-  const removeSavedLine = (idx: number) => {
-    setSavedLines((prev) => prev.filter((_, i) => i !== idx));
+  /** 입력 중 줄 단건 삭제 + 라벨 재정렬. */
+  const removeCurrentLine = (idx: number) => {
+    const removed = semiCurrentLines[idx];
+    const next = semiCurrentLines
+      .filter((_, i) => i !== idx)
+      .map((l, i) => ({ ...l, label: GAME_LABELS[i] }));
+    setSemiCurrentLines(next);
+    if (removed) {
+      setSaveNotice(
+        `${removed.label}줄 삭제 — 다음 입력은 ${GAME_LABELS[next.length] ?? 'A'}줄.`
+      );
+    }
   };
 
-  const clearSavedLines = () => {
-    if (savedLines.length === 0) return;
-    if (!window.confirm(`저장된 ${savedLines.length}줄을 모두 삭제할까요?`)) return;
-    setSavedLines([]);
+  /** 입력 중 줄 → picked 로 복원 (재편집). 그 줄은 누적에서 제거. */
+  const editCurrentLine = (idx: number) => {
+    const target = semiCurrentLines[idx];
+    if (!target) return;
+    setPicked([...target.numbers].sort((a, b) => a - b));
+    const next = semiCurrentLines
+      .filter((_, i) => i !== idx)
+      .map((l, i) => ({ ...l, label: GAME_LABELS[i] }));
+    setSemiCurrentLines(next);
+    setSaveNotice(`${target.label}줄 수정 모드 — 변경 후 [줄 저장].`);
+  };
+
+  /** 누적 용지 1장 통째 삭제. */
+  const removeSlip = (slipIdx: number) => {
+    setSemiSlipQueue((prev) => prev.filter((_, i) => i !== slipIdx));
+  };
+
+  /** 누적 용지의 1줄만 삭제 + 그 용지 내부 라벨 재정렬. */
+  const removeSlipLine = (slipIdx: number, lineIdx: number) => {
+    setSemiSlipQueue((prev) =>
+      prev
+        .map((slip, sIdx) => {
+          if (sIdx !== slipIdx) return slip;
+          const nextLines = slip.lines
+            .filter((_, lIdx) => lIdx !== lineIdx)
+            .map((l, li) => ({ ...l, label: GAME_LABELS[li] }));
+          return { lines: nextLines };
+        })
+        .filter((slip) => slip.lines.length > 0)
+    );
+  };
+
+  const clearAllSaved = () => {
+    const total =
+      semiCurrentLines.length + semiSlipQueue.reduce((s, sl) => s + sl.lines.length, 0);
+    if (total === 0) return;
+    if (!window.confirm(`저장된 ${total}줄 (${semiSlipQueue.length}장 + 입력 중 ${semiCurrentLines.length}줄)을 모두 삭제할까요?`)) {
+      return;
+    }
+    setSemiCurrentLines([]);
+    setSemiSlipQueue([]);
+    setSaveNotice('전체 저장 누적이 삭제되었습니다.');
   };
 
   const comparison = useMemo(
@@ -839,7 +1018,7 @@ export default function SemiAutoComparePanel({
       <Box sx={{ mb: 1.5 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
           <Typography variant="subtitle2" fontWeight={700}>
-            비교 줄 · {picked.length}/6
+            {currentLabel}줄 · {picked.length}/6
           </Typography>
           {picked.length > 0 && (
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
@@ -911,8 +1090,8 @@ export default function SemiAutoComparePanel({
         </Typography>
       )}
 
-      {/* 저장 누적 패널 — 자동의 SavedLinesPanel 패턴과 동일 */}
-      {savedLines.length > 0 && (
+      {/* 저장 누적 — 자동의 SavedLinesPanel 그대로 재사용 (A~E · 5줄/용지) */}
+      {(semiCurrentLines.length > 0 || semiSlipQueue.length > 0) && (
         <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
           <Stack
             direction="row"
@@ -921,44 +1100,21 @@ export default function SemiAutoComparePanel({
             sx={{ mb: 1 }}
           >
             <Typography variant="subtitle2" fontWeight={700}>
-              💾 저장 누적 — {savedLines.length}줄
+              💾 저장 누적 — {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄
             </Typography>
-            <Button size="small" color="error" variant="text" onClick={clearSavedLines}>
+            <Button size="small" color="error" variant="text" onClick={clearAllSaved}>
               전체 삭제
             </Button>
           </Stack>
-          <Stack spacing={0.75}>
-            {savedLines.map((line, idx) => (
-              <Stack
-                key={`saved-${idx}`}
-                direction="row"
-                alignItems="center"
-                spacing={0.75}
-                flexWrap="wrap"
-                useFlexGap
-              >
-                <Chip
-                  size="small"
-                  label={`${idx + 1}줄`}
-                  variant="outlined"
-                  sx={{ minWidth: 44, fontWeight: 700 }}
-                />
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ flex: 1 }}>
-                  {line.map((n) => (
-                    <LottoBall key={n} number={n} size={28} />
-                  ))}
-                </Stack>
-                <IconButton
-                  size="small"
-                  onClick={() => removeSavedLine(idx)}
-                  aria-label="삭제"
-                  sx={{ ml: 'auto' }}
-                >
-                  ×
-                </IconButton>
-              </Stack>
-            ))}
-          </Stack>
+          <SavedLinesPanel
+            currentSlipLines={semiCurrentLines}
+            slipQueue={semiSlipQueue}
+            onRemoveSlip={removeSlip}
+            onRemoveCurrentLine={removeCurrentLine}
+            onEditCurrentLine={editCurrentLine}
+            onRemoveSlipLine={removeSlipLine}
+            emptyHint="저장된 줄이 없습니다. 그리드에서 6개 선택 후 [줄 저장]."
+          />
         </Paper>
       )}
 

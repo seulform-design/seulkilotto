@@ -24,6 +24,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BulkLineInputDialog from '../components/BulkLineInputDialog';
 import LottoBall from '../components/LottoBall';
 import PhotoBacktestPanel from '../components/PhotoBacktestPanel';
+import SavedLinesPanel, {
+  GAME_LABELS,
+  slipFromLines,
+  type GameLabel,
+  type SavedLine,
+} from '../components/SavedLinesPanel';
 import SemiAutoComparePanel from '../components/SemiAutoComparePanel';
 import {
   v1Api,
@@ -614,21 +620,8 @@ function IntentAccumulatedPanel({
   );
 }
 
-const GAME_LABELS = ['A', 'B', 'C', 'D', 'E'] as const;
-type GameLabel = (typeof GAME_LABELS)[number];
 const GRID_NUMBERS = Array.from({ length: 45 }, (_, i) => i + 1);
 const GRID_COLS = 7;
-
-type SavedLine = { label: GameLabel; numbers: number[] };
-
-function slipFromLines(lines: SavedLine[]): ManualSlipInput {
-  return {
-    lines: lines.map((line) => ({
-      label: line.label,
-      numbers: [...line.numbers].sort((a, b) => a - b),
-    })),
-  };
-}
 
 function ManualNumberGrid({
   picked,
@@ -682,119 +675,6 @@ function ManualNumberGrid({
         })}
       </Box>
     </Box>
-  );
-}
-
-function SavedLinesPanel({
-  currentSlipLines,
-  slipQueue,
-  onRemoveSlip,
-  onRemoveCurrentLine,
-  onEditCurrentLine,
-  onRemoveSlipLine,
-}: {
-  currentSlipLines: SavedLine[];
-  slipQueue: ManualSlipInput[];
-  onRemoveSlip: (index: number) => void;
-  onRemoveCurrentLine: (index: number) => void;
-  onEditCurrentLine: (index: number) => void;
-  onRemoveSlipLine: (slipIndex: number, lineIndex: number) => void;
-}) {
-  const totalLines =
-    currentSlipLines.length + slipQueue.reduce((sum, slip) => sum + slip.lines.length, 0);
-  if (!totalLines) {
-    return (
-      <Typography variant="body2" color="text.secondary">
-        저장된 줄이 없습니다. 번호 6개 선택 후 「줄 저장」을 누르세요.
-      </Typography>
-    );
-  }
-  return (
-    <Stack spacing={1.5}>
-      {currentSlipLines.length > 0 && (
-        <Box>
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-            입력 중 (용지 {slipQueue.length + 1} · {currentSlipLines.length}/5줄)
-          </Typography>
-          {currentSlipLines.map((line, idx) => (
-            <Stack
-              key={`current-${idx}`}
-              direction="row"
-              alignItems="center"
-              spacing={1}
-              sx={{ mb: 0.5 }}
-            >
-              <Chip label={line.label} size="small" color="primary" variant="outlined" />
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ flex: 1 }}>
-                {line.numbers.map((n) => (
-                  <LottoBall key={n} number={n} size={28} />
-                ))}
-              </Stack>
-              <Button
-                size="small"
-                variant="text"
-                onClick={() => onEditCurrentLine(idx)}
-                sx={{ minWidth: 'auto', px: 1 }}
-                aria-label={`${line.label}줄 수정`}
-              >
-                수정
-              </Button>
-              <IconButton
-                size="small"
-                onClick={() => onRemoveCurrentLine(idx)}
-                aria-label={`${line.label}줄 삭제`}
-              >
-                ×
-              </IconButton>
-            </Stack>
-          ))}
-        </Box>
-      )}
-      {slipQueue.map((slip, slipIdx) => (
-        <Box key={`slip-${slipIdx}`}>
-          <Stack
-            direction="row"
-            alignItems="center"
-            justifyContent="space-between"
-            sx={{ mb: 0.5 }}
-          >
-            <Typography variant="caption" color="text.secondary">
-              용지 {slipIdx + 1} (저장됨 · {slip.lines.length}줄)
-            </Typography>
-            <IconButton
-              size="small"
-              onClick={() => onRemoveSlip(slipIdx)}
-              aria-label={`용지 ${slipIdx + 1} 전체 삭제`}
-            >
-              ×
-            </IconButton>
-          </Stack>
-          {slip.lines.map((line, lineIdx) => (
-            <Stack
-              key={`${slipIdx}-${lineIdx}`}
-              direction="row"
-              alignItems="center"
-              spacing={1}
-              sx={{ mb: 0.5 }}
-            >
-              <Chip label={line.label} size="small" variant="outlined" />
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ flex: 1 }}>
-                {line.numbers.map((n) => (
-                  <LottoBall key={n} number={n} size={28} />
-                ))}
-              </Stack>
-              <IconButton
-                size="small"
-                onClick={() => onRemoveSlipLine(slipIdx, lineIdx)}
-                aria-label={`용지 ${slipIdx + 1} ${line.label}줄 삭제`}
-              >
-                ×
-              </IconButton>
-            </Stack>
-          ))}
-        </Box>
-      ))}
-    </Stack>
   );
 }
 

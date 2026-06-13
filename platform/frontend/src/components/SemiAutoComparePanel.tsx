@@ -57,6 +57,8 @@ type PersistedSemiAutoState = {
   semiCurrentLines: SavedLine[];
   /** 자동 패턴: 5줄 완성된 용지들의 누적. */
   semiSlipQueue: ManualSlipInput[];
+  /** 사용자가 [누적·저장] 으로 명시적으로 확정한 마지막 시각 (ISO). */
+  lastSavedAt: string | null;
 };
 
 function defaultPersistedState(): PersistedSemiAutoState {
@@ -66,6 +68,7 @@ function defaultPersistedState(): PersistedSemiAutoState {
     bulkTickets: [],
     semiCurrentLines: [],
     semiSlipQueue: [],
+    lastSavedAt: null,
   };
 }
 
@@ -167,7 +170,19 @@ function loadSemiAutoState(): PersistedSemiAutoState {
       label: GAME_LABELS[idx] ?? line.label,
     }));
 
-    return { picked, pickFlags, bulkTickets, semiCurrentLines, semiSlipQueue };
+    const lastSavedAt: string | null =
+      typeof obj.lastSavedAt === 'string' && obj.lastSavedAt.length > 0
+        ? obj.lastSavedAt
+        : null;
+
+    return {
+      picked,
+      pickFlags,
+      bulkTickets,
+      semiCurrentLines,
+      semiSlipQueue,
+      lastSavedAt,
+    };
   } catch {
     return defaultPersistedState();
   }
@@ -647,8 +662,10 @@ export default function SemiAutoComparePanel({
     initial.semiSlipQueue
   );
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  /** 사용자가 명시적으로 [누적·저장] 누른 마지막 시각 (ISO). */
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(initial.lastSavedAt);
 
-  // 영속 — picked / bulkTickets / semiCurrentLines / semiSlipQueue
+  // 영속 — picked / bulkTickets / semiCurrentLines / semiSlipQueue / lastSavedAt
   useEffect(() => {
     saveSemiAutoState({
       picked,
@@ -656,8 +673,9 @@ export default function SemiAutoComparePanel({
       bulkTickets,
       semiCurrentLines,
       semiSlipQueue,
+      lastSavedAt,
     });
-  }, [picked, bulkTickets, semiCurrentLines, semiSlipQueue]);
+  }, [picked, bulkTickets, semiCurrentLines, semiSlipQueue, lastSavedAt]);
 
   /** 다음 저장 시 부여될 라벨 — currentSlipLines 의 크기로 결정. */
   const currentLabel: GameLabel =
@@ -916,7 +934,43 @@ export default function SemiAutoComparePanel({
     }
     setSemiCurrentLines([]);
     setSemiSlipQueue([]);
+    setLastSavedAt(null);
     setSaveNotice('전체 저장 누적이 삭제되었습니다.');
+  };
+
+  /** 입력 중인 용지 (picked + semiCurrentLines) 만 비움 — semiSlipQueue 보존. */
+  const resetCurrentSlip = () => {
+    if (picked.length === 0 && semiCurrentLines.length === 0) return;
+    setPicked([]);
+    setSemiCurrentLines([]);
+    setSaveNotice('입력 중인 용지를 초기화했습니다.');
+  };
+
+  /**
+   * [누적·저장] — 명시적 영속 확인.
+   * 반자동 누적은 이미 localStorage 자동 영속 중이지만, 사용자가 명시적으로
+   * '지금까지의 누적을 확정' 하는 행위로 마지막 저장 시각을 기록.
+   * 자동 누적 store 와는 분리 (사용자 선택).
+   */
+  const confirmAccumulate = () => {
+    const total =
+      semiCurrentLines.length + semiSlipQueue.reduce((s, sl) => s + sl.lines.length, 0);
+    if (total === 0) {
+      setSaveNotice('⚠ 저장할 줄이 없습니다.');
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    setLastSavedAt(nowIso);
+    const stamp = new Date(nowIso).toLocaleString('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    setSaveNotice(
+      `✅ ${semiSlipQueue.length}장 · 입력 중 ${semiCurrentLines.length}줄 (총 ${total}줄) 저장 확정 — ${stamp}.`
+    );
   };
 
   const comparison = useMemo(
@@ -1063,14 +1117,29 @@ export default function SemiAutoComparePanel({
         </Box>
       </Box>
 
-      {/* 하단 액션 행 — 자동 패턴 [⬆ 대량 입력] 위치와 동일 */}
+      {/* 하단 액션 행 — 자동 패턴 [용지 초기화] [⬆ 대량 입력] [누적·저장] */}
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1.5 }}>
+        <Button
+          variant="outlined"
+          color="inherit"
+          onClick={resetCurrentSlip}
+          disabled={picked.length === 0 && semiCurrentLines.length === 0}
+        >
+          용지 초기화
+        </Button>
         <Button
           variant="outlined"
           color="primary"
           onClick={() => setBulkOpen(true)}
         >
           ⬆ 대량 입력 (반자동 500줄+)
+        </Button>
+        <Button
+          variant="contained"
+          onClick={confirmAccumulate}
+          disabled={semiCurrentLines.length === 0 && semiSlipQueue.length === 0}
+        >
+          누적·저장 ({semiSlipQueue.length}장)
         </Button>
       </Stack>
 
@@ -1099,9 +1168,22 @@ export default function SemiAutoComparePanel({
             justifyContent="space-between"
             sx={{ mb: 1 }}
           >
-            <Typography variant="subtitle2" fontWeight={700}>
-              💾 저장 누적 — {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄
-            </Typography>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700}>
+                💾 저장 누적 — {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄
+              </Typography>
+              {lastSavedAt && (
+                <Typography variant="caption" color="text.secondary">
+                  마지막 저장 확정: {new Date(lastSavedAt).toLocaleString('ko-KR', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </Typography>
+              )}
+            </Box>
             <Button size="small" color="error" variant="text" onClick={clearAllSaved}>
               전체 삭제
             </Button>

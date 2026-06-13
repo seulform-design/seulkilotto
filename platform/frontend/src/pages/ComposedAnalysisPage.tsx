@@ -15,6 +15,7 @@ import { useMemo } from 'react';
 import ComboActions from '../components/ComboActions';
 import LottoBall from '../components/LottoBall';
 import MetricChips from '../components/MetricChips';
+import WalkForwardPanel from '../components/WalkForwardPanel';
 import {
   buildComposite,
   GRADE_COLORS,
@@ -365,6 +366,25 @@ export default function ComposedAnalysisPage() {
           </Paper>
         ))}
       </Paper>
+
+      {/* 백테스트 검증 — 합성 전략의 historical hit rate 측정 */}
+      <Divider sx={{ my: 2 }} />
+      <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
+        🧪 백테스트 검증
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+        과거 회차로 합성 전략의 적중 분포를 측정 — 시뮬레이션 실행 후 차트 확인
+      </Typography>
+      <Alert severity="info" sx={{ mb: 2 }} icon={false}>
+        <strong>🟡 디렉터 사전 안내:</strong> 합성 전략의 historical 평균 적중은
+        통상 baseline(0.8) 과 통계적 동등이거나 약간 낮습니다 (concentration 으로
+        coverage 가 줄어듦). 이는 알고리즘 부족이 아니라 게임의 본질이며,
+        본 백테스트의 가치는 그 진실을 시각적으로 입증하는 것입니다.
+      </Alert>
+      <WalkForwardPanel
+        title="종합 분석 vs 베이스라인 — Walk-Forward"
+        defaultIncludeComposite
+      />
 
       <Divider sx={{ my: 2 }} />
       <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block' }}>

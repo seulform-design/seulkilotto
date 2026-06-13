@@ -110,6 +110,10 @@ def get_walk_forward(
     end_round: int | None = Query(default=None, description="종료 회차 (생략 시 최신)"),
     sets_per_round: int = Query(default=5, ge=1, le=20),
     include_epo: bool = Query(default=False, description="EPO 전략 포함 (느림)"),
+    include_composite: bool = Query(
+        default=False,
+        description="종합 분석 전략 포함 (machine+post 신호 합성 — 빠름)",
+    ),
     seed: int = Query(default=42, description="재현성 시드"),
 ):
     """Walk-Forward 백테스트 — 회차 R 시점에 [1..R-1] 로 학습한 추천이
@@ -125,6 +129,8 @@ def get_walk_forward(
         raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
 
     strategies: tuple[wf.Strategy, ...] = ("uniform", "frequency")
+    if include_composite:
+        strategies = (*strategies, "composite")
     if include_epo:
         strategies = (*strategies, "epo")
 

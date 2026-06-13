@@ -28,7 +28,7 @@ from .epo import EpoConfig
 from .epo import run as run_epo
 from .epo.weights import compute_weights
 
-Strategy = Literal["uniform", "frequency", "epo"]
+Strategy = Literal["uniform", "frequency", "epo", "composite"]
 
 NUMBERS = np.arange(1, 46, dtype=int)
 BASELINE_AVG_HITS: float = 6.0 * 6.0 / 45.0  # ≈ 0.8
@@ -106,6 +106,67 @@ def _gen_epo(
     return [tuple(c["numbers"]) for c in res.combinations]
 
 
+def _gen_composite(
+    rng: np.random.Generator,
+    n_sets: int,
+    train_df: pd.DataFrame,
+) -> list[tuple[int, ...]]:
+    """합성 전략 — 종합 분석 페이지의 백테스트 가능 버전.
+
+    실제 종합 분석은 3개 신호 (machine + post + photo) 를 합치지만,
+    walk-forward 시점에서 photo 신호는 없으므로 (사용자 입력 의존)
+    여기서는 2개 신호를 시뮬레이션:
+
+      Signal 1 (machine 대용): 최근 30회 hot top 5
+      Signal 2 (post 대용):    전체 train 의 누적 top 10
+
+    각 번호의 신호 카운트로 가중치 계산 (1 + score) 후 정규화.
+    EPO 와 달리 필터 단계 생략 (UI 의 composite 생성과 동일 정책).
+
+    수학적 정직: 신호 가중치는 당첨 확률에 영향 없음.
+    """
+    if train_df.empty:
+        return _gen_uniform(rng, n_sets)
+
+    # Signal 1: 최근 30회 hot top 5
+    recent_30 = train_df.sort_values("round", ascending=False).head(30)
+    flat_recent = (
+        recent_30[database.NUMBER_COLUMNS].to_numpy(dtype=int).ravel()
+        if not recent_30.empty
+        else np.array([], dtype=int)
+    )
+    recent_counts = np.zeros(45, dtype=int)
+    for n in flat_recent:
+        if 1 <= n <= 45:
+            recent_counts[n - 1] += 1
+    hot_top5_idx = np.argsort(-recent_counts)[:5]
+
+    # Signal 2: 전체 train 의 누적 top 10
+    flat_all = train_df[database.NUMBER_COLUMNS].to_numpy(dtype=int).ravel()
+    all_counts = np.zeros(45, dtype=int)
+    for n in flat_all:
+        if 1 <= n <= 45:
+            all_counts[n - 1] += 1
+    grade_s_idx = np.argsort(-all_counts)[:10]
+
+    # 신호 점수: 0/1/2 합산
+    score = np.zeros(45, dtype=float)
+    for i in hot_top5_idx:
+        score[i] += 1.0
+    for i in grade_s_idx:
+        score[i] += 1.0
+
+    # 가중치 = (1 + score) 정규화 — 0점도 약간의 확률 보장
+    weights = 1.0 + score
+    weights /= weights.sum()
+
+    sets: list[tuple[int, ...]] = []
+    for _ in range(n_sets):
+        pick = rng.choice(NUMBERS, size=6, replace=False, p=weights)
+        sets.append(tuple(int(x) for x in sorted(pick)))
+    return sets
+
+
 def _run_strategy(
     strategy: Strategy,
     target_rounds: list[int],
@@ -136,6 +197,8 @@ def _run_strategy(
         elif strategy == "epo":
             # EPO 는 자체 seed 로 회차마다 다른 시드 사용
             sets = _gen_epo(train, sets_per_round, seed=int(r) ^ seed)
+        elif strategy == "composite":
+            sets = _gen_composite(rng, sets_per_round, train)
         else:
             return None
 

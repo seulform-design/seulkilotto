@@ -91,7 +91,7 @@ export interface CoOccurrenceResponse {
   disclaimer: string;
 }
 
-export type WalkForwardStrategy = 'uniform' | 'frequency' | 'epo';
+export type WalkForwardStrategy = 'uniform' | 'frequency' | 'epo' | 'composite';
 
 export interface WalkForwardStrategyResult {
   strategy: WalkForwardStrategy;
@@ -311,6 +311,7 @@ export const v1Api = {
     endRound?: number;
     setsPerRound?: number;
     includeEpo?: boolean;
+    includeComposite?: boolean;
     seed?: number;
   } = {}) => {
     const q = new URLSearchParams();
@@ -318,6 +319,7 @@ export const v1Api = {
     if (params.endRound != null) q.set('end_round', String(params.endRound));
     if (params.setsPerRound != null) q.set('sets_per_round', String(params.setsPerRound));
     if (params.includeEpo) q.set('include_epo', 'true');
+    if (params.includeComposite) q.set('include_composite', 'true');
     if (params.seed != null) q.set('seed', String(params.seed));
     return fetchJson<WalkForwardResponse>(`/api/v1/stats/walk-forward?${q.toString()}`, {
       timeoutMs: 60_000,

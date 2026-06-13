@@ -26,11 +26,13 @@ const STRATEGY_LABELS: Record<WalkForwardStrategy, string> = {
   uniform: '균등 무작위',
   frequency: '빈도 가중',
   epo: 'EPO 파이프라인',
+  composite: '종합 분석',
 };
 const STRATEGY_COLORS: Record<WalkForwardStrategy, string> = {
   uniform: '#9CA3AF',
   frequency: '#69C8F2',
   epo: '#FBC400',
+  composite: '#FF4D4D',
 };
 
 interface RunParams {
@@ -38,16 +40,18 @@ interface RunParams {
   endRound: number | undefined;
   setsPerRound: number;
   includeEpo: boolean;
+  includeComposite: boolean;
   seed: number;
 }
 
-const DEFAULT_PARAMS: RunParams = {
-  startRound: 1128,
-  endRound: undefined,
-  setsPerRound: 5,
-  includeEpo: false,
-  seed: 42,
-};
+interface WalkForwardPanelProps {
+  /** 초기 'EPO 포함' 토글 상태 */
+  defaultIncludeEpo?: boolean;
+  /** 초기 '종합 분석 포함' 토글 상태 */
+  defaultIncludeComposite?: boolean;
+  /** 패널 타이틀 오버라이드 — 호스트 페이지가 라벨 변경 가능 */
+  title?: string;
+}
 
 function pct(n: number): string {
   return `${(n * 100).toFixed(2)}%`;
@@ -111,8 +115,19 @@ function StrategySummary({
   );
 }
 
-export default function WalkForwardPanel() {
-  const [params, setParams] = useState<RunParams>(DEFAULT_PARAMS);
+export default function WalkForwardPanel({
+  defaultIncludeEpo = false,
+  defaultIncludeComposite = false,
+  title = 'Walk-Forward 백테스트',
+}: WalkForwardPanelProps = {}) {
+  const [params, setParams] = useState<RunParams>({
+    startRound: 1128,
+    endRound: undefined,
+    setsPerRound: 5,
+    includeEpo: defaultIncludeEpo,
+    includeComposite: defaultIncludeComposite,
+    seed: 42,
+  });
   const [data, setData] = useState<WalkForwardResponse | null>(null);
 
   const run = useMutation({
@@ -122,6 +137,7 @@ export default function WalkForwardPanel() {
         endRound: params.endRound,
         setsPerRound: params.setsPerRound,
         includeEpo: params.includeEpo,
+        includeComposite: params.includeComposite,
         seed: params.seed,
       }),
     onSuccess: (res) => setData(res),
@@ -222,7 +238,7 @@ export default function WalkForwardPanel() {
     <Paper sx={{ p: 2 }}>
       <Box sx={{ mb: 1.5 }}>
         <Typography variant="subtitle1" fontWeight={700}>
-          Walk-Forward 백테스트
+          {title}
         </Typography>
         <Typography variant="caption" color="text.secondary">
           회차 R 시점에 R 이전 데이터만으로 학습한 추천 → 실제 R 결과 비교 ·
@@ -280,6 +296,17 @@ export default function WalkForwardPanel() {
           value={params.seed}
           onChange={(e) => setParams((p) => ({ ...p, seed: Number(e.target.value) || 42 }))}
           sx={{ width: 90 }}
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              checked={params.includeComposite}
+              onChange={(e) =>
+                setParams((p) => ({ ...p, includeComposite: e.target.checked }))
+              }
+            />
+          }
+          label="종합 분석 포함"
         />
         <FormControlLabel
           control={

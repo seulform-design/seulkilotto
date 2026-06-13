@@ -1593,7 +1593,7 @@ export default function PhotoAnalysisPage() {
       <SemiAutoComparePanel
         slipQueue={slipQueue}
         accumulated={accumulated}
-        onDeleteAutoEntry={deleteHistoryEntry}
+        onRemoveSlipLine={removeSlipLine}
       />
 
       <Divider />

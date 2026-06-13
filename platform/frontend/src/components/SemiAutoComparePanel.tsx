@@ -171,8 +171,8 @@ function findComboMatches(
 interface SemiAutoComparePanelProps {
   slipQueue: ManualSlipInput[];
   accumulated: PhotoAnalysisAccumulated | null;
-  /** 자동(누적) 분석 엔트리 삭제 핸들러 — PhotoAnalysisPage 의 deleteHistoryEntry 전달 */
-  onDeleteAutoEntry?: (entryId: string) => void | Promise<void>;
+  /** 사용자 정정: '구입번호 직접입력' (slipQueue) = 자동. 그 줄 단위 삭제 콜백. */
+  onRemoveSlipLine?: (slipIdx: number, lineIdx: number) => void;
 }
 
 type PickType = 'user' | 'auto';
@@ -567,7 +567,7 @@ function MatchBadge({ label, count, of, color = 'default' }: { label: string; co
 export default function SemiAutoComparePanel({
   slipQueue,
   accumulated,
-  onDeleteAutoEntry,
+  onRemoveSlipLine,
 }: SemiAutoComparePanelProps) {
   // localStorage 에서 복원 — 새로고침/이탈 후에도 보존
   const initial = useMemo(() => loadSemiAutoState(), []);
@@ -639,29 +639,50 @@ export default function SemiAutoComparePanel({
   const [showFrequency, setShowFrequency] = useState(false);
   const [recommendations, setRecommendations] = useState<number[][]>([]);
 
-  // 전체 번호 빈도 분석 (자동 기준 — accumulated.multiples_votes 우선,
-  // 없으면 strong_candidate_votes, 둘 다 없으면 빈 배열).
-  // 사용자 요청: '전체 번호 빈도수는 자동 기준'.
+  // 사용자 정정 (이번 turn): '구입번호 직접입력' = 자동.
+  // 즉 slipQueue 가 자동 데이터 소스.
+  // 전체 번호 빈도 = slipQueue 의 모든 줄에서 1~45 등장 횟수.
   const numberFrequency = useMemo(() => {
-    const votes = accumulated?.multiples_votes ?? accumulated?.strong_candidate_votes ?? [];
-    if (votes.length === 0) return [];
+    if (slipQueue.length === 0) return [];
     const counter: Record<number, number> = {};
     for (let n = 1; n <= 45; n += 1) counter[n] = 0;
-    for (const v of votes) {
-      if (Number.isInteger(v.number) && v.number >= 1 && v.number <= 45) {
-        counter[v.number] = (counter[v.number] ?? 0) + (v.votes ?? 1);
+    for (const slip of slipQueue) {
+      for (const line of slip.lines) {
+        for (const n of line.numbers) {
+          if (Number.isInteger(n) && n >= 1 && n <= 45) {
+            counter[n] = (counter[n] ?? 0) + 1;
+          }
+        }
       }
     }
     return Object.entries(counter)
       .map(([n, count]) => ({ number: Number(n), count }))
       .filter((item) => item.count > 0)
       .sort((a, b) => b.count - a.count || a.number - b.number);
-  }, [accumulated]);
+  }, [slipQueue]);
 
-  // 자동 분석 엔트리 (entries_summary) — 자동 누적 티켓 목록용
-  const autoEntries = useMemo(() => {
-    return accumulated?.entries_summary ?? [];
-  }, [accumulated]);
+  // 자동 줄 리스트 — slipQueue 의 모든 (slipIdx, lineIdx, label, numbers) 평탄화
+  const autoSlipLines = useMemo(() => {
+    const out: {
+      slipIdx: number;
+      lineIdx: number;
+      label: string;
+      numbers: number[];
+    }[] = [];
+    slipQueue.forEach((slip, slipIdx) => {
+      slip.lines.forEach((line, lineIdx) => {
+        out.push({
+          slipIdx,
+          lineIdx,
+          label: line.label,
+          numbers: line.numbers,
+        });
+      });
+    });
+    return out;
+  }, [slipQueue]);
+
+  const totalSlipLines = autoSlipLines.length;
 
   // 추천 조합 생성 — 자동 강한 후보 + 반자동 상위 빈도 결합 → 5세트
   const generateRecommendations = () => {
@@ -1334,7 +1355,7 @@ export default function SemiAutoComparePanel({
               onClick={() => setShowFrequency((v) => !v)}
             >
               <Typography variant="body2" fontWeight={700}>
-                📊 전체 번호 빈도 (자동 누적 기준 · 등장 {numberFrequency.length}개)
+                📊 전체 번호 빈도 (자동 = 구입번호 직접입력 {totalSlipLines}줄 기준 · 등장 {numberFrequency.length}개)
                 {showFrequency ? ' ▼' : ' ▶'}
               </Typography>
               <Button size="small" variant="text">
@@ -1345,12 +1366,12 @@ export default function SemiAutoComparePanel({
               <Box sx={{ mt: 1.5 }}>
                 {numberFrequency.length === 0 ? (
                   <Alert severity="info">
-                    자동 누적 데이터가 없습니다. 사진 분석을 등록하면 multiples_votes 기준 빈도가 표시됩니다.
+                    자동 데이터가 없습니다. '구입번호 직접입력' 영역에서 줄을 추가하면 여기에 빈도가 표시됩니다.
                   </Alert>
                 ) : (
                   <>
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                      자동 누적 ({accumulated?.total_analyses ?? 0}건) 의 multiples_votes 빈도. 막대 길이 = 최대 대비 비율.
+                      자동 (구입번호 직접입력) {totalSlipLines}줄에서 각 번호 등장 횟수. 막대 길이 = 최대 대비 비율.
                     </Typography>
                     <Box sx={{ maxHeight: 360, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
                       <Stack spacing={0.4}>
@@ -1423,7 +1444,7 @@ export default function SemiAutoComparePanel({
               onClick={() => setShowAllTickets((v) => !v)}
             >
               <Typography variant="body2" fontWeight={700}>
-                🎫 전체 티켓 목록 — 반자동 {bulkComparison.ticketCount}장 / 자동 {autoEntries.length}건
+                🎫 전체 티켓 목록 — 반자동 {bulkComparison.ticketCount}장 / 자동 {totalSlipLines}줄
                 {showAllTickets ? ' ▼' : ' ▶'}
               </Typography>
               <Button size="small" variant="text">
@@ -1484,18 +1505,20 @@ export default function SemiAutoComparePanel({
                   </Stack>
                 </Box>
 
-                {/* 자동 — accumulated entries */}
+                {/* 자동 — slipQueue (구입번호 직접입력) */}
                 <Typography variant="caption" color="success.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-                  📷 자동 (사진/누적 분석) — {autoEntries.length}건
+                  📋 자동 (구입번호 직접입력) — {slipQueue.length}장 · {totalSlipLines}줄
                 </Typography>
-                {autoEntries.length === 0 ? (
-                  <Alert severity="info">자동 누적 데이터가 없습니다.</Alert>
+                {totalSlipLines === 0 ? (
+                  <Alert severity="info">
+                    자동 데이터가 없습니다. 상단의 '구입번호 직접입력' 영역에서 6개 번호를 선택하고 줄 저장을 누르세요.
+                  </Alert>
                 ) : (
                   <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
                     <Stack spacing={0.5}>
-                      {autoEntries.map((entry, idx) => (
+                      {autoSlipLines.map((line, idx) => (
                         <Stack
-                          key={entry.id}
+                          key={`auto-${line.slipIdx}-${line.lineIdx}`}
                           direction="row"
                           alignItems="center"
                           spacing={0.5}
@@ -1507,33 +1530,40 @@ export default function SemiAutoComparePanel({
                           </Typography>
                           <Chip
                             size="small"
-                            label={`${entry.ticket_round ?? '?'}회`}
+                            label={`용지${line.slipIdx + 1}·${line.label}`}
                             variant="outlined"
-                            sx={{ minWidth: 50 }}
+                            sx={{ minWidth: 64 }}
                           />
-                          {entry.strong_candidates && entry.strong_candidates.length > 0 && (
-                            <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
-                              {entry.strong_candidates.slice(0, 6).map((n) => (
-                                <LottoBall
-                                  key={`${entry.id}-${n}`}
-                                  number={n}
-                                  size={22}
-                                  dimmed={winningSet ? !winningSet.has(n) : false}
-                                />
-                              ))}
-                            </Stack>
+                          <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                            {line.numbers.map((n) => (
+                              <LottoBall
+                                key={`${line.slipIdx}-${line.lineIdx}-${n}`}
+                                number={n}
+                                size={22}
+                                dimmed={winningSet ? !winningSet.has(n) : false}
+                              />
+                            ))}
+                          </Stack>
+                          {winningSet && (
+                            <Chip
+                              size="small"
+                              color={
+                                line.numbers.filter((n) => winningSet.has(n)).length >= 3
+                                  ? 'success'
+                                  : 'default'
+                              }
+                              label={`${line.numbers.filter((n) => winningSet.has(n)).length}/6`}
+                              sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                            />
                           )}
-                          <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 100 }}>
-                            {(entry.video_title ?? entry.url ?? '').slice(0, 30)}
-                          </Typography>
-                          {onDeleteAutoEntry && (
+                          {onRemoveSlipLine && (
                             <IconButton
                               size="small"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onDeleteAutoEntry(entry.id);
+                                onRemoveSlipLine(line.slipIdx, line.lineIdx);
                               }}
-                              aria-label={`자동 엔트리 ${idx + 1} 삭제`}
+                              aria-label={`용지 ${line.slipIdx + 1} ${line.label}줄 삭제`}
                               sx={{ ml: 'auto' }}
                             >
                               ×

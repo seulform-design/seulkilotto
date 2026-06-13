@@ -1078,51 +1078,78 @@ export default function SemiAutoComparePanel({
         (a, b) => a - b
       );
 
-    // 자동 그룹 평탄화 — 평탄 순서대로 #1, #2, ... 일련번호 + 소스 라벨.
-    const autoLines: LineRef[] = [];
-    let ai = 0;
+    /**
+     * 6-튜플 키 기준 dedupe — 같은 6번호 줄이 한 그룹 안에 여러 번 들어가
+     * 있으면 첫 번째만 유지. 페어 매칭 결과에 '같은 자동 줄 ↔ 같은 반자동
+     * 줄' 페어가 다른 인덱스로 두 번 표시되는 것을 차단.
+     */
+    const dedupeBySixTuple = (refs: LineRef[]): { unique: LineRef[]; dupCount: number; dupSources: string[] } => {
+      const seen = new Map<string, string>();  // key → 처음 등장한 sourceLabel
+      const unique: LineRef[] = [];
+      const dupSources: string[] = [];
+      for (const ref of refs) {
+        const key = ref.numbers.join('-');
+        if (seen.has(key)) {
+          dupSources.push(`${ref.sourceLabel} (= ${seen.get(key)})`);
+          continue;
+        }
+        seen.set(key, ref.sourceLabel);
+        unique.push(ref);
+      }
+      // unique 안의 idx 를 평탄 순서 기준으로 재부여.
+      unique.forEach((ref, i) => (ref.idx = i + 1));
+      return { unique, dupCount: dupSources.length, dupSources };
+    };
+
+    // 자동 그룹 평탄화 (raw) — 일단 평탄 순서대로 임시 idx + 소스 라벨.
+    const autoRaw: LineRef[] = [];
     for (const line of currentSlipLines) {
-      autoLines.push({ idx: ++ai, numbers: sanitize(line.numbers), sourceLabel: `입력 중·${line.label}` });
+      autoRaw.push({ idx: 0, numbers: sanitize(line.numbers), sourceLabel: `입력 중·${line.label}` });
     }
     for (let sIdx = 0; sIdx < slipQueue.length; sIdx += 1) {
       for (const line of slipQueue[sIdx].lines) {
-        autoLines.push({
-          idx: ++ai,
+        autoRaw.push({
+          idx: 0,
           numbers: sanitize(line.numbers),
           sourceLabel: `용지${sIdx + 1}·${line.label}`,
         });
       }
     }
     for (let bi = 0; bi < bulkAutoTickets.length; bi += 1) {
-      autoLines.push({
-        idx: ++ai,
+      autoRaw.push({
+        idx: 0,
         numbers: sanitize(bulkAutoTickets[bi]),
         sourceLabel: `대량 #${bi + 1}`,
       });
     }
 
-    // 반자동 그룹 동일.
-    const semiLines: LineRef[] = [];
-    let si = 0;
+    // 반자동 그룹 raw.
+    const semiRaw: LineRef[] = [];
     for (const line of semiCurrentLines) {
-      semiLines.push({ idx: ++si, numbers: sanitize(line.numbers), sourceLabel: `입력 중·${line.label}` });
+      semiRaw.push({ idx: 0, numbers: sanitize(line.numbers), sourceLabel: `입력 중·${line.label}` });
     }
     for (let sIdx = 0; sIdx < semiSlipQueue.length; sIdx += 1) {
       for (const line of semiSlipQueue[sIdx].lines) {
-        semiLines.push({
-          idx: ++si,
+        semiRaw.push({
+          idx: 0,
           numbers: sanitize(line.numbers),
           sourceLabel: `용지${sIdx + 1}·${line.label}`,
         });
       }
     }
     for (let bi = 0; bi < bulkTickets.length; bi += 1) {
-      semiLines.push({
-        idx: ++si,
+      semiRaw.push({
+        idx: 0,
         numbers: sanitize(bulkTickets[bi]),
         sourceLabel: `대량 #${bi + 1}`,
       });
     }
+
+    // 양 그룹 dedupe + idx 재부여.
+    const autoDedup = dedupeBySixTuple(autoRaw);
+    const semiDedup = dedupeBySixTuple(semiRaw);
+    const autoLines = autoDedup.unique;
+    const semiLines = semiDedup.unique;
 
     // 자동 × 반자동 페어 전수 매칭. matchCount >= 2 인 페어만 누적.
     const pairs: PairMatch[] = [];
@@ -1153,6 +1180,10 @@ export default function SemiAutoComparePanel({
     return {
       autoLineCount: autoLines.length,
       semiLineCount: semiLines.length,
+      autoDupRemoved: autoDedup.dupCount,
+      semiDupRemoved: semiDedup.dupCount,
+      autoDupSamples: autoDedup.dupSources.slice(0, 5),
+      semiDupSamples: semiDedup.dupSources.slice(0, 5),
       totalPairCount: autoLines.length * semiLines.length,
       pairs6: pairs.filter((p) => p.matchCount === 6),
       pairs5: pairs.filter((p) => p.matchCount === 5),
@@ -2328,11 +2359,39 @@ export default function SemiAutoComparePanel({
                 🔀 자동 ↔ 반자동 줄 1:1 매칭 (공통 번호 2~6개)
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                자동 {groupLineMatching.autoLineCount}줄 × 반자동 {groupLineMatching.semiLineCount}줄
-                = 전수 비교 {groupLineMatching.totalPairCount}개 페어 가운데 공통 번호가 2개 이상인 페어만
+                자동 {groupLineMatching.autoLineCount}줄
+                {groupLineMatching.autoDupRemoved > 0 && (
+                  <> (중복 <strong>{groupLineMatching.autoDupRemoved}건</strong> 제외)</>
+                )}
+                {' × '}반자동 {groupLineMatching.semiLineCount}줄
+                {groupLineMatching.semiDupRemoved > 0 && (
+                  <> (중복 <strong>{groupLineMatching.semiDupRemoved}건</strong> 제외)</>
+                )}
+                {' = '}전수 비교 {groupLineMatching.totalPairCount}개 페어 가운데 공통 번호가 2개 이상인 페어만
                 추출. 일치 개수 (6 → 5 → 4 → 3 → 2) 순으로 모두 노출.
                 매치된 페어: <strong>{groupLineMatching.matchedPairCount}건</strong>.
               </Typography>
+              {(groupLineMatching.autoDupRemoved > 0 || groupLineMatching.semiDupRemoved > 0) && (
+                <Alert severity="info" sx={{ mb: 1, fontSize: 11 }}>
+                  같은 6번호 줄이 그룹 안에 2개 이상 들어가 있어 첫 번째 줄로 통합했습니다.
+                  {groupLineMatching.autoDupSamples.length > 0 && (
+                    <>
+                      <br />
+                      <strong>자동 중복 예시:</strong> {groupLineMatching.autoDupSamples.join(' · ')}
+                      {groupLineMatching.autoDupRemoved > groupLineMatching.autoDupSamples.length &&
+                        ` 외 ${groupLineMatching.autoDupRemoved - groupLineMatching.autoDupSamples.length}건`}
+                    </>
+                  )}
+                  {groupLineMatching.semiDupSamples.length > 0 && (
+                    <>
+                      <br />
+                      <strong>반자동 중복 예시:</strong> {groupLineMatching.semiDupSamples.join(' · ')}
+                      {groupLineMatching.semiDupRemoved > groupLineMatching.semiDupSamples.length &&
+                        ` 외 ${groupLineMatching.semiDupRemoved - groupLineMatching.semiDupSamples.length}건`}
+                    </>
+                  )}
+                </Alert>
+              )}
               {(() => {
                 const matchedSet = (matched: number[]): Set<number> => new Set(matched);
                 const renderPairGroup = (

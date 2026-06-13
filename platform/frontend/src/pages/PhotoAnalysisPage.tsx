@@ -477,7 +477,17 @@ function IntentAccumulatedPanel({
                     {e.video_title || e.url}
                   </TableCell>
                   <TableCell>{e.ticket_round ? `${e.ticket_round}회` : '-'}</TableCell>
-                  <TableCell>{e.analyzed_at?.slice(0, 16).replace('T', ' ')}</TableCell>
+                  <TableCell>
+                    {e.analyzed_at
+                      ? new Date(e.analyzed_at).toLocaleString('ko-KR', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : '-'}
+                  </TableCell>
                   <TableCell align="right">
                     <IconButton size="small" color="error" onClick={() => onDeleteEntry(e.id)} aria-label="삭제">
                       ×

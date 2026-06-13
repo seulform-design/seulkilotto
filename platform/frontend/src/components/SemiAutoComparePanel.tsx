@@ -1042,15 +1042,20 @@ export default function SemiAutoComparePanel({
   const intersectionCmp = (combinedComparison ?? bulkComparison)!;
 
   /**
-   * 자동 그룹 ∩ 반자동 그룹 — size 2/3/4+ 세트 조합 단위 교집합 통계.
+   * 자동 그룹 ∩ 반자동 그룹 — 부분 조합 (2번호 / 3번호 / 4번호 이상) 단위
+   * 교집합 통계.
    * 사용자 정정: '2개 3개 4개 이상 세트로 겹친 조합을 원하는거야'.
    *
    * 알고리즘:
-   * 1. 자동 그룹 각 줄에서 sorted unique 번호의 size=2,3,4,5,6 의 모든
-   *    조합을 추출, 그 조합이 등장한 줄 수 (autoCount) 를 누적.
-   * 2. 반자동 그룹도 동일.
-   * 3. 양쪽 모두 등장한 조합 (key=sorted joined) 만 교집합.
-   * 4. size 2 / 3 / 4+ 영역으로 분리, 빈도순 정렬, 모두 노출.
+   * 1. 자동 그룹 각 줄을 sanitize (1~45 정수, dedupe, 정렬) 후 한 줄에서
+   *    만들 수 있는 2·3·4·5·6 번호짜리 부분 조합을 모두 추출.
+   * 2. 같은 조합이 그룹 내 줄 가운데 몇 줄에서 등장했는지 카운트 (autoMap).
+   * 3. 반자동 그룹도 동일 방식 (semiMap).
+   * 4. 양쪽 맵에 모두 존재하는 키 = 두 그룹 사이 공통 부분 조합.
+   * 5. 조합의 번호 개수에 따라 2번호 / 3번호 / 4번호 이상 영역으로 분리,
+   *    빈도순 정렬, 모두 노출 (cap 없음).
+   *
+   * entry.size 필드: 조합에 들어있는 번호 개수 (2, 3, 4, 5, 6 중 하나).
    */
   const groupSetIntersection = useMemo(() => {
     type SetEntry = { numbers: number[]; size: number; autoCount: number; semiCount: number; total: number };
@@ -2025,13 +2030,13 @@ export default function SemiAutoComparePanel({
               <Chip
                 size="small"
                 color="warning"
-                label={`🟡 2개+ 교집합: ${intersectionCmp.twoPlusStrongCount}장 (${intersectionCmp.ticketCount > 0 ? (intersectionCmp.twoPlusStrongCount / intersectionCmp.ticketCount * 100).toFixed(2) : '0.00'}%)`}
+                label={`🟡 강한 후보와 2개 이상 겹친 티켓: ${intersectionCmp.twoPlusStrongCount}장 (${intersectionCmp.ticketCount > 0 ? (intersectionCmp.twoPlusStrongCount / intersectionCmp.ticketCount * 100).toFixed(2) : '0.00'}%)`}
                 sx={{ fontWeight: 700 }}
               />
               <Chip
                 size="small"
                 color="success"
-                label={`🟢 3개+ 교집합: ${intersectionCmp.threePlusStrongCount}장 (${intersectionCmp.ticketCount > 0 ? (intersectionCmp.threePlusStrongCount / intersectionCmp.ticketCount * 100).toFixed(2) : '0.00'}%)`}
+                label={`🟢 강한 후보와 3개 이상 겹친 티켓: ${intersectionCmp.threePlusStrongCount}장 (${intersectionCmp.ticketCount > 0 ? (intersectionCmp.threePlusStrongCount / intersectionCmp.ticketCount * 100).toFixed(2) : '0.00'}%)`}
                 sx={{ fontWeight: 700 }}
               />
             </Stack>
@@ -2074,7 +2079,7 @@ export default function SemiAutoComparePanel({
                       <Chip
                         size="small"
                         color="warning"
-                        label={`2개: ${intersectionCmp.twoIntersectionGroups.length}종`}
+                        label={`2번호 일치: ${intersectionCmp.twoIntersectionGroups.length}종`}
                         variant="outlined"
                       />
                     )}
@@ -2082,7 +2087,7 @@ export default function SemiAutoComparePanel({
                       <Chip
                         size="small"
                         color="success"
-                        label={`3개: ${intersectionCmp.threeIntersectionGroups.length}종`}
+                        label={`3번호 일치: ${intersectionCmp.threeIntersectionGroups.length}종`}
                         variant="outlined"
                       />
                     )}
@@ -2090,7 +2095,7 @@ export default function SemiAutoComparePanel({
                       <Chip
                         size="small"
                         color="error"
-                        label={`4개+: ${intersectionCmp.fourPlusIntersectionGroups.length}종`}
+                        label={`4번호 이상 일치: ${intersectionCmp.fourPlusIntersectionGroups.length}종`}
                         variant="outlined"
                       />
                     )}
@@ -2295,16 +2300,17 @@ export default function SemiAutoComparePanel({
             )}
           </Paper>
 
-          {/* ── 자동 그룹 ∩ 반자동 그룹 — size 2/3/4+ 세트 조합 교집합 ── */}
+          {/* ── 자동 그룹 ∩ 반자동 그룹 — 2번호/3번호/4번호+ 조합 교집합 ── */}
           {(groupSetIntersection.autoLineCount > 0 || groupSetIntersection.semiLineCount > 0) && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-                🔀 자동 그룹 ∩ 반자동 그룹 — 세트 조합 교집합 (2/3/4+ 개)
+                🔀 자동 그룹 ∩ 반자동 그룹 — 공통 번호 조합 (2번호 · 3번호 · 4번호 이상)
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                자동 그룹 ({groupSetIntersection.autoLineCount}줄) 의 모든 줄에서 추출 가능한 size 2·3·4·5·6 의 모든 조합과
-                반자동 그룹 ({groupSetIntersection.semiLineCount}줄) 의 모든 조합 중 양쪽에 모두 등장한 세트. 카운트 = 각 그룹에서
-                그 조합이 등장한 줄 수. 모두 노출.
+                자동 그룹 ({groupSetIntersection.autoLineCount}줄) 의 모든 줄에서 만들 수 있는 부분 조합
+                (2번호짜리·3번호짜리·4번호짜리·5번호짜리·6번호짜리) 과,
+                반자동 그룹 ({groupSetIntersection.semiLineCount}줄) 의 부분 조합 중 양쪽에 모두 등장한 조합.
+                카운트 '자동 N줄' = 그 조합이 자동 그룹의 줄 가운데 몇 줄에서 등장했는지. 모두 노출 (cap 없음).
               </Typography>
               {(() => {
                 const renderGroup = (
@@ -2380,14 +2386,22 @@ export default function SemiAutoComparePanel({
                                 label={`총 ${entry.total}줄`}
                                 sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
                               />
-                              {winningSet && (
-                                <Chip
-                                  size="small"
-                                  variant="outlined"
-                                  label={`${entry.numbers.filter((n) => winningSet.has(n)).length}/${entry.size}🎯`}
-                                  sx={{ height: 18, fontSize: 11 }}
-                                />
-                              )}
+                              {winningSet && (() => {
+                                const match = entry.numbers.filter((n) => winningSet.has(n)).length;
+                                return (
+                                  <Chip
+                                    size="small"
+                                    variant="outlined"
+                                    color={match >= 2 ? 'warning' : 'default'}
+                                    label={
+                                      match > 0
+                                        ? `🎯 당첨번호 ${match}개 일치 (조합 ${entry.size}개 중)`
+                                        : `당첨번호 일치 없음 (조합 ${entry.size}개)`
+                                    }
+                                    sx={{ height: 18, fontSize: 11 }}
+                                  />
+                                );
+                              })()}
                             </Stack>
                           ))}
                         </Stack>
@@ -2420,7 +2434,7 @@ export default function SemiAutoComparePanel({
                           size="small"
                           color="warning"
                           variant="outlined"
-                          label={`2개: ${groupSetIntersection.twoSets.length}종`}
+                          label={`2번호 조합: ${groupSetIntersection.twoSets.length}종`}
                         />
                       )}
                       {groupSetIntersection.threeSets.length > 0 && (
@@ -2428,7 +2442,7 @@ export default function SemiAutoComparePanel({
                           size="small"
                           color="success"
                           variant="outlined"
-                          label={`3개: ${groupSetIntersection.threeSets.length}종`}
+                          label={`3번호 조합: ${groupSetIntersection.threeSets.length}종`}
                         />
                       )}
                       {groupSetIntersection.fourPlusSets.length > 0 && (
@@ -2436,13 +2450,13 @@ export default function SemiAutoComparePanel({
                           size="small"
                           color="error"
                           variant="outlined"
-                          label={`4개+: ${groupSetIntersection.fourPlusSets.length}종`}
+                          label={`4번호 이상 조합: ${groupSetIntersection.fourPlusSets.length}종`}
                         />
                       )}
                     </Stack>
-                    {renderGroup('🟡 2개 세트 교집합', 'warning', groupSetIntersection.twoSets)}
-                    {renderGroup('🟢 3개 세트 교집합', 'success', groupSetIntersection.threeSets)}
-                    {renderGroup('🔴 4개+ 세트 교집합 (희귀)', 'error', groupSetIntersection.fourPlusSets)}
+                    {renderGroup('🟡 2번호 조합 (한 조합 = 번호 2개)', 'warning', groupSetIntersection.twoSets)}
+                    {renderGroup('🟢 3번호 조합 (한 조합 = 번호 3개)', 'success', groupSetIntersection.threeSets)}
+                    {renderGroup('🔴 4번호 이상 조합 (희귀 — 4·5·6개 번호)', 'error', groupSetIntersection.fourPlusSets)}
                   </>
                 );
               })()}

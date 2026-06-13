@@ -664,12 +664,14 @@ const dupKey = (nums: number[]): string =>
 
 type DuplicateLocation =
   | { foundIn: 'current'; lineLabel: string }
-  | { foundIn: 'queue'; slipIdx: number; lineLabel: string };
+  | { foundIn: 'queue'; slipIdx: number; lineLabel: string }
+  | { foundIn: 'bulkAuto'; ticketIdx: number };
 
 function findDuplicateInState(
   numbers: number[],
   currentSlipLines: SavedLine[],
-  slipQueue: ManualSlipInput[]
+  slipQueue: ManualSlipInput[],
+  bulkAutoTickets: number[][] = []
 ): DuplicateLocation | null {
   const key = dupKey(numbers);
   for (const line of currentSlipLines) {
@@ -685,6 +687,14 @@ function findDuplicateInState(
       }
     }
   }
+  // bulkAutoTickets 도 자동 그룹의 동등 데이터 소스 — groupSetIntersection
+  // 카운트 부풀림 방지 위해 함께 검사. 누락 시 같은 6번호가 그리드 [줄 저장] +
+  // 대량 입력 양쪽에 존재 가능 → autoCount 2배.
+  for (let i = 0; i < bulkAutoTickets.length; i += 1) {
+    if (dupKey(bulkAutoTickets[i]) === key) {
+      return { foundIn: 'bulkAuto', ticketIdx: i };
+    }
+  }
   return null;
 }
 
@@ -692,7 +702,10 @@ function formatDuplicateLocation(loc: DuplicateLocation): string {
   if (loc.foundIn === 'current') {
     return `입력 중인 ${loc.lineLabel}줄`;
   }
-  return `용지 ${loc.slipIdx + 1}의 ${loc.lineLabel}줄`;
+  if (loc.foundIn === 'queue') {
+    return `용지 ${loc.slipIdx + 1}의 ${loc.lineLabel}줄`;
+  }
+  return `대량 입력 #${loc.ticketIdx + 1}`;
 }
 
 export default function PhotoAnalysisPage() {
@@ -798,8 +811,15 @@ export default function PhotoAnalysisPage() {
     const sortedPicked = [...picked].sort((a, b) => a - b);
 
     // 중복 검사 — 이미 저장된 줄과 동일한 6-튜플인지 확인.
+    // 자동 그룹의 3개 소스 (currentSlipLines + slipQueue + bulkAutoTickets) 모두
+    // 검사해서 groupSetIntersection autoCount 부풀림 방지.
     // 발견 시 사용자에게 확인 다이얼로그 노출 (그래도 추가 허용).
-    const duplicate = findDuplicateInState(sortedPicked, currentSlipLines, slipQueue);
+    const duplicate = findDuplicateInState(
+      sortedPicked,
+      currentSlipLines,
+      slipQueue,
+      bulkAutoTickets
+    );
     if (duplicate) {
       const where = formatDuplicateLocation(duplicate);
       const ok = window.confirm(

@@ -7,6 +7,7 @@ import {
   Collapse,
   Divider,
   IconButton,
+  LinearProgress,
   Paper,
   Stack,
   Table,
@@ -19,7 +20,7 @@ import {
   Tabs,
   Typography,
 } from '@mui/material';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BulkLineInputDialog from '../components/BulkLineInputDialog';
 import LottoBall from '../components/LottoBall';
 import PhotoBacktestPanel from '../components/PhotoBacktestPanel';
@@ -29,11 +30,9 @@ import {
   type ComboDuplicatePatterns,
   type CrossLineAnalysisReport,
   type DrawReviewTemplate,
-  type PatternApplication,
   type ManualSlipInput,
   type PhotoAnalysisAccumulated,
   type PhotoAnalysisIntentSlice,
-  type PhotoAnalysisResponse,
   type SavedReviewTemplate,
 } from '../api/v1Api';
 
@@ -62,11 +61,6 @@ function ReviewBall({
       dimmed={winningSet ? !winningSet.has(number) : false}
     />
   );
-}
-
-function resolveResultIntent(result: PhotoAnalysisResponse): SheetIntent {
-  const intent = result.video_visual_analysis.video_intent ?? result.meta?.sheet_intent;
-  return intent === 'review' ? 'review' : 'current_round';
 }
 
 function DrawWinningTemplatePanel({ data, intentLabel }: { data?: DrawReviewTemplate | null; intentLabel?: string }) {
@@ -355,45 +349,6 @@ function ComboDuplicatePanel({
   );
 }
 
-function PatternApplicationPanel({
-  data,
-  winningSet,
-}: {
-  data?: PatternApplication | null;
-  winningSet?: Set<number> | null;
-}) {
-  if (!data?.summary) return null;
-  return (
-    <Paper sx={{ p: 2, border: '1px solid #1565c0' }}>
-      <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-        복기 용지 패턴 → {data.review_round ? `${data.review_round}회 ` : ''}이번회차 용지 적용
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        {data.summary}
-        {data.review_rounds?.length ? ` (복기 회차: ${data.review_rounds.join(', ')})` : ''}
-      </Typography>
-      {data.position_match_numbers?.length ? (
-        <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mb: 1 }}>
-          <Typography variant="body2" fontWeight={600}>동일 위치:</Typography>
-          {data.position_match_numbers.map((n) => (
-            <ReviewBall key={n} number={n} size={32} winningSet={winningSet} />
-          ))}
-        </Stack>
-      ) : null}
-      {data.combo_hits?.length ? (
-        <Stack spacing={0.5}>
-          <Typography variant="body2" fontWeight={600}>복기 조합 재출현</Typography>
-          {data.combo_hits.slice(0, 8).map((h) => (
-            <Typography key={h.numbers.join('-')} variant="body2">
-              [{h.numbers.join(', ')}] — 이번 용지 {h.current_sheet_hits}장
-            </Typography>
-          ))}
-        </Stack>
-      ) : null}
-    </Paper>
-  );
-}
-
 function SavedReviewTemplatePanel({
   data,
   winningSet,
@@ -420,153 +375,131 @@ function SavedReviewTemplatePanel({
   );
 }
 
-function SingleResultPanel({ result }: { result: PhotoAnalysisResponse }) {
-  const preview = result.meta?.preview_image_base64;
-  const intent = resolveResultIntent(result);
-  const winningSet = intent === 'review' ? toWinningSet(result.extracted_visual_patterns.draw_template) : null;
+function NumberFrequencyPanel({
+  slipQueue,
+  intent,
+  winningSet,
+}: {
+  slipQueue: ManualSlipInput[];
+  intent: SheetIntent;
+  winningSet: Set<number> | null;
+}) {
+  const [open, setOpen] = useState(true);
+  const frequency = useMemo(() => {
+    if (slipQueue.length === 0) return [];
+    const counter: Record<number, number> = {};
+    for (let n = 1; n <= 45; n += 1) counter[n] = 0;
+    for (const slip of slipQueue) {
+      for (const line of slip.lines) {
+        for (const n of line.numbers) {
+          if (Number.isInteger(n) && n >= 1 && n <= 45) {
+            counter[n] = (counter[n] ?? 0) + 1;
+          }
+        }
+      }
+    }
+    return Object.entries(counter)
+      .map(([n, count]) => ({ number: Number(n), count }))
+      .filter((item) => item.count > 0)
+      .sort((a, b) => b.count - a.count || a.number - b.number);
+  }, [slipQueue]);
+
+  const totalLines = slipQueue.reduce((s, sl) => s + sl.lines.length, 0);
+  const maxCount = frequency[0]?.count ?? 1;
+
   return (
-    <Stack spacing={2}>
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="body1" sx={{ mb: 1 }}>
-          {result.app_ui_message}
+    <Paper variant="outlined" sx={{ p: 1.5 }}>
+      <Stack
+        direction="row"
+        alignItems="center"
+        justifyContent="space-between"
+        sx={{ cursor: 'pointer', userSelect: 'none' }}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Typography variant="subtitle2" fontWeight={700}>
+          📊 전체 번호 빈도 (자동 = 구입번호 직접입력 {totalLines}줄 · 등장 {frequency.length}개)
+          {open ? ' ▼' : ' ▶'}
         </Typography>
-        {result.video_visual_analysis.video_title && (
-          <Typography variant="body2" color="text.secondary">
-            {result.video_visual_analysis.video_title}
-          </Typography>
-        )}
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          {result.video_visual_analysis.main_board_summary}
-        </Typography>
-        {result.meta?.vision_error && (
-          <Alert severity="warning" sx={{ mt: 1.5 }}>
-            {result.meta.vision_error}
-          </Alert>
-        )}
-        <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mt: 1 }}>
-          {intent === 'review' ? (
-            <>
-              <Chip label={`복기 · ${result.meta?.review_round_ref ?? result.extracted_visual_patterns.draw_template?.ticket_round}회 당첨`} size="small" color="primary" />
-              <Chip label="업로드 용지 vs 당첨번호" size="small" variant="outlined" />
-            </>
+        <Button size="small" variant="text">
+          {open ? '접기' : '펼치기'}
+        </Button>
+      </Stack>
+      {open && (
+        <Box sx={{ mt: 1.5 }}>
+          {frequency.length === 0 ? (
+            <Alert severity="info">
+              자동 데이터가 없습니다. '구입번호 직접입력' 영역에서 줄을 추가하면 여기에 빈도가 표시됩니다.
+            </Alert>
           ) : (
             <>
-              <Chip label={`이번회차 · ${result.meta?.current_round_ref ?? result.video_visual_analysis.ticket_round}회`} size="small" color="secondary" />
-              <Chip label="저장된 복기 용지 패턴 적용" size="small" variant="outlined" />
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                자동 (구입번호 직접입력) {totalLines}줄에서 각 번호 등장 횟수. 막대 길이 = 최대 대비 비율.
+                {intent === 'review' && winningSet ? ' 🎯 = 당첨번호.' : ''}
+              </Typography>
+              <Box sx={{ maxHeight: 360, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
+                <Stack spacing={0.4}>
+                  {frequency.map((item, idx) => {
+                    const widthPct = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
+                    const isWinning = winningSet?.has(item.number);
+                    return (
+                      <Stack
+                        key={item.number}
+                        direction="row"
+                        alignItems="center"
+                        spacing={0.5}
+                        flexWrap="wrap"
+                        useFlexGap
+                      >
+                        <Typography variant="caption" sx={{ minWidth: 30, color: 'text.secondary', fontWeight: 600 }}>
+                          #{idx + 1}
+                        </Typography>
+                        <LottoBall number={item.number} size={26} dimmed={winningSet ? !isWinning : false} />
+                        <Box sx={{ flex: 1, minWidth: 80, position: 'relative' }}>
+                          <LinearProgress
+                            variant="determinate"
+                            value={widthPct}
+                            sx={{
+                              height: 18,
+                              borderRadius: 1,
+                              bgcolor: 'action.selected',
+                              '& .MuiLinearProgress-bar': {
+                                bgcolor: isWinning
+                                  ? 'warning.main'
+                                  : item.count >= maxCount * 0.7
+                                    ? 'success.main'
+                                    : 'primary.main',
+                              },
+                            }}
+                          />
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 8,
+                              lineHeight: '18px',
+                              fontWeight: 700,
+                              color: '#fff',
+                              textShadow: '0 1px 2px rgba(0,0,0,0.6)',
+                            }}
+                          >
+                            {item.count}회
+                          </Typography>
+                        </Box>
+                        {isWinning && (
+                          <Chip size="small" color="warning" label="🎯 당첨" sx={{ height: 18, fontSize: 10 }} />
+                        )}
+                      </Stack>
+                    );
+                  })}
+                </Stack>
+              </Box>
             </>
           )}
-          {result.meta?.analysis_mode && (
-            <Chip
-              label={`엔진: ${
-                result.meta.analysis_mode === 'vision'
-                  ? 'Vision+로컬'
-                  : result.meta.analysis_mode === 'local' || result.meta.analysis_mode === 'opencv'
-                    ? '로컬(OpenCV)'
-                    : result.meta.analysis_mode
-              }`}
-              size="small"
-              variant="outlined"
-            />
-          )}
-          {(result.meta?.duplicates_removed ?? 0) > 0 && (
-            <Chip
-              label={`중복 제거 ${result.meta!.duplicates_removed}장`}
-              size="small"
-              color="warning"
-              variant="outlined"
-            />
-          )}
-        </Stack>
-      </Paper>
-      {preview && (
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="subtitle2" fontWeight={700} gutterBottom>
-            분석 대표 사진
-          </Typography>
-          <Box
-            component="img"
-            src={`data:image/jpeg;base64,${preview}`}
-            alt="분석 사진"
-            sx={{ maxWidth: '100%', borderRadius: 1, border: '1px solid #333' }}
-          />
-        </Paper>
+        </Box>
       )}
-      {intent === 'review' && (
-        <DrawWinningTemplatePanel
-          data={result.extracted_visual_patterns.draw_template}
-          intentLabel="복기"
-        />
-      )}
-      {intent === 'current_round' && (
-        <SavedReviewTemplatePanel
-          data={
-            result.extracted_visual_patterns.review_reference_template
-            || result.extracted_visual_patterns.photo_review_template
-          }
-        />
-      )}
-      {result.extracted_visual_patterns.combo_patterns?.cross_line_analysis && (
-        <CrossLineAnalysisPanel
-          data={result.extracted_visual_patterns.combo_patterns.cross_line_analysis}
-          winningSet={winningSet}
-        />
-      )}
-      {result.extracted_visual_patterns.combo_patterns && (
-        <Paper sx={{ p: 2, border: '1px solid #5c4d00' }}>
-          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-            {intent === 'review'
-              ? `복기 — ${result.meta?.review_round_ref ?? '1226'}회 당첨번호 · 게임 줄 일치`
-              : '이번회차 — 게임 줄 겹침 (기준번호 일치 + 줄간 조합)'}
-          </Typography>
-          <ComboDuplicatePanel
-            data={result.extracted_visual_patterns.combo_patterns}
-            mode={intent}
-            winningSet={winningSet}
-          />
-        </Paper>
-      )}
-      {intent === 'current_round' && (
-        <PatternApplicationPanel data={result.extracted_visual_patterns.pattern_application} />
-      )}
-      {intent === 'review' && result.extracted_visual_patterns.draw_analysis && (
-        <Paper sx={{ p: 2, border: '1px solid #1565c0' }}>
-          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-            복기 — 당첨번호 위치·조합 일치
-          </Typography>
-          <PatternApplicationPanel data={result.extracted_visual_patterns.draw_analysis} winningSet={winningSet} />
-        </Paper>
-      )}
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-          추천 후보
-        </Typography>
-        <Stack direction="row" flexWrap="wrap" gap={1}>
-          {result.final_predictions.strong_candidates.map((n) => (
-            <ReviewBall key={n} number={n} size={40} winningSet={winningSet} />
-          ))}
-        </Stack>
-      </Paper>
-    </Stack>
+    </Paper>
   );
-}
-
-type SelectedFile = { id: string; file: File };
-
-function fileKey(f: File) {
-  return `${f.name}:${f.size}:${f.lastModified}`;
-}
-
-function mergeUniqueFiles(existing: SelectedFile[], incoming: File[]): SelectedFile[] {
-  const seen = new Set(existing.map((x) => fileKey(x.file)));
-  const out = [...existing];
-  for (const f of incoming) {
-    const k = fileKey(f);
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push({ id: `${k}-${Math.random().toString(36).slice(2, 8)}`, file: f });
-    if (out.length >= 50) break;
-  }
-  return out;
 }
 
 function IntentAccumulatedPanel({
@@ -865,8 +798,6 @@ function SavedLinesPanel({
   );
 }
 
-const emptySelected = (): Record<SheetIntent, SelectedFile[]> => ({ review: [], current_round: [] });
-
 // ── 매뉴얼 입력 영속화 (localStorage) ───────────────────────────
 // 사용자가 입력한 picked / currentSlipLines / slipQueue 를 영속 저장.
 // 다른 탭으로 이동했다 돌아와도, 새로고침해도 보존됨.
@@ -971,7 +902,6 @@ function formatDuplicateLocation(loc: DuplicateLocation): string {
 
 export default function PhotoAnalysisPage() {
   const [activeTab, setActiveTab] = useState<SheetIntent>('review');
-  const [selectedByIntent, setSelectedByIntent] = useState<Record<SheetIntent, SelectedFile[]>>(emptySelected);
   const [manualByIntent, setManualByIntent] = useState<Record<SheetIntent, ManualDraft>>(
     loadManualByIntent
   );
@@ -980,13 +910,8 @@ export default function PhotoAnalysisPage() {
   useEffect(() => {
     saveManualByIntent(manualByIntent);
   }, [manualByIntent]);
-  const [showPhotoUpload, setShowPhotoUpload] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  // 분리된 로딩 상태 — 매뉴얼 분석 / 사진 분석을 동시 추적
   const [manualLoading, setManualLoading] = useState(false);
-  const [photoLoading, setPhotoLoading] = useState(false);
-  // 결과 자동 스크롤 타겟
-  const resultRef = useRef<HTMLDivElement | null>(null);
   // 비동기 작업 중 unmount 가드 (메모리 안정성)
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -997,7 +922,6 @@ export default function PhotoAnalysisPage() {
   }, []);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [resultsByIntent, setResultsByIntent] = useState<Partial<Record<SheetIntent, PhotoAnalysisResponse>>>({});
   const [accumulated, setAccumulated] = useState<PhotoAnalysisAccumulated | null>(null);
   const [visionConfigured, setVisionConfigured] = useState(false);
   const [useVisionApi, setUseVisionApi] = useState(false);
@@ -1041,20 +965,6 @@ export default function PhotoAnalysisPage() {
       });
   }, [refreshAccumulated]);
 
-  // 결과 도착 시 자동 스크롤 — 사용자가 분석 결과를 놓치지 않도록
-  useEffect(() => {
-    if (resultsByIntent[activeTab] && resultRef.current) {
-      // 페인트 후 스크롤 (DOM 안정화 대기)
-      const id = window.setTimeout(() => {
-        resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
-      return () => window.clearTimeout(id);
-    }
-    return undefined;
-  }, [resultsByIntent, activeTab]);
-
-  const selected = selectedByIntent[activeTab];
-  const activeResult = resultsByIntent[activeTab] ?? null;
   const activeSlice = accumulated?.by_intent?.[activeTab] ?? null;
   const manualDraft = manualByIntent[activeTab];
   const { picked, currentSlipLines, slipQueue } = manualDraft;
@@ -1257,10 +1167,6 @@ export default function PhotoAnalysisPage() {
     try {
       const data = await v1Api.analyzeManualSlips(slips, { sheetIntent: activeTab, persist: true });
       if (!mountedRef.current) return;
-      if (data.result) {
-        const intent = resolveResultIntent(data.result);
-        setResultsByIntent((prev) => ({ ...prev, [intent]: data.result! }));
-      }
       if (data.accumulated) setAccumulated(data.accumulated);
       if (data.duplicate_skipped) {
         setError(data.duplicate_message || '이미 등록된 용지입니다.');
@@ -1275,54 +1181,6 @@ export default function PhotoAnalysisPage() {
     } finally {
       if (mountedRef.current) setManualLoading(false);
     }
-  };
-
-  const runAnalyze = async () => {
-    if (!selected.length) {
-      setError('사진을 1장 이상 첨부하세요.');
-      return;
-    }
-    setPhotoLoading(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const data = await v1Api.analyzePhotos(
-        selected.map((s) => s.file),
-        { sheetIntent: activeTab, persist: true }
-      );
-      if (!mountedRef.current) return;
-      if (data.result) {
-        const intent = resolveResultIntent(data.result);
-        setResultsByIntent((prev) => ({ ...prev, [intent]: data.result! }));
-      }
-      if (data.accumulated) setAccumulated(data.accumulated);
-      const dupMsg =
-        (data.duplicates_removed ?? 0) > 0
-          ? `동일 사진 ${data.duplicates_removed}장 자동 제외됨.`
-          : null;
-      if (data.duplicate_skipped) {
-        setError(data.duplicate_message || '이미 분석된 사진 세트입니다.');
-        if (dupMsg) setNotice(dupMsg);
-      } else {
-        setSelectedByIntent((prev) => ({ ...prev, [activeTab]: [] }));
-        setNotice(
-          dupMsg ? `${dupMsg} ✅ 분석 완료 — 결과는 페이지 하단` : '✅ 분석 완료 — 결과는 페이지 하단'
-        );
-      }
-      await refreshAccumulated();
-    } catch (e) {
-      if (!mountedRef.current) return;
-      setError(e instanceof Error ? e.message : '분석 실패');
-    } finally {
-      if (mountedRef.current) setPhotoLoading(false);
-    }
-  };
-
-  const removeSelected = (id: string) => {
-    setSelectedByIntent((prev) => ({
-      ...prev,
-      [activeTab]: prev[activeTab].filter((s) => s.id !== id),
-    }));
   };
 
   const deleteHistoryEntry = async (entryId: string) => {
@@ -1342,8 +1200,6 @@ export default function PhotoAnalysisPage() {
     try {
       await v1Api.clearPhotoAnalysisStore();
       setAccumulated(null);
-      setResultsByIntent({});
-      setSelectedByIntent(emptySelected());
       setManualByIntent(emptyManualByIntent());
       await refreshAccumulated();
     } catch (e) {
@@ -1442,7 +1298,7 @@ export default function PhotoAnalysisPage() {
           <Button
             variant="contained"
             onClick={runManualAnalyze}
-            disabled={manualLoading || photoLoading}
+            disabled={manualLoading}
           >
             {manualLoading ? (
               <CircularProgress size={22} color="inherit" />
@@ -1469,68 +1325,6 @@ export default function PhotoAnalysisPage() {
         />
       </Paper>
 
-      <Paper sx={{ p: 2 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: showPhotoUpload ? 1.5 : 0 }}>
-          <Typography variant="subtitle1" fontWeight={700}>
-            📷 사진 업로드 <Typography component="span" variant="caption" color="text.secondary">(선택 · OCR)</Typography>
-          </Typography>
-          <Button size="small" onClick={() => setShowPhotoUpload((v) => !v)}>
-            {showPhotoUpload ? '접기' : '펼치기'}
-          </Button>
-        </Stack>
-        {showPhotoUpload && (
-        <Stack spacing={1.5}>
-          <Button variant="outlined" component="label">
-            사진 선택 (jpg, png, webp)
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/bmp,image/gif"
-              multiple
-              hidden
-              onChange={(e) => {
-                const picked = Array.from(e.target.files || []);
-                setSelectedByIntent((prev) => ({
-                  ...prev,
-                  [activeTab]: mergeUniqueFiles(prev[activeTab], picked),
-                }));
-                e.target.value = '';
-              }}
-            />
-          </Button>
-          {selected.length > 0 && (
-            <Stack spacing={0.5}>
-              <Typography variant="body2" color="text.secondary">
-                {selected.length}장 선택 (최대 50장) — X로 개별 제거
-              </Typography>
-              <Stack spacing={0.5} sx={{ maxHeight: 200, overflow: 'auto' }}>
-                {selected.map((s) => (
-                  <Stack key={s.id} direction="row" alignItems="center" spacing={1}>
-                    <Typography variant="body2" sx={{ flex: 1 }} noWrap>
-                      {s.file.name}
-                    </Typography>
-                    <IconButton size="small" onClick={() => removeSelected(s.id)} aria-label="제거">
-                      ×
-                    </IconButton>
-                  </Stack>
-                ))}
-              </Stack>
-            </Stack>
-          )}
-          <Button
-            variant="outlined"
-            onClick={runAnalyze}
-            disabled={photoLoading || manualLoading || !selected.length}
-          >
-            {photoLoading ? (
-              <CircularProgress size={22} color="inherit" />
-            ) : (
-              '사진으로 분석 · 저장'
-            )}
-          </Button>
-        </Stack>
-        )}
-      </Paper>
-
       {notice && <Alert severity="info">{notice}</Alert>}
       {error && <Alert severity="error" sx={{ whiteSpace: 'pre-wrap' }}>{error}</Alert>}
 
@@ -1541,21 +1335,18 @@ export default function PhotoAnalysisPage() {
         </Typography>
       </Divider>
 
+      <NumberFrequencyPanel
+        slipQueue={slipQueue}
+        intent={activeTab}
+        winningSet={activeTab === 'review' ? toWinningSet(activeSlice?.draw_template) : null}
+      />
+
       <IntentAccumulatedPanel
         slice={activeSlice}
         intent={activeTab}
         legacyCount={accumulated?.legacy_entry_count}
         onDeleteEntry={deleteHistoryEntry}
       />
-
-      {activeResult && (
-        <Box ref={resultRef}>
-          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-            🔍 최근 분석 1건 상세
-          </Typography>
-          <SingleResultPanel result={activeResult} />
-        </Box>
-      )}
 
       {/* ════════════ § 3. 비교 · 백테스트 ════════════ */}
       <Divider textAlign="left" sx={{ mt: 1 }}>

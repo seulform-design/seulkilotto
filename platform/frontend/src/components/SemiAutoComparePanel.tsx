@@ -19,10 +19,8 @@ import {
   Box,
   Button,
   Chip,
-  CircularProgress,
   Divider,
   IconButton,
-  LinearProgress,
   Paper,
   Stack,
   TextField,
@@ -447,7 +445,9 @@ function buildComparison(
   latestNumbers: number[],
   latestBonus: number | null
 ): ComparisonResult {
-  const userPicks = picked.filter((n) => pickFlags[n] === 'user').sort((a, b) => a - b);
+  // 'auto' 분류는 사진 (단건) 제거 후 더 이상 발생하지 않음.
+  // 분류 미지정 (legacy 로딩 / 신규 입력) = user 로 간주 → 비교 결과가 정상 동작.
+  const userPicks = picked.filter((n) => pickFlags[n] !== 'auto').sort((a, b) => a - b);
   const autoPicks = picked.filter((n) => pickFlags[n] === 'auto').sort((a, b) => a - b);
 
   const latestSet = new Set(latestNumbers);
@@ -519,29 +519,6 @@ function buildComparison(
   };
 }
 
-function ClassificationChip({
-  number,
-  type,
-  onToggle,
-  onDelete,
-}: {
-  number: number;
-  type: PickType;
-  onToggle: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <Chip
-      onClick={onToggle}
-      onDelete={onDelete}
-      label={`${number} · ${type === 'user' ? '사용자' : '자동'}`}
-      color={type === 'user' ? 'primary' : 'default'}
-      variant={type === 'user' ? 'filled' : 'outlined'}
-      sx={{ fontWeight: 700, cursor: 'pointer' }}
-    />
-  );
-}
-
 function MatchBadge({ label, count, of, color = 'default' }: { label: string; count: number; of: number; color?: 'success' | 'warning' | 'error' | 'default' }) {
   const colorMap = {
     success: '#69C8F2',
@@ -572,17 +549,13 @@ export default function SemiAutoComparePanel({
   // localStorage 에서 복원 — 새로고침/이탈 후에도 보존
   const initial = useMemo(() => loadSemiAutoState(), []);
   const [picked, setPicked] = useState<number[]>(initial.picked);
-  const [pickFlags, setPickFlags] = useState<Record<number, PickType>>(initial.pickFlags);
-  const [photoUploading, setPhotoUploading] = useState(false);
-  const [photoError, setPhotoError] = useState<string | null>(null);
-  const [photoNotice, setPhotoNotice] = useState<string | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkTickets, setBulkTickets] = useState<number[][]>(initial.bulkTickets);
 
-  // 영속 — picked/pickFlags/bulkTickets 변경 시 자동 저장
+  // 영속 — picked/bulkTickets 변경 시 자동 저장
   useEffect(() => {
-    saveSemiAutoState({ picked, pickFlags, bulkTickets });
-  }, [picked, pickFlags, bulkTickets]);
+    saveSemiAutoState({ picked, pickFlags: {}, bulkTickets });
+  }, [picked, bulkTickets]);
 
   const latest = useQuery({
     queryKey: ['v1-latest-for-semi-auto'],
@@ -636,7 +609,6 @@ export default function SemiAutoComparePanel({
 
   // UI 토글 상태
   const [showAllTickets, setShowAllTickets] = useState(false);
-  const [showFrequency, setShowFrequency] = useState(false);
   const [recommendations, setRecommendations] = useState<number[][]>([]);
 
   // 사용자 정정 (이번 turn): '구입번호 직접입력' = 자동.
@@ -721,107 +693,31 @@ export default function SemiAutoComparePanel({
   const togglePick = (n: number) => {
     if (picked.includes(n)) {
       setPicked(picked.filter((x) => x !== n));
-      const next = { ...pickFlags };
-      delete next[n];
-      setPickFlags(next);
     } else if (picked.length < 6) {
-      // 그리드 추가는 6개 cap. 사진 업로드는 별도 경로로 더 추가 가능 (사용자가 삭제로 정리)
       const sorted = [...picked, n].sort((a, b) => a - b);
       setPicked(sorted);
-      setPickFlags({ ...pickFlags, [n]: 'user' });
     }
-  };
-
-  const toggleType = (n: number) => {
-    setPickFlags({
-      ...pickFlags,
-      [n]: pickFlags[n] === 'user' ? 'auto' : 'user',
-    });
   };
 
   const deletePick = (n: number) => {
     setPicked((prev) => prev.filter((x) => x !== n));
-    setPickFlags((prev) => {
-      const next = { ...prev };
-      delete next[n];
-      return next;
-    });
-  };
-
-  const deleteAllAuto = () => {
-    const userOnly = picked.filter((n) => pickFlags[n] !== 'auto');
-    setPicked(userOnly);
-    setPickFlags((prev) => {
-      const next: Record<number, PickType> = {};
-      userOnly.forEach((n) => {
-        next[n] = prev[n] ?? 'user';
-      });
-      return next;
-    });
   };
 
   const reset = () => {
     setPicked([]);
-    setPickFlags({});
-    setPhotoError(null);
-    setPhotoNotice(null);
-  };
-
-  const handlePhotoUpload = async (file: File) => {
-    setPhotoUploading(true);
-    setPhotoError(null);
-    setPhotoNotice(null);
-    try {
-      const data = await v1Api.analyzePhotos([file], {
-        sheetIntent: 'current_round',
-        persist: false,
-      });
-      // 검출된 번호 후보 — draw_template.marked_numbers 우선, 폴백으로 strong_candidates
-      const detected =
-        data.result?.extracted_visual_patterns?.draw_template?.marked_numbers ??
-        data.result?.final_predictions?.strong_candidates ??
-        [];
-      // 6개 cap 제거 — OCR이 영수증의 자동 번호까지 잡을 수 있으므로
-      // 검출된 모든 유효 번호를 노출하고 사용자가 [×]로 정리하게 함
-      const validNums = Array.from(
-        new Set(detected.filter((n) => Number.isInteger(n) && n >= 1 && n <= 45))
-      );
-      if (validNums.length === 0) {
-        setPhotoError('사진에서 유효 번호를 검출하지 못했습니다. 아래 그리드에서 직접 선택해 주세요.');
-        return;
-      }
-      const sortedNums = validNums.sort((a, b) => a - b);
-      setPicked(sortedNums);
-      const flags: Record<number, PickType> = {};
-      sortedNums.forEach((n) => {
-        flags[n] = 'user'; // 기본 '사용자' — 토글/삭제는 사용자 책임
-      });
-      setPickFlags(flags);
-      setPhotoNotice(
-        sortedNums.length === 6
-          ? `6개 검출 완료 — 각 번호를 클릭해 [사용자 / 자동] 분류하세요. ` +
-              '본 분석은 누적에 저장되지 않습니다.'
-          : `${sortedNums.length}개 검출 (목표 6개) — 자동/오인식 번호는 [×]로 삭제 후 분류하세요. ` +
-              '본 분석은 누적에 저장되지 않습니다.'
-      );
-    } catch (e) {
-      setPhotoError(e instanceof Error ? e.message : '사진 분석 실패');
-    } finally {
-      setPhotoUploading(false);
-    }
   };
 
   const comparison = useMemo(
     () =>
       buildComparison(
         picked,
-        pickFlags,
+        {},
         slipQueue,
         accumulated,
         latest.data?.numbers ?? [],
         latest.data?.bonus ?? null
       ),
-    [picked, pickFlags, slipQueue, accumulated, latest.data]
+    [picked, slipQueue, accumulated, latest.data]
   );
 
   // 대량 비교 — comparisonRoundData (수동 선택된 회차 OR 최신) 의 당첨번호 사용
@@ -874,10 +770,6 @@ export default function SemiAutoComparePanel({
 
   const resetBulk = () => setBulkTickets([]);
 
-  const userCount = comparison.userPicks.length;
-  const autoCount = comparison.autoPicks.length;
-  const totalPicked = userCount + autoCount;
-
   return (
     <Paper sx={{ p: 2 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
@@ -886,7 +778,7 @@ export default function SemiAutoComparePanel({
             🔄 반자동 비교
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            반자동 용지의 6개 번호 입력 → [사용자/자동] 분류 → 기존 데이터와 비교
+            반자동 용지의 6개 번호 입력 → 기존 데이터와 비교
           </Typography>
         </Box>
         {picked.length > 0 && (
@@ -900,29 +792,8 @@ export default function SemiAutoComparePanel({
         🟡 본 비교는 패턴 관찰 도구입니다. 어떤 일치도 다음 회차의 1/8,145,060 확률을 변경하지 않습니다.
       </Alert>
 
-      {/* 입력 방식: 사진 / 대량 텍스트 / 직접 선택 */}
+      {/* 입력 방식: 대량 텍스트 / 직접 선택 */}
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
-        <Button
-          component="label"
-          variant="outlined"
-          size="small"
-          disabled={photoUploading}
-        >
-          {photoUploading ? (
-            <CircularProgress size={18} sx={{ mr: 1 }} />
-          ) : null}
-          📷 사진 (단건)
-          <input
-            hidden
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handlePhotoUpload(file);
-              if (e.target) e.target.value = '';
-            }}
-          />
-        </Button>
         <Button
           variant="outlined"
           size="small"
@@ -935,17 +806,6 @@ export default function SemiAutoComparePanel({
           OR 아래 그리드에서 직접 선택
         </Typography>
       </Stack>
-
-      {photoError && (
-        <Alert severity="error" sx={{ mb: 1.5 }}>
-          {photoError}
-        </Alert>
-      )}
-      {photoNotice && (
-        <Alert severity="info" sx={{ mb: 1.5 }}>
-          {photoNotice}
-        </Alert>
-      )}
 
       {/* 번호 선택 그리드 */}
       <Typography variant="caption" sx={{ display: 'block', mb: 0.5 }}>
@@ -981,42 +841,32 @@ export default function SemiAutoComparePanel({
         })}
       </Box>
 
-      {/* 분류 칩 */}
+      {/* 선택 번호 칩 — 자동번호 입력 형식과 동일 (단순 번호 + 삭제) */}
       {picked.length > 0 && (
         <Box sx={{ mb: 1.5 }}>
-          <Stack
-            direction="row"
-            alignItems="center"
-            justifyContent="space-between"
-            sx={{ mb: 0.5 }}
-          >
-            <Typography variant="caption">
-              각 번호: 클릭=토글, [×]=삭제 · 사용자 {userCount} / 자동 {autoCount} / 총 {picked.length}
-            </Typography>
-            {autoCount > 0 && (
-              <Button size="small" color="error" variant="text" onClick={deleteAllAuto}>
-                자동 {autoCount}개 일괄 삭제
-              </Button>
-            )}
-          </Stack>
+          <Typography variant="caption" sx={{ display: 'block', mb: 0.5 }}>
+            선택 번호 ({picked.length}/6) — 그리드 클릭=토글, [×]=삭제
+          </Typography>
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-            {picked.map((n) => (
-              <ClassificationChip
-                key={n}
-                number={n}
-                type={pickFlags[n] ?? 'user'}
-                onToggle={() => toggleType(n)}
-                onDelete={() => deletePick(n)}
-              />
-            ))}
+            {picked
+              .slice()
+              .sort((a, b) => a - b)
+              .map((n) => (
+                <Chip
+                  key={n}
+                  label={n}
+                  size="small"
+                  variant="outlined"
+                  onDelete={() => deletePick(n)}
+                />
+              ))}
           </Stack>
         </Box>
       )}
 
       {picked.length > 6 && (
         <Alert severity="warning" sx={{ mb: 1.5 }}>
-          ⚠ {picked.length}개 선택됨 (목표 6개) — 자동/오인식 번호를 [×]로 삭제하거나
-          「자동 일괄 삭제」 버튼을 누르세요. 정확히 6개가 되면 비교 결과가 표시됩니다.
+          ⚠ {picked.length}개 선택됨 (목표 6개) — 그리드에서 클릭으로 토글하거나 칩의 [×]로 삭제하세요.
         </Alert>
       )}
 
@@ -1027,7 +877,7 @@ export default function SemiAutoComparePanel({
       )}
 
       {/* 비교 결과 */}
-      {totalPicked === 6 && (
+      {picked.length === 6 && (
         <>
           <Divider sx={{ my: 1.5 }} />
           <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
@@ -1048,22 +898,13 @@ export default function SemiAutoComparePanel({
               {comparison.vsLatest.available && (
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                   <MatchBadge
-                    label="사용자"
+                    label="일치"
                     count={comparison.vsLatest.userMatch.length}
-                    of={userCount}
-                    color="success"
-                  />
-                  <MatchBadge
-                    label="자동"
-                    count={comparison.vsLatest.autoMatch.length}
-                    of={autoCount}
+                    of={picked.length}
                     color="success"
                   />
                   {comparison.vsLatest.bonusMatch.user && (
-                    <Chip size="small" label="🎁 보너스 (사용자)" color="warning" />
-                  )}
-                  {comparison.vsLatest.bonusMatch.auto && (
-                    <Chip size="small" label="🎁 보너스 (자동)" color="warning" />
+                    <Chip size="small" label="🎁 보너스" color="warning" />
                   )}
                 </Stack>
               )}
@@ -1097,15 +938,8 @@ export default function SemiAutoComparePanel({
                     {ov.userOverlap.length > 0 && (
                       <Chip
                         size="small"
-                        label={`사용자 겹침: ${ov.userOverlap.join(', ')}`}
+                        label={`겹침: ${ov.userOverlap.join(', ')}`}
                         sx={{ bgcolor: '#69C8F2', color: '#fff', fontWeight: 700 }}
-                      />
-                    )}
-                    {ov.autoOverlap.length > 0 && (
-                      <Chip
-                        size="small"
-                        label={`자동 겹침: ${ov.autoOverlap.join(', ')}`}
-                        variant="outlined"
                       />
                     )}
                   </Stack>
@@ -1132,15 +966,9 @@ export default function SemiAutoComparePanel({
               {comparison.vsStrong.available && (
                 <Stack direction="row" spacing={0.5}>
                   <MatchBadge
-                    label="사용자"
+                    label="일치"
                     count={comparison.vsStrong.userMatch.length}
-                    of={userCount}
-                    color="success"
-                  />
-                  <MatchBadge
-                    label="자동"
-                    count={comparison.vsStrong.autoMatch.length}
-                    of={autoCount}
+                    of={picked.length}
                     color="success"
                   />
                 </Stack>
@@ -1182,15 +1010,9 @@ export default function SemiAutoComparePanel({
               {comparison.vsExcluded.available && (
                 <Stack direction="row" spacing={0.5}>
                   <MatchBadge
-                    label="사용자"
+                    label="일치"
                     count={comparison.vsExcluded.userMatch.length}
-                    of={userCount}
-                    color="error"
-                  />
-                  <MatchBadge
-                    label="자동"
-                    count={comparison.vsExcluded.autoMatch.length}
-                    of={autoCount}
+                    of={picked.length}
                     color="error"
                   />
                 </Stack>
@@ -1344,95 +1166,6 @@ export default function SemiAutoComparePanel({
               </Typography>
             </Paper>
           )}
-
-          {/* 전체 번호 빈도 분석 — 자동(accumulated.multiples_votes) 기준 */}
-          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
-            <Stack
-              direction="row"
-              alignItems="center"
-              justifyContent="space-between"
-              sx={{ cursor: 'pointer', userSelect: 'none' }}
-              onClick={() => setShowFrequency((v) => !v)}
-            >
-              <Typography variant="body2" fontWeight={700}>
-                📊 전체 번호 빈도 (자동 = 구입번호 직접입력 {totalSlipLines}줄 기준 · 등장 {numberFrequency.length}개)
-                {showFrequency ? ' ▼' : ' ▶'}
-              </Typography>
-              <Button size="small" variant="text">
-                {showFrequency ? '접기' : '펼치기'}
-              </Button>
-            </Stack>
-            {showFrequency && (
-              <Box sx={{ mt: 1.5 }}>
-                {numberFrequency.length === 0 ? (
-                  <Alert severity="info">
-                    자동 데이터가 없습니다. '구입번호 직접입력' 영역에서 줄을 추가하면 여기에 빈도가 표시됩니다.
-                  </Alert>
-                ) : (
-                  <>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                      자동 (구입번호 직접입력) {totalSlipLines}줄에서 각 번호 등장 횟수. 막대 길이 = 최대 대비 비율.
-                    </Typography>
-                    <Box sx={{ maxHeight: 360, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
-                      <Stack spacing={0.4}>
-                        {numberFrequency.map((item, idx) => {
-                          const maxCount = numberFrequency[0]?.count ?? 1;
-                          const widthPct = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
-                          const isWinning = winningSet?.has(item.number);
-                          return (
-                            <Stack
-                              key={item.number}
-                              direction="row"
-                              alignItems="center"
-                              spacing={0.5}
-                              flexWrap="wrap"
-                              useFlexGap
-                            >
-                              <Typography variant="caption" sx={{ minWidth: 30, color: 'text.secondary', fontWeight: 600 }}>
-                                #{idx + 1}
-                              </Typography>
-                              <LottoBall number={item.number} size={26} dimmed={winningSet ? !isWinning : false} />
-                              <Box sx={{ flex: 1, minWidth: 80, position: 'relative' }}>
-                                <LinearProgress
-                                  variant="determinate"
-                                  value={widthPct}
-                                  sx={{
-                                    height: 18,
-                                    borderRadius: 1,
-                                    bgcolor: 'action.selected',
-                                    '& .MuiLinearProgress-bar': {
-                                      bgcolor: isWinning ? 'warning.main' : item.count >= maxCount * 0.7 ? 'success.main' : 'primary.main',
-                                    },
-                                  }}
-                                />
-                                <Typography
-                                  variant="caption"
-                                  sx={{
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 8,
-                                    lineHeight: '18px',
-                                    fontWeight: 700,
-                                    color: '#fff',
-                                    textShadow: '0 1px 2px rgba(0,0,0,0.6)',
-                                  }}
-                                >
-                                  {item.count}회
-                                </Typography>
-                              </Box>
-                              {isWinning && (
-                                <Chip size="small" color="warning" label="🎯 당첨" sx={{ height: 18, fontSize: 10 }} />
-                              )}
-                            </Stack>
-                          );
-                        })}
-                      </Stack>
-                    </Box>
-                  </>
-                )}
-              </Box>
-            )}
-          </Paper>
 
           {/* 전체 티켓 목록 — 반자동 / 자동 분리 */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>

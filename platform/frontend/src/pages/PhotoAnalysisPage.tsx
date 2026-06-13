@@ -21,6 +21,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import BulkLineInputDialog from '../components/BulkLineInputDialog';
 import LottoBall from '../components/LottoBall';
+import PhotoBacktestPanel from '../components/PhotoBacktestPanel';
 import SemiAutoComparePanel from '../components/SemiAutoComparePanel';
 import {
   v1Api,
@@ -1540,6 +1541,8 @@ export default function PhotoAnalysisPage() {
 
       {notice && <Alert severity="info">{notice}</Alert>}
       {error && <Alert severity="error" sx={{ whiteSpace: 'pre-wrap' }}>{error}</Alert>}
+
+      <PhotoBacktestPanel accumulated={accumulated} />
 
       <SemiAutoComparePanel slipQueue={slipQueue} accumulated={accumulated} />
 

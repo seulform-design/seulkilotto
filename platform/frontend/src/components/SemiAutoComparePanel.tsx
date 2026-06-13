@@ -171,6 +171,8 @@ function findComboMatches(
 interface SemiAutoComparePanelProps {
   slipQueue: ManualSlipInput[];
   accumulated: PhotoAnalysisAccumulated | null;
+  /** 자동(누적) 분석 엔트리 삭제 핸들러 — PhotoAnalysisPage 의 deleteHistoryEntry 전달 */
+  onDeleteAutoEntry?: (entryId: string) => void | Promise<void>;
 }
 
 type PickType = 'user' | 'auto';
@@ -565,6 +567,7 @@ function MatchBadge({ label, count, of, color = 'default' }: { label: string; co
 export default function SemiAutoComparePanel({
   slipQueue,
   accumulated,
+  onDeleteAutoEntry,
 }: SemiAutoComparePanelProps) {
   // localStorage 에서 복원 — 새로고침/이탈 후에도 보존
   const initial = useMemo(() => loadSemiAutoState(), []);
@@ -636,20 +639,29 @@ export default function SemiAutoComparePanel({
   const [showFrequency, setShowFrequency] = useState(false);
   const [recommendations, setRecommendations] = useState<number[][]>([]);
 
-  // 전체 번호 빈도 분석 (1~45 모든 번호의 등장 횟수)
+  // 전체 번호 빈도 분석 (자동 기준 — accumulated.multiples_votes 우선,
+  // 없으면 strong_candidate_votes, 둘 다 없으면 빈 배열).
+  // 사용자 요청: '전체 번호 빈도수는 자동 기준'.
   const numberFrequency = useMemo(() => {
-    if (bulkTickets.length === 0) return [];
+    const votes = accumulated?.multiples_votes ?? accumulated?.strong_candidate_votes ?? [];
+    if (votes.length === 0) return [];
     const counter: Record<number, number> = {};
     for (let n = 1; n <= 45; n += 1) counter[n] = 0;
-    for (const ticket of bulkTickets) {
-      for (const n of ticket) {
-        counter[n] = (counter[n] ?? 0) + 1;
+    for (const v of votes) {
+      if (Number.isInteger(v.number) && v.number >= 1 && v.number <= 45) {
+        counter[v.number] = (counter[v.number] ?? 0) + (v.votes ?? 1);
       }
     }
     return Object.entries(counter)
       .map(([n, count]) => ({ number: Number(n), count }))
+      .filter((item) => item.count > 0)
       .sort((a, b) => b.count - a.count || a.number - b.number);
-  }, [bulkTickets]);
+  }, [accumulated]);
+
+  // 자동 분석 엔트리 (entries_summary) — 자동 누적 티켓 목록용
+  const autoEntries = useMemo(() => {
+    return accumulated?.entries_summary ?? [];
+  }, [accumulated]);
 
   // 추천 조합 생성 — 자동 강한 후보 + 반자동 상위 빈도 결합 → 5세트
   const generateRecommendations = () => {
@@ -1312,7 +1324,7 @@ export default function SemiAutoComparePanel({
             </Paper>
           )}
 
-          {/* 전체 번호 빈도 분석 — 1~45 모든 번호 등장 횟수 */}
+          {/* 전체 번호 빈도 분석 — 자동(accumulated.multiples_votes) 기준 */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
             <Stack
               direction="row"
@@ -1322,7 +1334,7 @@ export default function SemiAutoComparePanel({
               onClick={() => setShowFrequency((v) => !v)}
             >
               <Typography variant="body2" fontWeight={700}>
-                📊 전체 번호 빈도 ({bulkComparison.ticketCount}장 기준 · 등장 1+ {numberFrequency.filter(f => f.count > 0).length}개)
+                📊 전체 번호 빈도 (자동 누적 기준 · 등장 {numberFrequency.length}개)
                 {showFrequency ? ' ▼' : ' ▶'}
               </Typography>
               <Button size="small" variant="text">
@@ -1331,69 +1343,77 @@ export default function SemiAutoComparePanel({
             </Stack>
             {showFrequency && (
               <Box sx={{ mt: 1.5 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                  빈도순. 평균값 = (티켓수 × 6 / 45). 막대 길이는 최대 빈도 대비 비율.
-                </Typography>
-                <Box sx={{ maxHeight: 360, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
-                  <Stack spacing={0.4}>
-                    {numberFrequency.map((item, idx) => {
-                      const maxCount = numberFrequency[0]?.count ?? 1;
-                      const widthPct = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
-                      const isWinning = winningSet?.has(item.number);
-                      return (
-                        <Stack
-                          key={item.number}
-                          direction="row"
-                          alignItems="center"
-                          spacing={0.5}
-                          flexWrap="wrap"
-                          useFlexGap
-                        >
-                          <Typography variant="caption" sx={{ minWidth: 30, color: 'text.secondary', fontWeight: 600 }}>
-                            #{idx + 1}
-                          </Typography>
-                          <LottoBall number={item.number} size={26} dimmed={winningSet ? !isWinning : false} />
-                          <Box sx={{ flex: 1, minWidth: 80, position: 'relative' }}>
-                            <LinearProgress
-                              variant="determinate"
-                              value={widthPct}
-                              sx={{
-                                height: 18,
-                                borderRadius: 1,
-                                bgcolor: 'action.selected',
-                                '& .MuiLinearProgress-bar': {
-                                  bgcolor: isWinning ? 'warning.main' : item.count >= maxCount * 0.7 ? 'success.main' : 'primary.main',
-                                },
-                              }}
-                            />
-                            <Typography
-                              variant="caption"
-                              sx={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 8,
-                                lineHeight: '18px',
-                                fontWeight: 700,
-                                color: '#fff',
-                                textShadow: '0 1px 2px rgba(0,0,0,0.6)',
-                              }}
+                {numberFrequency.length === 0 ? (
+                  <Alert severity="info">
+                    자동 누적 데이터가 없습니다. 사진 분석을 등록하면 multiples_votes 기준 빈도가 표시됩니다.
+                  </Alert>
+                ) : (
+                  <>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                      자동 누적 ({accumulated?.total_analyses ?? 0}건) 의 multiples_votes 빈도. 막대 길이 = 최대 대비 비율.
+                    </Typography>
+                    <Box sx={{ maxHeight: 360, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
+                      <Stack spacing={0.4}>
+                        {numberFrequency.map((item, idx) => {
+                          const maxCount = numberFrequency[0]?.count ?? 1;
+                          const widthPct = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
+                          const isWinning = winningSet?.has(item.number);
+                          return (
+                            <Stack
+                              key={item.number}
+                              direction="row"
+                              alignItems="center"
+                              spacing={0.5}
+                              flexWrap="wrap"
+                              useFlexGap
                             >
-                              {item.count}회 ({((item.count / bulkComparison.ticketCount) * 100).toFixed(1)}%)
-                            </Typography>
-                          </Box>
-                          {isWinning && (
-                            <Chip size="small" color="warning" label="🎯 당첨" sx={{ height: 18, fontSize: 10 }} />
-                          )}
-                        </Stack>
-                      );
-                    })}
-                  </Stack>
-                </Box>
+                              <Typography variant="caption" sx={{ minWidth: 30, color: 'text.secondary', fontWeight: 600 }}>
+                                #{idx + 1}
+                              </Typography>
+                              <LottoBall number={item.number} size={26} dimmed={winningSet ? !isWinning : false} />
+                              <Box sx={{ flex: 1, minWidth: 80, position: 'relative' }}>
+                                <LinearProgress
+                                  variant="determinate"
+                                  value={widthPct}
+                                  sx={{
+                                    height: 18,
+                                    borderRadius: 1,
+                                    bgcolor: 'action.selected',
+                                    '& .MuiLinearProgress-bar': {
+                                      bgcolor: isWinning ? 'warning.main' : item.count >= maxCount * 0.7 ? 'success.main' : 'primary.main',
+                                    },
+                                  }}
+                                />
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 8,
+                                    lineHeight: '18px',
+                                    fontWeight: 700,
+                                    color: '#fff',
+                                    textShadow: '0 1px 2px rgba(0,0,0,0.6)',
+                                  }}
+                                >
+                                  {item.count}회
+                                </Typography>
+                              </Box>
+                              {isWinning && (
+                                <Chip size="small" color="warning" label="🎯 당첨" sx={{ height: 18, fontSize: 10 }} />
+                              )}
+                            </Stack>
+                          );
+                        })}
+                      </Stack>
+                    </Box>
+                  </>
+                )}
               </Box>
             )}
           </Paper>
 
-          {/* 전체 티켓 목록 + 건별 삭제 */}
+          {/* 전체 티켓 목록 — 반자동 / 자동 분리 */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
             <Stack
               direction="row"
@@ -1403,7 +1423,7 @@ export default function SemiAutoComparePanel({
               onClick={() => setShowAllTickets((v) => !v)}
             >
               <Typography variant="body2" fontWeight={700}>
-                🎫 전체 티켓 목록 ({bulkComparison.ticketCount}장) — 건별 삭제 가능
+                🎫 전체 티켓 목록 — 반자동 {bulkComparison.ticketCount}장 / 자동 {autoEntries.length}건
                 {showAllTickets ? ' ▼' : ' ▶'}
               </Typography>
               <Button size="small" variant="text">
@@ -1411,55 +1431,119 @@ export default function SemiAutoComparePanel({
               </Button>
             </Stack>
             {showAllTickets && (
-              <Box sx={{ mt: 1, maxHeight: 360, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
-                <Stack spacing={0.5}>
-                  {bulkComparison.perTicket.map((t) => (
-                    <Stack
-                      key={`all-${t.index}`}
-                      direction="row"
-                      alignItems="center"
-                      spacing={0.5}
-                      flexWrap="wrap"
-                      useFlexGap
-                    >
-                      <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
-                        #{t.index + 1}
-                      </Typography>
-                      <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
-                        {t.ticket.map((n) => {
-                          const isWin = winningSet?.has(n);
-                          return (
+              <Box sx={{ mt: 1 }}>
+                {/* 반자동 — bulkTickets */}
+                <Typography variant="caption" color="primary.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+                  🔄 반자동 (사용자 입력) — {bulkComparison.ticketCount}장
+                </Typography>
+                <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
+                  <Stack spacing={0.5}>
+                    {bulkComparison.perTicket.map((t) => (
+                      <Stack
+                        key={`semi-${t.index}`}
+                        direction="row"
+                        alignItems="center"
+                        spacing={0.5}
+                        flexWrap="wrap"
+                        useFlexGap
+                      >
+                        <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
+                          #{t.index + 1}
+                        </Typography>
+                        <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                          {t.ticket.map((n) => (
                             <LottoBall
                               key={`${t.index}-${n}`}
                               number={n}
                               size={22}
-                              dimmed={winningSet ? !isWin : false}
+                              dimmed={winningSet ? !winningSet.has(n) : false}
                             />
-                          );
-                        })}
-                      </Stack>
-                      {winningSet && t.vsLatestMatch.length > 0 && (
-                        <Chip
+                          ))}
+                        </Stack>
+                        {winningSet && t.vsLatestMatch.length > 0 && (
+                          <Chip
+                            size="small"
+                            color={t.vsLatestMatch.length >= 3 ? 'success' : 'default'}
+                            label={`${t.vsLatestMatch.length}/6`}
+                            sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                          />
+                        )}
+                        <IconButton
                           size="small"
-                          color={t.vsLatestMatch.length >= 3 ? 'success' : 'default'}
-                          label={`${t.vsLatestMatch.length}/6`}
-                          sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                        />
-                      )}
-                      <IconButton
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteOneTicket(t.index);
-                        }}
-                        aria-label={`티켓 ${t.index + 1} 삭제`}
-                        sx={{ ml: 'auto' }}
-                      >
-                        ×
-                      </IconButton>
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteOneTicket(t.index);
+                          }}
+                          aria-label={`반자동 티켓 ${t.index + 1} 삭제`}
+                          sx={{ ml: 'auto' }}
+                        >
+                          ×
+                        </IconButton>
+                      </Stack>
+                    ))}
+                  </Stack>
+                </Box>
+
+                {/* 자동 — accumulated entries */}
+                <Typography variant="caption" color="success.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+                  📷 자동 (사진/누적 분석) — {autoEntries.length}건
+                </Typography>
+                {autoEntries.length === 0 ? (
+                  <Alert severity="info">자동 누적 데이터가 없습니다.</Alert>
+                ) : (
+                  <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
+                    <Stack spacing={0.5}>
+                      {autoEntries.map((entry, idx) => (
+                        <Stack
+                          key={entry.id}
+                          direction="row"
+                          alignItems="center"
+                          spacing={0.5}
+                          flexWrap="wrap"
+                          useFlexGap
+                        >
+                          <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
+                            #{idx + 1}
+                          </Typography>
+                          <Chip
+                            size="small"
+                            label={`${entry.ticket_round ?? '?'}회`}
+                            variant="outlined"
+                            sx={{ minWidth: 50 }}
+                          />
+                          {entry.strong_candidates && entry.strong_candidates.length > 0 && (
+                            <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                              {entry.strong_candidates.slice(0, 6).map((n) => (
+                                <LottoBall
+                                  key={`${entry.id}-${n}`}
+                                  number={n}
+                                  size={22}
+                                  dimmed={winningSet ? !winningSet.has(n) : false}
+                                />
+                              ))}
+                            </Stack>
+                          )}
+                          <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 100 }}>
+                            {(entry.video_title ?? entry.url ?? '').slice(0, 30)}
+                          </Typography>
+                          {onDeleteAutoEntry && (
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteAutoEntry(entry.id);
+                              }}
+                              aria-label={`자동 엔트리 ${idx + 1} 삭제`}
+                              sx={{ ml: 'auto' }}
+                            >
+                              ×
+                            </IconButton>
+                          )}
+                        </Stack>
+                      ))}
                     </Stack>
-                  ))}
-                </Stack>
+                  </Box>
+                )}
               </Box>
             )}
           </Paper>
@@ -1533,7 +1617,12 @@ export default function SemiAutoComparePanel({
                     />
                     <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                       {t.ticket.map((n) => (
-                        <LottoBall key={n} number={n} size={24} />
+                        <LottoBall
+                          key={n}
+                          number={n}
+                          size={24}
+                          dimmed={winningSet ? !winningSet.has(n) : false}
+                        />
                       ))}
                     </Stack>
                     <Chip
@@ -1693,7 +1782,12 @@ export default function SemiAutoComparePanel({
                               </Typography>
                               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                                 {g.numbers.map((n) => (
-                                  <LottoBall key={n} number={n} size={26} />
+                                  <LottoBall
+                                    key={n}
+                                    number={n}
+                                    size={26}
+                                    dimmed={winningSet ? !winningSet.has(n) : false}
+                                  />
                                 ))}
                               </Stack>
                               <Chip
@@ -1753,7 +1847,12 @@ export default function SemiAutoComparePanel({
                               </Typography>
                               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                                 {g.numbers.map((n) => (
-                                  <LottoBall key={n} number={n} size={26} />
+                                  <LottoBall
+                                    key={n}
+                                    number={n}
+                                    size={26}
+                                    dimmed={winningSet ? !winningSet.has(n) : false}
+                                  />
                                 ))}
                               </Stack>
                               <Chip
@@ -1813,7 +1912,12 @@ export default function SemiAutoComparePanel({
                               </Typography>
                               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                                 {g.numbers.map((n) => (
-                                  <LottoBall key={n} number={n} size={26} />
+                                  <LottoBall
+                                    key={n}
+                                    number={n}
+                                    size={26}
+                                    dimmed={winningSet ? !winningSet.has(n) : false}
+                                  />
                                 ))}
                               </Stack>
                               <Chip
@@ -1925,7 +2029,12 @@ export default function SemiAutoComparePanel({
                     />
                     <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                       {t.ticket.map((n) => (
-                        <LottoBall key={n} number={n} size={22} />
+                        <LottoBall
+                          key={n}
+                          number={n}
+                          size={22}
+                          dimmed={winningSet ? !winningSet.has(n) : false}
+                        />
                       ))}
                     </Stack>
                     <Chip

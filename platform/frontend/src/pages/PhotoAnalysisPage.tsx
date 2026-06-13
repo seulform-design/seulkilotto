@@ -1590,7 +1590,11 @@ export default function PhotoAnalysisPage() {
 
       <PhotoBacktestPanel accumulated={accumulated} />
 
-      <SemiAutoComparePanel slipQueue={slipQueue} accumulated={accumulated} />
+      <SemiAutoComparePanel
+        slipQueue={slipQueue}
+        accumulated={accumulated}
+        onDeleteAutoEntry={deleteHistoryEntry}
+      />
 
       <Divider />
       <Typography variant="h6" fontWeight={700}>

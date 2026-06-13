@@ -1042,116 +1042,124 @@ export default function SemiAutoComparePanel({
   const intersectionCmp = (combinedComparison ?? bulkComparison)!;
 
   /**
-   * 자동 + 반자동 통합 줄 목록에서 2줄 이상에 동시 등장한 부분 조합 통계.
-   * 사용자 정정: '자동 합집합 (currentSlipLines + slipQueue + bulkAutoTickets)
-   * + 반자동 합집합 (semiCurrentLines + semiSlipQueue + bulkTickets) 모든
-   * 줄을 합쳐 교집합 세트를 통계. 모두 노출'.
+   * 자동 그룹의 각 줄 ↔ 반자동 그룹의 각 줄 1:1 전수 비교 매칭.
+   * 사용자 정정 (최종 명세):
+   * - 자동 (currentSlipLines + slipQueue + bulkAutoTickets) 평탄화 후
+   *   '자동 #1, #2, ...' 일련번호 부여.
+   * - 반자동 (semiCurrentLines + semiSlipQueue + bulkTickets) 평탄화 후
+   *   '반자동 #1, #2, ...' 일련번호 부여.
+   * - 모든 (자동 줄, 반자동 줄) 페어를 만들고, 두 줄 사이 공통 번호 개수
+   *   (matchCount) 가 2~6 인 경우만 누적.
+   * - 일치 개수별 (6 → 5 → 4 → 3 → 2) 영역으로 분리, 모두 노출.
    *
-   * 알고리즘 (정정):
-   * 1. 자동의 모든 줄 + 반자동의 모든 줄을 단일 목록 (allLines) 으로 합친다.
-   * 2. 각 줄을 sanitize (1~45 정수, dedupe, 정렬) 후 2·3·4·5·6 번호짜리
-   *    부분 조합을 모두 추출.
-   * 3. 같은 조합이 통합 목록의 줄 가운데 몇 줄에서 등장했는지 카운트.
-   *    동시에 자동 측 등장 줄 수 (autoCount) / 반자동 측 등장 줄 수
-   *    (semiCount) 분리 집계.
-   * 4. 통합 카운트 (total = autoCount + semiCount) 가 2 이상인 조합만
-   *    '교집합 세트' 로 채택 (= 합친 목록에서 2줄 이상에 동시 등장).
-   * 5. 번호 개수 (2 / 3 / 4 이상) 영역으로 분리, 빈도순 정렬, 모두 노출.
+   * 표기 예시: '[자동 #112] 11 19 26 29 44 45 ↔ [반자동 #36] 4 11 12 26 29 44
+   *           (4개 일치: 11, 26, 29, 44)'.
    *
-   * 직전 (오해): 자동 맵과 반자동 맵의 키 양쪽 모두 존재 (intersection)
-   * 만 채택 → 자동 안에서만 자주 반복된 조합 누락됨. 정정 후엔 통합 카운트
-   * 기준이므로 자동만 반복도 포함.
+   * 직전 (오해): 줄에서 추출 가능한 모든 부분 조합 (2/3/4/5/6 번호짜리) 의
+   * 합집합 빈도를 통계 → 1~45 전체 모집단에서 455종 같은 큰 수가 나옴.
+   * 사용자 정정: '줄 1:1 비교' 가 맞음. 부분 조합 분석은 제거하고 줄 페어
+   * 매칭으로 교체.
    */
-  const groupSetIntersection = useMemo(() => {
-    type SetEntry = { numbers: number[]; size: number; autoCount: number; semiCount: number; total: number };
-
-    const autoLines: number[][] = [
-      ...currentSlipLines.map((l) => l.numbers),
-      ...slipQueue.flatMap((s) => s.lines.map((l) => l.numbers)),
-      ...bulkAutoTickets,
-    ];
-    const semiLines: number[][] = [
-      ...semiCurrentLines.map((l) => l.numbers),
-      ...semiSlipQueue.flatMap((s) => s.lines.map((l) => l.numbers)),
-      ...bulkTickets,
-    ];
+  const groupLineMatching = useMemo(() => {
+    type LineRef = { idx: number; numbers: number[]; sourceLabel: string };
+    type PairMatch = {
+      autoIdx: number;
+      autoLabel: string;
+      autoNumbers: number[];
+      semiIdx: number;
+      semiLabel: string;
+      semiNumbers: number[];
+      matchCount: number;
+      matchedNumbers: number[];
+    };
 
     const sanitize = (line: number[]): number[] =>
       Array.from(new Set(line.filter((n) => Number.isInteger(n) && n >= 1 && n <= 45))).sort(
         (a, b) => a - b
       );
 
-    // sorted 배열에서 size 조합을 yield. 1줄 6번호 → 최대 C(6,2..6) = 57개.
-    const combine = (arr: number[], k: number, out: number[][]) => {
-      const buf: number[] = [];
-      const dfs = (start: number, depth: number) => {
-        if (depth === k) {
-          out.push([...buf]);
-          return;
-        }
-        for (let i = start; i <= arr.length - (k - depth); i += 1) {
-          buf.push(arr[i]);
-          dfs(i + 1, depth + 1);
-          buf.pop();
-        }
-      };
-      dfs(0, 0);
-    };
-
-    // 통합 맵 — 같은 조합이 자동 측 / 반자동 측 각각 몇 줄에서 등장했는지 집계.
-    const acc: Record<
-      string,
-      { numbers: number[]; autoCount: number; semiCount: number }
-    > = {};
-    const accumulate = (lines: number[][], side: 'auto' | 'semi') => {
-      for (const raw of lines) {
-        const line = sanitize(raw);
-        for (const size of [2, 3, 4, 5, 6]) {
-          if (line.length < size) continue;
-          const combos: number[][] = [];
-          combine(line, size, combos);
-          for (const combo of combos) {
-            const key = `${size}|${combo.join('-')}`;
-            if (!acc[key]) acc[key] = { numbers: combo, autoCount: 0, semiCount: 0 };
-            if (side === 'auto') acc[key].autoCount += 1;
-            else acc[key].semiCount += 1;
-          }
-        }
+    // 자동 그룹 평탄화 — 평탄 순서대로 #1, #2, ... 일련번호 + 소스 라벨.
+    const autoLines: LineRef[] = [];
+    let ai = 0;
+    for (const line of currentSlipLines) {
+      autoLines.push({ idx: ++ai, numbers: sanitize(line.numbers), sourceLabel: `입력 중·${line.label}` });
+    }
+    for (let sIdx = 0; sIdx < slipQueue.length; sIdx += 1) {
+      for (const line of slipQueue[sIdx].lines) {
+        autoLines.push({
+          idx: ++ai,
+          numbers: sanitize(line.numbers),
+          sourceLabel: `용지${sIdx + 1}·${line.label}`,
+        });
       }
-    };
-    accumulate(autoLines, 'auto');
-    accumulate(semiLines, 'semi');
-
-    // 자동 측·반자동 측 양쪽에 모두 1번 이상 등장한 조합만 '교집합 세트'.
-    // 사용자 정정: '왜 반자동 0줄인데도 조합에 껴있는거야?' — 한쪽만에서
-    // 자주 반복된 조합은 두 그룹 사이 공통이 아니므로 제외.
-    const intersection: SetEntry[] = [];
-    for (const v of Object.values(acc)) {
-      if (v.autoCount === 0 || v.semiCount === 0) continue;
-      intersection.push({
-        numbers: v.numbers,
-        size: v.numbers.length,
-        autoCount: v.autoCount,
-        semiCount: v.semiCount,
-        total: v.autoCount + v.semiCount,
+    }
+    for (let bi = 0; bi < bulkAutoTickets.length; bi += 1) {
+      autoLines.push({
+        idx: ++ai,
+        numbers: sanitize(bulkAutoTickets[bi]),
+        sourceLabel: `대량 #${bi + 1}`,
       });
     }
-    const cmp = (x: SetEntry, y: SetEntry) =>
-      y.total - x.total ||
-      y.autoCount - x.autoCount ||
-      x.numbers[0] - y.numbers[0] ||
-      x.numbers[1] - y.numbers[1];
-    const twoSets = intersection.filter((e) => e.size === 2).sort(cmp);
-    const threeSets = intersection.filter((e) => e.size === 3).sort(cmp);
-    const fourPlusSets = intersection.filter((e) => e.size >= 4).sort(cmp);
+
+    // 반자동 그룹 동일.
+    const semiLines: LineRef[] = [];
+    let si = 0;
+    for (const line of semiCurrentLines) {
+      semiLines.push({ idx: ++si, numbers: sanitize(line.numbers), sourceLabel: `입력 중·${line.label}` });
+    }
+    for (let sIdx = 0; sIdx < semiSlipQueue.length; sIdx += 1) {
+      for (const line of semiSlipQueue[sIdx].lines) {
+        semiLines.push({
+          idx: ++si,
+          numbers: sanitize(line.numbers),
+          sourceLabel: `용지${sIdx + 1}·${line.label}`,
+        });
+      }
+    }
+    for (let bi = 0; bi < bulkTickets.length; bi += 1) {
+      semiLines.push({
+        idx: ++si,
+        numbers: sanitize(bulkTickets[bi]),
+        sourceLabel: `대량 #${bi + 1}`,
+      });
+    }
+
+    // 자동 × 반자동 페어 전수 매칭. matchCount >= 2 인 페어만 누적.
+    const pairs: PairMatch[] = [];
+    for (const auto of autoLines) {
+      const autoSet = new Set(auto.numbers);
+      for (const semi of semiLines) {
+        const matched: number[] = [];
+        for (const n of semi.numbers) if (autoSet.has(n)) matched.push(n);
+        if (matched.length < 2) continue;
+        pairs.push({
+          autoIdx: auto.idx,
+          autoLabel: auto.sourceLabel,
+          autoNumbers: auto.numbers,
+          semiIdx: semi.idx,
+          semiLabel: semi.sourceLabel,
+          semiNumbers: semi.numbers,
+          matchCount: matched.length,
+          matchedNumbers: matched.sort((a, b) => a - b),
+        });
+      }
+    }
+    // 정렬: 일치 개수 내림차순 → autoIdx asc → semiIdx asc.
+    pairs.sort(
+      (x, y) =>
+        y.matchCount - x.matchCount || x.autoIdx - y.autoIdx || x.semiIdx - y.semiIdx
+    );
 
     return {
       autoLineCount: autoLines.length,
       semiLineCount: semiLines.length,
-      totalLineCount: autoLines.length + semiLines.length,
-      twoSets,
-      threeSets,
-      fourPlusSets,
+      totalPairCount: autoLines.length * semiLines.length,
+      pairs6: pairs.filter((p) => p.matchCount === 6),
+      pairs5: pairs.filter((p) => p.matchCount === 5),
+      pairs4: pairs.filter((p) => p.matchCount === 4),
+      pairs3: pairs.filter((p) => p.matchCount === 3),
+      pairs2: pairs.filter((p) => p.matchCount === 2),
+      matchedPairCount: pairs.length,
     };
   }, [
     currentSlipLines,
@@ -2018,7 +2026,9 @@ export default function SemiAutoComparePanel({
               🔗 이번회차 자동 누적 강한 후보 교집합 (자동+반자동 {intersectionCmp.ticketCount}장 통합 분석)
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              ※ 전체 티켓 목록의 자동(currentSlipLines + slipQueue + bulkAutoTickets) + 반자동(semiCurrentLines + semiSlipQueue + bulkTickets) 모든 줄을 합쳐 교집합 세트를 통계. 정확한 교집합 세트 번호는 모두 노출.
+              ※ <strong>분석 모집단 = 강한 후보 {getCurrentRoundStrongCandidates(accumulated).length}개 안의 부분 조합만</strong>.
+              각 티켓의 번호 중 강한 후보에 속한 것 (vsStrongMatch) 이 2개 이상일 때만 그 교집합 세트를 그룹화.
+              아래 별도 패널인 '🔀 자동 ∩ 반자동' 은 <strong>1~45 전체 모집단</strong>을 보는 다른 분석 — 모집단이 달라 카운트도 다름.
             </Typography>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
               {[0, 1, 2, 3, 4, 5, 6].map((k) => {
@@ -2073,7 +2083,7 @@ export default function SemiAutoComparePanel({
                   sx={{ mb: 1 }}
                 >
                   <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                    📌 정확한 교집합 세트 — 어떤 번호가 겹쳤는지 (전체)
+                    📌 강한 후보({getCurrentRoundStrongCandidates(accumulated).length}개) 중 어떤 쌍이 티켓에 자주 함께 나왔는지 — 강한 후보의 부분 조합만
                   </Typography>
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                     <Chip
@@ -2121,7 +2131,7 @@ export default function SemiAutoComparePanel({
                       color="warning.light"
                       sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
                     >
-                      🟡 2개 정확히 겹친 세트 — 전체 {intersectionCmp.twoIntersectionGroups.length}종
+                      🟡 강한 후보 안에서 2개씩 겹친 세트 — 전체 {intersectionCmp.twoIntersectionGroups.length}종 (상한 = C(강한후보 개수, 2))
                     </Typography>
                     <Box
                       sx={{
@@ -2186,7 +2196,7 @@ export default function SemiAutoComparePanel({
                       color="success.light"
                       sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
                     >
-                      🟢 3개 정확히 겹친 세트 — 전체 {intersectionCmp.threeIntersectionGroups.length}종
+                      🟢 강한 후보 안에서 3개씩 겹친 세트 — 전체 {intersectionCmp.threeIntersectionGroups.length}종 (상한 = C(강한후보 개수, 3))
                     </Typography>
                     <Box
                       sx={{
@@ -2251,7 +2261,7 @@ export default function SemiAutoComparePanel({
                       color="error.light"
                       sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
                     >
-                      🔴 4개 이상 겹친 세트 — 전체 {intersectionCmp.fourPlusIntersectionGroups.length}종 (희귀)
+                      🔴 강한 후보 안에서 4개 이상 겹친 세트 — 전체 {intersectionCmp.fourPlusIntersectionGroups.length}종 (강한 후보 부분 조합, 희귀)
                     </Typography>
                     <Box
                       sx={{
@@ -2311,124 +2321,144 @@ export default function SemiAutoComparePanel({
             )}
           </Paper>
 
-          {/* ── 자동·반자동 양쪽에 모두 등장한 부분 조합 ── */}
-          {groupSetIntersection.totalLineCount > 0 && (
+          {/* ── 자동 ↔ 반자동 줄 페어 1:1 매칭 ── */}
+          {(groupLineMatching.autoLineCount > 0 && groupLineMatching.semiLineCount > 0) && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-                🔀 자동 ∩ 반자동 — 양쪽에 모두 등장한 부분 조합 (2번호 · 3번호 · 4번호 이상)
+                🔀 자동 ↔ 반자동 줄 1:1 매칭 (공통 번호 2~6개)
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                자동 ({groupSetIntersection.autoLineCount}줄) + 반자동 ({groupSetIntersection.semiLineCount}줄)
-                = 통합 {groupSetIntersection.totalLineCount}줄. 각 줄에서 만들 수 있는 부분 조합
-                (2·3·4·5·6 번호짜리) 가운데 <strong>자동 측 1줄 이상 + 반자동 측 1줄 이상</strong>에 등장한 조합만
-                추려서 모두 노출 (양쪽 모두 0줄이면 제외). 각 조합 옆 '자동 N줄 · 반자동 M줄' = 그 조합이
-                자동/반자동 측에서 각각 몇 줄에 등장했는지.
+                자동 {groupLineMatching.autoLineCount}줄 × 반자동 {groupLineMatching.semiLineCount}줄
+                = 전수 비교 {groupLineMatching.totalPairCount}개 페어 가운데 공통 번호가 2개 이상인 페어만
+                추출. 일치 개수 (6 → 5 → 4 → 3 → 2) 순으로 모두 노출.
+                매치된 페어: <strong>{groupLineMatching.matchedPairCount}건</strong>.
               </Typography>
               {(() => {
-                const renderGroup = (
+                const matchedSet = (matched: number[]): Set<number> => new Set(matched);
+                const renderPairGroup = (
                   label: string,
-                  color: 'warning' | 'success' | 'error',
-                  sets: typeof groupSetIntersection.twoSets
+                  color: 'warning' | 'success' | 'error' | 'primary' | 'info',
+                  pairs: typeof groupLineMatching.pairs6
                 ) => {
-                  if (sets.length === 0) return null;
-                  const colorLight: Record<typeof color, string> = {
-                    warning: 'warning.light',
-                    success: 'success.light',
-                    error: 'error.light',
-                  };
+                  if (pairs.length === 0) return null;
                   return (
                     <Box sx={{ mb: 1.5 }}>
                       <Typography
                         variant="caption"
-                        sx={{ fontWeight: 700, display: 'block', mb: 0.5, color: colorLight[color] }}
+                        color={`${color}.light`}
+                        sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
                       >
-                        {label} — 전체 {sets.length}종
+                        {label} — {pairs.length}건
                       </Typography>
                       <Box
                         sx={{
-                          maxHeight: 320,
+                          maxHeight: 420,
                           overflowY: 'auto',
                           bgcolor: 'action.hover',
                           borderRadius: 1,
                           p: 0.75,
                         }}
                       >
-                        <Stack spacing={0.5}>
-                          {sets.map((entry, idx) => (
-                            <Stack
-                              key={`gsi-${entry.size}-${entry.numbers.join('-')}`}
-                              direction="row"
-                              alignItems="center"
-                              spacing={0.5}
-                              flexWrap="wrap"
-                              useFlexGap
-                            >
-                              <Typography
-                                variant="caption"
-                                sx={{ minWidth: 32, color: 'text.secondary', fontWeight: 600 }}
+                        <Stack spacing={0.75}>
+                          {pairs.map((p, idx) => {
+                            const matchSet = matchedSet(p.matchedNumbers);
+                            return (
+                              <Box
+                                key={`pair-${p.autoIdx}-${p.semiIdx}`}
+                                sx={{
+                                  p: 0.5,
+                                  borderRadius: 1,
+                                  bgcolor: 'background.paper',
+                                }}
                               >
-                                #{idx + 1}
-                              </Typography>
-                              <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
-                                {entry.numbers.map((n) => (
-                                  <LottoBall
-                                    key={`${entry.size}-${n}`}
-                                    number={n}
-                                    size={24}
-                                    dimmed={winningSet ? !winningSet.has(n) : false}
+                                <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                  <Typography variant="caption" sx={{ minWidth: 32, color: 'text.secondary', fontWeight: 600 }}>
+                                    #{idx + 1}
+                                  </Typography>
+                                  <Chip
+                                    size="small"
+                                    color={color}
+                                    label={`${p.matchCount}개 일치`}
+                                    sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
                                   />
-                                ))}
-                              </Stack>
-                              <Chip
-                                size="small"
-                                color="success"
-                                label={`자동 ${entry.autoCount}줄`}
-                                sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                              />
-                              <Chip
-                                size="small"
-                                color="primary"
-                                label={`반자동 ${entry.semiCount}줄`}
-                                sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                              />
-                              <Chip
-                                size="small"
-                                color={color}
-                                variant="outlined"
-                                label={`총 ${entry.total}줄`}
-                                sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                              />
-                              {winningSet && (() => {
-                                const match = entry.numbers.filter((n) => winningSet.has(n)).length;
-                                return (
                                   <Chip
                                     size="small"
                                     variant="outlined"
-                                    color={match >= 2 ? 'warning' : 'default'}
-                                    label={
-                                      match > 0
-                                        ? `🎯 당첨번호 ${match}개 일치 (조합 ${entry.size}개 중)`
-                                        : `당첨번호 일치 없음 (조합 ${entry.size}개)`
-                                    }
+                                    label={`매치: ${p.matchedNumbers.join(', ')}`}
                                     sx={{ height: 18, fontSize: 11 }}
                                   />
-                                );
-                              })()}
-                            </Stack>
-                          ))}
+                                  {winningSet && (() => {
+                                    const w = p.matchedNumbers.filter((n) => winningSet.has(n)).length;
+                                    return w > 0 ? (
+                                      <Chip
+                                        size="small"
+                                        color="warning"
+                                        label={`🎯 당첨 ${w}개`}
+                                        sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                                      />
+                                    ) : null;
+                                  })()}
+                                </Stack>
+                                <Stack
+                                  direction="row"
+                                  alignItems="center"
+                                  spacing={0.4}
+                                  flexWrap="wrap"
+                                  useFlexGap
+                                  sx={{ mt: 0.4 }}
+                                >
+                                  <Chip
+                                    size="small"
+                                    color="success"
+                                    variant="outlined"
+                                    label={`자동 #${p.autoIdx} · ${p.autoLabel}`}
+                                    sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                                  />
+                                  {p.autoNumbers.map((n) => (
+                                    <LottoBall
+                                      key={`a-${p.autoIdx}-${n}`}
+                                      number={n}
+                                      size={22}
+                                      dimmed={!matchSet.has(n)}
+                                    />
+                                  ))}
+                                </Stack>
+                                <Stack
+                                  direction="row"
+                                  alignItems="center"
+                                  spacing={0.4}
+                                  flexWrap="wrap"
+                                  useFlexGap
+                                  sx={{ mt: 0.2 }}
+                                >
+                                  <Chip
+                                    size="small"
+                                    color="primary"
+                                    variant="outlined"
+                                    label={`반자동 #${p.semiIdx} · ${p.semiLabel}`}
+                                    sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                                  />
+                                  {p.semiNumbers.map((n) => (
+                                    <LottoBall
+                                      key={`s-${p.semiIdx}-${n}`}
+                                      number={n}
+                                      size={22}
+                                      dimmed={!matchSet.has(n)}
+                                    />
+                                  ))}
+                                </Stack>
+                              </Box>
+                            );
+                          })}
                         </Stack>
                       </Box>
                     </Box>
                   );
                 };
-                const totalSets =
-                  groupSetIntersection.twoSets.length +
-                  groupSetIntersection.threeSets.length +
-                  groupSetIntersection.fourPlusSets.length;
-                if (totalSets === 0) {
+                if (groupLineMatching.matchedPairCount === 0) {
                   return (
                     <Alert severity="info">
-                      교집합 세트가 없습니다. 자동 또는 반자동 그룹 한쪽에 데이터가 부족하거나 공통 조합이 없습니다.
+                      공통 번호 2개 이상인 줄 페어가 없습니다. 자동 또는 반자동 한쪽에 데이터가 부족하거나 두 그룹이 완전히 다른 번호를 사용했습니다.
                     </Alert>
                   );
                 }
@@ -2438,37 +2468,30 @@ export default function SemiAutoComparePanel({
                       <Chip
                         size="small"
                         variant="outlined"
-                        label={`총 ${totalSets}종`}
+                        label={`총 ${groupLineMatching.matchedPairCount}건`}
                         sx={{ fontWeight: 700 }}
                       />
-                      {groupSetIntersection.twoSets.length > 0 && (
-                        <Chip
-                          size="small"
-                          color="warning"
-                          variant="outlined"
-                          label={`2번호 조합: ${groupSetIntersection.twoSets.length}종`}
-                        />
+                      {groupLineMatching.pairs6.length > 0 && (
+                        <Chip size="small" color="error" label={`6개 일치: ${groupLineMatching.pairs6.length}건`} sx={{ fontWeight: 700 }} />
                       )}
-                      {groupSetIntersection.threeSets.length > 0 && (
-                        <Chip
-                          size="small"
-                          color="success"
-                          variant="outlined"
-                          label={`3번호 조합: ${groupSetIntersection.threeSets.length}종`}
-                        />
+                      {groupLineMatching.pairs5.length > 0 && (
+                        <Chip size="small" color="warning" label={`5개 일치: ${groupLineMatching.pairs5.length}건`} sx={{ fontWeight: 700 }} />
                       )}
-                      {groupSetIntersection.fourPlusSets.length > 0 && (
-                        <Chip
-                          size="small"
-                          color="error"
-                          variant="outlined"
-                          label={`4번호 이상 조합: ${groupSetIntersection.fourPlusSets.length}종`}
-                        />
+                      {groupLineMatching.pairs4.length > 0 && (
+                        <Chip size="small" color="success" label={`4개 일치: ${groupLineMatching.pairs4.length}건`} sx={{ fontWeight: 700 }} />
+                      )}
+                      {groupLineMatching.pairs3.length > 0 && (
+                        <Chip size="small" color="primary" label={`3개 일치: ${groupLineMatching.pairs3.length}건`} sx={{ fontWeight: 700 }} />
+                      )}
+                      {groupLineMatching.pairs2.length > 0 && (
+                        <Chip size="small" color="info" label={`2개 일치: ${groupLineMatching.pairs2.length}건`} sx={{ fontWeight: 700 }} />
                       )}
                     </Stack>
-                    {renderGroup('🟡 2번호 조합 (한 조합 = 번호 2개)', 'warning', groupSetIntersection.twoSets)}
-                    {renderGroup('🟢 3번호 조합 (한 조합 = 번호 3개)', 'success', groupSetIntersection.threeSets)}
-                    {renderGroup('🔴 4번호 이상 조합 (희귀 — 4·5·6개 번호)', 'error', groupSetIntersection.fourPlusSets)}
+                    {renderPairGroup('🟣 6개 일치 (한 줄 통째 일치 — 매우 희귀)', 'error', groupLineMatching.pairs6)}
+                    {renderPairGroup('🔴 5개 일치 (희귀)', 'warning', groupLineMatching.pairs5)}
+                    {renderPairGroup('🟠 4개 일치', 'success', groupLineMatching.pairs4)}
+                    {renderPairGroup('🟢 3개 일치', 'primary', groupLineMatching.pairs3)}
+                    {renderPairGroup('🟡 2개 일치 (가장 많음)', 'info', groupLineMatching.pairs2)}
                   </>
                 );
               })()}

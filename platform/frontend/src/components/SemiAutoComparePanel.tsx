@@ -1042,6 +1042,78 @@ export default function SemiAutoComparePanel({
   const intersectionCmp = (combinedComparison ?? bulkComparison)!;
 
   /**
+   * 자동 그룹 ∩ 반자동 그룹 — 번호 단위 교집합 통계.
+   * 사용자 요청: '전체 티켓 목록 중 [자동 그룹]과 [반자동 그룹] 간의
+   * 교집합 번호 세트를 통계. 두 그룹 간에 공통으로 존재하는 교집합 세트
+   * 번호는 누락 없이 모두 화면에 노출'.
+   *
+   * 자동 그룹: currentSlipLines + slipQueue + bulkAutoTickets 합집합.
+   * 반자동 그룹: semiCurrentLines + semiSlipQueue + bulkTickets 합집합.
+   * 각 번호별 양쪽 등장 줄 수 카운트. autoOnly / semiOnly 도 함께 노출.
+   */
+  const groupIntersection = useMemo(() => {
+    const autoLines: number[][] = [
+      ...currentSlipLines.map((l) => l.numbers),
+      ...slipQueue.flatMap((s) => s.lines.map((l) => l.numbers)),
+      ...bulkAutoTickets,
+    ];
+    const semiLines: number[][] = [
+      ...semiCurrentLines.map((l) => l.numbers),
+      ...semiSlipQueue.flatMap((s) => s.lines.map((l) => l.numbers)),
+      ...bulkTickets,
+    ];
+    const autoCounts: Record<number, number> = {};
+    const semiCounts: Record<number, number> = {};
+    for (const line of autoLines) {
+      const unique = new Set<number>();
+      for (const n of line) {
+        if (Number.isInteger(n) && n >= 1 && n <= 45) unique.add(n);
+      }
+      for (const n of unique) autoCounts[n] = (autoCounts[n] ?? 0) + 1;
+    }
+    for (const line of semiLines) {
+      const unique = new Set<number>();
+      for (const n of line) {
+        if (Number.isInteger(n) && n >= 1 && n <= 45) unique.add(n);
+      }
+      for (const n of unique) semiCounts[n] = (semiCounts[n] ?? 0) + 1;
+    }
+    const intersection: Array<{ number: number; autoCount: number; semiCount: number; total: number }> = [];
+    const autoOnly: Array<{ number: number; autoCount: number }> = [];
+    const semiOnly: Array<{ number: number; semiCount: number }> = [];
+    for (let n = 1; n <= 45; n += 1) {
+      const a = autoCounts[n] ?? 0;
+      const s = semiCounts[n] ?? 0;
+      if (a > 0 && s > 0) {
+        intersection.push({ number: n, autoCount: a, semiCount: s, total: a + s });
+      } else if (a > 0) {
+        autoOnly.push({ number: n, autoCount: a });
+      } else if (s > 0) {
+        semiOnly.push({ number: n, semiCount: s });
+      }
+    }
+    intersection.sort(
+      (x, y) => y.total - x.total || y.autoCount - x.autoCount || x.number - y.number
+    );
+    autoOnly.sort((x, y) => y.autoCount - x.autoCount || x.number - y.number);
+    semiOnly.sort((x, y) => y.semiCount - x.semiCount || x.number - y.number);
+    return {
+      autoLineCount: autoLines.length,
+      semiLineCount: semiLines.length,
+      intersection,
+      autoOnly,
+      semiOnly,
+    };
+  }, [
+    currentSlipLines,
+    slipQueue,
+    bulkAutoTickets,
+    semiCurrentLines,
+    semiSlipQueue,
+    bulkTickets,
+  ]);
+
+  /**
    * 대량 입력 — append + dedup.
    *
    * 이전: setBulkTickets(lines) 가 모두 덮어씀
@@ -2189,6 +2261,122 @@ export default function SemiAutoComparePanel({
               </Box>
             )}
           </Paper>
+
+          {/* ── 자동 그룹 ∩ 반자동 그룹 — 번호 단위 교집합 통계 ── */}
+          {(groupIntersection.autoLineCount > 0 || groupIntersection.semiLineCount > 0) && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+                🔀 자동 그룹 ∩ 반자동 그룹 — 교집합 번호 {groupIntersection.intersection.length}개 (전체)
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                자동 그룹 (currentSlipLines + slipQueue + bulkAutoTickets = {groupIntersection.autoLineCount}줄) 과
+                반자동 그룹 (semiCurrentLines + semiSlipQueue + bulkTickets = {groupIntersection.semiLineCount}줄) 양쪽에 모두 등장한 번호.
+                카운트 = 각 그룹에서 등장한 줄 수. 모두 노출.
+              </Typography>
+              {groupIntersection.intersection.length === 0 ? (
+                <Alert severity="info" sx={{ mb: 1 }}>
+                  교집합 번호가 없습니다. 자동 또는 반자동 그룹 한쪽에 데이터가 부족합니다.
+                </Alert>
+              ) : (
+                <Box
+                  sx={{
+                    maxHeight: 360,
+                    overflowY: 'auto',
+                    bgcolor: 'action.hover',
+                    borderRadius: 1,
+                    p: 0.75,
+                    mb: 1,
+                  }}
+                >
+                  <Stack spacing={0.4}>
+                    {groupIntersection.intersection.map((item, idx) => {
+                      const autoPct =
+                        groupIntersection.autoLineCount > 0
+                          ? (item.autoCount / groupIntersection.autoLineCount) * 100
+                          : 0;
+                      const semiPct =
+                        groupIntersection.semiLineCount > 0
+                          ? (item.semiCount / groupIntersection.semiLineCount) * 100
+                          : 0;
+                      return (
+                        <Stack
+                          key={`gi-${item.number}`}
+                          direction="row"
+                          alignItems="center"
+                          spacing={0.5}
+                          flexWrap="wrap"
+                          useFlexGap
+                        >
+                          <Typography variant="caption" sx={{ minWidth: 30, color: 'text.secondary', fontWeight: 600 }}>
+                            #{idx + 1}
+                          </Typography>
+                          <LottoBall
+                            number={item.number}
+                            size={28}
+                            dimmed={winningSet ? !winningSet.has(item.number) : false}
+                          />
+                          <Chip
+                            size="small"
+                            color="success"
+                            label={`자동 ${item.autoCount}줄 (${autoPct.toFixed(1)}%)`}
+                            sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
+                          />
+                          <Chip
+                            size="small"
+                            color="primary"
+                            label={`반자동 ${item.semiCount}줄 (${semiPct.toFixed(1)}%)`}
+                            sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
+                          />
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            label={`총 ${item.total}줄`}
+                            sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
+                          />
+                          {winningSet?.has(item.number) && (
+                            <Chip size="small" color="warning" label="🎯 당첨" sx={{ height: 18, fontSize: 10 }} />
+                          )}
+                        </Stack>
+                      );
+                    })}
+                  </Stack>
+                </Box>
+              )}
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={`전체 교집합 ${groupIntersection.intersection.length}개`}
+                  sx={{ fontWeight: 700 }}
+                />
+                {groupIntersection.autoOnly.length > 0 && (
+                  <Chip
+                    size="small"
+                    color="success"
+                    variant="outlined"
+                    label={`자동 only ${groupIntersection.autoOnly.length}개`}
+                  />
+                )}
+                {groupIntersection.semiOnly.length > 0 && (
+                  <Chip
+                    size="small"
+                    color="primary"
+                    variant="outlined"
+                    label={`반자동 only ${groupIntersection.semiOnly.length}개`}
+                  />
+                )}
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={`등장 1~45 중 ${
+                    groupIntersection.intersection.length +
+                    groupIntersection.autoOnly.length +
+                    groupIntersection.semiOnly.length
+                  }개`}
+                />
+              </Stack>
+            </Paper>
+          )}
 
           {/* ── 누적 자동 페어/트리플 콤보 교집합 ──────────────── */}
           {bulkComparison.comboDataAvailable && (

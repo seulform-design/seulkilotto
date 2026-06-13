@@ -27,6 +27,7 @@ import {
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
+import BulkLineInputDialog from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
 import {
   v1Api,
@@ -78,6 +79,112 @@ interface ComparisonResult {
     userMatch: number[];
     autoMatch: number[];
     warning: boolean;
+  };
+}
+
+// ── 대량 비교 결과 ───────────────────────────────────────────────
+interface BulkTicketResult {
+  index: number;
+  ticket: number[];
+  vsLatestMatch: number[];
+  vsStrongMatch: number[];
+  vsExcludedMatch: number[];
+  bonusMatch: boolean;
+  savedSlipOverlapMax: number; // 가장 많이 겹친 슬립 라인의 겹침 수
+}
+
+interface BulkComparisonResult {
+  ticketCount: number;
+  uniqueNumberCount: number;
+  perTicket: BulkTicketResult[];
+  hitDistribution: Record<number, number>; // 적중 개수 → 티켓 수
+  avgHits: number;
+  hitRates: {
+    threePlus: number;
+    fourPlus: number;
+    fivePlus: number;
+    six: number;
+  };
+  bestTickets: BulkTicketResult[]; // 상위 5개 (vs latest 매치 많은 순)
+  excludedWarningCount: number; // 배제 후보와 2개 이상 겹친 티켓 수
+}
+
+function buildBulkComparison(
+  tickets: number[][],
+  slipQueue: ManualSlipInput[],
+  accumulated: PhotoAnalysisAccumulated | null,
+  latestNumbers: number[],
+  latestBonus: number | null
+): BulkComparisonResult {
+  const latestSet = new Set(latestNumbers);
+  const strongSet = new Set(accumulated?.final_predictions?.strong_candidates ?? []);
+  const excludedSet = new Set(accumulated?.final_predictions?.excluded_candidates ?? []);
+
+  const uniqueNumbers = new Set<number>();
+  const perTicket: BulkTicketResult[] = [];
+  const hitDistribution: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+  let totalHits = 0;
+  let excludedWarningCount = 0;
+
+  tickets.forEach((ticket, index) => {
+    ticket.forEach((n) => uniqueNumbers.add(n));
+
+    const vsLatestMatch = ticket.filter((n) => latestSet.has(n));
+    const vsStrongMatch = ticket.filter((n) => strongSet.has(n));
+    const vsExcludedMatch = ticket.filter((n) => excludedSet.has(n));
+    const bonusMatch = latestBonus != null && ticket.includes(latestBonus);
+
+    // 가장 큰 슬립 라인 겹침 — 빠른 계산을 위해 전체 슬립 라인 순회
+    let maxSlipOverlap = 0;
+    for (const slip of slipQueue) {
+      for (const line of slip.lines) {
+        const overlap = ticket.filter((n) => line.numbers.includes(n)).length;
+        if (overlap > maxSlipOverlap) maxSlipOverlap = overlap;
+      }
+    }
+
+    perTicket.push({
+      index,
+      ticket,
+      vsLatestMatch,
+      vsStrongMatch,
+      vsExcludedMatch,
+      bonusMatch,
+      savedSlipOverlapMax: maxSlipOverlap,
+    });
+
+    const hits = vsLatestMatch.length;
+    hitDistribution[hits] = (hitDistribution[hits] ?? 0) + 1;
+    totalHits += hits;
+    if (vsExcludedMatch.length >= 2) excludedWarningCount += 1;
+  });
+
+  const ticketCount = tickets.length;
+  const avgHits = ticketCount > 0 ? totalHits / ticketCount : 0;
+
+  const threePlus = (hitDistribution[3] + hitDistribution[4] + hitDistribution[5] + hitDistribution[6]) / ticketCount;
+  const fourPlus = (hitDistribution[4] + hitDistribution[5] + hitDistribution[6]) / ticketCount;
+  const fivePlus = (hitDistribution[5] + hitDistribution[6]) / ticketCount;
+  const six = hitDistribution[6] / ticketCount;
+
+  // 상위 5개 — vs latest 매치 많은 순 (보너스 매치는 가산)
+  const bestTickets = [...perTicket]
+    .sort((a, b) => {
+      const aScore = a.vsLatestMatch.length + (a.bonusMatch ? 0.5 : 0);
+      const bScore = b.vsLatestMatch.length + (b.bonusMatch ? 0.5 : 0);
+      return bScore - aScore;
+    })
+    .slice(0, 5);
+
+  return {
+    ticketCount,
+    uniqueNumberCount: uniqueNumbers.size,
+    perTicket,
+    hitDistribution,
+    avgHits,
+    hitRates: { threePlus, fourPlus, fivePlus, six },
+    bestTickets,
+    excludedWarningCount,
   };
 }
 
@@ -215,6 +322,8 @@ export default function SemiAutoComparePanel({
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [photoNotice, setPhotoNotice] = useState<string | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkTickets, setBulkTickets] = useState<number[][]>([]);
 
   const latest = useQuery({
     queryKey: ['v1-latest-for-semi-auto'],
@@ -328,6 +437,26 @@ export default function SemiAutoComparePanel({
     [picked, pickFlags, slipQueue, accumulated, latest.data]
   );
 
+  const bulkComparison = useMemo(
+    () =>
+      bulkTickets.length > 0
+        ? buildBulkComparison(
+            bulkTickets,
+            slipQueue,
+            accumulated,
+            latest.data?.numbers ?? [],
+            latest.data?.bonus ?? null
+          )
+        : null,
+    [bulkTickets, slipQueue, accumulated, latest.data]
+  );
+
+  const handleBulkInsert = (lines: number[][]) => {
+    setBulkTickets(lines);
+  };
+
+  const resetBulk = () => setBulkTickets([]);
+
   const userCount = comparison.userPicks.length;
   const autoCount = comparison.autoPicks.length;
   const totalPicked = userCount + autoCount;
@@ -354,8 +483,8 @@ export default function SemiAutoComparePanel({
         🟡 본 비교는 패턴 관찰 도구입니다. 어떤 일치도 다음 회차의 1/8,145,060 확률을 변경하지 않습니다.
       </Alert>
 
-      {/* 사진 업로드 (선택) */}
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+      {/* 입력 방식: 사진 / 대량 텍스트 / 직접 선택 */}
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
         <Button
           component="label"
           variant="outlined"
@@ -365,7 +494,7 @@ export default function SemiAutoComparePanel({
           {photoUploading ? (
             <CircularProgress size={18} sx={{ mr: 1 }} />
           ) : null}
-          📷 사진으로 자동 입력 (선택)
+          📷 사진 (단건)
           <input
             hidden
             type="file"
@@ -376,6 +505,14 @@ export default function SemiAutoComparePanel({
               if (e.target) e.target.value = '';
             }}
           />
+        </Button>
+        <Button
+          variant="outlined"
+          size="small"
+          color="primary"
+          onClick={() => setBulkOpen(true)}
+        >
+          📋 대량 입력 (반자동 500줄+)
         </Button>
         <Typography variant="caption" color="text.secondary">
           OR 아래 그리드에서 직접 선택
@@ -650,6 +787,139 @@ export default function SemiAutoComparePanel({
           </Paper>
         </>
       )}
+
+      {/* ─── 대량 비교 결과 ─────────────────────────────────────── */}
+      {bulkComparison && (
+        <>
+          <Divider sx={{ my: 2 }} />
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+            <Typography variant="subtitle1" fontWeight={700}>
+              📋 대량 비교 결과 ({bulkComparison.ticketCount}장)
+            </Typography>
+            <Button size="small" color="error" variant="outlined" onClick={resetBulk}>
+              대량 결과 초기화
+            </Button>
+          </Stack>
+
+          {/* 집계 메트릭 */}
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+              <Chip
+                size="small"
+                color="primary"
+                label={`평균 적중 ${bulkComparison.avgHits.toFixed(3)} / 6`}
+                sx={{ fontWeight: 700 }}
+              />
+              <Chip size="small" label={`고유 번호 ${bulkComparison.uniqueNumberCount}/45`} variant="outlined" />
+              <Chip
+                size="small"
+                color="success"
+                label={`3등이상 ${(bulkComparison.hitRates.threePlus * 100).toFixed(2)}%`}
+                sx={{ fontWeight: 700 }}
+              />
+              <Chip
+                size="small"
+                color="warning"
+                label={`4등이상 ${(bulkComparison.hitRates.fourPlus * 100).toFixed(2)}%`}
+              />
+              <Chip
+                size="small"
+                color="error"
+                label={`1등 ${(bulkComparison.hitRates.six * 100).toFixed(4)}%`}
+              />
+              {bulkComparison.excludedWarningCount > 0 && (
+                <Chip
+                  size="small"
+                  color="error"
+                  label={`⚠ 배제 매치 2+ 티켓: ${bulkComparison.excludedWarningCount}`}
+                />
+              )}
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              ※ 베이스라인(균등 무작위) 평균 적중 = 0.800 — 본 결과와 비교해 보세요.
+            </Typography>
+          </Paper>
+
+          {/* 적중 분포 테이블 */}
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+            <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+              적중 개수 분포
+            </Typography>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              {[0, 1, 2, 3, 4, 5, 6].map((hits) => {
+                const count = bulkComparison.hitDistribution[hits] ?? 0;
+                const pct = bulkComparison.ticketCount > 0
+                  ? (count / bulkComparison.ticketCount) * 100
+                  : 0;
+                return (
+                  <Chip
+                    key={hits}
+                    size="small"
+                    label={`${hits}개: ${count}장 (${pct.toFixed(1)}%)`}
+                    color={hits >= 3 ? 'success' : 'default'}
+                    variant={hits >= 3 ? 'filled' : 'outlined'}
+                  />
+                );
+              })}
+            </Stack>
+          </Paper>
+
+          {/* 상위 5개 매칭 티켓 */}
+          {bulkComparison.bestTickets.length > 0 && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>
+                🏆 최근 당첨 대비 매치 상위 5장
+              </Typography>
+              <Stack spacing={1}>
+                {bulkComparison.bestTickets.map((t) => (
+                  <Stack
+                    key={t.index}
+                    direction="row"
+                    alignItems="center"
+                    spacing={0.75}
+                    sx={{ flexWrap: 'wrap' }}
+                    useFlexGap
+                  >
+                    <Chip
+                      size="small"
+                      label={`#${t.index + 1}`}
+                      variant="outlined"
+                      sx={{ minWidth: 48 }}
+                    />
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      {t.ticket.map((n) => (
+                        <LottoBall key={n} number={n} size={24} />
+                      ))}
+                    </Stack>
+                    <Chip
+                      size="small"
+                      color={t.vsLatestMatch.length >= 3 ? 'success' : 'default'}
+                      label={`매치 ${t.vsLatestMatch.length}/6${t.bonusMatch ? ' +🎁' : ''}`}
+                      sx={{ fontWeight: 700 }}
+                    />
+                    {t.vsLatestMatch.length > 0 && (
+                      <Typography variant="caption" color="text.secondary">
+                        ({t.vsLatestMatch.join(', ')})
+                      </Typography>
+                    )}
+                  </Stack>
+                ))}
+              </Stack>
+            </Paper>
+          )}
+
+          <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block' }}>
+            ※ 위 매치율은 과거 회차에 대한 측정값이며, 다음 회차의 당첨 확률(1/8,145,060)을 변경하지 않습니다.
+          </Typography>
+        </>
+      )}
+
+      <BulkLineInputDialog
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        onConfirm={handleBulkInsert}
+        linesPerSlip={6}
+      />
     </Paper>
   );
 }

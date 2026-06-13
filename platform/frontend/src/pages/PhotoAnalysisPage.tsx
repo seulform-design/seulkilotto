@@ -561,12 +561,19 @@ type ManualDraft = {
   picked: number[];
   currentSlipLines: SavedLine[];
   slipQueue: ManualSlipInput[];
+  /**
+   * 자동 [⬆ 대량 입력 (텍스트)] 결과 — 반자동의 bulkTickets 와 동등 구조.
+   * slipQueue 와 별개로 보관되어 [분석·저장] 후에도 보존된다.
+   * 분석 시에는 5줄/용지로 묶어 slipQueue 와 함께 백엔드로 전송.
+   */
+  bulkAutoTickets: number[][];
 };
 
 const emptyManualDraft = (): ManualDraft => ({
   picked: [],
   currentSlipLines: [],
   slipQueue: [],
+  bulkAutoTickets: [],
 });
 
 const emptyManualByIntent = (): Record<SheetIntent, ManualDraft> => ({
@@ -591,11 +598,20 @@ function loadManualByIntent(): Record<SheetIntent, ManualDraft> {
         Array.isArray((d as ManualDraft).currentSlipLines) &&
         Array.isArray((d as ManualDraft).slipQueue)
       ) {
-        const draft = d as ManualDraft;
+        const draft = d as ManualDraft & { bulkAutoTickets?: unknown };
+        const bulkAutoTickets: number[][] = Array.isArray(draft.bulkAutoTickets)
+          ? (draft.bulkAutoTickets as unknown[])
+              .filter((t): t is number[] => Array.isArray(t))
+              .map((t) =>
+                t.filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= 45)
+              )
+              .filter((t) => t.length === 6)
+          : [];
         out[key] = {
           picked: draft.picked.filter((n) => Number.isInteger(n) && n >= 1 && n <= 45),
           currentSlipLines: draft.currentSlipLines,
           slipQueue: draft.slipQueue,
+          bulkAutoTickets,
         };
       }
     }
@@ -720,7 +736,7 @@ export default function PhotoAnalysisPage() {
 
   const activeSlice = accumulated?.by_intent?.[activeTab] ?? null;
   const manualDraft = manualByIntent[activeTab];
-  const { picked, currentSlipLines, slipQueue } = manualDraft;
+  const { picked, currentSlipLines, slipQueue, bulkAutoTickets } = manualDraft;
 
   const patchManual = (patch: Partial<ManualDraft>) => {
     setManualByIntent((prev) => ({
@@ -801,11 +817,13 @@ export default function PhotoAnalysisPage() {
   const handleBulkInsert = (lines: number[][]) => {
     if (!lines.length) return;
 
+    // 중복 검사 대상: 입력 중·저장 용지·기존 대량 입력 모두.
     const existingKeys = new Set<string>();
     for (const l of currentSlipLines) existingKeys.add(dupKey(l.numbers));
     for (const slip of slipQueue) {
       for (const l of slip.lines) existingKeys.add(dupKey(l.numbers));
     }
+    for (const t of bulkAutoTickets) existingKeys.add(dupKey(t));
 
     const freshLines: number[][] = [];
     const seenInBulk = new Set<string>();
@@ -834,19 +852,12 @@ export default function PhotoAnalysisPage() {
       return;
     }
 
-    const newSlips: ManualSlipInput[] = [];
-    for (let i = 0; i < freshLines.length; i += GAME_LABELS.length) {
-      const chunk = freshLines.slice(i, i + GAME_LABELS.length);
-      const slipLines: SavedLine[] = chunk.map((numbers, idx) => ({
-        label: GAME_LABELS[idx],
-        numbers,
-      }));
-      newSlips.push(slipFromLines(slipLines));
-    }
-    patchManual({ slipQueue: [...slipQueue, ...newSlips] });
+    // 자동도 반자동처럼 bulkAutoTickets 별도 구조에 보관.
+    // slipQueue 와 분리되어 [분석·저장] 후에도 보존됨.
+    patchManual({ bulkAutoTickets: [...bulkAutoTickets, ...freshLines] });
     setError(null);
 
-    let msg = `${freshLines.length}줄 → ${newSlips.length}장 추가 완료 (총 ${slipQueue.length + newSlips.length}장 누적)`;
+    let msg = `${freshLines.length}줄 대량 추가 완료 (대량 누적 ${bulkAutoTickets.length + freshLines.length}장)`;
     if (externalDupCount > 0) msg += ` · 기존 중복 ${externalDupCount}줄 제외`;
     if (internalDupCount > 0) msg += ` · 입력 내 중복 ${internalDupCount}줄 제외`;
     setNotice(msg);
@@ -909,6 +920,18 @@ export default function PhotoAnalysisPage() {
     // 부분 용지(1~4줄)도 자동으로 슬립화하여 분석 — "저장이 안 됨" 결함 해소
     if (currentSlipLines.length > 0) {
       slips = [...slips, slipFromLines(currentSlipLines)];
+    }
+    // bulkAutoTickets 도 5줄/용지로 묶어 함께 분석에 포함.
+    // 분석 후에도 bulkAutoTickets 는 보존되어 추가 세팅에 계속 표시됨.
+    if (bulkAutoTickets.length > 0) {
+      for (let i = 0; i < bulkAutoTickets.length; i += GAME_LABELS.length) {
+        const chunk = bulkAutoTickets.slice(i, i + GAME_LABELS.length);
+        const chunkLines: SavedLine[] = chunk.map((numbers, idx) => ({
+          label: GAME_LABELS[idx],
+          numbers,
+        }));
+        slips.push(slipFromLines(chunkLines));
+      }
     }
     if (!slips.length) {
       setError('저장된 줄이 없습니다. 번호 6개 선택 후 「줄 저장」을 누르세요.');
@@ -1046,13 +1069,17 @@ export default function PhotoAnalysisPage() {
             onClick={runManualAnalyze}
             disabled={manualLoading}
           >
-            {manualLoading ? (
-              <CircularProgress size={22} color="inherit" />
-            ) : activeTab === 'review' ? (
-              `복기 분석 · 저장 (${slipQueue.length}장)`
-            ) : (
-              `이번회차 분석 · 저장 (${slipQueue.length}장)`
-            )}
+            {(() => {
+              if (manualLoading) {
+                return <CircularProgress size={22} color="inherit" />;
+              }
+              const analyzeChunks =
+                slipQueue.length +
+                (currentSlipLines.length > 0 ? 1 : 0) +
+                Math.ceil(bulkAutoTickets.length / GAME_LABELS.length);
+              const label = activeTab === 'review' ? '복기 분석 · 저장' : '이번회차 분석 · 저장';
+              return `${label} (${analyzeChunks}장)`;
+            })()}
           </Button>
         </Stack>
         <Divider sx={{ my: 2 }} />
@@ -1076,9 +1103,9 @@ export default function PhotoAnalysisPage() {
           ⚙ 추가 세팅
         </Typography>
         {(() => {
-          // 자동 누적 평탄화 — 같은 룩앤필을 반자동 § 3 추가 세팅과 공유.
-          // 데이터 소스: 입력 중 줄 + 저장된 용지의 모든 줄. 백엔드 누적은 § 2
-          // IntentAccumulatedPanel 에서만 표시·관리하므로 여기서는 제외.
+          // 자동 누적 평탄화 — 반자동 § 3 추가 세팅과 동일 룩앤필.
+          // 데이터 소스: 입력 중 줄 + 저장 용지의 모든 줄 + 대량 입력 (bulkAutoTickets).
+          // 백엔드 누적은 § 2 IntentAccumulatedPanel 에서만 관리하므로 여기서는 제외.
           const ticketLines = [
             ...currentSlipLines.map((line, idx) => ({
               key: `current-${idx}`,
@@ -1094,12 +1121,21 @@ export default function PhotoAnalysisPage() {
                 onRemove: () => removeSlipLine(slipIdx, lineIdx),
               }))
             ),
+            ...bulkAutoTickets.map((ticket, idx) => ({
+              key: `bulk-${idx}`,
+              label: `대량 #${idx + 1}`,
+              numbers: ticket,
+              onRemove: () =>
+                patchManual({
+                  bulkAutoTickets: bulkAutoTickets.filter((_, i) => i !== idx),
+                }),
+            })),
           ];
           const winSet = activeTab === 'review' ? toWinningSet(activeSlice?.draw_template) : null;
           return (
             <>
               <Typography variant="body2" sx={{ mb: 0.5 }}>
-                자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄 · 총 {ticketLines.length}줄
+                자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkAutoTickets.length}장 · 총 {ticketLines.length}줄
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 아래 목록의 [×] 로 개별 줄 삭제. 하단 [전체 삭제] 는 자동 누적만 (백엔드 store 포함). 반자동은 § 3 추가 세팅에서 따로.
@@ -1183,7 +1219,11 @@ export default function PhotoAnalysisPage() {
       </Divider>
 
       <NumberFrequencyPanel
-        lines={slipQueue.flatMap((slip) => slip.lines.map((line) => line.numbers))}
+        lines={[
+          ...currentSlipLines.map((line) => line.numbers),
+          ...slipQueue.flatMap((slip) => slip.lines.map((line) => line.numbers)),
+          ...bulkAutoTickets,
+        ]}
         winningSet={activeTab === 'review' ? toWinningSet(activeSlice?.draw_template) : null}
         sourceLabel="자동 = 구입번호 직접입력"
         bodyLabel="자동 (구입번호 직접입력)"

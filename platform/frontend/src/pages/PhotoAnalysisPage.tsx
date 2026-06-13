@@ -1075,32 +1075,101 @@ export default function PhotoAnalysisPage() {
         <Typography variant="subtitle2" fontWeight={700} gutterBottom>
           ⚙ 추가 세팅
         </Typography>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="body2">
-              자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄
-              {accumulated && accumulated.total_analyses > 0
-                ? ` · 백엔드 누적 ${accumulated.total_analyses}건`
-                : ''}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              아래 버튼은 <strong>자동(구입번호 직접입력) 누적만</strong> 삭제합니다. 반자동 누적은 § 3 반자동 비교의 추가 세팅에서 따로 삭제하세요.
-            </Typography>
-          </Box>
-          <Button
-            size="small"
-            color="error"
-            variant="outlined"
-            onClick={clearStore}
-            disabled={
-              slipQueue.length === 0 &&
-              currentSlipLines.length === 0 &&
-              (!accumulated || accumulated.total_analyses === 0)
-            }
-          >
-            자동 누적 전체 삭제
-          </Button>
-        </Stack>
+        {(() => {
+          // 자동 누적 평탄화 — 같은 룩앤필을 반자동 § 3 추가 세팅과 공유.
+          // 데이터 소스: 입력 중 줄 + 저장된 용지의 모든 줄. 백엔드 누적은 § 2
+          // IntentAccumulatedPanel 에서만 표시·관리하므로 여기서는 제외.
+          const ticketLines = [
+            ...currentSlipLines.map((line, idx) => ({
+              key: `current-${idx}`,
+              label: `입력 중·${line.label}`,
+              numbers: line.numbers,
+              onRemove: () => removeCurrentLine(idx),
+            })),
+            ...slipQueue.flatMap((slip, slipIdx) =>
+              slip.lines.map((line, lineIdx) => ({
+                key: `slip-${slipIdx}-${lineIdx}`,
+                label: `용지${slipIdx + 1}·${line.label}`,
+                numbers: line.numbers,
+                onRemove: () => removeSlipLine(slipIdx, lineIdx),
+              }))
+            ),
+          ];
+          const winSet = activeTab === 'review' ? toWinningSet(activeSlice?.draw_template) : null;
+          return (
+            <>
+              <Typography variant="body2" sx={{ mb: 0.5 }}>
+                자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄 · 총 {ticketLines.length}줄
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                아래 목록의 [×] 로 개별 줄 삭제. 하단 [전체 삭제] 는 자동 누적만 (백엔드 store 포함). 반자동은 § 3 추가 세팅에서 따로.
+              </Typography>
+              {ticketLines.length === 0 ? (
+                <Alert severity="info" sx={{ mb: 1.5 }}>
+                  자동 누적 줄이 없습니다. 위 그리드에서 6개 선택 후 [줄 저장].
+                </Alert>
+              ) : (
+                <Box sx={{ maxHeight: 320, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
+                  <Stack spacing={0.5}>
+                    {ticketLines.map((line, idx) => {
+                      const matchCount = winSet ? line.numbers.filter((n) => winSet.has(n)).length : 0;
+                      return (
+                        <Stack
+                          key={line.key}
+                          direction="row"
+                          alignItems="center"
+                          spacing={0.5}
+                          flexWrap="wrap"
+                          useFlexGap
+                        >
+                          <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
+                            #{idx + 1}
+                          </Typography>
+                          <Chip size="small" label={line.label} variant="outlined" sx={{ minWidth: 84 }} />
+                          <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                            {line.numbers.map((n) => (
+                              <LottoBall
+                                key={`${line.key}-${n}`}
+                                number={n}
+                                size={22}
+                                dimmed={winSet ? !winSet.has(n) : false}
+                              />
+                            ))}
+                          </Stack>
+                          {winSet && (
+                            <Chip
+                              size="small"
+                              color={matchCount >= 3 ? 'success' : 'default'}
+                              label={`${matchCount}/6`}
+                              sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                            />
+                          )}
+                          <IconButton size="small" onClick={line.onRemove} aria-label="삭제" sx={{ ml: 'auto' }}>
+                            ×
+                          </IconButton>
+                        </Stack>
+                      );
+                    })}
+                  </Stack>
+                </Box>
+              )}
+              <Stack direction="row" justifyContent="flex-end">
+                <Button
+                  size="small"
+                  color="error"
+                  variant="outlined"
+                  onClick={clearStore}
+                  disabled={
+                    ticketLines.length === 0 &&
+                    (!accumulated || accumulated.total_analyses === 0)
+                  }
+                >
+                  자동 누적 전체 삭제
+                </Button>
+              </Stack>
+            </>
+          );
+        })()}
       </Paper>
 
       {notice && <Alert severity="info">{notice}</Alert>}

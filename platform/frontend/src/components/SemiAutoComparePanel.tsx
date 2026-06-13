@@ -2189,29 +2189,105 @@ export default function SemiAutoComparePanel({
       <Typography variant="subtitle2" fontWeight={700} gutterBottom>
         ⚙ 추가 세팅
       </Typography>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
-        <Box sx={{ flex: 1 }}>
-          <Typography variant="body2">
-            반자동 누적: {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkTickets.length}장
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            아래 버튼은 <strong>반자동 누적만</strong> 삭제합니다 (저장 줄 + 입력 중 + 대량 + 마지막 저장 시각). 자동 누적은 §1 구입번호 직접입력의 추가 세팅에서 따로 삭제하세요.
-          </Typography>
-        </Box>
-        <Button
-          size="small"
-          color="error"
-          variant="outlined"
-          onClick={clearAllSaved}
-          disabled={
-            semiCurrentLines.length === 0 &&
-            semiSlipQueue.length === 0 &&
-            bulkTickets.length === 0
-          }
-        >
-          반자동 누적 전체 삭제
-        </Button>
-      </Stack>
+      {(() => {
+        // 반자동 누적 평탄화 — 자동 §1 추가 세팅과 동일 룩앤필 공유.
+        // 데이터 소스: 입력 중 줄 + 저장된 용지 + 대량 입력 (반자동 특유).
+        const ticketLines = [
+          ...semiCurrentLines.map((line, idx) => ({
+            key: `current-${idx}`,
+            label: `입력 중·${line.label}`,
+            numbers: line.numbers,
+            onRemove: () => removeCurrentLine(idx),
+          })),
+          ...semiSlipQueue.flatMap((slip, slipIdx) =>
+            slip.lines.map((line, lineIdx) => ({
+              key: `slip-${slipIdx}-${lineIdx}`,
+              label: `용지${slipIdx + 1}·${line.label}`,
+              numbers: line.numbers,
+              onRemove: () => removeSlipLine(slipIdx, lineIdx),
+            }))
+          ),
+          ...bulkTickets.map((ticket, idx) => ({
+            key: `bulk-${idx}`,
+            label: `대량 #${idx + 1}`,
+            numbers: ticket,
+            onRemove: () =>
+              setBulkTickets((prev) => prev.filter((_, i) => i !== idx)),
+          })),
+        ];
+        return (
+          <>
+            <Typography variant="body2" sx={{ mb: 0.5 }}>
+              반자동 누적: {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkTickets.length}장 · 총 {ticketLines.length}줄
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              아래 목록의 [×] 로 개별 줄 삭제. 하단 [전체 삭제] 는 반자동 누적만 (저장 줄 + 입력 중 + 대량 + 마지막 저장 시각). 자동은 §1 추가 세팅에서 따로.
+            </Typography>
+            {ticketLines.length === 0 ? (
+              <Alert severity="info" sx={{ mb: 1.5 }}>
+                반자동 누적이 없습니다. 그리드에서 6개 선택 후 [줄 저장] 하거나 [⬆ 대량 입력] 으로 추가하세요.
+              </Alert>
+            ) : (
+              <Box sx={{ maxHeight: 320, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
+                <Stack spacing={0.5}>
+                  {ticketLines.map((line, idx) => {
+                    const matchCount = winningSet
+                      ? line.numbers.filter((n) => winningSet.has(n)).length
+                      : 0;
+                    return (
+                      <Stack
+                        key={line.key}
+                        direction="row"
+                        alignItems="center"
+                        spacing={0.5}
+                        flexWrap="wrap"
+                        useFlexGap
+                      >
+                        <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
+                          #{idx + 1}
+                        </Typography>
+                        <Chip size="small" label={line.label} variant="outlined" sx={{ minWidth: 84 }} />
+                        <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                          {line.numbers.map((n) => (
+                            <LottoBall
+                              key={`${line.key}-${n}`}
+                              number={n}
+                              size={22}
+                              dimmed={winningSet ? !winningSet.has(n) : false}
+                            />
+                          ))}
+                        </Stack>
+                        {winningSet && (
+                          <Chip
+                            size="small"
+                            color={matchCount >= 3 ? 'success' : 'default'}
+                            label={`${matchCount}/6`}
+                            sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                          />
+                        )}
+                        <IconButton size="small" onClick={line.onRemove} aria-label="삭제" sx={{ ml: 'auto' }}>
+                          ×
+                        </IconButton>
+                      </Stack>
+                    );
+                  })}
+                </Stack>
+              </Box>
+            )}
+            <Stack direction="row" justifyContent="flex-end">
+              <Button
+                size="small"
+                color="error"
+                variant="outlined"
+                onClick={clearAllSaved}
+                disabled={ticketLines.length === 0}
+              >
+                반자동 누적 전체 삭제
+              </Button>
+            </Stack>
+          </>
+        );
+      })()}
 
       <BulkLineInputDialog
         open={bulkOpen}

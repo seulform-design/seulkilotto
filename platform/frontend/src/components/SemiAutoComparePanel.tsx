@@ -1173,48 +1173,53 @@ export default function SemiAutoComparePanel({
     }
 
     /**
-     * (autoIdx, matchedNumbers) 단위 그룹화 — 사용자 정정:
-     * '자동 #5 ↔ 반자동 #40, #42, #44, #47 매치 [23, 24]' 4건이 사실상
-     * '같은 자동 줄 + 같은 매치 결과 + 반자동만 다름' 이라 중복으로 보임.
-     * 한 카드에 통합: { autoLine, matchedNumbers, semiList[] }.
+     * matchedNumbers 단위 그룹화 — 사용자 정정 (2차):
+     * '자동 측도 일치줄 있으면 중복되지 않도록 매치번호로'.
+     * 같은 매치 번호를 갖는 모든 자동 줄과 모든 반자동 줄을 한 카드로 통합.
+     * 한 그룹 항목: { matchedNumbers, autoList[], semiList[] }.
      */
+    type LineEntry = { idx: number; label: string; numbers: number[] };
     type GroupEntry = {
       key: string;
-      autoIdx: number;
-      autoLabel: string;
-      autoNumbers: number[];
       matchCount: number;
       matchedNumbers: number[];
-      semiList: { idx: number; label: string; numbers: number[] }[];
+      autoList: LineEntry[];
+      semiList: LineEntry[];
     };
     const groupMap = new Map<string, GroupEntry>();
     for (const p of pairs) {
-      const key = `${p.autoIdx}|${p.matchedNumbers.join('-')}`;
+      const key = p.matchedNumbers.join('-');
       if (!groupMap.has(key)) {
         groupMap.set(key, {
           key,
-          autoIdx: p.autoIdx,
-          autoLabel: p.autoLabel,
-          autoNumbers: p.autoNumbers,
           matchCount: p.matchCount,
           matchedNumbers: p.matchedNumbers,
+          autoList: [],
           semiList: [],
         });
       }
-      groupMap.get(key)!.semiList.push({
-        idx: p.semiIdx,
-        label: p.semiLabel,
-        numbers: p.semiNumbers,
-      });
+      const g = groupMap.get(key)!;
+      if (!g.autoList.some((a) => a.idx === p.autoIdx)) {
+        g.autoList.push({ idx: p.autoIdx, label: p.autoLabel, numbers: p.autoNumbers });
+      }
+      if (!g.semiList.some((s) => s.idx === p.semiIdx)) {
+        g.semiList.push({ idx: p.semiIdx, label: p.semiLabel, numbers: p.semiNumbers });
+      }
     }
-    // 정렬: matchCount 내림차순 → autoIdx asc → matchedNumbers 사전식.
+    // 정렬: matchCount 내림차순 → matchedNumbers 사전식 → autoList 크기.
     const groups = Array.from(groupMap.values()).sort(
       (x, y) =>
         y.matchCount - x.matchCount ||
-        x.autoIdx - y.autoIdx ||
         (x.matchedNumbers[0] ?? 0) - (y.matchedNumbers[0] ?? 0) ||
-        (x.matchedNumbers[1] ?? 0) - (y.matchedNumbers[1] ?? 0)
+        (x.matchedNumbers[1] ?? 0) - (y.matchedNumbers[1] ?? 0) ||
+        y.autoList.length - x.autoList.length ||
+        y.semiList.length - x.semiList.length
     );
+    // 각 그룹 내부 list 도 idx 오름차순 정렬.
+    for (const g of groups) {
+      g.autoList.sort((a, b) => a.idx - b.idx);
+      g.semiList.sort((a, b) => a.idx - b.idx);
+    }
 
     return {
       autoLineCount: autoLines.length,
@@ -2408,8 +2413,8 @@ export default function SemiAutoComparePanel({
                   <> (중복 <strong>{groupLineMatching.semiDupRemoved}건</strong> 제외)</>
                 )}
                 {' = '}전수 비교 {groupLineMatching.totalPairCount}개 페어 가운데 공통 번호 ≥2 인
-                페어 {groupLineMatching.rawPairCount}건. <strong>같은 자동 줄 + 같은 매치 번호 (반자동만 다름)</strong> 는
-                한 카드로 통합 → 화면 카드 {groupLineMatching.groupCount}건. 일치 개수
+                페어 {groupLineMatching.rawPairCount}건. <strong>같은 매치 번호를 가진 자동/반자동 줄들</strong>은
+                한 카드로 통합 (자동 list + 반자동 list) → 화면 카드 {groupLineMatching.groupCount}건. 일치 개수
                 (6 → 5 → 4 → 3 → 2) 순으로 모두 노출.
               </Typography>
               {(groupLineMatching.autoDupRemoved > 0 || groupLineMatching.semiDupRemoved > 0) && (
@@ -2489,6 +2494,13 @@ export default function SemiAutoComparePanel({
                                   />
                                   <Chip
                                     size="small"
+                                    color="success"
+                                    variant="outlined"
+                                    label={`자동 ${g.autoList.length}줄`}
+                                    sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                                  />
+                                  <Chip
+                                    size="small"
                                     color="primary"
                                     variant="outlined"
                                     label={`반자동 ${g.semiList.length}줄`}
@@ -2506,30 +2518,39 @@ export default function SemiAutoComparePanel({
                                     ) : null;
                                   })()}
                                 </Stack>
-                                <Stack
-                                  direction="row"
-                                  alignItems="center"
-                                  spacing={0.4}
-                                  flexWrap="wrap"
-                                  useFlexGap
-                                  sx={{ mt: 0.4 }}
-                                >
-                                  <Chip
-                                    size="small"
-                                    color="success"
-                                    variant="outlined"
-                                    label={`자동 #${g.autoIdx} · ${g.autoLabel}`}
-                                    sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
-                                  />
-                                  {g.autoNumbers.map((n) => (
-                                    <LottoBall
-                                      key={`ga-${g.autoIdx}-${n}`}
-                                      number={n}
-                                      size={22}
-                                      dimmed={!mset.has(n)}
-                                    />
-                                  ))}
-                                </Stack>
+                                <Box sx={{ mt: 0.4, pl: 0.5 }}>
+                                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.2 }}>
+                                    자동 측 일치 줄 ({g.autoList.length}):
+                                  </Typography>
+                                  <Stack spacing={0.2}>
+                                    {g.autoList.map((a) => (
+                                      <Stack
+                                        key={`ga-${g.key}-${a.idx}`}
+                                        direction="row"
+                                        alignItems="center"
+                                        spacing={0.4}
+                                        flexWrap="wrap"
+                                        useFlexGap
+                                      >
+                                        <Chip
+                                          size="small"
+                                          color="success"
+                                          variant="outlined"
+                                          label={`자동 #${a.idx} · ${a.label}`}
+                                          sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                                        />
+                                        {a.numbers.map((n) => (
+                                          <LottoBall
+                                            key={`ga-${g.key}-${a.idx}-${n}`}
+                                            number={n}
+                                            size={20}
+                                            dimmed={!mset.has(n)}
+                                          />
+                                        ))}
+                                      </Stack>
+                                    ))}
+                                  </Stack>
+                                </Box>
                                 <Box sx={{ mt: 0.4, pl: 0.5 }}>
                                   <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.2 }}>
                                     반자동 측 일치 줄 ({g.semiList.length}):

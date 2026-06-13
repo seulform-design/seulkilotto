@@ -699,10 +699,6 @@ export default function SemiAutoComparePanel({
     }
   };
 
-  const deletePick = (n: number) => {
-    setPicked((prev) => prev.filter((x) => x !== n));
-  };
-
   const reset = () => {
     setPicked([]);
   };
@@ -792,86 +788,68 @@ export default function SemiAutoComparePanel({
         🟡 본 비교는 패턴 관찰 도구입니다. 어떤 일치도 다음 회차의 1/8,145,060 확률을 변경하지 않습니다.
       </Alert>
 
-      {/* 입력 방식: 대량 텍스트 / 직접 선택 */}
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
+      {/* 번호 선택 그리드 — 자동(구입번호 직접입력) 패턴과 동일 룩앤필 */}
+      <Box sx={{ mb: 1.5 }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+          <Typography variant="subtitle2" fontWeight={700}>
+            비교 줄 · {picked.length}/6
+          </Typography>
+          {picked.length > 0 && (
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              {picked
+                .slice()
+                .sort((a, b) => a - b)
+                .map((n) => (
+                  <LottoBall key={n} number={n} size={32} />
+                ))}
+            </Stack>
+          )}
+        </Stack>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+            gap: 0.75,
+            p: 1.5,
+            borderRadius: 2,
+            bgcolor: 'action.hover',
+          }}
+        >
+          {NUMBERS.map((n) => {
+            const isPicked = picked.includes(n);
+            return (
+              <Box
+                key={n}
+                onClick={() => togglePick(n)}
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  opacity: isPicked ? 1 : 0.55,
+                  transform: isPicked ? 'scale(1.05)' : 'scale(1)',
+                  transition: 'transform 0.12s ease, opacity 0.12s ease',
+                }}
+              >
+                <LottoBall number={n} size={36} dimmed={!isPicked} />
+              </Box>
+            );
+          })}
+        </Box>
+      </Box>
+
+      {/* 하단 액션 행 — 자동 패턴 [⬆ 대량 입력] 위치와 동일 */}
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1.5 }}>
         <Button
           variant="outlined"
-          size="small"
           color="primary"
           onClick={() => setBulkOpen(true)}
         >
-          📋 대량 입력 (반자동 500줄+)
+          ⬆ 대량 입력 (반자동 500줄+)
         </Button>
-        <Typography variant="caption" color="text.secondary">
-          OR 아래 그리드에서 직접 선택
-        </Typography>
       </Stack>
 
-      {/* 번호 선택 그리드 */}
-      <Typography variant="caption" sx={{ display: 'block', mb: 0.5 }}>
-        번호 6개 선택 ({picked.length}/6)
-      </Typography>
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(15, minmax(0, 1fr))',
-          gap: 0.5,
-          p: 1,
-          borderRadius: 1.5,
-          bgcolor: 'action.hover',
-          mb: 1.5,
-        }}
-      >
-        {NUMBERS.map((n) => {
-          const isPicked = picked.includes(n);
-          return (
-            <Box
-              key={n}
-              onClick={() => togglePick(n)}
-              sx={{
-                display: 'flex',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                opacity: isPicked ? 1 : 0.55,
-              }}
-            >
-              <LottoBall number={n} size={24} dimmed={!isPicked} />
-            </Box>
-          );
-        })}
-      </Box>
-
-      {/* 선택 번호 칩 — 자동번호 입력 형식과 동일 (단순 번호 + 삭제) */}
-      {picked.length > 0 && (
-        <Box sx={{ mb: 1.5 }}>
-          <Typography variant="caption" sx={{ display: 'block', mb: 0.5 }}>
-            선택 번호 ({picked.length}/6) — 그리드 클릭=토글, [×]=삭제
-          </Typography>
-          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-            {picked
-              .slice()
-              .sort((a, b) => a - b)
-              .map((n) => (
-                <Chip
-                  key={n}
-                  label={n}
-                  size="small"
-                  variant="outlined"
-                  onDelete={() => deletePick(n)}
-                />
-              ))}
-          </Stack>
-        </Box>
-      )}
-
-      {picked.length > 6 && (
-        <Alert severity="warning" sx={{ mb: 1.5 }}>
-          ⚠ {picked.length}개 선택됨 (목표 6개) — 그리드에서 클릭으로 토글하거나 칩의 [×]로 삭제하세요.
-        </Alert>
-      )}
-
       {picked.length > 0 && picked.length < 6 && (
-        <Typography variant="caption" color="text.secondary">
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           {6 - picked.length}개 더 선택하면 비교 결과가 표시됩니다.
         </Typography>
       )}

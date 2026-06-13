@@ -21,12 +21,14 @@ import {
   Chip,
   CircularProgress,
   Divider,
+  IconButton,
+  LinearProgress,
   Paper,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import BulkLineInputDialog from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
@@ -611,6 +613,78 @@ export default function SemiAutoComparePanel({
   const comparisonRoundData = compareRound != null ? selectedRoundQuery.data : latest.data;
   const effectiveRound = compareRound ?? latest.data?.round ?? null;
 
+  // 당첨번호 set — 복기 모드에서 ball 색상 강조용
+  const winningSet = useMemo<Set<number> | null>(() => {
+    if (!comparisonRoundData?.numbers?.length) return null;
+    return new Set(comparisonRoundData.numbers);
+  }, [comparisonRoundData]);
+
+  const qc = useQueryClient();
+  const handleRefreshAll = () => {
+    qc.invalidateQueries({ queryKey: ['v1-latest-for-semi-auto'] });
+    qc.invalidateQueries({ queryKey: ['v1-meta-for-semi-auto'] });
+    qc.invalidateQueries({ queryKey: ['v1-round-for-semi-auto'] });
+  };
+
+  // 개별 티켓 삭제 — bulkTickets 누적 중 한 건만 제거
+  const deleteOneTicket = (idx: number) => {
+    setBulkTickets((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  // UI 토글 상태
+  const [showAllTickets, setShowAllTickets] = useState(false);
+  const [showFrequency, setShowFrequency] = useState(false);
+  const [recommendations, setRecommendations] = useState<number[][]>([]);
+
+  // 전체 번호 빈도 분석 (1~45 모든 번호의 등장 횟수)
+  const numberFrequency = useMemo(() => {
+    if (bulkTickets.length === 0) return [];
+    const counter: Record<number, number> = {};
+    for (let n = 1; n <= 45; n += 1) counter[n] = 0;
+    for (const ticket of bulkTickets) {
+      for (const n of ticket) {
+        counter[n] = (counter[n] ?? 0) + 1;
+      }
+    }
+    return Object.entries(counter)
+      .map(([n, count]) => ({ number: Number(n), count }))
+      .sort((a, b) => b.count - a.count || a.number - b.number);
+  }, [bulkTickets]);
+
+  // 추천 조합 생성 — 자동 강한 후보 + 반자동 상위 빈도 결합 → 5세트
+  const generateRecommendations = () => {
+    const topFreq = numberFrequency.slice(0, 20).map((f) => f.number);
+    const strong = getCurrentRoundStrongCandidates(accumulated);
+    const excluded = new Set(getCurrentRoundExcludedCandidates(accumulated));
+    const pool = Array.from(new Set([...strong, ...topFreq])).filter(
+      (n) => !excluded.has(n) && n >= 1 && n <= 45
+    );
+    // 풀이 부족하면 1~45 무작위로 보충
+    if (pool.length < 12) {
+      const all = Array.from({ length: 45 }, (_, i) => i + 1).filter(
+        (n) => !pool.includes(n) && !excluded.has(n)
+      );
+      while (pool.length < 12 && all.length > 0) {
+        const idx = Math.floor(Math.random() * all.length);
+        pool.push(all.splice(idx, 1)[0]);
+      }
+    }
+    const result: number[][] = [];
+    const seen = new Set<string>();
+    let attempts = 0;
+    while (result.length < 5 && attempts < 200) {
+      attempts += 1;
+      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      const combo = shuffled.slice(0, 6).sort((a, b) => a - b);
+      const key = combo.join('-');
+      if (combo.length === 6 && !seen.has(key)) {
+        seen.add(key);
+        result.push(combo);
+      }
+    }
+    setRecommendations(result);
+  };
+
   const togglePick = (n: number) => {
     if (picked.includes(n)) {
       setPicked(picked.filter((x) => x !== n));
@@ -1107,6 +1181,9 @@ export default function SemiAutoComparePanel({
               📋 대량 비교 결과 ({bulkComparison.ticketCount}장)
             </Typography>
             <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" gap={0.5}>
+              <Button size="small" variant="outlined" onClick={handleRefreshAll}>
+                ↻ 재분석
+              </Button>
               <TextField
                 size="small"
                 label="비교 회차"
@@ -1202,6 +1279,234 @@ export default function SemiAutoComparePanel({
                 );
               })}
             </Stack>
+          </Paper>
+
+          {/* 당첨번호 표시 (복기 모드 — 회차 수동 선택 시 강조) */}
+          {comparisonRoundData?.numbers && (
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 1.5,
+                mb: 1.5,
+                borderColor: 'warning.main',
+                borderWidth: 2,
+              }}
+            >
+              <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+                <Typography variant="body2" fontWeight={700}>
+                  🎯 {comparisonRoundData.round}회 당첨번호
+                </Typography>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                  {comparisonRoundData.numbers.map((n) => (
+                    <LottoBall key={n} number={n} size={32} />
+                  ))}
+                  <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mx: 0.5 }}>
+                    + 보너스
+                  </Typography>
+                  <LottoBall number={comparisonRoundData.bonus} size={28} />
+                </Stack>
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                ※ 아래 티켓의 번호 중 당첨번호와 일치하는 것은 색상 유지, 미일치는 회색 dim 처리.
+              </Typography>
+            </Paper>
+          )}
+
+          {/* 전체 번호 빈도 분석 — 1~45 모든 번호 등장 횟수 */}
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+            <Stack
+              direction="row"
+              alignItems="center"
+              justifyContent="space-between"
+              sx={{ cursor: 'pointer', userSelect: 'none' }}
+              onClick={() => setShowFrequency((v) => !v)}
+            >
+              <Typography variant="body2" fontWeight={700}>
+                📊 전체 번호 빈도 ({bulkComparison.ticketCount}장 기준 · 등장 1+ {numberFrequency.filter(f => f.count > 0).length}개)
+                {showFrequency ? ' ▼' : ' ▶'}
+              </Typography>
+              <Button size="small" variant="text">
+                {showFrequency ? '접기' : '펼치기'}
+              </Button>
+            </Stack>
+            {showFrequency && (
+              <Box sx={{ mt: 1.5 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                  빈도순. 평균값 = (티켓수 × 6 / 45). 막대 길이는 최대 빈도 대비 비율.
+                </Typography>
+                <Box sx={{ maxHeight: 360, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
+                  <Stack spacing={0.4}>
+                    {numberFrequency.map((item, idx) => {
+                      const maxCount = numberFrequency[0]?.count ?? 1;
+                      const widthPct = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
+                      const isWinning = winningSet?.has(item.number);
+                      return (
+                        <Stack
+                          key={item.number}
+                          direction="row"
+                          alignItems="center"
+                          spacing={0.5}
+                          flexWrap="wrap"
+                          useFlexGap
+                        >
+                          <Typography variant="caption" sx={{ minWidth: 30, color: 'text.secondary', fontWeight: 600 }}>
+                            #{idx + 1}
+                          </Typography>
+                          <LottoBall number={item.number} size={26} dimmed={winningSet ? !isWinning : false} />
+                          <Box sx={{ flex: 1, minWidth: 80, position: 'relative' }}>
+                            <LinearProgress
+                              variant="determinate"
+                              value={widthPct}
+                              sx={{
+                                height: 18,
+                                borderRadius: 1,
+                                bgcolor: 'action.selected',
+                                '& .MuiLinearProgress-bar': {
+                                  bgcolor: isWinning ? 'warning.main' : item.count >= maxCount * 0.7 ? 'success.main' : 'primary.main',
+                                },
+                              }}
+                            />
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 8,
+                                lineHeight: '18px',
+                                fontWeight: 700,
+                                color: '#fff',
+                                textShadow: '0 1px 2px rgba(0,0,0,0.6)',
+                              }}
+                            >
+                              {item.count}회 ({((item.count / bulkComparison.ticketCount) * 100).toFixed(1)}%)
+                            </Typography>
+                          </Box>
+                          {isWinning && (
+                            <Chip size="small" color="warning" label="🎯 당첨" sx={{ height: 18, fontSize: 10 }} />
+                          )}
+                        </Stack>
+                      );
+                    })}
+                  </Stack>
+                </Box>
+              </Box>
+            )}
+          </Paper>
+
+          {/* 전체 티켓 목록 + 건별 삭제 */}
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+            <Stack
+              direction="row"
+              alignItems="center"
+              justifyContent="space-between"
+              sx={{ cursor: 'pointer', userSelect: 'none' }}
+              onClick={() => setShowAllTickets((v) => !v)}
+            >
+              <Typography variant="body2" fontWeight={700}>
+                🎫 전체 티켓 목록 ({bulkComparison.ticketCount}장) — 건별 삭제 가능
+                {showAllTickets ? ' ▼' : ' ▶'}
+              </Typography>
+              <Button size="small" variant="text">
+                {showAllTickets ? '접기' : '펼치기'}
+              </Button>
+            </Stack>
+            {showAllTickets && (
+              <Box sx={{ mt: 1, maxHeight: 360, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
+                <Stack spacing={0.5}>
+                  {bulkComparison.perTicket.map((t) => (
+                    <Stack
+                      key={`all-${t.index}`}
+                      direction="row"
+                      alignItems="center"
+                      spacing={0.5}
+                      flexWrap="wrap"
+                      useFlexGap
+                    >
+                      <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
+                        #{t.index + 1}
+                      </Typography>
+                      <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                        {t.ticket.map((n) => {
+                          const isWin = winningSet?.has(n);
+                          return (
+                            <LottoBall
+                              key={`${t.index}-${n}`}
+                              number={n}
+                              size={22}
+                              dimmed={winningSet ? !isWin : false}
+                            />
+                          );
+                        })}
+                      </Stack>
+                      {winningSet && t.vsLatestMatch.length > 0 && (
+                        <Chip
+                          size="small"
+                          color={t.vsLatestMatch.length >= 3 ? 'success' : 'default'}
+                          label={`${t.vsLatestMatch.length}/6`}
+                          sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                        />
+                      )}
+                      <IconButton
+                        size="small"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteOneTicket(t.index);
+                        }}
+                        aria-label={`티켓 ${t.index + 1} 삭제`}
+                        sx={{ ml: 'auto' }}
+                      >
+                        ×
+                      </IconButton>
+                    </Stack>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+          </Paper>
+
+          {/* 추천 조합 생성 — 자동+반자동 누적 데이터 기반 */}
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+              <Typography variant="body2" fontWeight={700}>
+                🎲 자동+반자동 누적 기반 추천 조합
+              </Typography>
+              <Button size="small" variant="contained" color="success" onClick={generateRecommendations}>
+                추천 5세트 생성
+              </Button>
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              누적 자동의 강한 후보 + 반자동의 상위 빈도 번호 결합 → 배제 후보 제외 → 6-튜플 무작위 추출. 정직성:
+              어떤 조합도 1/8,145,060 의 동일 확률.
+            </Typography>
+            {recommendations.length > 0 && (
+              <Stack spacing={0.75}>
+                {recommendations.map((combo, idx) => (
+                  <Stack
+                    key={`rec-${idx}`}
+                    direction="row"
+                    alignItems="center"
+                    spacing={0.5}
+                    flexWrap="wrap"
+                    useFlexGap
+                  >
+                    <Chip size="small" label={`${idx + 1}`} variant="outlined" sx={{ minWidth: 32, fontWeight: 700 }} />
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      {combo.map((n) => (
+                        <LottoBall key={n} number={n} size={28} dimmed={winningSet ? !winningSet.has(n) : false} />
+                      ))}
+                    </Stack>
+                    {winningSet && (
+                      <Chip
+                        size="small"
+                        color={combo.filter((n) => winningSet.has(n)).length >= 3 ? 'success' : 'default'}
+                        label={`${combo.filter((n) => winningSet.has(n)).length}/6`}
+                        sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                      />
+                    )}
+                  </Stack>
+                ))}
+              </Stack>
+            )}
           </Paper>
 
           {/* 상위 5개 매칭 티켓 */}

@@ -209,7 +209,10 @@ export interface RoundRecommendResponse {
     avg_sum: number;
     avg_odd: number;
   };
-  combinations: GeneratedCombination[];
+  combinations: (GeneratedCombination & {
+    pattern?: string | null;
+    pattern_label?: string | null;
+  })[];
   warning?: string | null;
   filter_rule: string;
   compose_rule: string;

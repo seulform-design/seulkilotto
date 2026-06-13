@@ -11,26 +11,14 @@ import {
   Switch,
   ToggleButton,
   ToggleButtonGroup,
-  Tooltip,
   Typography,
 } from '@mui/material';
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import ComboActions from '../components/ComboActions';
 import LottoBall from '../components/LottoBall';
+import MetricChips from '../components/MetricChips';
 import { v1Api } from '../api/v1Api';
-import {
-  acValue,
-  consecutivePairs,
-  decadeBuckets,
-  evenCount,
-  highCount,
-  lastDigitUnique,
-  lowCount,
-  oddCount,
-  sumBand,
-  sumTotal,
-} from '../utils/comboMetrics';
 
 const LOOKBACK_OPTIONS = [5, 10, 20];
 
@@ -42,69 +30,6 @@ const N_SETS = 5;
 
 const HONESTY_DISCLAIMER =
   '본 추천은 과거 통계 패턴 분석 결과일 뿐이며, 수학적 독립시행인 로또의 당첨 확률(1/8,145,060)을 물리적으로 상승시키지 않습니다.';
-
-interface MetricChipsProps {
-  numbers: number[];
-}
-
-function MetricChips({ numbers }: MetricChipsProps) {
-  const sum = sumTotal(numbers);
-  const band = sumBand(sum);
-  const oc = oddCount(numbers);
-  const ec = evenCount(numbers);
-  const hc = highCount(numbers);
-  const lc = lowCount(numbers);
-  const ac = acValue(numbers);
-  const pairs = consecutivePairs(numbers);
-  const ld = lastDigitUnique(numbers);
-  const decades = decadeBuckets(numbers);
-  const decadeStr = `${decades[0]}-${decades[1]}-${decades[2]}-${decades[3]}-${decades[4]}`;
-
-  const sumColor: 'success' | 'info' | 'warning' =
-    band === 'mid' ? 'success' : band === 'low' ? 'info' : 'warning';
-
-  return (
-    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-      <Tooltip title="6개 번호의 총합. 100~175 구간이 통계적 중앙(p10~p90)">
-        <Chip size="small" label={`합 ${sum}`} color={sumColor} variant="filled" />
-      </Tooltip>
-      <Tooltip title="홀수:짝수 개수. 표준 분포 = 2:4, 3:3, 4:2">
-        <Chip size="small" label={`홀:짝 ${oc}:${ec}`} variant="outlined" />
-      </Tooltip>
-      <Tooltip title={`23 이상:22 이하 개수. 표준 분포 = 2:4, 3:3, 4:2`}>
-        <Chip size="small" label={`고:저 ${hc}:${lc}`} variant="outlined" />
-      </Tooltip>
-      <Tooltip title="Arithmetic Complexity. 등차수열 류 회피 지수 (최대 10, 1등 평균 ≈ 7.4)">
-        <Chip
-          size="small"
-          label={`AC ${ac}`}
-          variant="outlined"
-          color={ac >= 7 ? 'success' : ac >= 5 ? 'default' : 'warning'}
-        />
-      </Tooltip>
-      <Tooltip
-        title={
-          pairs.length === 0
-            ? '연속된 번호 없음'
-            : `연속 쌍: ${pairs.map((p) => p.join('-')).join(', ')}`
-        }
-      >
-        <Chip
-          size="small"
-          label={pairs.length === 0 ? '연속 0' : `연속 ${pairs.length}`}
-          variant="outlined"
-          color={pairs.length === 0 ? 'default' : 'warning'}
-        />
-      </Tooltip>
-      <Tooltip title="끝자리(번호 % 10) 종류 수. 3종 이상이면 일자 픽 회피">
-        <Chip size="small" label={`끝자리 ${ld}종`} variant="outlined" />
-      </Tooltip>
-      <Tooltip title="십의자리별 개수 (1자리-10대-20대-30대-40대)">
-        <Chip size="small" label={`십 ${decadeStr}`} variant="outlined" />
-      </Tooltip>
-    </Stack>
-  );
-}
 
 export default function GeneratorPage() {
   const [lookback, setLookback] = useState(5);

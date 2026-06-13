@@ -2,7 +2,9 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   CircularProgress,
+  Divider,
   Paper,
   Stack,
   ToggleButton,
@@ -11,9 +13,13 @@ import {
 } from '@mui/material';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import CopyButton from '../components/CopyButton';
+import ComboActions from '../components/ComboActions';
 import LottoBall from '../components/LottoBall';
+import MetricChips from '../components/MetricChips';
 import { v1Api } from '../api/v1Api';
+
+const HONESTY_DISCLAIMER =
+  '본 추첨기 추천은 호기별 과거 통계 패턴에 기반합니다. 모든 6-튜플의 1등 당첨 확률은 동일하게 1/8,145,060 이며, 본 페이지의 어떤 옵션도 그 확률을 변경하지 않습니다. 추첨기 분류는 추첨일 기반 추정값입니다.';
 
 type MachineChoice = 'auto' | 1 | 2 | 3;
 
@@ -100,25 +106,100 @@ export default function RoundRecommendPage() {
 
       {data && data.stats.draw_count > 0 && (
         <Paper sx={{ p: 2, mb: 2 }}>
-          <Typography variant="subtitle1" fontWeight={700}>
-            호기 통계 요약
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            분석 {data.stats.draw_count}회 · 평균합 {data.stats.avg_sum} · 홀{' '}
-            {data.stats.avg_odd}
-          </Typography>
-          <Typography variant="caption" color="warning.main" sx={{ mt: 1, display: 'block' }}>
-            최다 출현 TOP 5
-          </Typography>
-          <Typography variant="body2">
-            {data.stats.hot_top5.map((h) => `${h.number}(${h.count})`).join('  ')}
-          </Typography>
-          <Typography variant="caption" color="warning.main" sx={{ mt: 1, display: 'block' }}>
-            미출현 TOP 5
-          </Typography>
-          <Typography variant="body2">
-            {data.stats.cold_top5.map((c) => `${c.number}(${c.gap_rounds})`).join('  ')}
-          </Typography>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+            <Typography variant="subtitle1" fontWeight={700}>
+              호기 통계 요약
+            </Typography>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              <Chip
+                size="small"
+                label={`표본 ${data.stats.draw_count}회`}
+                variant="outlined"
+              />
+              <Chip size="small" label={`평균합 ${data.stats.avg_sum}`} variant="outlined" />
+              <Chip size="small" label={`평균 홀 ${data.stats.avg_odd}`} variant="outlined" />
+            </Stack>
+          </Stack>
+
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mt: 1 }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" color="warning.main" sx={{ fontWeight: 700 }}>
+                🔥 최다 출현 TOP 5
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                {data.stats.hot_top5.map((h) => (
+                  <Chip
+                    key={`hot-${h.number}`}
+                    size="small"
+                    label={`${h.number} · ${h.count}회`}
+                    color="warning"
+                    variant="outlined"
+                  />
+                ))}
+              </Stack>
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" color="info.main" sx={{ fontWeight: 700 }}>
+                ❄ 미출현 TOP 5 (gap)
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                {data.stats.cold_top5.map((c) => (
+                  <Chip
+                    key={`cold-${c.number}`}
+                    size="small"
+                    label={`${c.number} · ${c.gap_rounds}회 전`}
+                    color="info"
+                    variant="outlined"
+                  />
+                ))}
+              </Stack>
+            </Box>
+          </Stack>
+
+          {data.stats.consecutive_top3?.length > 0 && (
+            <Box sx={{ mt: 1.5 }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontWeight: 700, display: 'block' }}
+              >
+                연속 출현 TOP 3
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                {data.stats.consecutive_top3.map((c, i) => (
+                  <Chip
+                    key={`cons-${i}`}
+                    size="small"
+                    label={`${c.pair.join('-')} · ${c.count}회`}
+                    variant="outlined"
+                  />
+                ))}
+              </Stack>
+            </Box>
+          )}
+
+          {data.stats.synergy_top3?.length > 0 && (
+            <Box sx={{ mt: 1.5 }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontWeight: 700, display: 'block' }}
+              >
+                동반 출현 TOP 3 (호기 내)
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                {data.stats.synergy_top3.map((s, i) => (
+                  <Chip
+                    key={`syn-${i}`}
+                    size="small"
+                    label={`${s.pair.join(' & ')} · ${s.count}회`}
+                    variant="outlined"
+                    color="success"
+                  />
+                ))}
+              </Stack>
+            </Box>
+          )}
         </Paper>
       )}
 
@@ -131,23 +212,76 @@ export default function RoundRecommendPage() {
             {data.compose_rule} · {data.filter_rule}
           </Typography>
           {data.combinations.map((combo, idx) => (
-            <Paper key={idx} sx={{ p: 2, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography sx={{ width: 22, fontWeight: 800, color: 'text.secondary' }}>
-                {idx + 1}
-              </Typography>
-              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ flex: 1 }}>
-                {combo.numbers.map((n) => (
-                  <LottoBall key={n} number={n} size={36} />
-                ))}
-              </Stack>
-              <Box sx={{ textAlign: 'right' }}>
-                <Typography variant="caption" color="text.secondary" display="block">
-                  합{combo.sum_total} · 홀{combo.odd_count}
+            <Paper key={idx} sx={{ p: 2, mb: 1 }}>
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={1}
+                alignItems={{ xs: 'flex-start', sm: 'center' }}
+              >
+                <Typography
+                  sx={{
+                    width: 28,
+                    fontWeight: 800,
+                    color: 'text.secondary',
+                    flexShrink: 0,
+                    fontSize: 18,
+                  }}
+                >
+                  {idx + 1}
                 </Typography>
-                <CopyButton numbers={combo.numbers} />
-              </Box>
+                <Stack
+                  direction="row"
+                  spacing={0.75}
+                  flexWrap="wrap"
+                  useFlexGap
+                  sx={{ flex: 1 }}
+                >
+                  {combo.numbers.map((n) => (
+                    <LottoBall key={n} number={n} size={38} />
+                  ))}
+                </Stack>
+                <ComboActions
+                  numbers={combo.numbers}
+                  source="recommend"
+                  label={
+                    data?.machine_id
+                      ? `${data.machine_id}호기 ${idx + 1}게임`
+                      : `추첨기 ${idx + 1}게임`
+                  }
+                />
+              </Stack>
+              <MetricChips numbers={combo.numbers} />
+              {combo.pattern_label && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', mt: 0.5 }}
+                >
+                  패턴: {combo.pattern_label}
+                </Typography>
+              )}
             </Paper>
           ))}
+
+          <Divider sx={{ my: 2 }} />
+          <Paper variant="outlined" sx={{ p: 1.5, borderColor: 'warning.main', borderLeftWidth: 4, borderLeftStyle: 'solid' }}>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+              <Chip
+                size="small"
+                label="1등 확률 1 / 8,145,060"
+                color="warning"
+                sx={{ fontWeight: 700 }}
+              />
+              <Chip size="small" label="≈ 0.0000123%" variant="outlined" />
+            </Stack>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontStyle: 'italic' }}
+            >
+              {HONESTY_DISCLAIMER}
+            </Typography>
+          </Paper>
         </Box>
       )}
     </Box>

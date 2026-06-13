@@ -274,6 +274,14 @@ interface SemiAutoComparePanelProps {
   accumulated: PhotoAnalysisAccumulated | null;
   /** 사용자 정정: '구입번호 직접입력' (slipQueue) = 자동. 그 줄 단위 삭제 콜백. */
   onRemoveSlipLine?: (slipIdx: number, lineIdx: number) => void;
+  /** 자동 누적의 '입력 중' 줄 (currentSlipLines). 전체 티켓 목록 카운트·표시에 합산. */
+  currentSlipLines?: SavedLine[];
+  /** 자동 대량 입력 (bulkAutoTickets). 전체 티켓 목록 카운트·표시에 합산. */
+  bulkAutoTickets?: number[][];
+  /** 자동 '입력 중' 줄 단건 삭제 콜백. */
+  onRemoveCurrentLine?: (idx: number) => void;
+  /** 자동 대량 1장 단건 삭제 콜백. */
+  onRemoveBulkAutoTicket?: (idx: number) => void;
 }
 
 type PickType = 'user' | 'auto';
@@ -648,6 +656,10 @@ export default function SemiAutoComparePanel({
   slipQueue,
   accumulated,
   onRemoveSlipLine,
+  currentSlipLines = [],
+  bulkAutoTickets = [],
+  onRemoveCurrentLine,
+  onRemoveBulkAutoTicket,
 }: SemiAutoComparePanelProps) {
   // localStorage 에서 복원 — 새로고침/이탈 후에도 보존
   const initial = useMemo(() => loadSemiAutoState(), []);
@@ -727,11 +739,6 @@ export default function SemiAutoComparePanel({
     qc.invalidateQueries({ queryKey: ['v1-round-for-semi-auto'] });
   };
 
-  // 개별 티켓 삭제 — bulkTickets 누적 중 한 건만 제거
-  const deleteOneTicket = (idx: number) => {
-    setBulkTickets((prev) => prev.filter((_, i) => i !== idx));
-  };
-
   // UI 토글 상태
   const [showAllTickets, setShowAllTickets] = useState(false);
   const [recommendations, setRecommendations] = useState<number[][]>([]);
@@ -757,29 +764,6 @@ export default function SemiAutoComparePanel({
       .filter((item) => item.count > 0)
       .sort((a, b) => b.count - a.count || a.number - b.number);
   }, [slipQueue]);
-
-  // 자동 줄 리스트 — slipQueue 의 모든 (slipIdx, lineIdx, label, numbers) 평탄화
-  const autoSlipLines = useMemo(() => {
-    const out: {
-      slipIdx: number;
-      lineIdx: number;
-      label: string;
-      numbers: number[];
-    }[] = [];
-    slipQueue.forEach((slip, slipIdx) => {
-      slip.lines.forEach((line, lineIdx) => {
-        out.push({
-          slipIdx,
-          lineIdx,
-          label: line.label,
-          numbers: line.numbers,
-        });
-      });
-    });
-    return out;
-  }, [slipQueue]);
-
-  const totalSlipLines = autoSlipLines.length;
 
   // 추천 조합 생성 — 자동 강한 후보 + 반자동 상위 빈도 결합 → 5세트
   const generateRecommendations = () => {
@@ -1621,149 +1605,160 @@ export default function SemiAutoComparePanel({
             </Paper>
           )}
 
-          {/* 전체 티켓 목록 — 반자동 / 자동 분리 */}
-          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
-            <Stack
-              direction="row"
-              alignItems="center"
-              justifyContent="space-between"
-              sx={{ cursor: 'pointer', userSelect: 'none' }}
-              onClick={() => setShowAllTickets((v) => !v)}
-            >
-              <Typography variant="body2" fontWeight={700}>
-                🎫 전체 티켓 목록 — 반자동 {bulkComparison.ticketCount}장 / 자동 {totalSlipLines}줄
-                {showAllTickets ? ' ▼' : ' ▶'}
-              </Typography>
-              <Button size="small" variant="text">
-                {showAllTickets ? '접기' : '펼치기'}
-              </Button>
-            </Stack>
-            {showAllTickets && (
-              <Box sx={{ mt: 1 }}>
-                {/* 반자동 — bulkTickets */}
-                <Typography variant="caption" color="primary.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-                  🔄 반자동 (사용자 입력) — {bulkComparison.ticketCount}장
-                </Typography>
-                <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
-                  <Stack spacing={0.5}>
-                    {bulkComparison.perTicket.map((t) => (
-                      <Stack
-                        key={`semi-${t.index}`}
-                        direction="row"
-                        alignItems="center"
-                        spacing={0.5}
-                        flexWrap="wrap"
-                        useFlexGap
-                      >
-                        <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
-                          #{t.index + 1}
-                        </Typography>
-                        <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
-                          {t.ticket.map((n) => (
-                            <LottoBall
-                              key={`${t.index}-${n}`}
-                              number={n}
-                              size={22}
-                              dimmed={winningSet ? !winningSet.has(n) : false}
-                            />
-                          ))}
-                        </Stack>
-                        {winningSet && t.vsLatestMatch.length > 0 && (
-                          <Chip
-                            size="small"
-                            color={t.vsLatestMatch.length >= 3 ? 'success' : 'default'}
-                            label={`${t.vsLatestMatch.length}/6`}
-                            sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                          />
-                        )}
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteOneTicket(t.index);
-                          }}
-                          aria-label={`반자동 티켓 ${t.index + 1} 삭제`}
-                          sx={{ ml: 'auto' }}
-                        >
-                          ×
-                        </IconButton>
-                      </Stack>
+          {/* 전체 티켓 목록 — 자동 / 반자동 각각 § 1, § 3 추가 세팅의 평탄화 패턴과 동일 룩.
+              데이터 소스: 자동 = currentSlipLines + slipQueue + bulkAutoTickets,
+                          반자동 = semiCurrentLines + semiSlipQueue + bulkTickets. */}
+          {(() => {
+            const autoTickets = [
+              ...currentSlipLines.map((line, idx) => ({
+                key: `auto-current-${idx}`,
+                label: `입력 중·${line.label}`,
+                numbers: line.numbers,
+                onRemove: onRemoveCurrentLine ? () => onRemoveCurrentLine(idx) : undefined,
+              })),
+              ...slipQueue.flatMap((slip, slipIdx) =>
+                slip.lines.map((line, lineIdx) => ({
+                  key: `auto-slip-${slipIdx}-${lineIdx}`,
+                  label: `용지${slipIdx + 1}·${line.label}`,
+                  numbers: line.numbers,
+                  onRemove: onRemoveSlipLine ? () => onRemoveSlipLine(slipIdx, lineIdx) : undefined,
+                }))
+              ),
+              ...bulkAutoTickets.map((ticket, idx) => ({
+                key: `auto-bulk-${idx}`,
+                label: `대량 #${idx + 1}`,
+                numbers: ticket,
+                onRemove: onRemoveBulkAutoTicket ? () => onRemoveBulkAutoTicket(idx) : undefined,
+              })),
+            ];
+            const semiTickets = [
+              ...semiCurrentLines.map((line, idx) => ({
+                key: `semi-current-${idx}`,
+                label: `입력 중·${line.label}`,
+                numbers: line.numbers,
+                onRemove: () => removeCurrentLine(idx),
+              })),
+              ...semiSlipQueue.flatMap((slip, slipIdx) =>
+                slip.lines.map((line, lineIdx) => ({
+                  key: `semi-slip-${slipIdx}-${lineIdx}`,
+                  label: `용지${slipIdx + 1}·${line.label}`,
+                  numbers: line.numbers,
+                  onRemove: () => removeSlipLine(slipIdx, lineIdx),
+                }))
+              ),
+              ...bulkTickets.map((ticket, idx) => ({
+                key: `semi-bulk-${idx}`,
+                label: `대량 #${idx + 1}`,
+                numbers: ticket,
+                onRemove: () =>
+                  setBulkTickets((prev) => prev.filter((_, i) => i !== idx)),
+              })),
+            ];
+            const renderRow = (
+              t: { key: string; label: string; numbers: number[]; onRemove?: () => void },
+              idx: number
+            ) => {
+              const matchCount = winningSet
+                ? t.numbers.filter((n) => winningSet.has(n)).length
+                : 0;
+              return (
+                <Stack
+                  key={t.key}
+                  direction="row"
+                  alignItems="center"
+                  spacing={0.5}
+                  flexWrap="wrap"
+                  useFlexGap
+                >
+                  <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
+                    #{idx + 1}
+                  </Typography>
+                  <Chip size="small" label={t.label} variant="outlined" sx={{ minWidth: 84 }} />
+                  <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                    {t.numbers.map((n) => (
+                      <LottoBall
+                        key={`${t.key}-${n}`}
+                        number={n}
+                        size={22}
+                        dimmed={winningSet ? !winningSet.has(n) : false}
+                      />
                     ))}
                   </Stack>
-                </Box>
+                  {winningSet && (
+                    <Chip
+                      size="small"
+                      color={matchCount >= 3 ? 'success' : 'default'}
+                      label={`${matchCount}/6`}
+                      sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                    />
+                  )}
+                  {t.onRemove && (
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        t.onRemove!();
+                      }}
+                      aria-label="삭제"
+                      sx={{ ml: 'auto' }}
+                    >
+                      ×
+                    </IconButton>
+                  )}
+                </Stack>
+              );
+            };
+            return (
+              <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  sx={{ cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => setShowAllTickets((v) => !v)}
+                >
+                  <Typography variant="body2" fontWeight={700}>
+                    🎫 전체 티켓 목록 — 자동 {autoTickets.length}줄 / 반자동 {semiTickets.length}줄
+                    {showAllTickets ? ' ▼' : ' ▶'}
+                  </Typography>
+                  <Button size="small" variant="text">
+                    {showAllTickets ? '접기' : '펼치기'}
+                  </Button>
+                </Stack>
+                {showAllTickets && (
+                  <Box sx={{ mt: 1 }}>
+                    {/* 자동 영역 — § 1 추가 세팅과 동일 데이터 소스·카운트 형식 */}
+                    <Typography variant="caption" color="success.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+                      📋 자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkAutoTickets.length}장 · 총 {autoTickets.length}줄
+                    </Typography>
+                    {autoTickets.length === 0 ? (
+                      <Alert severity="info" sx={{ mb: 1.5 }}>
+                        자동 데이터가 없습니다. 상단 § 1 의 '구입번호 직접입력' 으로 추가하세요.
+                      </Alert>
+                    ) : (
+                      <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
+                        <Stack spacing={0.5}>{autoTickets.map(renderRow)}</Stack>
+                      </Box>
+                    )}
 
-                {/* 자동 — slipQueue (구입번호 직접입력) */}
-                <Typography variant="caption" color="success.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-                  📋 자동 (구입번호 직접입력) — {slipQueue.length}장 · {totalSlipLines}줄
-                </Typography>
-                {totalSlipLines === 0 ? (
-                  <Alert severity="info">
-                    자동 데이터가 없습니다. 상단의 '구입번호 직접입력' 영역에서 6개 번호를 선택하고 줄 저장을 누르세요.
-                  </Alert>
-                ) : (
-                  <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
-                    <Stack spacing={0.5}>
-                      {autoSlipLines.map((line, idx) => (
-                        <Stack
-                          key={`auto-${line.slipIdx}-${line.lineIdx}`}
-                          direction="row"
-                          alignItems="center"
-                          spacing={0.5}
-                          flexWrap="wrap"
-                          useFlexGap
-                        >
-                          <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
-                            #{idx + 1}
-                          </Typography>
-                          <Chip
-                            size="small"
-                            label={`용지${line.slipIdx + 1}·${line.label}`}
-                            variant="outlined"
-                            sx={{ minWidth: 64 }}
-                          />
-                          <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
-                            {line.numbers.map((n) => (
-                              <LottoBall
-                                key={`${line.slipIdx}-${line.lineIdx}-${n}`}
-                                number={n}
-                                size={22}
-                                dimmed={winningSet ? !winningSet.has(n) : false}
-                              />
-                            ))}
-                          </Stack>
-                          {winningSet && (
-                            <Chip
-                              size="small"
-                              color={
-                                line.numbers.filter((n) => winningSet.has(n)).length >= 3
-                                  ? 'success'
-                                  : 'default'
-                              }
-                              label={`${line.numbers.filter((n) => winningSet.has(n)).length}/6`}
-                              sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                            />
-                          )}
-                          {onRemoveSlipLine && (
-                            <IconButton
-                              size="small"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onRemoveSlipLine(line.slipIdx, line.lineIdx);
-                              }}
-                              aria-label={`용지 ${line.slipIdx + 1} ${line.label}줄 삭제`}
-                              sx={{ ml: 'auto' }}
-                            >
-                              ×
-                            </IconButton>
-                          )}
-                        </Stack>
-                      ))}
-                    </Stack>
+                    {/* 반자동 영역 — § 3 추가 세팅과 동일 데이터 소스·카운트 형식 */}
+                    <Typography variant="caption" color="primary.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+                      🔄 반자동 누적: {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkTickets.length}장 · 총 {semiTickets.length}줄
+                    </Typography>
+                    {semiTickets.length === 0 ? (
+                      <Alert severity="info">
+                        반자동 데이터가 없습니다. 그리드에서 6개 선택 후 [줄 저장] 하거나 [⬆ 대량 입력] 으로 추가하세요.
+                      </Alert>
+                    ) : (
+                      <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
+                        <Stack spacing={0.5}>{semiTickets.map(renderRow)}</Stack>
+                      </Box>
+                    )}
                   </Box>
                 )}
-              </Box>
-            )}
-          </Paper>
+              </Paper>
+            );
+          })()}
 
           {/* 추천 조합 생성 — 자동+반자동 누적 데이터 기반 */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>

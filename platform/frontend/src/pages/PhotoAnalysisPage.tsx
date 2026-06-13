@@ -1274,6 +1274,14 @@ export default function PhotoAnalysisPage() {
         slipQueue={slipQueue}
         accumulated={accumulated}
         onRemoveSlipLine={removeSlipLine}
+        currentSlipLines={currentSlipLines}
+        bulkAutoTickets={bulkAutoTickets}
+        onRemoveCurrentLine={removeCurrentLine}
+        onRemoveBulkAutoTicket={(idx) =>
+          patchManual({
+            bulkAutoTickets: bulkAutoTickets.filter((_, i) => i !== idx),
+          })
+        }
       />
 
       <PhotoBacktestPanel accumulated={accumulated} />

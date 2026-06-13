@@ -30,6 +30,7 @@ const RoundsPage = lazy(() => import('./pages/RoundsPage'));
 const RoundRecommendPage = lazy(() => import('./pages/RoundRecommendPage'));
 const ResearchPage = lazy(() => import('./pages/ResearchPage'));
 const PhotoAnalysisPage = lazy(() => import('./pages/PhotoAnalysisPage'));
+const ComposedAnalysisPage = lazy(() => import('./pages/ComposedAnalysisPage'));
 
 function PageFallback() {
   return (
@@ -56,6 +57,7 @@ function PageFallback() {
 const TABS = [
   { id: 'dashboard', label: '대시보드' },
   { id: 'rounds', label: '회차' },
+  { id: 'composite', label: '🎯 종합 분석' },
   { id: 'epo', label: '⚡ EPO 추천 (권장)' },
   { id: 'smart', label: '스마트 추천' },
   { id: 'generator', label: '가중치 추천' },
@@ -102,6 +104,7 @@ export default function App() {
         <Suspense fallback={<PageFallback />}>
           {tab === 'dashboard' && <DashboardPage />}
           {tab === 'rounds' && <RoundsPage />}
+          {tab === 'composite' && <ComposedAnalysisPage />}
           {tab === 'generator' && <GeneratorPage />}
           {tab === 'smart' && <SmartPickPage />}
           {tab === 'epo' && <EpoPage />}

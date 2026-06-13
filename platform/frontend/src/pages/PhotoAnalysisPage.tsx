@@ -962,21 +962,14 @@ export default function PhotoAnalysisPage() {
 
   return (
     <Stack spacing={2}>
-      {/* ━━ 헤더 ━━ */}
-      <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-        <Stack spacing={0.25}>
-          <Typography variant="h5" fontWeight={800}>
-            자동번호 용지 분석
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            복기·이번회차 누적 분석 + 반자동 비교 + 백테스트
-          </Typography>
-        </Stack>
-        {accumulated && accumulated.total_analyses > 0 && (
-          <Button size="small" color="error" variant="outlined" onClick={clearStore}>
-            누적 전체 삭제
-          </Button>
-        )}
+      {/* ━━ 헤더 ━━ — 누적 삭제는 §1/§3 각 영역의 추가 세팅으로 분리 */}
+      <Stack spacing={0.25}>
+        <Typography variant="h5" fontWeight={800}>
+          자동번호 용지 분석
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          복기·이번회차 누적 분석 + 반자동 비교 + 백테스트
+        </Typography>
       </Stack>
 
       {/* ━━ 회차 탭 ━━ */}
@@ -1076,6 +1069,38 @@ export default function PhotoAnalysisPage() {
           onEditCurrentLine={editCurrentLine}
           onRemoveSlipLine={removeSlipLine}
         />
+
+        {/* 추가 세팅 — 자동(구입번호 직접입력) 전용. 반자동과 분리. */}
+        <Divider sx={{ my: 2 }} />
+        <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+          ⚙ 추가 세팅
+        </Typography>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="body2">
+              자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄
+              {accumulated && accumulated.total_analyses > 0
+                ? ` · 백엔드 누적 ${accumulated.total_analyses}건`
+                : ''}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              아래 버튼은 <strong>자동(구입번호 직접입력) 누적만</strong> 삭제합니다. 반자동 누적은 § 3 반자동 비교의 추가 세팅에서 따로 삭제하세요.
+            </Typography>
+          </Box>
+          <Button
+            size="small"
+            color="error"
+            variant="outlined"
+            onClick={clearStore}
+            disabled={
+              slipQueue.length === 0 &&
+              currentSlipLines.length === 0 &&
+              (!accumulated || accumulated.total_analyses === 0)
+            }
+          >
+            자동 누적 전체 삭제
+          </Button>
+        </Stack>
       </Paper>
 
       {notice && <Alert severity="info">{notice}</Alert>}

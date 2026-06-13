@@ -926,17 +926,27 @@ export default function SemiAutoComparePanel({
     );
   };
 
+  /**
+   * 반자동 누적 전체 삭제 — 저장 줄(semi*) + 대량(bulkTickets) + 마지막
+   * 저장 시각까지. picked (입력 중 그리드 선택) 는 누적이 아니므로 제외.
+   */
   const clearAllSaved = () => {
-    const total =
+    const savedTotalLines =
       semiCurrentLines.length + semiSlipQueue.reduce((s, sl) => s + sl.lines.length, 0);
-    if (total === 0) return;
-    if (!window.confirm(`저장된 ${total}줄 (${semiSlipQueue.length}장 + 입력 중 ${semiCurrentLines.length}줄)을 모두 삭제할까요?`)) {
+    const bulkCount = bulkTickets.length;
+    if (savedTotalLines === 0 && bulkCount === 0) return;
+    const parts: string[] = [];
+    if (semiSlipQueue.length > 0) parts.push(`저장 ${semiSlipQueue.length}장`);
+    if (semiCurrentLines.length > 0) parts.push(`입력 중 ${semiCurrentLines.length}줄`);
+    if (bulkCount > 0) parts.push(`대량 ${bulkCount}장`);
+    if (!window.confirm(`반자동 누적 (${parts.join(' + ')}) 을 모두 삭제할까요?`)) {
       return;
     }
     setSemiCurrentLines([]);
     setSemiSlipQueue([]);
+    setBulkTickets([]);
     setLastSavedAt(null);
-    setSaveNotice('전체 저장 누적이 삭제되었습니다.');
+    setSaveNotice('반자동 누적이 모두 삭제되었습니다.');
   };
 
   /** 입력 중인 용지 (picked + semiCurrentLines) 만 비움 — semiSlipQueue 보존. */
@@ -1185,9 +1195,6 @@ export default function SemiAutoComparePanel({
                 </Typography>
               )}
             </Box>
-            <Button size="small" color="error" variant="text" onClick={clearAllSaved}>
-              전체 삭제
-            </Button>
           </Stack>
           <SavedLinesPanel
             currentSlipLines={semiCurrentLines}
@@ -2176,6 +2183,35 @@ export default function SemiAutoComparePanel({
           </Typography>
         </>
       )}
+
+      {/* 추가 세팅 — 반자동 비교 전용. 자동(§1) 누적과 분리. */}
+      <Divider sx={{ my: 2 }} />
+      <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+        ⚙ 추가 세팅
+      </Typography>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+        <Box sx={{ flex: 1 }}>
+          <Typography variant="body2">
+            반자동 누적: {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkTickets.length}장
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            아래 버튼은 <strong>반자동 누적만</strong> 삭제합니다 (저장 줄 + 입력 중 + 대량 + 마지막 저장 시각). 자동 누적은 §1 구입번호 직접입력의 추가 세팅에서 따로 삭제하세요.
+          </Typography>
+        </Box>
+        <Button
+          size="small"
+          color="error"
+          variant="outlined"
+          onClick={clearAllSaved}
+          disabled={
+            semiCurrentLines.length === 0 &&
+            semiSlipQueue.length === 0 &&
+            bulkTickets.length === 0
+          }
+        >
+          반자동 누적 전체 삭제
+        </Button>
+      </Stack>
 
       <BulkLineInputDialog
         open={bulkOpen}

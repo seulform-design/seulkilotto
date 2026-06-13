@@ -93,8 +93,10 @@ def build_manual_sheet_payloads(slips: List[Dict[str, Any]]) -> List[Dict[str, A
     out: List[Dict[str, Any]] = []
     for idx, slip in enumerate(slips, start=1):
         raw_lines = slip.get("lines") or []
-        if len(raw_lines) < GAME_LINE_COUNT:
-            raise ValueError(f"용지 {idx}: A~E 게임 줄 5개가 필요합니다 (현재 {len(raw_lines)}개).")
+        # 부분 용지 허용: 1줄 이상이면 OK (대량 입력의 마지막 슬립이 5줄 미만일 수 있음).
+        # 6줄 이상이면 build_manual_slip_payload 가 lines[:GAME_LINE_COUNT] 로 잘라냄.
+        if len(raw_lines) < 1:
+            raise ValueError(f"용지 {idx}: 최소 1개 게임 줄이 필요합니다.")
         out.append(
             build_manual_slip_payload(
                 idx,

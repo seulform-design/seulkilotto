@@ -67,7 +67,8 @@ class ManualGameLine(BaseModel):
 
 class ManualSlip(BaseModel):
     name: str = ""
-    lines: List[ManualGameLine] = Field(..., min_length=5, max_length=5)
+    # 부분 용지 허용: 1~5줄 (대량 입력에서 마지막 슬립이 5줄 미만일 수 있음)
+    lines: List[ManualGameLine] = Field(..., min_length=1, max_length=5)
 
 
 class ManualAnalyzeRequest(BaseModel):

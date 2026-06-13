@@ -172,6 +172,20 @@ interface BulkTicketResult {
   comboScore: number;
 }
 
+/**
+ * 교집합 세트 그룹 — 정확히 N개 번호가 강한 후보와 겹친 케이스를
+ * 같은 번호 세트별로 묶은 결과.
+ *
+ * 예: 2개 겹친 티켓이 50장인데, 그 중 [3, 15] 가 8장, [12, 23] 가 5장 등...
+ *     이걸 빈도순으로 정렬해 노출.
+ */
+interface IntersectionGroup {
+  numbers: number[]; // 정렬된 교집합 세트
+  size: number;
+  ticketCount: number;
+  ticketIndices: number[]; // 어느 티켓들이 이 세트를 가졌는지 (디버깅/드릴다운용)
+}
+
 interface BulkComparisonResult {
   ticketCount: number;
   uniqueNumberCount: number;
@@ -186,18 +200,18 @@ interface BulkComparisonResult {
   };
   bestTickets: BulkTicketResult[];
   excludedWarningCount: number;
-  // 누적 자동 강한 후보 교집합 분포
-  strongIntersectionDistribution: Record<number, number>; // 0,1,2,3,4,5,6 → 티켓수
-  twoPlusStrongCount: number;   // 강한 후보 2개+ 교집합 티켓 수
-  threePlusStrongCount: number; // 강한 후보 3개+ 교집합 티켓 수
-  // 페어/트리플 매치 분포
+  strongIntersectionDistribution: Record<number, number>;
+  twoPlusStrongCount: number;
+  threePlusStrongCount: number;
+  // 교집합 세트 그룹 — 정확히 그 크기로 겹친 케이스
+  twoIntersectionGroups: IntersectionGroup[];   // size=2 빈도 TOP 10
+  threeIntersectionGroups: IntersectionGroup[]; // size=3 빈도 TOP 10
+  fourPlusIntersectionGroups: IntersectionGroup[]; // size>=4 빈도 TOP 5
   pairMatchDistribution: Record<number, number>;
   tripleMatchDistribution: Record<number, number>;
   avgPairMatches: number;
   avgTripleMatches: number;
-  // 콤보 점수 상위 5개
   bestComboTickets: BulkTicketResult[];
-  // 데이터 가용성
   comboDataAvailable: boolean;
 }
 
@@ -226,6 +240,8 @@ function buildBulkComparison(
   const strongIntersectionDistribution: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
   const pairMatchDistribution: Record<number, number> = {};
   const tripleMatchDistribution: Record<number, number> = {};
+  // 교집합 세트 그룹화 — 정규형 키 → 그룹
+  const intersectionGroupsByKey: Record<string, IntersectionGroup> = {};
   let totalHits = 0;
   let totalPairMatches = 0;
   let totalTripleMatches = 0;
@@ -281,6 +297,22 @@ function buildBulkComparison(
     if (strongInt >= 2) twoPlusStrongCount += 1;
     if (strongInt >= 3) threePlusStrongCount += 1;
 
+    // 교집합 세트 그룹화 — 정확히 어느 번호가 겹쳤는지 추적
+    if (vsStrongMatch.length >= 2) {
+      const sortedIntersection = [...vsStrongMatch].sort((a, b) => a - b);
+      const key = sortedIntersection.join('-');
+      if (!intersectionGroupsByKey[key]) {
+        intersectionGroupsByKey[key] = {
+          numbers: sortedIntersection,
+          size: sortedIntersection.length,
+          ticketCount: 0,
+          ticketIndices: [],
+        };
+      }
+      intersectionGroupsByKey[key].ticketCount += 1;
+      intersectionGroupsByKey[key].ticketIndices.push(index);
+    }
+
     pairMatchDistribution[pairCount] = (pairMatchDistribution[pairCount] ?? 0) + 1;
     tripleMatchDistribution[tripleCount] = (tripleMatchDistribution[tripleCount] ?? 0) + 1;
     totalPairMatches += pairCount;
@@ -311,6 +343,21 @@ function buildBulkComparison(
     .sort((a, b) => b.comboScore - a.comboScore || b.vsStrongMatch.length - a.vsStrongMatch.length)
     .slice(0, 5);
 
+  // 교집합 세트 그룹을 크기별로 분류 + 빈도순 정렬
+  const allGroups = Object.values(intersectionGroupsByKey);
+  const twoIntersectionGroups = allGroups
+    .filter((g) => g.size === 2)
+    .sort((a, b) => b.ticketCount - a.ticketCount || a.numbers[0] - b.numbers[0])
+    .slice(0, 10);
+  const threeIntersectionGroups = allGroups
+    .filter((g) => g.size === 3)
+    .sort((a, b) => b.ticketCount - a.ticketCount || a.numbers[0] - b.numbers[0])
+    .slice(0, 10);
+  const fourPlusIntersectionGroups = allGroups
+    .filter((g) => g.size >= 4)
+    .sort((a, b) => b.size - a.size || b.ticketCount - a.ticketCount)
+    .slice(0, 5);
+
   return {
     ticketCount,
     uniqueNumberCount: uniqueNumbers.size,
@@ -323,6 +370,9 @@ function buildBulkComparison(
     strongIntersectionDistribution,
     twoPlusStrongCount,
     threePlusStrongCount,
+    twoIntersectionGroups,
+    threeIntersectionGroups,
+    fourPlusIntersectionGroups,
     pairMatchDistribution,
     tripleMatchDistribution,
     avgPairMatches,
@@ -1092,6 +1142,146 @@ export default function SemiAutoComparePanel({
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
                 ※ 이번회차 자동 누적 데이터가 없습니다. 자동 용지를 분석하여 누적을 만들면 교집합 분석이 활성됩니다.
               </Typography>
+            )}
+
+            {/* 교집합 세트별 빈도 — 어느 번호가 정확히 겹친 케이스 */}
+            {(bulkComparison.twoIntersectionGroups.length > 0 ||
+              bulkComparison.threeIntersectionGroups.length > 0 ||
+              bulkComparison.fourPlusIntersectionGroups.length > 0) && (
+              <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px dashed', borderColor: 'divider' }}>
+                <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 1 }}>
+                  📌 정확한 교집합 세트 — 어떤 번호가 겹쳤는지
+                </Typography>
+
+                {/* 2개 교집합 TOP 10 */}
+                {bulkComparison.twoIntersectionGroups.length > 0 && (
+                  <Box sx={{ mb: 1.5 }}>
+                    <Typography
+                      variant="caption"
+                      color="warning.light"
+                      sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
+                    >
+                      🟡 2개 정확히 겹친 세트 TOP {bulkComparison.twoIntersectionGroups.length}
+                    </Typography>
+                    <Stack spacing={0.5}>
+                      {bulkComparison.twoIntersectionGroups.map((g) => {
+                        const pct = bulkComparison.ticketCount > 0
+                          ? (g.ticketCount / bulkComparison.ticketCount) * 100
+                          : 0;
+                        return (
+                          <Stack
+                            key={`int2-${g.numbers.join('-')}`}
+                            direction="row"
+                            alignItems="center"
+                            spacing={0.5}
+                            flexWrap="wrap"
+                            useFlexGap
+                          >
+                            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                              {g.numbers.map((n) => (
+                                <LottoBall key={n} number={n} size={26} />
+                              ))}
+                            </Stack>
+                            <Chip
+                              size="small"
+                              label={`${g.ticketCount}장 (${pct.toFixed(2)}%)`}
+                              color="warning"
+                              variant="filled"
+                              sx={{ fontWeight: 700 }}
+                            />
+                          </Stack>
+                        );
+                      })}
+                    </Stack>
+                  </Box>
+                )}
+
+                {/* 3개 교집합 TOP 10 */}
+                {bulkComparison.threeIntersectionGroups.length > 0 && (
+                  <Box sx={{ mb: 1.5 }}>
+                    <Typography
+                      variant="caption"
+                      color="success.light"
+                      sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
+                    >
+                      🟢 3개 정확히 겹친 세트 TOP {bulkComparison.threeIntersectionGroups.length}
+                    </Typography>
+                    <Stack spacing={0.5}>
+                      {bulkComparison.threeIntersectionGroups.map((g) => {
+                        const pct = bulkComparison.ticketCount > 0
+                          ? (g.ticketCount / bulkComparison.ticketCount) * 100
+                          : 0;
+                        return (
+                          <Stack
+                            key={`int3-${g.numbers.join('-')}`}
+                            direction="row"
+                            alignItems="center"
+                            spacing={0.5}
+                            flexWrap="wrap"
+                            useFlexGap
+                          >
+                            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                              {g.numbers.map((n) => (
+                                <LottoBall key={n} number={n} size={26} />
+                              ))}
+                            </Stack>
+                            <Chip
+                              size="small"
+                              label={`${g.ticketCount}장 (${pct.toFixed(2)}%)`}
+                              color="success"
+                              variant="filled"
+                              sx={{ fontWeight: 700 }}
+                            />
+                          </Stack>
+                        );
+                      })}
+                    </Stack>
+                  </Box>
+                )}
+
+                {/* 4개+ 교집합 TOP 5 */}
+                {bulkComparison.fourPlusIntersectionGroups.length > 0 && (
+                  <Box>
+                    <Typography
+                      variant="caption"
+                      color="error.light"
+                      sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
+                    >
+                      🔴 4개 이상 겹친 세트 TOP {bulkComparison.fourPlusIntersectionGroups.length} (희귀)
+                    </Typography>
+                    <Stack spacing={0.5}>
+                      {bulkComparison.fourPlusIntersectionGroups.map((g) => {
+                        const pct = bulkComparison.ticketCount > 0
+                          ? (g.ticketCount / bulkComparison.ticketCount) * 100
+                          : 0;
+                        return (
+                          <Stack
+                            key={`int4-${g.numbers.join('-')}`}
+                            direction="row"
+                            alignItems="center"
+                            spacing={0.5}
+                            flexWrap="wrap"
+                            useFlexGap
+                          >
+                            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                              {g.numbers.map((n) => (
+                                <LottoBall key={n} number={n} size={26} />
+                              ))}
+                            </Stack>
+                            <Chip
+                              size="small"
+                              label={`${g.size}개 · ${g.ticketCount}장 (${pct.toFixed(2)}%)`}
+                              color="error"
+                              variant="filled"
+                              sx={{ fontWeight: 700 }}
+                            />
+                          </Stack>
+                        );
+                      })}
+                    </Stack>
+                  </Box>
+                )}
+              </Box>
             )}
           </Paper>
 

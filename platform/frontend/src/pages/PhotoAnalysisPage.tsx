@@ -18,7 +18,7 @@ import {
   Tabs,
   Typography,
 } from '@mui/material';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import BulkLineInputDialog from '../components/BulkLineInputDialog';
 import LottoBall from '../components/LottoBall';
 import {
@@ -26,7 +26,6 @@ import {
   type ComboDuplicatePatterns,
   type CrossLineAnalysisReport,
   type DrawReviewTemplate,
-  type FrequencyOverlapPatterns,
   type PatternApplication,
   type ManualSlipInput,
   type PhotoAnalysisAccumulated,
@@ -370,49 +369,6 @@ function SavedReviewTemplatePanel({
         ))}
       </Stack>
     </Paper>
-  );
-}
-
-function FrequencyOverlapPanel({
-  data,
-  accumulated = false,
-  winningSet,
-}: {
-  data?: FrequencyOverlapPatterns | null;
-  accumulated?: boolean;
-  winningSet?: Set<number> | null;
-}) {
-  if (!data?.tiers?.length) return null;
-  return (
-    <Stack spacing={1.5}>
-      {data.tiers.map((tier) => (
-        <Box key={tier.min_count}>
-          <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
-            {tier.label} ({tier.pattern_type})
-          </Typography>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>번호</TableCell>
-                <TableCell>{accumulated ? '칸 내 최대 겹침' : '칸 내 겹침'}</TableCell>
-                {accumulated && <TableCell>패턴 용지 수</TableCell>}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {tier.items.map((row) => (
-                <TableRow key={`${tier.min_count}-${row.number}`}>
-                  <TableCell>
-                    <ReviewBall number={row.number} size={30} winningSet={winningSet} />
-                  </TableCell>
-                  <TableCell>{row.max_overlap_count ?? row.overlap_count ?? tier.min_count}회</TableCell>
-                  {accumulated && <TableCell>{row.video_votes ?? 1}건</TableCell>}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Box>
-      ))}
-    </Stack>
   );
 }
 
@@ -978,7 +934,19 @@ export default function PhotoAnalysisPage() {
   }, [manualByIntent]);
   const [showPhotoUpload, setShowPhotoUpload] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // 분리된 로딩 상태 — 매뉴얼 분석 / 사진 분석을 동시 추적
+  const [manualLoading, setManualLoading] = useState(false);
+  const [photoLoading, setPhotoLoading] = useState(false);
+  // 결과 자동 스크롤 타겟
+  const resultRef = useRef<HTMLDivElement | null>(null);
+  // 비동기 작업 중 unmount 가드 (메모리 안정성)
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [resultsByIntent, setResultsByIntent] = useState<Partial<Record<SheetIntent, PhotoAnalysisResponse>>>({});
@@ -1001,22 +969,41 @@ export default function PhotoAnalysisPage() {
   }, []);
 
   useEffect(() => {
+    // mount 시 3개 비동기 호출 — 모두 mountedRef 가드로 보호
     refreshAccumulated();
-    v1Api.getMeta().then((m) => {
-      setLatestRound(m.latest_round);
-      setCurrentRound(m.current_round);
-    }).catch(() => {});
+    v1Api
+      .getMeta()
+      .then((m) => {
+        if (!mountedRef.current) return;
+        setLatestRound(m.latest_round);
+        setCurrentRound(m.current_round);
+      })
+      .catch(() => {});
     v1Api
       .getPhotoVisionConfig()
       .then((c) => {
+        if (!mountedRef.current) return;
         setVisionConfigured(c.configured);
         setUseVisionApi(Boolean(c.use_vision_api));
       })
       .catch(() => {
+        if (!mountedRef.current) return;
         setVisionConfigured(false);
         setUseVisionApi(false);
       });
   }, [refreshAccumulated]);
+
+  // 결과 도착 시 자동 스크롤 — 사용자가 분석 결과를 놓치지 않도록
+  useEffect(() => {
+    if (resultsByIntent[activeTab] && resultRef.current) {
+      // 페인트 후 스크롤 (DOM 안정화 대기)
+      const id = window.setTimeout(() => {
+        resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+      return () => window.clearTimeout(id);
+    }
+    return undefined;
+  }, [resultsByIntent, activeTab]);
 
   const selected = selectedByIntent[activeTab];
   const activeResult = resultsByIntent[activeTab] ?? null;
@@ -1216,11 +1203,12 @@ export default function PhotoAnalysisPage() {
       setError('저장된 줄이 없습니다. 번호 6개 선택 후 「줄 저장」을 누르세요.');
       return;
     }
-    setLoading(true);
+    setManualLoading(true);
     setError(null);
     setNotice(null);
     try {
       const data = await v1Api.analyzeManualSlips(slips, { sheetIntent: activeTab, persist: true });
+      if (!mountedRef.current) return;
       if (data.result) {
         const intent = resolveResultIntent(data.result);
         setResultsByIntent((prev) => ({ ...prev, [intent]: data.result! }));
@@ -1230,13 +1218,14 @@ export default function PhotoAnalysisPage() {
         setError(data.duplicate_message || '이미 등록된 용지입니다.');
       } else {
         patchManual({ slipQueue: [], currentSlipLines: [], picked: [] });
-        setNotice(`${slips.length}장 분석·저장 완료`);
+        setNotice(`✅ ${slips.length}장 분석·저장 완료 — 결과는 페이지 하단`);
       }
       await refreshAccumulated();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '분석 실패');
+      if (!mountedRef.current) return;
+      setError(e instanceof Error ? e.message : '분석 실패 — 저장된 줄은 유지됩니다.');
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setManualLoading(false);
     }
   };
 
@@ -1245,7 +1234,7 @@ export default function PhotoAnalysisPage() {
       setError('사진을 1장 이상 첨부하세요.');
       return;
     }
-    setLoading(true);
+    setPhotoLoading(true);
     setError(null);
     setNotice(null);
     try {
@@ -1253,6 +1242,7 @@ export default function PhotoAnalysisPage() {
         selected.map((s) => s.file),
         { sheetIntent: activeTab, persist: true }
       );
+      if (!mountedRef.current) return;
       if (data.result) {
         const intent = resolveResultIntent(data.result);
         setResultsByIntent((prev) => ({ ...prev, [intent]: data.result! }));
@@ -1267,13 +1257,16 @@ export default function PhotoAnalysisPage() {
         if (dupMsg) setNotice(dupMsg);
       } else {
         setSelectedByIntent((prev) => ({ ...prev, [activeTab]: [] }));
-        if (dupMsg) setNotice(dupMsg);
+        setNotice(
+          dupMsg ? `${dupMsg} ✅ 분석 완료 — 결과는 페이지 하단` : '✅ 분석 완료 — 결과는 페이지 하단'
+        );
       }
       await refreshAccumulated();
     } catch (e) {
+      if (!mountedRef.current) return;
       setError(e instanceof Error ? e.message : '분석 실패');
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setPhotoLoading(false);
     }
   };
 
@@ -1452,8 +1445,12 @@ export default function PhotoAnalysisPage() {
           <Button variant="outlined" color="primary" onClick={() => setBulkOpen(true)}>
             ⬆ 대량 입력 (텍스트)
           </Button>
-          <Button variant="contained" onClick={runManualAnalyze} disabled={loading}>
-            {loading ? (
+          <Button
+            variant="contained"
+            onClick={runManualAnalyze}
+            disabled={manualLoading || photoLoading}
+          >
+            {manualLoading ? (
               <CircularProgress size={22} color="inherit" />
             ) : activeTab === 'review' ? (
               `복기 분석 · 저장 (${slipQueue.length}장)`
@@ -1525,8 +1522,16 @@ export default function PhotoAnalysisPage() {
               </Stack>
             </Stack>
           )}
-          <Button variant="outlined" onClick={runAnalyze} disabled={loading || !selected.length}>
-            {loading ? <CircularProgress size={22} color="inherit" /> : '사진으로 분석 · 저장'}
+          <Button
+            variant="outlined"
+            onClick={runAnalyze}
+            disabled={photoLoading || manualLoading || !selected.length}
+          >
+            {photoLoading ? (
+              <CircularProgress size={22} color="inherit" />
+            ) : (
+              '사진으로 분석 · 저장'
+            )}
           </Button>
         </Stack>
         )}
@@ -1545,13 +1550,13 @@ export default function PhotoAnalysisPage() {
         onDeleteEntry={deleteHistoryEntry}
       />
       {activeResult && (
-        <>
-          <Divider />
+        <Box ref={resultRef}>
+          <Divider sx={{ mb: 2 }} />
           <Typography variant="h6" fontWeight={700}>
             {activeTab === 'review' ? '복기' : '이번회차'} 최근 분석
           </Typography>
           <SingleResultPanel result={activeResult} />
-        </>
+        </Box>
       )}
 
       <BulkLineInputDialog

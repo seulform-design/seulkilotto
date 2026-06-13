@@ -997,6 +997,51 @@ export default function SemiAutoComparePanel({
   );
 
   /**
+   * 자동 + 반자동 통합 비교 — 강한 후보 교집합 패널 전용.
+   * 자동 (currentSlipLines + slipQueue + bulkAutoTickets) + 반자동
+   * (semiCurrentLines + semiSlipQueue + bulkTickets) 의 모든 줄을 합쳐
+   * '이번회차 자동 누적 강한 후보' 와의 교집합 세트를 모두 통계.
+   * 사용자 요청: '전체 티켓 목록에서 자동과 반자동의 교집합 세트 번호는
+   * 모두 나올 수 있도록 통계 분석'.
+   */
+  const combinedTickets = useMemo<number[][]>(() => {
+    const out: number[][] = [];
+    for (const line of currentSlipLines) out.push(line.numbers);
+    for (const slip of slipQueue) {
+      for (const line of slip.lines) out.push(line.numbers);
+    }
+    for (const ticket of bulkAutoTickets) out.push(ticket);
+    for (const line of semiCurrentLines) out.push(line.numbers);
+    for (const slip of semiSlipQueue) {
+      for (const line of slip.lines) out.push(line.numbers);
+    }
+    for (const ticket of bulkTickets) out.push(ticket);
+    return out;
+  }, [currentSlipLines, slipQueue, bulkAutoTickets, semiCurrentLines, semiSlipQueue, bulkTickets]);
+
+  const combinedComparison = useMemo(
+    () =>
+      combinedTickets.length > 0
+        ? buildBulkComparison(
+            combinedTickets,
+            slipQueue,
+            accumulated,
+            comparisonRoundData?.numbers ?? [],
+            comparisonRoundData?.bonus ?? null
+          )
+        : null,
+    [combinedTickets, slipQueue, accumulated, comparisonRoundData]
+  );
+
+  /**
+   * 강한 후보 교집합 패널 전용 alias.
+   * 자동+반자동 통합 통계 (combinedComparison) 우선, 없을 때만 bulkComparison
+   * 으로 폴백. 사용은 패널의 외부 가드 (`bulkComparison && (...)`) 안에서만
+   * 일어나므로 non-null 보장 — TS 어설션으로 표시.
+   */
+  const intersectionCmp = (combinedComparison ?? bulkComparison)!;
+
+  /**
    * 대량 입력 — append + dedup.
    *
    * 이전: setBulkTickets(lines) 가 모두 덮어씀
@@ -1854,16 +1899,19 @@ export default function SemiAutoComparePanel({
             </Paper>
           )}
 
-          {/* ── 누적 자동 강한 후보 교집합 분포 ────────────────── */}
+          {/* ── 누적 자동 강한 후보 교집합 분포 — 자동+반자동 통합 통계 ── */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'primary.main' }}>
             <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-              🔗 이번회차 자동 누적 강한 후보 교집합 ({bulkComparison.perTicket[0]?.vsStrongMatch != null && (getCurrentRoundStrongCandidates(accumulated).length)}개 후보)
+              🔗 이번회차 자동 누적 강한 후보 교집합 ({getCurrentRoundStrongCandidates(accumulated).length}개 후보 · 자동+반자동 {intersectionCmp.ticketCount}장 통합 분석)
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              ※ 전체 티켓 목록의 자동(currentSlipLines + slipQueue + bulkAutoTickets) + 반자동(semiCurrentLines + semiSlipQueue + bulkTickets) 모든 줄을 합쳐 교집합 세트를 통계. 정확한 교집합 세트 번호는 모두 노출.
             </Typography>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
               {[0, 1, 2, 3, 4, 5, 6].map((k) => {
-                const count = bulkComparison.strongIntersectionDistribution[k] ?? 0;
-                const pct = bulkComparison.ticketCount > 0
-                  ? (count / bulkComparison.ticketCount) * 100
+                const count = intersectionCmp.strongIntersectionDistribution[k] ?? 0;
+                const pct = intersectionCmp.ticketCount > 0
+                  ? (count / intersectionCmp.ticketCount) * 100
                   : 0;
                 return (
                   <Chip
@@ -1880,13 +1928,13 @@ export default function SemiAutoComparePanel({
               <Chip
                 size="small"
                 color="warning"
-                label={`🟡 2개+ 교집합: ${bulkComparison.twoPlusStrongCount}장 (${bulkComparison.ticketCount > 0 ? (bulkComparison.twoPlusStrongCount / bulkComparison.ticketCount * 100).toFixed(2) : '0.00'}%)`}
+                label={`🟡 2개+ 교집합: ${intersectionCmp.twoPlusStrongCount}장 (${intersectionCmp.ticketCount > 0 ? (intersectionCmp.twoPlusStrongCount / intersectionCmp.ticketCount * 100).toFixed(2) : '0.00'}%)`}
                 sx={{ fontWeight: 700 }}
               />
               <Chip
                 size="small"
                 color="success"
-                label={`🟢 3개+ 교집합: ${bulkComparison.threePlusStrongCount}장 (${bulkComparison.ticketCount > 0 ? (bulkComparison.threePlusStrongCount / bulkComparison.ticketCount * 100).toFixed(2) : '0.00'}%)`}
+                label={`🟢 3개+ 교집합: ${intersectionCmp.threePlusStrongCount}장 (${intersectionCmp.ticketCount > 0 ? (intersectionCmp.threePlusStrongCount / intersectionCmp.ticketCount * 100).toFixed(2) : '0.00'}%)`}
                 sx={{ fontWeight: 700 }}
               />
             </Stack>
@@ -1897,9 +1945,9 @@ export default function SemiAutoComparePanel({
             )}
 
             {/* 교집합 세트별 빈도 — 어느 번호가 정확히 겹친 케이스 (전체 노출) */}
-            {(bulkComparison.twoIntersectionGroups.length > 0 ||
-              bulkComparison.threeIntersectionGroups.length > 0 ||
-              bulkComparison.fourPlusIntersectionGroups.length > 0) && (
+            {(intersectionCmp.twoIntersectionGroups.length > 0 ||
+              intersectionCmp.threeIntersectionGroups.length > 0 ||
+              intersectionCmp.fourPlusIntersectionGroups.length > 0) && (
               <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px dashed', borderColor: 'divider' }}>
                 {/* 헤더 + 집계 메트릭 */}
                 <Stack
@@ -1918,34 +1966,34 @@ export default function SemiAutoComparePanel({
                     <Chip
                       size="small"
                       label={`총 ${
-                        bulkComparison.twoIntersectionGroups.length +
-                        bulkComparison.threeIntersectionGroups.length +
-                        bulkComparison.fourPlusIntersectionGroups.length
+                        intersectionCmp.twoIntersectionGroups.length +
+                        intersectionCmp.threeIntersectionGroups.length +
+                        intersectionCmp.fourPlusIntersectionGroups.length
                       }종`}
                       variant="outlined"
                       sx={{ fontWeight: 700 }}
                     />
-                    {bulkComparison.twoIntersectionGroups.length > 0 && (
+                    {intersectionCmp.twoIntersectionGroups.length > 0 && (
                       <Chip
                         size="small"
                         color="warning"
-                        label={`2개: ${bulkComparison.twoIntersectionGroups.length}종`}
+                        label={`2개: ${intersectionCmp.twoIntersectionGroups.length}종`}
                         variant="outlined"
                       />
                     )}
-                    {bulkComparison.threeIntersectionGroups.length > 0 && (
+                    {intersectionCmp.threeIntersectionGroups.length > 0 && (
                       <Chip
                         size="small"
                         color="success"
-                        label={`3개: ${bulkComparison.threeIntersectionGroups.length}종`}
+                        label={`3개: ${intersectionCmp.threeIntersectionGroups.length}종`}
                         variant="outlined"
                       />
                     )}
-                    {bulkComparison.fourPlusIntersectionGroups.length > 0 && (
+                    {intersectionCmp.fourPlusIntersectionGroups.length > 0 && (
                       <Chip
                         size="small"
                         color="error"
-                        label={`4개+: ${bulkComparison.fourPlusIntersectionGroups.length}종`}
+                        label={`4개+: ${intersectionCmp.fourPlusIntersectionGroups.length}종`}
                         variant="outlined"
                       />
                     )}
@@ -1953,14 +2001,14 @@ export default function SemiAutoComparePanel({
                 </Stack>
 
                 {/* 2개 교집합 — 전체 노출 (스크롤 컨테이너) */}
-                {bulkComparison.twoIntersectionGroups.length > 0 && (
+                {intersectionCmp.twoIntersectionGroups.length > 0 && (
                   <Box sx={{ mb: 1.5 }}>
                     <Typography
                       variant="caption"
                       color="warning.light"
                       sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
                     >
-                      🟡 2개 정확히 겹친 세트 — 전체 {bulkComparison.twoIntersectionGroups.length}종
+                      🟡 2개 정확히 겹친 세트 — 전체 {intersectionCmp.twoIntersectionGroups.length}종
                     </Typography>
                     <Box
                       sx={{
@@ -1973,9 +2021,9 @@ export default function SemiAutoComparePanel({
                       }}
                     >
                       <Stack spacing={0.5} sx={{ px: 1 }}>
-                        {bulkComparison.twoIntersectionGroups.map((g, idx) => {
-                          const pct = bulkComparison.ticketCount > 0
-                            ? (g.ticketCount / bulkComparison.ticketCount) * 100
+                        {intersectionCmp.twoIntersectionGroups.map((g, idx) => {
+                          const pct = intersectionCmp.ticketCount > 0
+                            ? (g.ticketCount / intersectionCmp.ticketCount) * 100
                             : 0;
                           return (
                             <Stack
@@ -2018,14 +2066,14 @@ export default function SemiAutoComparePanel({
                 )}
 
                 {/* 3개 교집합 — 전체 노출 (스크롤 컨테이너) */}
-                {bulkComparison.threeIntersectionGroups.length > 0 && (
+                {intersectionCmp.threeIntersectionGroups.length > 0 && (
                   <Box sx={{ mb: 1.5 }}>
                     <Typography
                       variant="caption"
                       color="success.light"
                       sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
                     >
-                      🟢 3개 정확히 겹친 세트 — 전체 {bulkComparison.threeIntersectionGroups.length}종
+                      🟢 3개 정확히 겹친 세트 — 전체 {intersectionCmp.threeIntersectionGroups.length}종
                     </Typography>
                     <Box
                       sx={{
@@ -2038,9 +2086,9 @@ export default function SemiAutoComparePanel({
                       }}
                     >
                       <Stack spacing={0.5} sx={{ px: 1 }}>
-                        {bulkComparison.threeIntersectionGroups.map((g, idx) => {
-                          const pct = bulkComparison.ticketCount > 0
-                            ? (g.ticketCount / bulkComparison.ticketCount) * 100
+                        {intersectionCmp.threeIntersectionGroups.map((g, idx) => {
+                          const pct = intersectionCmp.ticketCount > 0
+                            ? (g.ticketCount / intersectionCmp.ticketCount) * 100
                             : 0;
                           return (
                             <Stack
@@ -2083,14 +2131,14 @@ export default function SemiAutoComparePanel({
                 )}
 
                 {/* 4개+ 교집합 — 전체 노출 */}
-                {bulkComparison.fourPlusIntersectionGroups.length > 0 && (
+                {intersectionCmp.fourPlusIntersectionGroups.length > 0 && (
                   <Box>
                     <Typography
                       variant="caption"
                       color="error.light"
                       sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
                     >
-                      🔴 4개 이상 겹친 세트 — 전체 {bulkComparison.fourPlusIntersectionGroups.length}종 (희귀)
+                      🔴 4개 이상 겹친 세트 — 전체 {intersectionCmp.fourPlusIntersectionGroups.length}종 (희귀)
                     </Typography>
                     <Box
                       sx={{
@@ -2103,9 +2151,9 @@ export default function SemiAutoComparePanel({
                       }}
                     >
                       <Stack spacing={0.5} sx={{ px: 1 }}>
-                        {bulkComparison.fourPlusIntersectionGroups.map((g, idx) => {
-                          const pct = bulkComparison.ticketCount > 0
-                            ? (g.ticketCount / bulkComparison.ticketCount) * 100
+                        {intersectionCmp.fourPlusIntersectionGroups.map((g, idx) => {
+                          const pct = intersectionCmp.ticketCount > 0
+                            ? (g.ticketCount / intersectionCmp.ticketCount) * 100
                             : 0;
                           return (
                             <Stack

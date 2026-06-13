@@ -1353,17 +1353,24 @@ export default function PhotoAnalysisPage() {
 
   return (
     <Stack spacing={2}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center">
-        <Typography variant="h5" fontWeight={800}>
-          자동번호 용지 분석 (수기 등록)
-        </Typography>
+      {/* ━━ 헤더 ━━ */}
+      <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+        <Stack spacing={0.25}>
+          <Typography variant="h5" fontWeight={800}>
+            자동번호 용지 분석
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            복기·이번회차 누적 분석 + 반자동 비교 + 백테스트
+          </Typography>
+        </Stack>
         {accumulated && accumulated.total_analyses > 0 && (
           <Button size="small" color="error" variant="outlined" onClick={clearStore}>
-            누적 삭제
+            누적 전체 삭제
           </Button>
         )}
       </Stack>
 
+      {/* ━━ 회차 탭 ━━ */}
       <Paper sx={{ px: 1, pt: 1 }}>
         <Tabs
           value={activeTab}
@@ -1387,94 +1394,33 @@ export default function PhotoAnalysisPage() {
         </Tabs>
       </Paper>
 
+      {/* ━━ 안내 (탭 + 입력 방법 통합) ━━ */}
       <Alert severity="info">
-        {activeTab === 'review' ? (
-          <>
-            <strong>복기 탭</strong> — {latestRound ?? '1226'}회 <strong>당첨번호</strong>와 수기 등록한 <strong>A~E 줄(각 6번호)</strong> 일치를 확인합니다.
-            A/B/C/D/E 다른 줄에도 겹치는 번호 조합을 함께 표시합니다.
-          </>
-        ) : (
-          <>
-            <strong>이번회차 탭</strong> — {currentRound ?? '1227'}회 수기 등록 <strong>A~E 줄</strong>이 복기 기준과 맞는지, <strong>다른 줄·다른 용지</strong> 겹치는 2·3·4번호를 검사합니다.
-          </>
-        )}
-      </Alert>
-
-      <Paper sx={{ p: 2 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Typography variant="body2" color="text.secondary">
-            {visionConfigured
-              ? 'OpenAI Vision 보조 분석 사용 중 (선택)'
-              : 'OpenAI Vision은 선택 사항입니다'}
-          </Typography>
-          <Button size="small" onClick={() => setShowVisionAdvanced((v) => !v)}>
-            {showVisionAdvanced ? '접기' : '고급 설정'}
-          </Button>
-        </Stack>
-        {showVisionAdvanced && (
-          <Stack spacing={1} sx={{ mt: 1.5 }}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <TextField
-                fullWidth
-                type="password"
-                label="OpenAI API Key (선택)"
-                placeholder="sk-..."
-                value={visionKey}
-                onChange={(e) => setVisionKey(e.target.value)}
-              />
-              <Button
-                variant="outlined"
-                disabled={visionSaving || !visionKey.trim().startsWith('sk-')}
-                onClick={async () => {
-                  setVisionSaving(true);
-                  try {
-                    const res = await v1Api.savePhotoVisionConfig(visionKey.trim());
-                    setVisionConfigured(res.configured);
-                    setUseVisionApi(Boolean(res.use_vision_api));
-                    setVisionSaveMsg(res.message);
-                    setVisionKey('');
-                  } catch (e) {
-                    setVisionSaveMsg(e instanceof Error ? e.message : '저장 실패');
-                  } finally {
-                    setVisionSaving(false);
-                  }
-                }}
-              >
-                Vision 사용
-              </Button>
-            </Stack>
-            {(visionConfigured || useVisionApi) && (
-              <Button
-                size="small"
-                color="inherit"
-                onClick={async () => {
-                  try {
-                    const res = await v1Api.disablePhotoVisionConfig();
-                    setVisionConfigured(res.configured);
-                    setUseVisionApi(res.use_vision_api);
-                    setVisionSaveMsg(res.message);
-                  } catch (e) {
-                    setVisionSaveMsg(e instanceof Error ? e.message : '전환 실패');
-                  }
-                }}
-              >
-                로컬 분석만 사용
-              </Button>
+        <Stack spacing={0.5}>
+          <Typography variant="body2">
+            {activeTab === 'review' ? (
+              <><strong>복기 탭</strong> — {latestRound ?? '1226'}회 <strong>당첨번호</strong>와 수기 등록 <strong>A~E 줄</strong> 일치 확인. 다른 줄에 겹치는 2·3·4번호 조합도 표시합니다.</>
+            ) : (
+              <><strong>이번회차 탭</strong> — {currentRound ?? '1227'}회 수기 등록 <strong>A~E 줄</strong>의 <strong>다른 줄·다른 용지</strong> 겹침 (2·3·4번호) 을 검사합니다.</>
             )}
-            {visionSaveMsg && <Alert severity="info" sx={{ mt: 0.5 }}>{visionSaveMsg}</Alert>}
-          </Stack>
-        )}
-      </Paper>
-
-      <Alert severity="info">
-        번호를 눌러 6개 선택 → <strong>줄 저장</strong> (A→B→C→D→E). 5줄이 모이면 용지 1장이 누적됩니다.
-        여러 장 저장 후 <strong>분석·저장</strong>을 누르세요.
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            번호 6개 선택 → <strong>줄 저장</strong> (A→B→C→D→E). 5줄이 모이면 용지 1장 누적. 여러 장 후 <strong>분석·저장</strong>.
+          </Typography>
+        </Stack>
       </Alert>
+
+      {/* ════════════ § 1. 번호 입력 ════════════ */}
+      <Divider textAlign="left" sx={{ mt: 1 }}>
+        <Typography variant="overline" fontWeight={800} color="primary.main" sx={{ letterSpacing: 1.2 }}>
+          § 1. 번호 입력
+        </Typography>
+      </Divider>
 
       <Paper sx={{ p: 2 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
           <Typography variant="subtitle1" fontWeight={700}>
-            구입번호 직접입력
+            📋 구입번호 직접입력 <Typography component="span" variant="caption" color="text.secondary">(자동)</Typography>
           </Typography>
           <Stack direction="row" spacing={1}>
             <Button size="small" onClick={resetPicked}>
@@ -1525,8 +1471,8 @@ export default function PhotoAnalysisPage() {
 
       <Paper sx={{ p: 2 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: showPhotoUpload ? 1.5 : 0 }}>
-          <Typography variant="body2" color="text.secondary">
-            사진 업로드 (선택 · OCR)
+          <Typography variant="subtitle1" fontWeight={700}>
+            📷 사진 업로드 <Typography component="span" variant="caption" color="text.secondary">(선택 · OCR)</Typography>
           </Typography>
           <Button size="small" onClick={() => setShowPhotoUpload((v) => !v)}>
             {showPhotoUpload ? '접기' : '펼치기'}
@@ -1588,7 +1534,35 @@ export default function PhotoAnalysisPage() {
       {notice && <Alert severity="info">{notice}</Alert>}
       {error && <Alert severity="error" sx={{ whiteSpace: 'pre-wrap' }}>{error}</Alert>}
 
-      <PhotoBacktestPanel accumulated={accumulated} />
+      {/* ════════════ § 2. 분석 결과 ════════════ */}
+      <Divider textAlign="left" sx={{ mt: 1 }}>
+        <Typography variant="overline" fontWeight={800} color="primary.main" sx={{ letterSpacing: 1.2 }}>
+          § 2. {activeTab === 'review' ? '복기' : '이번회차'} 분석 결과
+        </Typography>
+      </Divider>
+
+      <IntentAccumulatedPanel
+        slice={activeSlice}
+        intent={activeTab}
+        legacyCount={accumulated?.legacy_entry_count}
+        onDeleteEntry={deleteHistoryEntry}
+      />
+
+      {activeResult && (
+        <Box ref={resultRef}>
+          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+            🔍 최근 분석 1건 상세
+          </Typography>
+          <SingleResultPanel result={activeResult} />
+        </Box>
+      )}
+
+      {/* ════════════ § 3. 비교 · 백테스트 ════════════ */}
+      <Divider textAlign="left" sx={{ mt: 1 }}>
+        <Typography variant="overline" fontWeight={800} color="primary.main" sx={{ letterSpacing: 1.2 }}>
+          § 3. 반자동 비교 · 백테스트
+        </Typography>
+      </Divider>
 
       <SemiAutoComparePanel
         slipQueue={slipQueue}
@@ -1596,25 +1570,78 @@ export default function PhotoAnalysisPage() {
         onRemoveSlipLine={removeSlipLine}
       />
 
-      <Divider />
-      <Typography variant="h6" fontWeight={700}>
-        {activeTab === 'review' ? '복기' : '이번회차'} 누적
-      </Typography>
-      <IntentAccumulatedPanel
-        slice={activeSlice}
-        intent={activeTab}
-        legacyCount={accumulated?.legacy_entry_count}
-        onDeleteEntry={deleteHistoryEntry}
-      />
-      {activeResult && (
-        <Box ref={resultRef}>
-          <Divider sx={{ mb: 2 }} />
-          <Typography variant="h6" fontWeight={700}>
-            {activeTab === 'review' ? '복기' : '이번회차'} 최근 분석
+      <PhotoBacktestPanel accumulated={accumulated} />
+
+      {/* ════════════ § 4. 고급 설정 ════════════ */}
+      <Divider textAlign="left" sx={{ mt: 1 }}>
+        <Typography variant="overline" fontWeight={800} color="text.secondary" sx={{ letterSpacing: 1.2 }}>
+          § 4. 고급 설정
+        </Typography>
+      </Divider>
+
+      <Paper sx={{ p: 2 }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Typography variant="body2" color="text.secondary">
+            ⚙️ OpenAI Vision 보조 분석 — {visionConfigured ? '사용 중' : '선택 사항'}
           </Typography>
-          <SingleResultPanel result={activeResult} />
-        </Box>
-      )}
+          <Button size="small" onClick={() => setShowVisionAdvanced((v) => !v)}>
+            {showVisionAdvanced ? '접기' : '설정'}
+          </Button>
+        </Stack>
+        {showVisionAdvanced && (
+          <Stack spacing={1} sx={{ mt: 1.5 }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <TextField
+                fullWidth
+                type="password"
+                label="OpenAI API Key (선택)"
+                placeholder="sk-..."
+                value={visionKey}
+                onChange={(e) => setVisionKey(e.target.value)}
+              />
+              <Button
+                variant="outlined"
+                disabled={visionSaving || !visionKey.trim().startsWith('sk-')}
+                onClick={async () => {
+                  setVisionSaving(true);
+                  try {
+                    const res = await v1Api.savePhotoVisionConfig(visionKey.trim());
+                    setVisionConfigured(res.configured);
+                    setUseVisionApi(Boolean(res.use_vision_api));
+                    setVisionSaveMsg(res.message);
+                    setVisionKey('');
+                  } catch (e) {
+                    setVisionSaveMsg(e instanceof Error ? e.message : '저장 실패');
+                  } finally {
+                    setVisionSaving(false);
+                  }
+                }}
+              >
+                Vision 사용
+              </Button>
+            </Stack>
+            {(visionConfigured || useVisionApi) && (
+              <Button
+                size="small"
+                color="inherit"
+                onClick={async () => {
+                  try {
+                    const res = await v1Api.disablePhotoVisionConfig();
+                    setVisionConfigured(res.configured);
+                    setUseVisionApi(res.use_vision_api);
+                    setVisionSaveMsg(res.message);
+                  } catch (e) {
+                    setVisionSaveMsg(e instanceof Error ? e.message : '전환 실패');
+                  }
+                }}
+              >
+                로컬 분석만 사용
+              </Button>
+            )}
+            {visionSaveMsg && <Alert severity="info" sx={{ mt: 0.5 }}>{visionSaveMsg}</Alert>}
+          </Stack>
+        )}
+      </Paper>
 
       <BulkLineInputDialog
         open={bulkOpen}

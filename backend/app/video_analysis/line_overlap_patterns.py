@@ -299,17 +299,22 @@ def build_cross_line_analysis_report(
     lines: List[Dict[str, Any]],
     *,
     min_repeat: int = 2,
-    pair_limit: int = 10,
-    triple_limit: int = 15,
+    pair_limit: int | None = None,
+    triple_limit: int | None = None,
 ) -> Dict[str, Any]:
     """
     이미지·A~E 줄 교차 분석 리포트.
     동일/다른 이미지·다른 줄에서 2·3번호 세트가 2회 이상 같이 나온 경우.
+
+    pair_limit / triple_limit:
+      None (기본) — 전체 결과 노출 (사용자 요청). 프론트엔드 측에서
+      스크롤 컨테이너 + 가상화로 처리.
+      정수 — 상위 N개만. 외부에서 명시한 제한이 있을 때만.
     """
     raw_pairs = find_cross_line_combos(lines, sizes=(2,), min_line_repeat=min_repeat)
     raw_triples = find_cross_line_combos(lines, sizes=(3,), min_line_repeat=min_repeat)
-    pairs = raw_pairs[:pair_limit]
-    triples = raw_triples[:triple_limit]
+    pairs = raw_pairs[:pair_limit] if pair_limit is not None else raw_pairs
+    triples = raw_triples[:triple_limit] if triple_limit is not None else raw_triples
     opinion = _build_cross_analysis_opinion(pairs, triples, lines)
 
     def _section_triples() -> str:

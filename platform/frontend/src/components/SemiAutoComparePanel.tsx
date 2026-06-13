@@ -1440,11 +1440,7 @@ export default function SemiAutoComparePanel({
               justifyContent="space-between"
             >
               <Typography variant="body2" fontWeight={700}>
-                🏆 vs 누적 강한 후보 (
-                {comparison.vsStrong.available
-                  ? `${comparison.vsStrong.strongCandidates.length}개`
-                  : '데이터 없음'}
-                )
+                🏆 vs 누적 강한 후보{!comparison.vsStrong.available && ' (데이터 없음)'}
               </Typography>
               {comparison.vsStrong.available && (
                 <Stack direction="row" spacing={0.5}>
@@ -1484,11 +1480,7 @@ export default function SemiAutoComparePanel({
                 fontWeight={700}
                 color={comparison.vsExcluded.warning ? 'error.main' : undefined}
               >
-                ⛔ vs 누적 배제 후보 (
-                {comparison.vsExcluded.available
-                  ? `${comparison.vsExcluded.excludedCandidates.length}개`
-                  : '데이터 없음'}
-                )
+                ⛔ vs 누적 배제 후보{!comparison.vsExcluded.available && ' (데이터 없음)'}
               </Typography>
               {comparison.vsExcluded.available && (
                 <Stack direction="row" spacing={0.5}>
@@ -1902,7 +1894,7 @@ export default function SemiAutoComparePanel({
           {/* ── 누적 자동 강한 후보 교집합 분포 — 자동+반자동 통합 통계 ── */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'primary.main' }}>
             <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-              🔗 이번회차 자동 누적 강한 후보 교집합 ({getCurrentRoundStrongCandidates(accumulated).length}개 후보 · 자동+반자동 {intersectionCmp.ticketCount}장 통합 분석)
+              🔗 이번회차 자동 누적 강한 후보 교집합 (자동+반자동 {intersectionCmp.ticketCount}장 통합 분석)
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
               ※ 전체 티켓 목록의 자동(currentSlipLines + slipQueue + bulkAutoTickets) + 반자동(semiCurrentLines + semiSlipQueue + bulkTickets) 모든 줄을 합쳐 교집합 세트를 통계. 정확한 교집합 세트 번호는 모두 노출.

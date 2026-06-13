@@ -23,6 +23,7 @@ import {
   Divider,
   Paper,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
@@ -584,6 +585,32 @@ export default function SemiAutoComparePanel({
     staleTime: 60_000,
   });
 
+  // 메타 — 최신 회차 가져오기 (회차 선택 상한 클램프용)
+  const meta = useQuery({
+    queryKey: ['v1-meta-for-semi-auto'],
+    queryFn: v1Api.getMeta,
+    staleTime: 60_000,
+  });
+  const latestRound = meta.data?.latest_round ?? null;
+
+  // 비교 기준 회차 — 사용자가 수동 선택 가능. 미선택 시 최신 회차.
+  const [compareRound, setCompareRound] = useState<number | null>(null);
+
+  // 선택된 회차의 당첨번호 (수동 회차 선택 시)
+  const selectedRoundQuery = useQuery({
+    queryKey: ['v1-round-for-semi-auto', compareRound],
+    queryFn: () => v1Api.getRound(compareRound as number),
+    enabled: !!compareRound,
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  // 실제 비교에 사용할 회차 데이터 결정:
+  //   수동 선택 시 → selectedRoundQuery.data
+  //   미선택 시 → latest.data (최신)
+  const comparisonRoundData = compareRound != null ? selectedRoundQuery.data : latest.data;
+  const effectiveRound = compareRound ?? latest.data?.round ?? null;
+
   const togglePick = (n: number) => {
     if (picked.includes(n)) {
       setPicked(picked.filter((x) => x !== n));
@@ -690,6 +717,7 @@ export default function SemiAutoComparePanel({
     [picked, pickFlags, slipQueue, accumulated, latest.data]
   );
 
+  // 대량 비교 — comparisonRoundData (수동 선택된 회차 OR 최신) 의 당첨번호 사용
   const bulkComparison = useMemo(
     () =>
       bulkTickets.length > 0
@@ -697,15 +725,44 @@ export default function SemiAutoComparePanel({
             bulkTickets,
             slipQueue,
             accumulated,
-            latest.data?.numbers ?? [],
-            latest.data?.bonus ?? null
+            comparisonRoundData?.numbers ?? [],
+            comparisonRoundData?.bonus ?? null
           )
         : null,
-    [bulkTickets, slipQueue, accumulated, latest.data]
+    [bulkTickets, slipQueue, accumulated, comparisonRoundData]
   );
 
+  /**
+   * 대량 입력 — append + dedup.
+   *
+   * 이전: setBulkTickets(lines) 가 모두 덮어씀
+   * 이후: 기존 bulkTickets 에 new lines 를 append, 중복(같은 6-튜플) 제거.
+   * → 매번 새로 입력해도 사라지지 않고 누적됨 (사용자 요청).
+   * → 명시 초기화 ('대량 결과 초기화') 시에만 비워짐.
+   */
   const handleBulkInsert = (lines: number[][]) => {
-    setBulkTickets(lines);
+    if (!lines.length) return;
+    setBulkTickets((prev) => {
+      const existingKeys = new Set(
+        prev.map((t) => [...t].sort((a, b) => a - b).join('-'))
+      );
+      let dupCount = 0;
+      const merged = [...prev];
+      for (const line of lines) {
+        const key = [...line].sort((a, b) => a - b).join('-');
+        if (existingKeys.has(key)) {
+          dupCount += 1;
+          continue;
+        }
+        existingKeys.add(key);
+        merged.push([...line].sort((a, b) => a - b));
+      }
+      // 누적 카운트는 다음 렌더에서 chip 으로 표현되므로 여기서는 console 로 디버그
+      if (dupCount > 0) {
+        // setNotice 등을 이용해도 좋지만 SemiAutoComparePanel 은 자체 notice state 가 없음 — 향후 추가 가능
+      }
+      return merged;
+    });
   };
 
   const resetBulk = () => setBulkTickets([]);
@@ -1045,13 +1102,43 @@ export default function SemiAutoComparePanel({
       {bulkComparison && (
         <>
           <Divider sx={{ my: 2 }} />
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }} flexWrap="wrap" gap={1}>
             <Typography variant="subtitle1" fontWeight={700}>
               📋 대량 비교 결과 ({bulkComparison.ticketCount}장)
             </Typography>
-            <Button size="small" color="error" variant="outlined" onClick={resetBulk}>
-              대량 결과 초기화
-            </Button>
+            <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" gap={0.5}>
+              <TextField
+                size="small"
+                label="비교 회차"
+                type="number"
+                value={effectiveRound ?? ''}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isInteger(v) && v > 0 && (!latestRound || v <= latestRound)) {
+                    setCompareRound(v);
+                  } else if (e.target.value === '') {
+                    setCompareRound(null);
+                  }
+                }}
+                inputProps={{ min: 1, max: latestRound ?? undefined, step: 1 }}
+                sx={{ width: 130 }}
+                helperText={
+                  compareRound != null
+                    ? '복기 기준'
+                    : latest.data
+                      ? `최신 ${latest.data.round}회`
+                      : ''
+                }
+              />
+              {compareRound != null && (
+                <Button size="small" onClick={() => setCompareRound(null)}>
+                  ↺ 최신
+                </Button>
+              )}
+              <Button size="small" color="error" variant="outlined" onClick={resetBulk}>
+                초기화
+              </Button>
+            </Stack>
           </Stack>
 
           {/* 집계 메트릭 */}

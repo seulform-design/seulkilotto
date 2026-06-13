@@ -4,6 +4,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Collapse,
   Divider,
   IconButton,
   Paper,
@@ -99,6 +100,7 @@ function CrossLineAnalysisPanel({
   data?: CrossLineAnalysisReport | null;
   winningSet?: Set<number> | null;
 }) {
+  const [expanded, setExpanded] = useState(false);
   if (!data) return null;
   const renderSets = (
     title: string,
@@ -156,35 +158,59 @@ function CrossLineAnalysisPanel({
         bgcolor: 'background.paper',
       }}
     >
-      <Typography variant="subtitle1" fontWeight={700} gutterBottom color="text.primary">
-        이미지·A~E 줄 교차 분석 (2·3번호 세트)
-      </Typography>
-      <Stack direction="row" flexWrap="wrap" gap={0.5} alignItems="center" sx={{ mb: 1.5 }}>
-        <Typography variant="caption" color="text.secondary">
-          이미지 {data.image_count}장 · 게임 줄 {data.line_count}개 · 2회 이상 공동 출현
-        </Typography>
-        {data.line_label_counts &&
-          ['A', 'B', 'C', 'D', 'E'].map((label) =>
-            (data.line_label_counts?.[label] ?? 0) > 0 ? (
-              <Chip key={label} label={`${label} ${data.line_label_counts![label]}`} size="small" variant="outlined" />
-            ) : null
-          )}
+      {/* 헤더 — 클릭으로 접기/펼치기 */}
+      <Stack
+        direction="row"
+        alignItems="center"
+        justifyContent="space-between"
+        sx={{ cursor: 'pointer', userSelect: 'none' }}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <Box>
+          <Typography variant="subtitle1" fontWeight={700} color="text.primary">
+            이미지·A~E 줄 교차 분석 (2·3번호 세트)
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            이미지 {data.image_count}장 · 게임 줄 {data.line_count}개 ·
+            세트 {(data.triple_sets?.length ?? 0) + (data.pair_sets?.length ?? 0)}건
+            {expanded ? ' · ▼ 접기' : ' · ▶ 펼치기'}
+          </Typography>
+        </Box>
+        <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}>
+          {expanded ? '접기' : '펼치기'}
+        </Button>
       </Stack>
-      {!hasSets && (
-        <Alert severity="info" sx={{ mb: 1.5 }}>
-          2회 이상 함께 나온 2·3번호 세트가 없습니다. (줄 {data.line_count}개 분석됨)
-        </Alert>
-      )}
-      {renderSets('■ 1. [3개 세트] 다른 줄에서도 겹치는 3인조', data.triple_sets, '없음')}
-      {renderSets('■ 2. [2개 세트] 다른 줄에서도 겹치는 2인조', data.pair_sets, '없음')}
-      <Box sx={{ mt: 1, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
-        <Typography variant="subtitle2" fontWeight={700} gutterBottom color="text.primary">
-          ■ 3. 교차 분석 종합 의견
-        </Typography>
-        <Typography variant="body2" color="text.primary">
-          {data.summary_opinion}
-        </Typography>
-      </Box>
+
+      <Collapse in={expanded} timeout="auto" unmountOnExit>
+        <Box sx={{ mt: 1.5 }}>
+          <Stack direction="row" flexWrap="wrap" gap={0.5} alignItems="center" sx={{ mb: 1.5 }}>
+            <Typography variant="caption" color="text.secondary">
+              2회 이상 공동 출현 기준
+            </Typography>
+            {data.line_label_counts &&
+              ['A', 'B', 'C', 'D', 'E'].map((label) =>
+                (data.line_label_counts?.[label] ?? 0) > 0 ? (
+                  <Chip key={label} label={`${label} ${data.line_label_counts![label]}`} size="small" variant="outlined" />
+                ) : null
+              )}
+          </Stack>
+          {!hasSets && (
+            <Alert severity="info" sx={{ mb: 1.5 }}>
+              2회 이상 함께 나온 2·3번호 세트가 없습니다. (줄 {data.line_count}개 분석됨)
+            </Alert>
+          )}
+          {renderSets('■ 1. [3개 세트] 다른 줄에서도 겹치는 3인조', data.triple_sets, '없음')}
+          {renderSets('■ 2. [2개 세트] 다른 줄에서도 겹치는 2인조', data.pair_sets, '없음')}
+          <Box sx={{ mt: 1, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+            <Typography variant="subtitle2" fontWeight={700} gutterBottom color="text.primary">
+              ■ 3. 교차 분석 종합 의견
+            </Typography>
+            <Typography variant="body2" color="text.primary">
+              {data.summary_opinion}
+            </Typography>
+          </Box>
+        </Box>
+      </Collapse>
     </Paper>
   );
 }
@@ -215,35 +241,45 @@ function ComboDuplicatePanel({
   }
   const ver = data.combo_verification;
 
-  const renderCross = (items: ComboDuplicatePatterns['pair_duplicates'], title: string, limit = 15) =>
+  // 모든 항목 노출 — 상한 제거. 50건 이상이면 스크롤 컨테이너로 페이지 길이 방어.
+  const renderCross = (items: ComboDuplicatePatterns['pair_duplicates'], title: string) =>
     items?.length ? (
       <Box>
         <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
-          {title}
-          {items.length > limit ? ` (상위 ${limit}건)` : ` (${items.length}건)`}
+          {title} ({items.length}건 전체)
         </Typography>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>번호 조합</TableCell>
-              <TableCell>겹친 줄 수</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {items.slice(0, limit).map((row) => (
-              <TableRow key={`${title}-${row.numbers.join('-')}`}>
-                <TableCell>
-                  <Stack direction="row" gap={0.5} flexWrap="wrap">
-                    {row.numbers.map((n) => (
-                      <ReviewBall key={n} number={n} size={28} winningSet={mode === 'review' ? winningSet : null} />
-                    ))}
-                  </Stack>
-                </TableCell>
-                <TableCell>{row.repeat_count ?? row.line_count ?? 0}줄</TableCell>
+        <Box
+          sx={{
+            maxHeight: items.length > 20 ? 360 : undefined,
+            overflowY: items.length > 20 ? 'auto' : undefined,
+            bgcolor: items.length > 20 ? 'action.hover' : undefined,
+            borderRadius: 1,
+            p: items.length > 20 ? 0.5 : 0,
+          }}
+        >
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>번호 조합</TableCell>
+                <TableCell>겹친 줄 수</TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHead>
+            <TableBody>
+              {items.map((row) => (
+                <TableRow key={`${title}-${row.numbers.join('-')}`}>
+                  <TableCell>
+                    <Stack direction="row" gap={0.5} flexWrap="wrap">
+                      {row.numbers.map((n) => (
+                        <ReviewBall key={n} number={n} size={28} winningSet={mode === 'review' ? winningSet : null} />
+                      ))}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>{row.repeat_count ?? row.line_count ?? 0}줄</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Box>
       </Box>
     ) : null;
 
@@ -253,34 +289,44 @@ function ComboDuplicatePanel({
     return (
       <Box>
         <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
-          {mode === 'review' ? '당첨번호 vs 게임 줄 일치' : '복기 기준번호 vs 게임 줄 일치'} ({matches.length}줄)
+          {mode === 'review' ? '당첨번호 vs 게임 줄 일치' : '복기 기준번호 vs 게임 줄 일치'} ({matches.length}줄 전체)
         </Typography>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>용지·줄</TableCell>
-              <TableCell>일치 번호</TableCell>
-              <TableCell>등급</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {matches.slice(0, 20).map((row) => (
-              <TableRow key={`${row.sheet_index}-${row.line_index}-${row.matching_numbers.join('-')}`}>
-                <TableCell>
-                  이미지 {(row as { image_index?: number }).image_index ?? row.sheet_index + 1} · {row.line_label}줄
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" gap={0.5} flexWrap="wrap">
-                    {row.matching_numbers.map((n) => (
-                      <ReviewBall key={n} number={n} size={28} winningSet={mode === 'review' ? winningSet : null} />
-                    ))}
-                  </Stack>
-                </TableCell>
-                <TableCell>{row.prize_tier} ({row.overlap_count}개)</TableCell>
+        <Box
+          sx={{
+            maxHeight: matches.length > 25 ? 400 : undefined,
+            overflowY: matches.length > 25 ? 'auto' : undefined,
+            bgcolor: matches.length > 25 ? 'action.hover' : undefined,
+            borderRadius: 1,
+            p: matches.length > 25 ? 0.5 : 0,
+          }}
+        >
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>용지·줄</TableCell>
+                <TableCell>일치 번호</TableCell>
+                <TableCell>등급</TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHead>
+            <TableBody>
+              {matches.map((row) => (
+                <TableRow key={`${row.sheet_index}-${row.line_index}-${row.matching_numbers.join('-')}`}>
+                  <TableCell>
+                    이미지 {(row as { image_index?: number }).image_index ?? row.sheet_index + 1} · {row.line_label}줄
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" gap={0.5} flexWrap="wrap">
+                      {row.matching_numbers.map((n) => (
+                        <ReviewBall key={n} number={n} size={28} winningSet={mode === 'review' ? winningSet : null} />
+                      ))}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>{row.prize_tier} ({row.overlap_count}개)</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Box>
       </Box>
     );
   };

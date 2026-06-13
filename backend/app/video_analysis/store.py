@@ -579,10 +579,11 @@ def _recompute_intent_combo(entries: List[Dict[str, Any]], intent: str) -> Dict[
     if not group:
         return {"summary": "분석 없음", "pair_duplicates": [], "triple_duplicates": []}
 
-    latest = group[-1]
-    stored = _latest_entry_combo(latest)
-    if stored and stored.get("combo_verification"):
-        return stored
+    # 라이브 재계산 강제 — 이전엔 latest entry 의 stored combo 를 그대로
+    # 반환하여 옛 cap 데이터 (pair 10건 / triple 15건) 가 by_intent
+    # 슬라이스에 박혀 있었음. 사용자가 모든 항목을 보고 싶다고 명시하여
+    # stored 단락 제거하고 항상 모든 entry 의 raw sheet details 에서
+    # 라이브 재계산. 다소 느릴 수 있으나 (수십 ms ~ 수백 ms) 정확도 보장.
 
     if intent == "review":
         details: List[Dict[str, Any]] = []

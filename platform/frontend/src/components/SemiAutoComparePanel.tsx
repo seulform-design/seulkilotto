@@ -1042,20 +1042,25 @@ export default function SemiAutoComparePanel({
   const intersectionCmp = (combinedComparison ?? bulkComparison)!;
 
   /**
-   * 자동 그룹 ∩ 반자동 그룹 — 부분 조합 (2번호 / 3번호 / 4번호 이상) 단위
-   * 교집합 통계.
-   * 사용자 정정: '2개 3개 4개 이상 세트로 겹친 조합을 원하는거야'.
+   * 자동 + 반자동 통합 줄 목록에서 2줄 이상에 동시 등장한 부분 조합 통계.
+   * 사용자 정정: '자동 합집합 (currentSlipLines + slipQueue + bulkAutoTickets)
+   * + 반자동 합집합 (semiCurrentLines + semiSlipQueue + bulkTickets) 모든
+   * 줄을 합쳐 교집합 세트를 통계. 모두 노출'.
    *
-   * 알고리즘:
-   * 1. 자동 그룹 각 줄을 sanitize (1~45 정수, dedupe, 정렬) 후 한 줄에서
-   *    만들 수 있는 2·3·4·5·6 번호짜리 부분 조합을 모두 추출.
-   * 2. 같은 조합이 그룹 내 줄 가운데 몇 줄에서 등장했는지 카운트 (autoMap).
-   * 3. 반자동 그룹도 동일 방식 (semiMap).
-   * 4. 양쪽 맵에 모두 존재하는 키 = 두 그룹 사이 공통 부분 조합.
-   * 5. 조합의 번호 개수에 따라 2번호 / 3번호 / 4번호 이상 영역으로 분리,
-   *    빈도순 정렬, 모두 노출 (cap 없음).
+   * 알고리즘 (정정):
+   * 1. 자동의 모든 줄 + 반자동의 모든 줄을 단일 목록 (allLines) 으로 합친다.
+   * 2. 각 줄을 sanitize (1~45 정수, dedupe, 정렬) 후 2·3·4·5·6 번호짜리
+   *    부분 조합을 모두 추출.
+   * 3. 같은 조합이 통합 목록의 줄 가운데 몇 줄에서 등장했는지 카운트.
+   *    동시에 자동 측 등장 줄 수 (autoCount) / 반자동 측 등장 줄 수
+   *    (semiCount) 분리 집계.
+   * 4. 통합 카운트 (total = autoCount + semiCount) 가 2 이상인 조합만
+   *    '교집합 세트' 로 채택 (= 합친 목록에서 2줄 이상에 동시 등장).
+   * 5. 번호 개수 (2 / 3 / 4 이상) 영역으로 분리, 빈도순 정렬, 모두 노출.
    *
-   * entry.size 필드: 조합에 들어있는 번호 개수 (2, 3, 4, 5, 6 중 하나).
+   * 직전 (오해): 자동 맵과 반자동 맵의 키 양쪽 모두 존재 (intersection)
+   * 만 채택 → 자동 안에서만 자주 반복된 조합 누락됨. 정정 후엔 통합 카운트
+   * 기준이므로 자동만 반복도 포함.
    */
   const groupSetIntersection = useMemo(() => {
     type SetEntry = { numbers: number[]; size: number; autoCount: number; semiCount: number; total: number };
@@ -1093,8 +1098,12 @@ export default function SemiAutoComparePanel({
       dfs(0, 0);
     };
 
-    const countCombosBySize = (lines: number[][]): Record<string, { numbers: number[]; count: number }> => {
-      const acc: Record<string, { numbers: number[]; count: number }> = {};
+    // 통합 맵 — 같은 조합이 자동 측 / 반자동 측 각각 몇 줄에서 등장했는지 집계.
+    const acc: Record<
+      string,
+      { numbers: number[]; autoCount: number; semiCount: number }
+    > = {};
+    const accumulate = (lines: number[][], side: 'auto' | 'semi') => {
       for (const raw of lines) {
         const line = sanitize(raw);
         for (const size of [2, 3, 4, 5, 6]) {
@@ -1103,27 +1112,27 @@ export default function SemiAutoComparePanel({
           combine(line, size, combos);
           for (const combo of combos) {
             const key = `${size}|${combo.join('-')}`;
-            if (!acc[key]) acc[key] = { numbers: combo, count: 0 };
-            acc[key].count += 1;
+            if (!acc[key]) acc[key] = { numbers: combo, autoCount: 0, semiCount: 0 };
+            if (side === 'auto') acc[key].autoCount += 1;
+            else acc[key].semiCount += 1;
           }
         }
       }
-      return acc;
     };
+    accumulate(autoLines, 'auto');
+    accumulate(semiLines, 'semi');
 
-    const autoMap = countCombosBySize(autoLines);
-    const semiMap = countCombosBySize(semiLines);
-
+    // 통합 목록 안에서 2줄 이상에 동시 등장한 조합 = '교집합 세트'.
     const intersection: SetEntry[] = [];
-    for (const [key, autoVal] of Object.entries(autoMap)) {
-      const semiVal = semiMap[key];
-      if (!semiVal) continue;
+    for (const v of Object.values(acc)) {
+      const total = v.autoCount + v.semiCount;
+      if (total < 2) continue;
       intersection.push({
-        numbers: autoVal.numbers,
-        size: autoVal.numbers.length,
-        autoCount: autoVal.count,
-        semiCount: semiVal.count,
-        total: autoVal.count + semiVal.count,
+        numbers: v.numbers,
+        size: v.numbers.length,
+        autoCount: v.autoCount,
+        semiCount: v.semiCount,
+        total,
       });
     }
     const cmp = (x: SetEntry, y: SetEntry) =>
@@ -1138,6 +1147,7 @@ export default function SemiAutoComparePanel({
     return {
       autoLineCount: autoLines.length,
       semiLineCount: semiLines.length,
+      totalLineCount: autoLines.length + semiLines.length,
       twoSets,
       threeSets,
       fourPlusSets,
@@ -2300,17 +2310,17 @@ export default function SemiAutoComparePanel({
             )}
           </Paper>
 
-          {/* ── 자동 그룹 ∩ 반자동 그룹 — 2번호/3번호/4번호+ 조합 교집합 ── */}
-          {(groupSetIntersection.autoLineCount > 0 || groupSetIntersection.semiLineCount > 0) && (
+          {/* ── 자동+반자동 통합 줄에서 2줄 이상에 동시 등장한 부분 조합 ── */}
+          {groupSetIntersection.totalLineCount > 0 && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-                🔀 자동 그룹 ∩ 반자동 그룹 — 공통 번호 조합 (2번호 · 3번호 · 4번호 이상)
+                🔀 자동+반자동 통합 — 여러 줄에 동시 등장한 부분 조합 (2번호 · 3번호 · 4번호 이상)
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                자동 그룹 ({groupSetIntersection.autoLineCount}줄) 의 모든 줄에서 만들 수 있는 부분 조합
-                (2번호짜리·3번호짜리·4번호짜리·5번호짜리·6번호짜리) 과,
-                반자동 그룹 ({groupSetIntersection.semiLineCount}줄) 의 부분 조합 중 양쪽에 모두 등장한 조합.
-                카운트 '자동 N줄' = 그 조합이 자동 그룹의 줄 가운데 몇 줄에서 등장했는지. 모두 노출 (cap 없음).
+                자동 ({groupSetIntersection.autoLineCount}줄) + 반자동 ({groupSetIntersection.semiLineCount}줄)
+                = 통합 {groupSetIntersection.totalLineCount}줄 의 모든 줄에서 만들 수 있는
+                부분 조합 (2·3·4·5·6 번호짜리) 가운데, <strong>통합 목록의 2줄 이상에 동시 등장한 조합</strong>만 추려서 모두 노출.
+                각 조합 옆 '자동 N줄 · 반자동 M줄' = 그 조합이 자동/반자동 측에서 각각 몇 줄에 등장했는지.
               </Typography>
               {(() => {
                 const renderGroup = (

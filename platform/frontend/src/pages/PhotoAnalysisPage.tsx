@@ -19,6 +19,7 @@ import {
   Typography,
 } from '@mui/material';
 import { useCallback, useEffect, useState } from 'react';
+import BulkLineInputDialog from '../components/BulkLineInputDialog';
 import LottoBall from '../components/LottoBall';
 import {
   v1Api,
@@ -875,6 +876,7 @@ export default function PhotoAnalysisPage() {
     current_round: emptyManualDraft(),
   });
   const [showPhotoUpload, setShowPhotoUpload] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -966,6 +968,31 @@ export default function PhotoAnalysisPage() {
     }
     patchManual({ picked: [], currentSlipLines: nextLines });
     setNotice(`${currentLabel}줄 저장 — 다음 ${GAME_LABELS[nextLines.length]}줄`);
+  };
+
+  /**
+   * 대량 입력 처리.
+   *
+   * 받은 6-튜플 배열을 5줄씩 슬립으로 묶어 slipQueue 에 append.
+   * 현재 진행 중인 currentSlipLines / picked 는 보존 — 사용자 작업 보호.
+   * 마지막 슬립이 5줄 미만이면 부분 슬립으로 추가됨 (백엔드가 허용).
+   */
+  const handleBulkInsert = (lines: number[][]) => {
+    if (!lines.length) return;
+    const newSlips: ManualSlipInput[] = [];
+    for (let i = 0; i < lines.length; i += GAME_LABELS.length) {
+      const chunk = lines.slice(i, i + GAME_LABELS.length);
+      const slipLines: SavedLine[] = chunk.map((numbers, idx) => ({
+        label: GAME_LABELS[idx],
+        numbers: [...numbers].sort((a, b) => a - b),
+      }));
+      newSlips.push(slipFromLines(slipLines));
+    }
+    patchManual({ slipQueue: [...slipQueue, ...newSlips] });
+    setError(null);
+    setNotice(
+      `${lines.length}줄 → ${newSlips.length}장 추가 완료 (총 ${slipQueue.length + newSlips.length}장 누적)`
+    );
   };
 
   const removeCurrentLine = (idx: number) => {
@@ -1263,6 +1290,9 @@ export default function PhotoAnalysisPage() {
           <Button variant="outlined" color="inherit" onClick={resetCurrentSlip}>
             용지 초기화
           </Button>
+          <Button variant="outlined" color="primary" onClick={() => setBulkOpen(true)}>
+            ⬆ 대량 입력 (텍스트)
+          </Button>
           <Button variant="contained" onClick={runManualAnalyze} disabled={loading}>
             {loading ? (
               <CircularProgress size={22} color="inherit" />
@@ -1364,6 +1394,13 @@ export default function PhotoAnalysisPage() {
           <SingleResultPanel result={activeResult} />
         </>
       )}
+
+      <BulkLineInputDialog
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        onConfirm={handleBulkInsert}
+        linesPerSlip={GAME_LABELS.length}
+      />
     </Stack>
   );
 }

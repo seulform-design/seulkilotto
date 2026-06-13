@@ -1122,17 +1122,18 @@ export default function SemiAutoComparePanel({
     accumulate(autoLines, 'auto');
     accumulate(semiLines, 'semi');
 
-    // 통합 목록 안에서 2줄 이상에 동시 등장한 조합 = '교집합 세트'.
+    // 자동 측·반자동 측 양쪽에 모두 1번 이상 등장한 조합만 '교집합 세트'.
+    // 사용자 정정: '왜 반자동 0줄인데도 조합에 껴있는거야?' — 한쪽만에서
+    // 자주 반복된 조합은 두 그룹 사이 공통이 아니므로 제외.
     const intersection: SetEntry[] = [];
     for (const v of Object.values(acc)) {
-      const total = v.autoCount + v.semiCount;
-      if (total < 2) continue;
+      if (v.autoCount === 0 || v.semiCount === 0) continue;
       intersection.push({
         numbers: v.numbers,
         size: v.numbers.length,
         autoCount: v.autoCount,
         semiCount: v.semiCount,
-        total,
+        total: v.autoCount + v.semiCount,
       });
     }
     const cmp = (x: SetEntry, y: SetEntry) =>
@@ -2310,17 +2311,18 @@ export default function SemiAutoComparePanel({
             )}
           </Paper>
 
-          {/* ── 자동+반자동 통합 줄에서 2줄 이상에 동시 등장한 부분 조합 ── */}
+          {/* ── 자동·반자동 양쪽에 모두 등장한 부분 조합 ── */}
           {groupSetIntersection.totalLineCount > 0 && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-                🔀 자동+반자동 통합 — 여러 줄에 동시 등장한 부분 조합 (2번호 · 3번호 · 4번호 이상)
+                🔀 자동 ∩ 반자동 — 양쪽에 모두 등장한 부분 조합 (2번호 · 3번호 · 4번호 이상)
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 자동 ({groupSetIntersection.autoLineCount}줄) + 반자동 ({groupSetIntersection.semiLineCount}줄)
-                = 통합 {groupSetIntersection.totalLineCount}줄 의 모든 줄에서 만들 수 있는
-                부분 조합 (2·3·4·5·6 번호짜리) 가운데, <strong>통합 목록의 2줄 이상에 동시 등장한 조합</strong>만 추려서 모두 노출.
-                각 조합 옆 '자동 N줄 · 반자동 M줄' = 그 조합이 자동/반자동 측에서 각각 몇 줄에 등장했는지.
+                = 통합 {groupSetIntersection.totalLineCount}줄. 각 줄에서 만들 수 있는 부분 조합
+                (2·3·4·5·6 번호짜리) 가운데 <strong>자동 측 1줄 이상 + 반자동 측 1줄 이상</strong>에 등장한 조합만
+                추려서 모두 노출 (양쪽 모두 0줄이면 제외). 각 조합 옆 '자동 N줄 · 반자동 M줄' = 그 조합이
+                자동/반자동 측에서 각각 몇 줄에 등장했는지.
               </Typography>
               {(() => {
                 const renderGroup = (

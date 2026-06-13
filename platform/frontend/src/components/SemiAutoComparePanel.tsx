@@ -1206,19 +1206,25 @@ export default function SemiAutoComparePanel({
         g.semiList.push({ idx: p.semiIdx, label: p.semiLabel, numbers: p.semiNumbers });
       }
     }
-    // 정렬: matchCount 내림차순 → matchedNumbers 사전식 → autoList 크기.
+    // 정렬: (복기 탭에서) 당첨번호 일치 개수 1순위 → matchCount → 사전식 → list 크기.
+    // winningSet 이 있는 (복기) 컨텍스트에서 '당첨된 매치 번호' 가 많은 그룹이 상단.
+    const winCount = (g: GroupEntry): number =>
+      winningSet ? g.matchedNumbers.filter((n) => winningSet.has(n)).length : 0;
     const groups = Array.from(groupMap.values()).sort(
       (x, y) =>
+        winCount(y) - winCount(x) ||
         y.matchCount - x.matchCount ||
         (x.matchedNumbers[0] ?? 0) - (y.matchedNumbers[0] ?? 0) ||
         (x.matchedNumbers[1] ?? 0) - (y.matchedNumbers[1] ?? 0) ||
         y.autoList.length - x.autoList.length ||
         y.semiList.length - x.semiList.length
     );
-    // 각 그룹 내부 list 도 idx 오름차순 정렬.
+    // 각 그룹 내부 list 도 (winningSet 있으면) 그 줄의 당첨번호 일치 개수 1순위 → idx 오름차순.
+    const lineWinCount = (line: LineEntry): number =>
+      winningSet ? line.numbers.filter((n) => winningSet.has(n)).length : 0;
     for (const g of groups) {
-      g.autoList.sort((a, b) => a.idx - b.idx);
-      g.semiList.sort((a, b) => a.idx - b.idx);
+      g.autoList.sort((a, b) => lineWinCount(b) - lineWinCount(a) || a.idx - b.idx);
+      g.semiList.sort((a, b) => lineWinCount(b) - lineWinCount(a) || a.idx - b.idx);
     }
 
     return {
@@ -1244,6 +1250,7 @@ export default function SemiAutoComparePanel({
     semiCurrentLines,
     semiSlipQueue,
     bulkTickets,
+    winningSet,
   ]);
 
   /**
@@ -2521,6 +2528,7 @@ export default function SemiAutoComparePanel({
                                 <Box sx={{ mt: 0.4, pl: 0.5 }}>
                                   <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.2 }}>
                                     자동 측 일치 줄 ({g.autoList.length}):
+                                    {winningSet && ' — 당첨번호만 컬러, 나머지 회색'}
                                   </Typography>
                                   <Stack spacing={0.2}>
                                     {g.autoList.map((a) => (
@@ -2536,7 +2544,11 @@ export default function SemiAutoComparePanel({
                                           size="small"
                                           color="success"
                                           variant="outlined"
-                                          label={`자동 #${a.idx} · ${a.label}`}
+                                          label={
+                                            winningSet
+                                              ? `자동 #${a.idx} · ${a.label} · 당첨 ${a.numbers.filter((n) => winningSet.has(n)).length}/6`
+                                              : `자동 #${a.idx} · ${a.label}`
+                                          }
                                           sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
                                         />
                                         {a.numbers.map((n) => (
@@ -2544,7 +2556,7 @@ export default function SemiAutoComparePanel({
                                             key={`ga-${g.key}-${a.idx}-${n}`}
                                             number={n}
                                             size={20}
-                                            dimmed={!mset.has(n)}
+                                            dimmed={winningSet ? !winningSet.has(n) : !mset.has(n)}
                                           />
                                         ))}
                                       </Stack>
@@ -2554,6 +2566,7 @@ export default function SemiAutoComparePanel({
                                 <Box sx={{ mt: 0.4, pl: 0.5 }}>
                                   <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.2 }}>
                                     반자동 측 일치 줄 ({g.semiList.length}):
+                                    {winningSet && ' — 당첨번호만 컬러, 나머지 회색'}
                                   </Typography>
                                   <Stack spacing={0.2}>
                                     {g.semiList.map((s) => (
@@ -2569,7 +2582,11 @@ export default function SemiAutoComparePanel({
                                           size="small"
                                           color="primary"
                                           variant="outlined"
-                                          label={`반자동 #${s.idx} · ${s.label}`}
+                                          label={
+                                            winningSet
+                                              ? `반자동 #${s.idx} · ${s.label} · 당첨 ${s.numbers.filter((n) => winningSet.has(n)).length}/6`
+                                              : `반자동 #${s.idx} · ${s.label}`
+                                          }
                                           sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
                                         />
                                         {s.numbers.map((n) => (
@@ -2577,7 +2594,7 @@ export default function SemiAutoComparePanel({
                                             key={`gs-${g.key}-${s.idx}-${n}`}
                                             number={n}
                                             size={20}
-                                            dimmed={!mset.has(n)}
+                                            dimmed={winningSet ? !winningSet.has(n) : !mset.has(n)}
                                           />
                                         ))}
                                       </Stack>

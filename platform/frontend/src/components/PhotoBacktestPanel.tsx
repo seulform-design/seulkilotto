@@ -27,10 +27,11 @@ import {
   Divider,
   Paper,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
 import {
   v1Api,
@@ -41,6 +42,71 @@ import {
 
 interface PhotoBacktestPanelProps {
   accumulated: PhotoAnalysisAccumulated | null;
+}
+
+// ── 백테스트 이력 영속화 ─────────────────────────────────────────
+// 백테스트 결과를 localStorage 에 저장하여 회차 전환·새로고침 후에도
+// 과거 회차들의 백테스트 요약을 다시 볼 수 있게 한다.
+const BACKTEST_HISTORY_KEY = 'lotto:photoBacktest:history:v1';
+const BACKTEST_HISTORY_LIMIT = 20;
+
+interface BacktestSnapshot {
+  round: number;
+  grade: 'S' | 'A' | 'B' | 'C' | 'D';
+  strongHits: number;
+  totalStrong: number;
+  excludedHits: number;
+  totalExcluded: number;
+  bonusInStrong: boolean;
+  matchedPairs: number;
+  matchedTriples: number;
+  matchedQuads: number;
+  winningNumbers: number[];
+  bonus: number;
+  recordedAt: number;
+}
+
+function loadBacktestHistory(): BacktestSnapshot[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(BACKTEST_HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (s): s is BacktestSnapshot =>
+        !!s && typeof s === 'object' && Number.isInteger(s.round) && typeof s.grade === 'string'
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveBacktestHistory(history: BacktestSnapshot[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(BACKTEST_HISTORY_KEY, JSON.stringify(history));
+  } catch {
+    /* quota — silent */
+  }
+}
+
+function upsertBacktestSnapshot(
+  existing: BacktestSnapshot[],
+  snapshot: BacktestSnapshot
+): BacktestSnapshot[] {
+  // 같은 회차는 최신값으로 덮어쓰고 최신순 정렬, 상한 cap
+  const filtered = existing.filter((s) => s.round !== snapshot.round);
+  return [snapshot, ...filtered].slice(0, BACKTEST_HISTORY_LIMIT);
+}
+
+function formatRelativeTime(timestamp: number): string {
+  const now = Date.now();
+  const diffSec = Math.floor((now - timestamp) / 1000);
+  if (diffSec < 60) return `방금 전`;
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}분 전`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}시간 전`;
+  return `${Math.floor(diffSec / 86400)}일 전`;
 }
 
 function findComboMatches(
@@ -93,24 +159,26 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
   const slice = accumulated?.by_intent?.current_round ?? null;
   const sliceTicketRoundStr = slice?.ticket_round?.trim();
 
-  // 백테스트 대상 회차 결정:
-  //   1) 슬라이스 ticket_round 가 latest_round 이하 (이미 추첨됨) → 그것
-  //   2) ticket_round 가 미래 회차 (미추첨) → latest_round 폴백
-  //   3) ticket_round 없음 → latest_round
-  // 이렇게 해야 사용자가 '이번회차 예측' (= 다음 회차) 으로 만든 ticket_round
-  // 가 아직 미추첨일 때 무용한 404 호출이 발생하지 않음.
+  // 백테스트 대상 회차 결정 (3단계 fallback):
+  //   1) 사용자 수동 선택 (manualRound) 우선
+  //   2) 슬라이스 ticket_round 가 latest_round 이하 → 그것
+  //   3) ticket_round 가 미래/없음 → latest_round
   const latestRound = meta.data?.latest_round ?? null;
-  const targetRound = useMemo(() => {
+  const [manualRound, setManualRound] = useState<number | null>(null);
+  const [history, setHistory] = useState<BacktestSnapshot[]>(() => loadBacktestHistory());
+
+  const autoSelectedRound = useMemo(() => {
     if (!latestRound) return null;
     if (sliceTicketRoundStr) {
       const parsed = Number(sliceTicketRoundStr);
       if (Number.isInteger(parsed) && parsed > 0 && parsed <= latestRound) {
-        return parsed; // 이미 추첨된 회차만 백테스트
+        return parsed;
       }
-      // ticket_round 가 미래 (미추첨) → latest_round 폴백
     }
     return latestRound;
   }, [sliceTicketRoundStr, latestRound]);
+
+  const targetRound = manualRound ?? autoSelectedRound;
 
   // 미래 회차 예측인지 표시 — UI에 명시
   const isPredictingFutureRound = useMemo(() => {
@@ -198,6 +266,37 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
     };
   }, [hasSlice, roundDrawn, round.data, slice, accumulated]);
 
+  // 분석 성공 시 이력에 자동 저장 (snapshot)
+  useEffect(() => {
+    if (!analysis || !targetRound) return;
+    const snapshot: BacktestSnapshot = {
+      round: targetRound,
+      grade: analysis.grade,
+      strongHits: analysis.strongHits.length,
+      totalStrong: analysis.strongCandidates.length,
+      excludedHits: analysis.excludedHits.length,
+      totalExcluded: analysis.excludedCandidates.length,
+      bonusInStrong: analysis.bonusInStrong,
+      matchedPairs: analysis.matchedPairs.length,
+      matchedTriples: analysis.matchedTriples.length,
+      matchedQuads: analysis.matchedQuads.length,
+      winningNumbers: analysis.winning,
+      bonus: analysis.bonus,
+      recordedAt: Date.now(),
+    };
+    setHistory((prev) => {
+      const next = upsertBacktestSnapshot(prev, snapshot);
+      saveBacktestHistory(next);
+      return next;
+    });
+  }, [analysis, targetRound]);
+
+  const clearHistory = () => {
+    if (!window.confirm(`백테스트 이력 ${history.length}건을 모두 삭제할까요?`)) return;
+    setHistory([]);
+    saveBacktestHistory([]);
+  };
+
   // 데이터 부재 — 패널 렌더 안 함
   if (!accumulated || !hasSlice) {
     return null;
@@ -248,6 +347,68 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
           업데이트 가능. 업데이트 후 백테스트가 갱신됩니다.
         </Alert>
       )}
+
+      {/* 회차 선택 — 수동 오버라이드 */}
+      <Stack
+        direction="row"
+        alignItems="center"
+        spacing={1}
+        flexWrap="wrap"
+        useFlexGap
+        sx={{ mb: 1.5 }}
+      >
+        <TextField
+          size="small"
+          label="백테스트 회차"
+          type="number"
+          value={targetRound ?? ''}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isInteger(v) && v > 0 && (!latestRound || v <= latestRound)) {
+              setManualRound(v);
+            } else if (e.target.value === '') {
+              setManualRound(null);
+            }
+          }}
+          inputProps={{ min: 1, max: latestRound ?? undefined, step: 1 }}
+          sx={{ width: 140 }}
+          helperText={
+            manualRound != null
+              ? '수동 선택'
+              : autoSelectedRound != null
+                ? '자동 선택'
+                : '회차 없음'
+          }
+        />
+        {manualRound != null && (
+          <Button size="small" onClick={() => setManualRound(null)}>
+            ↺ 자동
+          </Button>
+        )}
+        {latestRound && targetRound && targetRound < latestRound && (
+          <Button
+            size="small"
+            onClick={() => setManualRound((targetRound ?? 1) + 1)}
+            disabled={!targetRound || targetRound >= latestRound}
+          >
+            다음 회차 →
+          </Button>
+        )}
+        {targetRound && targetRound > 1 && (
+          <Button
+            size="small"
+            onClick={() => setManualRound((targetRound ?? 2) - 1)}
+            disabled={!targetRound || targetRound <= 1}
+          >
+            ← 이전 회차
+          </Button>
+        )}
+        {latestRound && (
+          <Typography variant="caption" color="text.secondary">
+            최신 추첨 회차: {latestRound}
+          </Typography>
+        )}
+      </Stack>
 
       {/* 데이터 로딩 */}
       {round.isLoading && (
@@ -490,6 +651,105 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
           <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block' }}>
             ※ 본 백테스트는 backward-looking 자기 검증입니다. 좋은 등급이 다음 회차의 예측력을 의미하지 않습니다.
             다음 회차의 1/8,145,060 확률은 변하지 않습니다.
+          </Typography>
+        </>
+      )}
+
+      {/* 백테스트 이력 — localStorage 영속 */}
+      {history.length > 0 && (
+        <>
+          <Divider sx={{ my: 1.5 }} />
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+            <Typography variant="body2" fontWeight={700}>
+              📒 백테스트 이력 ({history.length}건 / 최대 {BACKTEST_HISTORY_LIMIT})
+            </Typography>
+            <Button size="small" color="error" variant="outlined" onClick={clearHistory}>
+              이력 전체 삭제
+            </Button>
+          </Stack>
+          <Box
+            sx={{
+              maxHeight: 280,
+              overflowY: 'auto',
+              pr: 0.5,
+              py: 0.5,
+              bgcolor: 'action.hover',
+              borderRadius: 1,
+            }}
+          >
+            <Stack spacing={0.5} sx={{ px: 1 }}>
+              {history.map((snap) => {
+                const isActive = snap.round === targetRound;
+                return (
+                  <Stack
+                    key={`snap-${snap.round}`}
+                    direction="row"
+                    alignItems="center"
+                    spacing={0.75}
+                    flexWrap="wrap"
+                    useFlexGap
+                    sx={{
+                      p: 0.75,
+                      borderRadius: 1,
+                      bgcolor: isActive ? 'action.selected' : 'transparent',
+                      border: isActive ? '1px solid' : 'none',
+                      borderColor: 'primary.main',
+                    }}
+                  >
+                    <Chip
+                      size="small"
+                      label={`${snap.round}회`}
+                      variant="outlined"
+                      sx={{ fontWeight: 700, minWidth: 60 }}
+                    />
+                    <Chip
+                      size="small"
+                      label={snap.grade}
+                      sx={{
+                        bgcolor: gradeColors[snap.grade],
+                        color: '#fff',
+                        fontWeight: 700,
+                        minWidth: 32,
+                      }}
+                    />
+                    <Typography variant="caption" sx={{ minWidth: 90 }}>
+                      강한 {snap.strongHits}/{snap.totalStrong}
+                    </Typography>
+                    {snap.bonusInStrong && (
+                      <Typography variant="caption" color="warning.light">🎁</Typography>
+                    )}
+                    <Typography
+                      variant="caption"
+                      color={snap.excludedHits === 0 ? 'success.light' : 'error.light'}
+                      sx={{ minWidth: 70 }}
+                    >
+                      배제 fp {snap.excludedHits}
+                    </Typography>
+                    <Typography variant="caption" sx={{ minWidth: 50 }}>
+                      페어 {snap.matchedPairs}
+                    </Typography>
+                    <Typography variant="caption" sx={{ minWidth: 60 }}>
+                      트리플 {snap.matchedTriples}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ flex: 1, textAlign: 'right' }}>
+                      {formatRelativeTime(snap.recordedAt)}
+                    </Typography>
+                    {!isActive && (
+                      <Button
+                        size="small"
+                        variant="text"
+                        onClick={() => setManualRound(snap.round)}
+                      >
+                        다시 보기
+                      </Button>
+                    )}
+                  </Stack>
+                );
+              })}
+            </Stack>
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+            ※ 이력은 이 브라우저에만 저장됩니다. 같은 회차 백테스트는 최신값으로 덮어씁니다.
           </Typography>
         </>
       )}

@@ -26,7 +26,7 @@ import {
   Typography,
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import BulkLineInputDialog from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
 import {
@@ -38,6 +38,61 @@ import {
 } from '../api/v1Api';
 
 const NUMBERS = Array.from({ length: 45 }, (_, i) => i + 1);
+
+// ── 반자동 비교 영속화 (localStorage) ─────────────────────────────
+// 새로고침/페이지 이탈 시에도 사용자 입력 보존. 명시 초기화 시에만 사라짐.
+const SEMI_AUTO_STORAGE_KEY = 'lotto:semiAuto:v1';
+
+type PersistedSemiAutoState = {
+  picked: number[];
+  pickFlags: Record<number, 'user' | 'auto'>;
+  bulkTickets: number[][];
+};
+
+function defaultPersistedState(): PersistedSemiAutoState {
+  return { picked: [], pickFlags: {}, bulkTickets: [] };
+}
+
+function loadSemiAutoState(): PersistedSemiAutoState {
+  if (typeof window === 'undefined') return defaultPersistedState();
+  try {
+    const raw = window.localStorage.getItem(SEMI_AUTO_STORAGE_KEY);
+    if (!raw) return defaultPersistedState();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return defaultPersistedState();
+    const obj = parsed as Partial<PersistedSemiAutoState>;
+    const picked = Array.isArray(obj.picked)
+      ? obj.picked.filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= 45)
+      : [];
+    const pickFlags: Record<number, 'user' | 'auto'> = {};
+    if (obj.pickFlags && typeof obj.pickFlags === 'object') {
+      for (const [k, v] of Object.entries(obj.pickFlags as Record<string, unknown>)) {
+        const n = Number(k);
+        if (Number.isInteger(n) && n >= 1 && n <= 45 && (v === 'user' || v === 'auto')) {
+          pickFlags[n] = v;
+        }
+      }
+    }
+    const bulkTickets: number[][] = Array.isArray(obj.bulkTickets)
+      ? obj.bulkTickets
+          .filter((t): t is number[] => Array.isArray(t))
+          .map((t) => t.filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= 45))
+          .filter((t) => t.length === 6)
+      : [];
+    return { picked, pickFlags, bulkTickets };
+  } catch {
+    return defaultPersistedState();
+  }
+}
+
+function saveSemiAutoState(state: PersistedSemiAutoState): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(SEMI_AUTO_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota / private mode — silent */
+  }
+}
 
 /**
  * '이번회차 자동 누적' 데이터 슬라이스 우선순위:
@@ -508,13 +563,20 @@ export default function SemiAutoComparePanel({
   slipQueue,
   accumulated,
 }: SemiAutoComparePanelProps) {
-  const [picked, setPicked] = useState<number[]>([]);
-  const [pickFlags, setPickFlags] = useState<Record<number, PickType>>({});
+  // localStorage 에서 복원 — 새로고침/이탈 후에도 보존
+  const initial = useMemo(() => loadSemiAutoState(), []);
+  const [picked, setPicked] = useState<number[]>(initial.picked);
+  const [pickFlags, setPickFlags] = useState<Record<number, PickType>>(initial.pickFlags);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [photoNotice, setPhotoNotice] = useState<string | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkTickets, setBulkTickets] = useState<number[][]>([]);
+  const [bulkTickets, setBulkTickets] = useState<number[][]>(initial.bulkTickets);
+
+  // 영속 — picked/pickFlags/bulkTickets 변경 시 자동 저장
+  useEffect(() => {
+    saveSemiAutoState({ picked, pickFlags, bulkTickets });
+  }, [picked, pickFlags, bulkTickets]);
 
   const latest = useQuery({
     queryKey: ['v1-latest-for-semi-auto'],

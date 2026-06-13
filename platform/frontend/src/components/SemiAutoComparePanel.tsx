@@ -165,14 +165,17 @@ function ClassificationChip({
   number,
   type,
   onToggle,
+  onDelete,
 }: {
   number: number;
   type: PickType;
   onToggle: () => void;
+  onDelete: () => void;
 }) {
   return (
     <Chip
       onClick={onToggle}
+      onDelete={onDelete}
       label={`${number} · ${type === 'user' ? '사용자' : '자동'}`}
       color={type === 'user' ? 'primary' : 'default'}
       variant={type === 'user' ? 'filled' : 'outlined'}
@@ -226,6 +229,7 @@ export default function SemiAutoComparePanel({
       delete next[n];
       setPickFlags(next);
     } else if (picked.length < 6) {
+      // 그리드 추가는 6개 cap. 사진 업로드는 별도 경로로 더 추가 가능 (사용자가 삭제로 정리)
       const sorted = [...picked, n].sort((a, b) => a - b);
       setPicked(sorted);
       setPickFlags({ ...pickFlags, [n]: 'user' });
@@ -236,6 +240,27 @@ export default function SemiAutoComparePanel({
     setPickFlags({
       ...pickFlags,
       [n]: pickFlags[n] === 'user' ? 'auto' : 'user',
+    });
+  };
+
+  const deletePick = (n: number) => {
+    setPicked((prev) => prev.filter((x) => x !== n));
+    setPickFlags((prev) => {
+      const next = { ...prev };
+      delete next[n];
+      return next;
+    });
+  };
+
+  const deleteAllAuto = () => {
+    const userOnly = picked.filter((n) => pickFlags[n] !== 'auto');
+    setPicked(userOnly);
+    setPickFlags((prev) => {
+      const next: Record<number, PickType> = {};
+      userOnly.forEach((n) => {
+        next[n] = prev[n] ?? 'user';
+      });
+      return next;
     });
   };
 
@@ -260,9 +285,11 @@ export default function SemiAutoComparePanel({
         data.result?.extracted_visual_patterns?.draw_template?.marked_numbers ??
         data.result?.final_predictions?.strong_candidates ??
         [];
+      // 6개 cap 제거 — OCR이 영수증의 자동 번호까지 잡을 수 있으므로
+      // 검출된 모든 유효 번호를 노출하고 사용자가 [×]로 정리하게 함
       const validNums = Array.from(
         new Set(detected.filter((n) => Number.isInteger(n) && n >= 1 && n <= 45))
-      ).slice(0, 6);
+      );
       if (validNums.length === 0) {
         setPhotoError('사진에서 유효 번호를 검출하지 못했습니다. 아래 그리드에서 직접 선택해 주세요.');
         return;
@@ -271,12 +298,15 @@ export default function SemiAutoComparePanel({
       setPicked(sortedNums);
       const flags: Record<number, PickType> = {};
       sortedNums.forEach((n) => {
-        flags[n] = 'user'; // 사용자가 토글로 자동/사용자 재분류
+        flags[n] = 'user'; // 기본 '사용자' — 토글/삭제는 사용자 책임
       });
       setPickFlags(flags);
       setPhotoNotice(
-        `${sortedNums.length}개 검출 완료 — 각 번호를 클릭해 [사용자 / 자동] 분류하세요. ` +
-          '본 분석은 누적에 저장되지 않습니다.'
+        sortedNums.length === 6
+          ? `6개 검출 완료 — 각 번호를 클릭해 [사용자 / 자동] 분류하세요. ` +
+              '본 분석은 누적에 저장되지 않습니다.'
+          : `${sortedNums.length}개 검출 (목표 6개) — 자동/오인식 번호는 [×]로 삭제 후 분류하세요. ` +
+              '본 분석은 누적에 저장되지 않습니다.'
       );
     } catch (e) {
       setPhotoError(e instanceof Error ? e.message : '사진 분석 실패');
@@ -400,9 +430,21 @@ export default function SemiAutoComparePanel({
       {/* 분류 칩 */}
       {picked.length > 0 && (
         <Box sx={{ mb: 1.5 }}>
-          <Typography variant="caption" sx={{ display: 'block', mb: 0.5 }}>
-            각 번호 분류 (클릭하여 사용자 ↔ 자동 토글) · 사용자 {userCount} / 자동 {autoCount}
-          </Typography>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            sx={{ mb: 0.5 }}
+          >
+            <Typography variant="caption">
+              각 번호: 클릭=토글, [×]=삭제 · 사용자 {userCount} / 자동 {autoCount} / 총 {picked.length}
+            </Typography>
+            {autoCount > 0 && (
+              <Button size="small" color="error" variant="text" onClick={deleteAllAuto}>
+                자동 {autoCount}개 일괄 삭제
+              </Button>
+            )}
+          </Stack>
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
             {picked.map((n) => (
               <ClassificationChip
@@ -410,15 +452,23 @@ export default function SemiAutoComparePanel({
                 number={n}
                 type={pickFlags[n] ?? 'user'}
                 onToggle={() => toggleType(n)}
+                onDelete={() => deletePick(n)}
               />
             ))}
           </Stack>
         </Box>
       )}
 
-      {picked.length < 6 && (
+      {picked.length > 6 && (
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          ⚠ {picked.length}개 선택됨 (목표 6개) — 자동/오인식 번호를 [×]로 삭제하거나
+          「자동 일괄 삭제」 버튼을 누르세요. 정확히 6개가 되면 비교 결과가 표시됩니다.
+        </Alert>
+      )}
+
+      {picked.length > 0 && picked.length < 6 && (
         <Typography variant="caption" color="text.secondary">
-          6개 번호를 모두 선택하면 비교 결과가 표시됩니다.
+          {6 - picked.length}개 더 선택하면 비교 결과가 표시됩니다.
         </Typography>
       )}
 

@@ -31,11 +31,84 @@ import BulkLineInputDialog from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
 import {
   v1Api,
+  type ComboDuplicateItem,
+  type ComboDuplicatePatterns,
   type ManualSlipInput,
   type PhotoAnalysisAccumulated,
 } from '../api/v1Api';
 
 const NUMBERS = Array.from({ length: 45 }, (_, i) => i + 1);
+
+/**
+ * '이번회차 자동 누적' 데이터 슬라이스 우선순위:
+ *   1) accumulated.by_intent.current_round.accumulated_combo_patterns (가장 정확)
+ *   2) accumulated.accumulated_combo_patterns (전체 누적 폴백)
+ * 둘 다 없으면 null.
+ */
+function getCurrentRoundComboPatterns(
+  accumulated: PhotoAnalysisAccumulated | null
+): ComboDuplicatePatterns | null {
+  if (!accumulated) return null;
+  return (
+    accumulated.by_intent?.current_round?.accumulated_combo_patterns ??
+    accumulated.accumulated_combo_patterns ??
+    null
+  );
+}
+
+/**
+ * 자동 누적의 강한 후보.
+ *
+ * 주의: PhotoAnalysisIntentSlice 타입 자체에는 final_predictions 가 없으므로
+ * 루트 accumulated.final_predictions 만 사용. 이는 전체 누적이지만
+ * 현재 백엔드는 current_round 가 절대 다수일 때 root 값이 사실상
+ * current_round 누적과 같다.
+ */
+function getCurrentRoundStrongCandidates(
+  accumulated: PhotoAnalysisAccumulated | null
+): number[] {
+  return accumulated?.final_predictions?.strong_candidates ?? [];
+}
+
+function getCurrentRoundExcludedCandidates(
+  accumulated: PhotoAnalysisAccumulated | null
+): number[] {
+  return accumulated?.final_predictions?.excluded_candidates ?? [];
+}
+
+/**
+ * 반자동 티켓의 6개 번호 안에 누적 자동의 자주-페어/자주-트리플이
+ * 통째로 포함되어 있는지 측정 — 콤보 교집합.
+ *
+ * 예: 반자동 티켓 [3, 12, 15, 23, 28, 45]
+ *     누적 자주-페어 [12, 23] (5장에서 함께 등장)
+ *     → 매치 (티켓이 12, 23 모두 포함)
+ */
+function findComboMatches(
+  ticket: number[],
+  combos: ComboDuplicatePatterns | null
+): {
+  matchedPairs: ComboDuplicateItem[];
+  matchedTriples: ComboDuplicateItem[];
+  matchedQuads: ComboDuplicateItem[];
+} {
+  const ticketSet = new Set(ticket);
+  const matchedPairs: ComboDuplicateItem[] = [];
+  const matchedTriples: ComboDuplicateItem[] = [];
+  const matchedQuads: ComboDuplicateItem[] = [];
+  if (!combos) return { matchedPairs, matchedTriples, matchedQuads };
+
+  for (const p of combos.pair_duplicates ?? []) {
+    if (p.numbers.every((n) => ticketSet.has(n))) matchedPairs.push(p);
+  }
+  for (const t of combos.triple_duplicates ?? []) {
+    if (t.numbers.every((n) => ticketSet.has(n))) matchedTriples.push(t);
+  }
+  for (const q of combos.quad_duplicates ?? []) {
+    if (q.numbers.every((n) => ticketSet.has(n))) matchedQuads.push(q);
+  }
+  return { matchedPairs, matchedTriples, matchedQuads };
+}
 
 interface SemiAutoComparePanelProps {
   slipQueue: ManualSlipInput[];
@@ -90,14 +163,20 @@ interface BulkTicketResult {
   vsStrongMatch: number[];
   vsExcludedMatch: number[];
   bonusMatch: boolean;
-  savedSlipOverlapMax: number; // 가장 많이 겹친 슬립 라인의 겹침 수
+  savedSlipOverlapMax: number;
+  // 콤보 교집합 — 누적 자동의 자주-페어/트리플 매치
+  matchedPairCount: number;
+  matchedTripleCount: number;
+  matchedQuadCount: number;
+  // 종합 콤보 점수 (가중: 페어 1, 트리플 3, 쿼드 6)
+  comboScore: number;
 }
 
 interface BulkComparisonResult {
   ticketCount: number;
   uniqueNumberCount: number;
   perTicket: BulkTicketResult[];
-  hitDistribution: Record<number, number>; // 적중 개수 → 티켓 수
+  hitDistribution: Record<number, number>;
   avgHits: number;
   hitRates: {
     threePlus: number;
@@ -105,8 +184,21 @@ interface BulkComparisonResult {
     fivePlus: number;
     six: number;
   };
-  bestTickets: BulkTicketResult[]; // 상위 5개 (vs latest 매치 많은 순)
-  excludedWarningCount: number; // 배제 후보와 2개 이상 겹친 티켓 수
+  bestTickets: BulkTicketResult[];
+  excludedWarningCount: number;
+  // 누적 자동 강한 후보 교집합 분포
+  strongIntersectionDistribution: Record<number, number>; // 0,1,2,3,4,5,6 → 티켓수
+  twoPlusStrongCount: number;   // 강한 후보 2개+ 교집합 티켓 수
+  threePlusStrongCount: number; // 강한 후보 3개+ 교집합 티켓 수
+  // 페어/트리플 매치 분포
+  pairMatchDistribution: Record<number, number>;
+  tripleMatchDistribution: Record<number, number>;
+  avgPairMatches: number;
+  avgTripleMatches: number;
+  // 콤보 점수 상위 5개
+  bestComboTickets: BulkTicketResult[];
+  // 데이터 가용성
+  comboDataAvailable: boolean;
 }
 
 function buildBulkComparison(
@@ -117,13 +209,28 @@ function buildBulkComparison(
   latestBonus: number | null
 ): BulkComparisonResult {
   const latestSet = new Set(latestNumbers);
-  const strongSet = new Set(accumulated?.final_predictions?.strong_candidates ?? []);
-  const excludedSet = new Set(accumulated?.final_predictions?.excluded_candidates ?? []);
+
+  // 핵심 변경: '이번회차 자동 누적' 슬라이스를 우선 사용
+  const strongCandidates = getCurrentRoundStrongCandidates(accumulated);
+  const excludedCandidates = getCurrentRoundExcludedCandidates(accumulated);
+  const comboPatterns = getCurrentRoundComboPatterns(accumulated);
+  const strongSet = new Set(strongCandidates);
+  const excludedSet = new Set(excludedCandidates);
+  const comboDataAvailable = !!comboPatterns &&
+    ((comboPatterns.pair_duplicates?.length ?? 0) > 0 ||
+      (comboPatterns.triple_duplicates?.length ?? 0) > 0);
 
   const uniqueNumbers = new Set<number>();
   const perTicket: BulkTicketResult[] = [];
   const hitDistribution: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+  const strongIntersectionDistribution: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+  const pairMatchDistribution: Record<number, number> = {};
+  const tripleMatchDistribution: Record<number, number> = {};
   let totalHits = 0;
+  let totalPairMatches = 0;
+  let totalTripleMatches = 0;
+  let twoPlusStrongCount = 0;
+  let threePlusStrongCount = 0;
   let excludedWarningCount = 0;
 
   tickets.forEach((ticket, index) => {
@@ -134,7 +241,7 @@ function buildBulkComparison(
     const vsExcludedMatch = ticket.filter((n) => excludedSet.has(n));
     const bonusMatch = latestBonus != null && ticket.includes(latestBonus);
 
-    // 가장 큰 슬립 라인 겹침 — 빠른 계산을 위해 전체 슬립 라인 순회
+    // 가장 큰 슬립 라인 겹침
     let maxSlipOverlap = 0;
     for (const slip of slipQueue) {
       for (const line of slip.lines) {
@@ -142,6 +249,13 @@ function buildBulkComparison(
         if (overlap > maxSlipOverlap) maxSlipOverlap = overlap;
       }
     }
+
+    // 콤보 교집합 — 누적 자동의 자주-페어/트리플 매치
+    const { matchedPairs, matchedTriples, matchedQuads } = findComboMatches(ticket, comboPatterns);
+    const pairCount = matchedPairs.length;
+    const tripleCount = matchedTriples.length;
+    const quadCount = matchedQuads.length;
+    const comboScore = pairCount + tripleCount * 3 + quadCount * 6;
 
     perTicket.push({
       index,
@@ -151,29 +265,50 @@ function buildBulkComparison(
       vsExcludedMatch,
       bonusMatch,
       savedSlipOverlapMax: maxSlipOverlap,
+      matchedPairCount: pairCount,
+      matchedTripleCount: tripleCount,
+      matchedQuadCount: quadCount,
+      comboScore,
     });
 
     const hits = vsLatestMatch.length;
     hitDistribution[hits] = (hitDistribution[hits] ?? 0) + 1;
     totalHits += hits;
     if (vsExcludedMatch.length >= 2) excludedWarningCount += 1;
+
+    const strongInt = vsStrongMatch.length;
+    strongIntersectionDistribution[strongInt] = (strongIntersectionDistribution[strongInt] ?? 0) + 1;
+    if (strongInt >= 2) twoPlusStrongCount += 1;
+    if (strongInt >= 3) threePlusStrongCount += 1;
+
+    pairMatchDistribution[pairCount] = (pairMatchDistribution[pairCount] ?? 0) + 1;
+    tripleMatchDistribution[tripleCount] = (tripleMatchDistribution[tripleCount] ?? 0) + 1;
+    totalPairMatches += pairCount;
+    totalTripleMatches += tripleCount;
   });
 
   const ticketCount = tickets.length;
   const avgHits = ticketCount > 0 ? totalHits / ticketCount : 0;
+  const avgPairMatches = ticketCount > 0 ? totalPairMatches / ticketCount : 0;
+  const avgTripleMatches = ticketCount > 0 ? totalTripleMatches / ticketCount : 0;
 
   const threePlus = (hitDistribution[3] + hitDistribution[4] + hitDistribution[5] + hitDistribution[6]) / ticketCount;
   const fourPlus = (hitDistribution[4] + hitDistribution[5] + hitDistribution[6]) / ticketCount;
   const fivePlus = (hitDistribution[5] + hitDistribution[6]) / ticketCount;
   const six = hitDistribution[6] / ticketCount;
 
-  // 상위 5개 — vs latest 매치 많은 순 (보너스 매치는 가산)
   const bestTickets = [...perTicket]
     .sort((a, b) => {
       const aScore = a.vsLatestMatch.length + (a.bonusMatch ? 0.5 : 0);
       const bScore = b.vsLatestMatch.length + (b.bonusMatch ? 0.5 : 0);
       return bScore - aScore;
     })
+    .slice(0, 5);
+
+  // 콤보 점수 상위 5개 — 누적 자동과 가장 잘 맞은 티켓
+  const bestComboTickets = [...perTicket]
+    .filter((t) => t.comboScore > 0)
+    .sort((a, b) => b.comboScore - a.comboScore || b.vsStrongMatch.length - a.vsStrongMatch.length)
     .slice(0, 5);
 
   return {
@@ -185,6 +320,15 @@ function buildBulkComparison(
     hitRates: { threePlus, fourPlus, fivePlus, six },
     bestTickets,
     excludedWarningCount,
+    strongIntersectionDistribution,
+    twoPlusStrongCount,
+    threePlusStrongCount,
+    pairMatchDistribution,
+    tripleMatchDistribution,
+    avgPairMatches,
+    avgTripleMatches,
+    bestComboTickets,
+    comboDataAvailable,
   };
 }
 
@@ -908,8 +1052,175 @@ export default function SemiAutoComparePanel({
             </Paper>
           )}
 
+          {/* ── 누적 자동 강한 후보 교집합 분포 ────────────────── */}
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'primary.main' }}>
+            <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+              🔗 이번회차 자동 누적 강한 후보 교집합 ({bulkComparison.perTicket[0]?.vsStrongMatch != null && (getCurrentRoundStrongCandidates(accumulated).length)}개 후보)
+            </Typography>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+              {[0, 1, 2, 3, 4, 5, 6].map((k) => {
+                const count = bulkComparison.strongIntersectionDistribution[k] ?? 0;
+                const pct = bulkComparison.ticketCount > 0
+                  ? (count / bulkComparison.ticketCount) * 100
+                  : 0;
+                return (
+                  <Chip
+                    key={k}
+                    size="small"
+                    label={`${k}개: ${count}장 (${pct.toFixed(1)}%)`}
+                    color={k >= 3 ? 'success' : k >= 2 ? 'warning' : 'default'}
+                    variant={k >= 2 ? 'filled' : 'outlined'}
+                  />
+                );
+              })}
+            </Stack>
+            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+              <Chip
+                size="small"
+                color="warning"
+                label={`🟡 2개+ 교집합: ${bulkComparison.twoPlusStrongCount}장 (${bulkComparison.ticketCount > 0 ? (bulkComparison.twoPlusStrongCount / bulkComparison.ticketCount * 100).toFixed(2) : '0.00'}%)`}
+                sx={{ fontWeight: 700 }}
+              />
+              <Chip
+                size="small"
+                color="success"
+                label={`🟢 3개+ 교집합: ${bulkComparison.threePlusStrongCount}장 (${bulkComparison.ticketCount > 0 ? (bulkComparison.threePlusStrongCount / bulkComparison.ticketCount * 100).toFixed(2) : '0.00'}%)`}
+                sx={{ fontWeight: 700 }}
+              />
+            </Stack>
+            {getCurrentRoundStrongCandidates(accumulated).length === 0 && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                ※ 이번회차 자동 누적 데이터가 없습니다. 자동 용지를 분석하여 누적을 만들면 교집합 분석이 활성됩니다.
+              </Typography>
+            )}
+          </Paper>
+
+          {/* ── 누적 자동 페어/트리플 콤보 교집합 ──────────────── */}
+          {bulkComparison.comboDataAvailable && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+                🔗 자동 누적 페어/트리플 콤보 교집합
+              </Typography>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                <Chip
+                  size="small"
+                  color="primary"
+                  label={`평균 페어 매치 ${bulkComparison.avgPairMatches.toFixed(2)} / 티켓`}
+                  sx={{ fontWeight: 700 }}
+                />
+                <Chip
+                  size="small"
+                  color="primary"
+                  label={`평균 트리플 매치 ${bulkComparison.avgTripleMatches.toFixed(3)} / 티켓`}
+                  variant="outlined"
+                />
+              </Stack>
+              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 600 }}>
+                페어 매치 분포 (티켓 안에 자동 누적의 자주-페어가 통째로 들어 있는지):
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                {Object.entries(bulkComparison.pairMatchDistribution)
+                  .map(([k, v]) => [Number(k), v] as [number, number])
+                  .sort((a, b) => a[0] - b[0])
+                  .map(([k, v]) => {
+                    const pct = bulkComparison.ticketCount > 0
+                      ? (v / bulkComparison.ticketCount) * 100
+                      : 0;
+                    return (
+                      <Chip
+                        key={`pair-${k}`}
+                        size="small"
+                        label={`${k}개 페어: ${v}장 (${pct.toFixed(1)}%)`}
+                        color={k >= 2 ? 'success' : k >= 1 ? 'primary' : 'default'}
+                        variant={k >= 1 ? 'filled' : 'outlined'}
+                      />
+                    );
+                  })}
+              </Stack>
+              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 600 }}>
+                트리플 매치 분포:
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                {Object.entries(bulkComparison.tripleMatchDistribution)
+                  .map(([k, v]) => [Number(k), v] as [number, number])
+                  .sort((a, b) => a[0] - b[0])
+                  .map(([k, v]) => {
+                    const pct = bulkComparison.ticketCount > 0
+                      ? (v / bulkComparison.ticketCount) * 100
+                      : 0;
+                    return (
+                      <Chip
+                        key={`triple-${k}`}
+                        size="small"
+                        label={`${k}개 트리플: ${v}장 (${pct.toFixed(1)}%)`}
+                        color={k >= 1 ? 'success' : 'default'}
+                        variant={k >= 1 ? 'filled' : 'outlined'}
+                      />
+                    );
+                  })}
+              </Stack>
+            </Paper>
+          )}
+
+          {/* ── 콤보 점수 상위 5장 ─────────────────────────────── */}
+          {bulkComparison.bestComboTickets.length > 0 && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>
+                🥇 누적 자동과 가장 잘 맞은 티켓 5장 (페어 1점 · 트리플 3점 · 쿼드 6점)
+              </Typography>
+              <Stack spacing={0.75}>
+                {bulkComparison.bestComboTickets.map((t) => (
+                  <Stack
+                    key={`combo-best-${t.index}`}
+                    direction="row"
+                    alignItems="center"
+                    spacing={0.75}
+                    flexWrap="wrap"
+                    useFlexGap
+                  >
+                    <Chip
+                      size="small"
+                      label={`#${t.index + 1}`}
+                      variant="outlined"
+                      sx={{ minWidth: 48 }}
+                    />
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      {t.ticket.map((n) => (
+                        <LottoBall key={n} number={n} size={22} />
+                      ))}
+                    </Stack>
+                    <Chip
+                      size="small"
+                      color="success"
+                      label={`점수 ${t.comboScore}`}
+                      sx={{ fontWeight: 700 }}
+                    />
+                    {t.matchedPairCount > 0 && (
+                      <Chip size="small" label={`페어 ${t.matchedPairCount}`} variant="outlined" />
+                    )}
+                    {t.matchedTripleCount > 0 && (
+                      <Chip
+                        size="small"
+                        label={`트리플 ${t.matchedTripleCount}`}
+                        color="warning"
+                      />
+                    )}
+                    {t.vsStrongMatch.length >= 2 && (
+                      <Chip
+                        size="small"
+                        label={`강한후보 ${t.vsStrongMatch.length}`}
+                        color="primary"
+                      />
+                    )}
+                  </Stack>
+                ))}
+              </Stack>
+            </Paper>
+          )}
+
           <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block' }}>
             ※ 위 매치율은 과거 회차에 대한 측정값이며, 다음 회차의 당첨 확률(1/8,145,060)을 변경하지 않습니다.
+            누적 자동과의 콤보 교집합은 사용자의 픽이 군중의 강한 패턴에 얼마나 정렬되는지 보여주는 관찰 도구입니다.
           </Typography>
         </>
       )}

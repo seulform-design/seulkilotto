@@ -7,7 +7,6 @@ import {
   Collapse,
   Divider,
   IconButton,
-  LinearProgress,
   Paper,
   Stack,
   Table,
@@ -20,9 +19,10 @@ import {
   Tabs,
   Typography,
 } from '@mui/material';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import BulkLineInputDialog from '../components/BulkLineInputDialog';
 import LottoBall from '../components/LottoBall';
+import NumberFrequencyPanel from '../components/NumberFrequencyPanel';
 import PhotoBacktestPanel from '../components/PhotoBacktestPanel';
 import SavedLinesPanel, {
   GAME_LABELS,
@@ -377,133 +377,6 @@ function SavedReviewTemplatePanel({
           <ReviewBall key={n} number={n} size={30} winningSet={winningSet} />
         ))}
       </Stack>
-    </Paper>
-  );
-}
-
-function NumberFrequencyPanel({
-  slipQueue,
-  intent,
-  winningSet,
-}: {
-  slipQueue: ManualSlipInput[];
-  intent: SheetIntent;
-  winningSet: Set<number> | null;
-}) {
-  const [open, setOpen] = useState(true);
-  const frequency = useMemo(() => {
-    if (slipQueue.length === 0) return [];
-    const counter: Record<number, number> = {};
-    for (let n = 1; n <= 45; n += 1) counter[n] = 0;
-    for (const slip of slipQueue) {
-      for (const line of slip.lines) {
-        for (const n of line.numbers) {
-          if (Number.isInteger(n) && n >= 1 && n <= 45) {
-            counter[n] = (counter[n] ?? 0) + 1;
-          }
-        }
-      }
-    }
-    return Object.entries(counter)
-      .map(([n, count]) => ({ number: Number(n), count }))
-      .filter((item) => item.count > 0)
-      .sort((a, b) => b.count - a.count || a.number - b.number);
-  }, [slipQueue]);
-
-  const totalLines = slipQueue.reduce((s, sl) => s + sl.lines.length, 0);
-  const maxCount = frequency[0]?.count ?? 1;
-
-  return (
-    <Paper variant="outlined" sx={{ p: 1.5 }}>
-      <Stack
-        direction="row"
-        alignItems="center"
-        justifyContent="space-between"
-        sx={{ cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Typography variant="subtitle2" fontWeight={700}>
-          📊 전체 번호 빈도 (자동 = 구입번호 직접입력 {totalLines}줄 · 등장 {frequency.length}개)
-          {open ? ' ▼' : ' ▶'}
-        </Typography>
-        <Button size="small" variant="text">
-          {open ? '접기' : '펼치기'}
-        </Button>
-      </Stack>
-      {open && (
-        <Box sx={{ mt: 1.5 }}>
-          {frequency.length === 0 ? (
-            <Alert severity="info">
-              자동 데이터가 없습니다. '구입번호 직접입력' 영역에서 줄을 추가하면 여기에 빈도가 표시됩니다.
-            </Alert>
-          ) : (
-            <>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                자동 (구입번호 직접입력) {totalLines}줄에서 각 번호 등장 횟수. 막대 길이 = 최대 대비 비율.
-                {intent === 'review' && winningSet ? ' 🎯 = 당첨번호.' : ''}
-              </Typography>
-              <Box sx={{ maxHeight: 360, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
-                <Stack spacing={0.4}>
-                  {frequency.map((item, idx) => {
-                    const widthPct = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
-                    const isWinning = winningSet?.has(item.number);
-                    return (
-                      <Stack
-                        key={item.number}
-                        direction="row"
-                        alignItems="center"
-                        spacing={0.5}
-                        flexWrap="wrap"
-                        useFlexGap
-                      >
-                        <Typography variant="caption" sx={{ minWidth: 30, color: 'text.secondary', fontWeight: 600 }}>
-                          #{idx + 1}
-                        </Typography>
-                        <LottoBall number={item.number} size={26} dimmed={winningSet ? !isWinning : false} />
-                        <Box sx={{ flex: 1, minWidth: 80, position: 'relative' }}>
-                          <LinearProgress
-                            variant="determinate"
-                            value={widthPct}
-                            sx={{
-                              height: 18,
-                              borderRadius: 1,
-                              bgcolor: 'action.selected',
-                              '& .MuiLinearProgress-bar': {
-                                bgcolor: isWinning
-                                  ? 'warning.main'
-                                  : item.count >= maxCount * 0.7
-                                    ? 'success.main'
-                                    : 'primary.main',
-                              },
-                            }}
-                          />
-                          <Typography
-                            variant="caption"
-                            sx={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 8,
-                              lineHeight: '18px',
-                              fontWeight: 700,
-                              color: '#fff',
-                              textShadow: '0 1px 2px rgba(0,0,0,0.6)',
-                            }}
-                          >
-                            {item.count}회
-                          </Typography>
-                        </Box>
-                        {isWinning && (
-                          <Chip size="small" color="warning" label="🎯 당첨" sx={{ height: 18, fontSize: 10 }} />
-                        )}
-                      </Stack>
-                    );
-                  })}
-                </Stack>
-              </Box>
-            </>
-          )}
-        </Box>
-      )}
     </Paper>
   );
 }
@@ -1216,9 +1089,11 @@ export default function PhotoAnalysisPage() {
       </Divider>
 
       <NumberFrequencyPanel
-        slipQueue={slipQueue}
-        intent={activeTab}
+        lines={slipQueue.flatMap((slip) => slip.lines.map((line) => line.numbers))}
         winningSet={activeTab === 'review' ? toWinningSet(activeSlice?.draw_template) : null}
+        sourceLabel="자동 = 구입번호 직접입력"
+        bodyLabel="자동 (구입번호 직접입력)"
+        emptyHint="자동 데이터가 없습니다. '구입번호 직접입력' 영역에서 줄을 추가하면 여기에 빈도가 표시됩니다."
       />
 
       <IntentAccumulatedPanel

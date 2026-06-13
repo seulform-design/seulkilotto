@@ -30,6 +30,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import BulkLineInputDialog from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
+import NumberFrequencyPanel from './NumberFrequencyPanel';
 import SavedLinesPanel, {
   GAME_LABELS,
   type GameLabel,
@@ -1198,6 +1199,22 @@ export default function SemiAutoComparePanel({
             emptyHint="저장된 줄이 없습니다. 그리드에서 6개 선택 후 [줄 저장]."
           />
         </Paper>
+      )}
+
+      {/* 반자동 누적 기반 빈도 — 자동(§2) 과 분리, 반자동 누적만 카운트 */}
+      {(semiCurrentLines.length > 0 || semiSlipQueue.length > 0) && (
+        <Box sx={{ mb: 1.5 }}>
+          <NumberFrequencyPanel
+            lines={[
+              ...semiCurrentLines.map((l) => l.numbers),
+              ...semiSlipQueue.flatMap((s) => s.lines.map((l) => l.numbers)),
+            ]}
+            winningSet={winningSet}
+            sourceLabel="반자동 누적"
+            bodyLabel="반자동 누적"
+            emptyHint="반자동 누적이 없습니다. 그리드에서 6개 선택 후 [줄 저장] 으로 누적하세요."
+          />
+        </Box>
       )}
 
       {/* 비교 결과 */}

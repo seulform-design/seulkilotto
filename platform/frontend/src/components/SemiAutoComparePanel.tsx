@@ -1171,10 +1171,49 @@ export default function SemiAutoComparePanel({
         });
       }
     }
-    // 정렬: 일치 개수 내림차순 → autoIdx asc → semiIdx asc.
-    pairs.sort(
+
+    /**
+     * (autoIdx, matchedNumbers) 단위 그룹화 — 사용자 정정:
+     * '자동 #5 ↔ 반자동 #40, #42, #44, #47 매치 [23, 24]' 4건이 사실상
+     * '같은 자동 줄 + 같은 매치 결과 + 반자동만 다름' 이라 중복으로 보임.
+     * 한 카드에 통합: { autoLine, matchedNumbers, semiList[] }.
+     */
+    type GroupEntry = {
+      key: string;
+      autoIdx: number;
+      autoLabel: string;
+      autoNumbers: number[];
+      matchCount: number;
+      matchedNumbers: number[];
+      semiList: { idx: number; label: string; numbers: number[] }[];
+    };
+    const groupMap = new Map<string, GroupEntry>();
+    for (const p of pairs) {
+      const key = `${p.autoIdx}|${p.matchedNumbers.join('-')}`;
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          key,
+          autoIdx: p.autoIdx,
+          autoLabel: p.autoLabel,
+          autoNumbers: p.autoNumbers,
+          matchCount: p.matchCount,
+          matchedNumbers: p.matchedNumbers,
+          semiList: [],
+        });
+      }
+      groupMap.get(key)!.semiList.push({
+        idx: p.semiIdx,
+        label: p.semiLabel,
+        numbers: p.semiNumbers,
+      });
+    }
+    // 정렬: matchCount 내림차순 → autoIdx asc → matchedNumbers 사전식.
+    const groups = Array.from(groupMap.values()).sort(
       (x, y) =>
-        y.matchCount - x.matchCount || x.autoIdx - y.autoIdx || x.semiIdx - y.semiIdx
+        y.matchCount - x.matchCount ||
+        x.autoIdx - y.autoIdx ||
+        (x.matchedNumbers[0] ?? 0) - (y.matchedNumbers[0] ?? 0) ||
+        (x.matchedNumbers[1] ?? 0) - (y.matchedNumbers[1] ?? 0)
     );
 
     return {
@@ -1185,12 +1224,13 @@ export default function SemiAutoComparePanel({
       autoDupSamples: autoDedup.dupSources.slice(0, 5),
       semiDupSamples: semiDedup.dupSources.slice(0, 5),
       totalPairCount: autoLines.length * semiLines.length,
-      pairs6: pairs.filter((p) => p.matchCount === 6),
-      pairs5: pairs.filter((p) => p.matchCount === 5),
-      pairs4: pairs.filter((p) => p.matchCount === 4),
-      pairs3: pairs.filter((p) => p.matchCount === 3),
-      pairs2: pairs.filter((p) => p.matchCount === 2),
-      matchedPairCount: pairs.length,
+      groups6: groups.filter((g) => g.matchCount === 6),
+      groups5: groups.filter((g) => g.matchCount === 5),
+      groups4: groups.filter((g) => g.matchCount === 4),
+      groups3: groups.filter((g) => g.matchCount === 3),
+      groups2: groups.filter((g) => g.matchCount === 2),
+      rawPairCount: pairs.length,
+      groupCount: groups.length,
     };
   }, [
     currentSlipLines,
@@ -2367,9 +2407,10 @@ export default function SemiAutoComparePanel({
                 {groupLineMatching.semiDupRemoved > 0 && (
                   <> (중복 <strong>{groupLineMatching.semiDupRemoved}건</strong> 제외)</>
                 )}
-                {' = '}전수 비교 {groupLineMatching.totalPairCount}개 페어 가운데 공통 번호가 2개 이상인 페어만
-                추출. 일치 개수 (6 → 5 → 4 → 3 → 2) 순으로 모두 노출.
-                매치된 페어: <strong>{groupLineMatching.matchedPairCount}건</strong>.
+                {' = '}전수 비교 {groupLineMatching.totalPairCount}개 페어 가운데 공통 번호 ≥2 인
+                페어 {groupLineMatching.rawPairCount}건. <strong>같은 자동 줄 + 같은 매치 번호 (반자동만 다름)</strong> 는
+                한 카드로 통합 → 화면 카드 {groupLineMatching.groupCount}건. 일치 개수
+                (6 → 5 → 4 → 3 → 2) 순으로 모두 노출.
               </Typography>
               {(groupLineMatching.autoDupRemoved > 0 || groupLineMatching.semiDupRemoved > 0) && (
                 <Alert severity="info" sx={{ mb: 1, fontSize: 11 }}>
@@ -2394,12 +2435,12 @@ export default function SemiAutoComparePanel({
               )}
               {(() => {
                 const matchedSet = (matched: number[]): Set<number> => new Set(matched);
-                const renderPairGroup = (
+                const renderGroupSection = (
                   label: string,
                   color: 'warning' | 'success' | 'error' | 'primary' | 'info',
-                  pairs: typeof groupLineMatching.pairs6
+                  groups: typeof groupLineMatching.groups6
                 ) => {
-                  if (pairs.length === 0) return null;
+                  if (groups.length === 0) return null;
                   return (
                     <Box sx={{ mb: 1.5 }}>
                       <Typography
@@ -2407,11 +2448,11 @@ export default function SemiAutoComparePanel({
                         color={`${color}.light`}
                         sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
                       >
-                        {label} — {pairs.length}건
+                        {label} — {groups.length}건
                       </Typography>
                       <Box
                         sx={{
-                          maxHeight: 420,
+                          maxHeight: 480,
                           overflowY: 'auto',
                           bgcolor: 'action.hover',
                           borderRadius: 1,
@@ -2419,11 +2460,11 @@ export default function SemiAutoComparePanel({
                         }}
                       >
                         <Stack spacing={0.75}>
-                          {pairs.map((p, idx) => {
-                            const matchSet = matchedSet(p.matchedNumbers);
+                          {groups.map((g, idx) => {
+                            const mset = matchedSet(g.matchedNumbers);
                             return (
                               <Box
-                                key={`pair-${p.autoIdx}-${p.semiIdx}`}
+                                key={g.key}
                                 sx={{
                                   p: 0.5,
                                   borderRadius: 1,
@@ -2437,17 +2478,24 @@ export default function SemiAutoComparePanel({
                                   <Chip
                                     size="small"
                                     color={color}
-                                    label={`${p.matchCount}개 일치`}
+                                    label={`${g.matchCount}개 일치`}
                                     sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
                                   />
                                   <Chip
                                     size="small"
                                     variant="outlined"
-                                    label={`매치: ${p.matchedNumbers.join(', ')}`}
+                                    label={`매치: ${g.matchedNumbers.join(', ')}`}
                                     sx={{ height: 18, fontSize: 11 }}
                                   />
+                                  <Chip
+                                    size="small"
+                                    color="primary"
+                                    variant="outlined"
+                                    label={`반자동 ${g.semiList.length}줄`}
+                                    sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                                  />
                                   {winningSet && (() => {
-                                    const w = p.matchedNumbers.filter((n) => winningSet.has(n)).length;
+                                    const w = g.matchedNumbers.filter((n) => winningSet.has(n)).length;
                                     return w > 0 ? (
                                       <Chip
                                         size="small"
@@ -2470,42 +2518,51 @@ export default function SemiAutoComparePanel({
                                     size="small"
                                     color="success"
                                     variant="outlined"
-                                    label={`자동 #${p.autoIdx} · ${p.autoLabel}`}
+                                    label={`자동 #${g.autoIdx} · ${g.autoLabel}`}
                                     sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
                                   />
-                                  {p.autoNumbers.map((n) => (
+                                  {g.autoNumbers.map((n) => (
                                     <LottoBall
-                                      key={`a-${p.autoIdx}-${n}`}
+                                      key={`ga-${g.autoIdx}-${n}`}
                                       number={n}
                                       size={22}
-                                      dimmed={!matchSet.has(n)}
+                                      dimmed={!mset.has(n)}
                                     />
                                   ))}
                                 </Stack>
-                                <Stack
-                                  direction="row"
-                                  alignItems="center"
-                                  spacing={0.4}
-                                  flexWrap="wrap"
-                                  useFlexGap
-                                  sx={{ mt: 0.2 }}
-                                >
-                                  <Chip
-                                    size="small"
-                                    color="primary"
-                                    variant="outlined"
-                                    label={`반자동 #${p.semiIdx} · ${p.semiLabel}`}
-                                    sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
-                                  />
-                                  {p.semiNumbers.map((n) => (
-                                    <LottoBall
-                                      key={`s-${p.semiIdx}-${n}`}
-                                      number={n}
-                                      size={22}
-                                      dimmed={!matchSet.has(n)}
-                                    />
-                                  ))}
-                                </Stack>
+                                <Box sx={{ mt: 0.4, pl: 0.5 }}>
+                                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.2 }}>
+                                    반자동 측 일치 줄 ({g.semiList.length}):
+                                  </Typography>
+                                  <Stack spacing={0.2}>
+                                    {g.semiList.map((s) => (
+                                      <Stack
+                                        key={`gs-${g.key}-${s.idx}`}
+                                        direction="row"
+                                        alignItems="center"
+                                        spacing={0.4}
+                                        flexWrap="wrap"
+                                        useFlexGap
+                                      >
+                                        <Chip
+                                          size="small"
+                                          color="primary"
+                                          variant="outlined"
+                                          label={`반자동 #${s.idx} · ${s.label}`}
+                                          sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                                        />
+                                        {s.numbers.map((n) => (
+                                          <LottoBall
+                                            key={`gs-${g.key}-${s.idx}-${n}`}
+                                            number={n}
+                                            size={20}
+                                            dimmed={!mset.has(n)}
+                                          />
+                                        ))}
+                                      </Stack>
+                                    ))}
+                                  </Stack>
+                                </Box>
                               </Box>
                             );
                           })}
@@ -2514,7 +2571,7 @@ export default function SemiAutoComparePanel({
                     </Box>
                   );
                 };
-                if (groupLineMatching.matchedPairCount === 0) {
+                if (groupLineMatching.groupCount === 0) {
                   return (
                     <Alert severity="info">
                       공통 번호 2개 이상인 줄 페어가 없습니다. 자동 또는 반자동 한쪽에 데이터가 부족하거나 두 그룹이 완전히 다른 번호를 사용했습니다.
@@ -2527,30 +2584,30 @@ export default function SemiAutoComparePanel({
                       <Chip
                         size="small"
                         variant="outlined"
-                        label={`총 ${groupLineMatching.matchedPairCount}건`}
+                        label={`통합 카드 총 ${groupLineMatching.groupCount}건 (원본 페어 ${groupLineMatching.rawPairCount}건)`}
                         sx={{ fontWeight: 700 }}
                       />
-                      {groupLineMatching.pairs6.length > 0 && (
-                        <Chip size="small" color="error" label={`6개 일치: ${groupLineMatching.pairs6.length}건`} sx={{ fontWeight: 700 }} />
+                      {groupLineMatching.groups6.length > 0 && (
+                        <Chip size="small" color="error" label={`6개 일치: ${groupLineMatching.groups6.length}건`} sx={{ fontWeight: 700 }} />
                       )}
-                      {groupLineMatching.pairs5.length > 0 && (
-                        <Chip size="small" color="warning" label={`5개 일치: ${groupLineMatching.pairs5.length}건`} sx={{ fontWeight: 700 }} />
+                      {groupLineMatching.groups5.length > 0 && (
+                        <Chip size="small" color="warning" label={`5개 일치: ${groupLineMatching.groups5.length}건`} sx={{ fontWeight: 700 }} />
                       )}
-                      {groupLineMatching.pairs4.length > 0 && (
-                        <Chip size="small" color="success" label={`4개 일치: ${groupLineMatching.pairs4.length}건`} sx={{ fontWeight: 700 }} />
+                      {groupLineMatching.groups4.length > 0 && (
+                        <Chip size="small" color="success" label={`4개 일치: ${groupLineMatching.groups4.length}건`} sx={{ fontWeight: 700 }} />
                       )}
-                      {groupLineMatching.pairs3.length > 0 && (
-                        <Chip size="small" color="primary" label={`3개 일치: ${groupLineMatching.pairs3.length}건`} sx={{ fontWeight: 700 }} />
+                      {groupLineMatching.groups3.length > 0 && (
+                        <Chip size="small" color="primary" label={`3개 일치: ${groupLineMatching.groups3.length}건`} sx={{ fontWeight: 700 }} />
                       )}
-                      {groupLineMatching.pairs2.length > 0 && (
-                        <Chip size="small" color="info" label={`2개 일치: ${groupLineMatching.pairs2.length}건`} sx={{ fontWeight: 700 }} />
+                      {groupLineMatching.groups2.length > 0 && (
+                        <Chip size="small" color="info" label={`2개 일치: ${groupLineMatching.groups2.length}건`} sx={{ fontWeight: 700 }} />
                       )}
                     </Stack>
-                    {renderPairGroup('🟣 6개 일치 (한 줄 통째 일치 — 매우 희귀)', 'error', groupLineMatching.pairs6)}
-                    {renderPairGroup('🔴 5개 일치 (희귀)', 'warning', groupLineMatching.pairs5)}
-                    {renderPairGroup('🟠 4개 일치', 'success', groupLineMatching.pairs4)}
-                    {renderPairGroup('🟢 3개 일치', 'primary', groupLineMatching.pairs3)}
-                    {renderPairGroup('🟡 2개 일치 (가장 많음)', 'info', groupLineMatching.pairs2)}
+                    {renderGroupSection('🟣 6개 일치 (한 줄 통째 일치 — 매우 희귀)', 'error', groupLineMatching.groups6)}
+                    {renderGroupSection('🔴 5개 일치 (희귀)', 'warning', groupLineMatching.groups5)}
+                    {renderGroupSection('🟠 4개 일치', 'success', groupLineMatching.groups4)}
+                    {renderGroupSection('🟢 3개 일치', 'primary', groupLineMatching.groups3)}
+                    {renderGroupSection('🟡 2개 일치 (가장 많음)', 'info', groupLineMatching.groups2)}
                   </>
                 );
               })()}

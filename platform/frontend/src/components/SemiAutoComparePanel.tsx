@@ -1206,25 +1206,70 @@ export default function SemiAutoComparePanel({
         g.semiList.push({ idx: p.semiIdx, label: p.semiLabel, numbers: p.semiNumbers });
       }
     }
-    // 정렬: (복기 탭에서) 당첨번호 일치 개수 1순위 → matchCount → 사전식 → list 크기.
-    // winningSet 이 있는 (복기) 컨텍스트에서 '당첨된 매치 번호' 가 많은 그룹이 상단.
+    // 강한 후보 (이번회차 자동 누적) — 매치 번호 중 강한 후보 개수가 통계 핵심.
+    const strongCandidates = getCurrentRoundStrongCandidates(accumulated);
+    const strongSet = new Set(strongCandidates);
+
+    // 카운터 정의:
+    //   winCount(g): 매치 번호 중 당첨번호 개수 (복기 탭).
+    //   strongMatchCount(g): 매치 번호 중 강한 후보 개수 (이번회차 탭).
     const winCount = (g: GroupEntry): number =>
       winningSet ? g.matchedNumbers.filter((n) => winningSet.has(n)).length : 0;
-    const groups = Array.from(groupMap.values()).sort(
-      (x, y) =>
-        winCount(y) - winCount(x) ||
+    const strongMatchCount = (g: GroupEntry): number =>
+      g.matchedNumbers.filter((n) => strongSet.has(n)).length;
+    const lineWinCount = (line: LineEntry): number =>
+      winningSet ? line.numbers.filter((n) => winningSet.has(n)).length : 0;
+    const lineStrongCount = (line: LineEntry): number =>
+      line.numbers.filter((n) => strongSet.has(n)).length;
+
+    // 정렬:
+    //   복기 탭 (winningSet 존재): 당첨 일치 1순위 → 강한 후보 일치 → matchCount.
+    //   이번회차 탭 (winningSet null): 강한 후보 일치 1순위 → matchCount.
+    const groups = Array.from(groupMap.values()).sort((x, y) => {
+      if (winningSet) {
+        const dw = winCount(y) - winCount(x);
+        if (dw !== 0) return dw;
+      }
+      const ds = strongMatchCount(y) - strongMatchCount(x);
+      if (ds !== 0) return ds;
+      return (
         y.matchCount - x.matchCount ||
         (x.matchedNumbers[0] ?? 0) - (y.matchedNumbers[0] ?? 0) ||
         (x.matchedNumbers[1] ?? 0) - (y.matchedNumbers[1] ?? 0) ||
         y.autoList.length - x.autoList.length ||
         y.semiList.length - x.semiList.length
-    );
-    // 각 그룹 내부 list 도 (winningSet 있으면) 그 줄의 당첨번호 일치 개수 1순위 → idx 오름차순.
-    const lineWinCount = (line: LineEntry): number =>
-      winningSet ? line.numbers.filter((n) => winningSet.has(n)).length : 0;
+      );
+    });
+    // 각 그룹 내부 list 정렬 — 복기는 당첨 일치 1순위, 이번회차는 강한 후보 1순위.
     for (const g of groups) {
-      g.autoList.sort((a, b) => lineWinCount(b) - lineWinCount(a) || a.idx - b.idx);
-      g.semiList.sort((a, b) => lineWinCount(b) - lineWinCount(a) || a.idx - b.idx);
+      if (winningSet) {
+        g.autoList.sort(
+          (a, b) =>
+            lineWinCount(b) - lineWinCount(a) ||
+            lineStrongCount(b) - lineStrongCount(a) ||
+            a.idx - b.idx
+        );
+        g.semiList.sort(
+          (a, b) =>
+            lineWinCount(b) - lineWinCount(a) ||
+            lineStrongCount(b) - lineStrongCount(a) ||
+            a.idx - b.idx
+        );
+      } else {
+        g.autoList.sort(
+          (a, b) => lineStrongCount(b) - lineStrongCount(a) || a.idx - b.idx
+        );
+        g.semiList.sort(
+          (a, b) => lineStrongCount(b) - lineStrongCount(a) || a.idx - b.idx
+        );
+      }
+    }
+
+    // 강한 후보 일치 분포 (matchedNumbers 의 강한 후보 개수별 그룹 카운트).
+    const strongDist: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+    for (const g of groups) {
+      const k = strongMatchCount(g);
+      strongDist[k] = (strongDist[k] ?? 0) + 1;
     }
 
     return {
@@ -1242,6 +1287,9 @@ export default function SemiAutoComparePanel({
       groups2: groups.filter((g) => g.matchCount === 2),
       rawPairCount: pairs.length,
       groupCount: groups.length,
+      strongCandidateCount: strongCandidates.length,
+      strongDist,
+      strongAvailable: strongCandidates.length > 0,
     };
   }, [
     currentSlipLines,
@@ -1251,6 +1299,7 @@ export default function SemiAutoComparePanel({
     semiSlipQueue,
     bulkTickets,
     winningSet,
+    accumulated,
   ]);
 
   /**
@@ -2424,6 +2473,36 @@ export default function SemiAutoComparePanel({
                 한 카드로 통합 (자동 list + 반자동 list) → 화면 카드 {groupLineMatching.groupCount}건. 일치 개수
                 (6 → 5 → 4 → 3 → 2) 순으로 모두 노출.
               </Typography>
+              {groupLineMatching.strongAvailable && (
+                <Box sx={{ mb: 1, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+                  <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.3 }}>
+                    🎯 이번회차 자동 누적 강한 후보 ({groupLineMatching.strongCandidateCount}개) 기반 통계 — 그룹별 매치 번호와의 일치 분포
+                  </Typography>
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                    {[0, 1, 2, 3, 4, 5, 6].map((k) => {
+                      const cnt = groupLineMatching.strongDist[k] ?? 0;
+                      if (cnt === 0 && k > 0) return null;
+                      const pct =
+                        groupLineMatching.groupCount > 0
+                          ? (cnt / groupLineMatching.groupCount) * 100
+                          : 0;
+                      return (
+                        <Chip
+                          key={k}
+                          size="small"
+                          color={k >= 3 ? 'success' : k >= 2 ? 'warning' : 'default'}
+                          variant={k >= 2 ? 'filled' : 'outlined'}
+                          label={`강한 후보 ${k}개 일치: ${cnt}건 (${pct.toFixed(1)}%)`}
+                          sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                        />
+                      );
+                    })}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.3 }}>
+                    ※ 정렬은 {winningSet ? '당첨번호 일치 → ' : ''}강한 후보 일치 개수 내림차순. 위쪽 카드일수록 강한 후보가 많이 겹친 매치.
+                  </Typography>
+                </Box>
+              )}
               {(groupLineMatching.autoDupRemoved > 0 || groupLineMatching.semiDupRemoved > 0) && (
                 <Alert severity="info" sx={{ mb: 1, fontSize: 11 }}>
                   같은 6번호 줄이 그룹 안에 2개 이상 들어가 있어 첫 번째 줄로 통합했습니다.
@@ -2523,6 +2602,20 @@ export default function SemiAutoComparePanel({
                                         sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
                                       />
                                     ) : null;
+                                  })()}
+                                  {groupLineMatching.strongAvailable && (() => {
+                                    const sm = g.matchedNumbers.filter((n) =>
+                                      getCurrentRoundStrongCandidates(accumulated).includes(n)
+                                    ).length;
+                                    return (
+                                      <Chip
+                                        size="small"
+                                        color={sm >= 3 ? 'success' : sm >= 2 ? 'warning' : 'default'}
+                                        variant={sm >= 2 ? 'filled' : 'outlined'}
+                                        label={`강한 후보 ${sm}개 일치`}
+                                        sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                                      />
+                                    );
                                   })()}
                                 </Stack>
                                 <Box sx={{ mt: 0.4, pl: 0.5 }}>

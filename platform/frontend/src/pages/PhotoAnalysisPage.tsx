@@ -926,6 +926,45 @@ function saveManualByIntent(state: Record<SheetIntent, ManualDraft>): void {
   }
 }
 
+// ── 중복 검사 헬퍼 ───────────────────────────────────────────────
+// 같은 6-튜플(정렬 기준)이 이미 저장돼 있는지 확인.
+// 만약 발견되면 어느 위치에서 발견됐는지 정보 반환.
+const dupKey = (nums: number[]): string =>
+  [...nums].sort((a, b) => a - b).join('-');
+
+type DuplicateLocation =
+  | { foundIn: 'current'; lineLabel: string }
+  | { foundIn: 'queue'; slipIdx: number; lineLabel: string };
+
+function findDuplicateInState(
+  numbers: number[],
+  currentSlipLines: SavedLine[],
+  slipQueue: ManualSlipInput[]
+): DuplicateLocation | null {
+  const key = dupKey(numbers);
+  for (const line of currentSlipLines) {
+    if (dupKey(line.numbers) === key) {
+      return { foundIn: 'current', lineLabel: line.label };
+    }
+  }
+  for (let slipIdx = 0; slipIdx < slipQueue.length; slipIdx++) {
+    const slip = slipQueue[slipIdx];
+    for (const line of slip.lines) {
+      if (dupKey(line.numbers) === key) {
+        return { foundIn: 'queue', slipIdx, lineLabel: line.label };
+      }
+    }
+  }
+  return null;
+}
+
+function formatDuplicateLocation(loc: DuplicateLocation): string {
+  if (loc.foundIn === 'current') {
+    return `입력 중인 ${loc.lineLabel}줄`;
+  }
+  return `용지 ${loc.slipIdx + 1}의 ${loc.lineLabel}줄`;
+}
+
 export default function PhotoAnalysisPage() {
   const [activeTab, setActiveTab] = useState<SheetIntent>('review');
   const [selectedByIntent, setSelectedByIntent] = useState<Record<SheetIntent, SelectedFile[]>>(emptySelected);
@@ -1016,7 +1055,24 @@ export default function PhotoAnalysisPage() {
       setError(`${currentLabel}줄: 번호 6개를 선택하세요 (현재 ${picked.length}개).`);
       return;
     }
-    const line: SavedLine = { label: currentLabel, numbers: [...picked].sort((a, b) => a - b) };
+    const sortedPicked = [...picked].sort((a, b) => a - b);
+
+    // 중복 검사 — 이미 저장된 줄과 동일한 6-튜플인지 확인.
+    // 발견 시 사용자에게 확인 다이얼로그 노출 (그래도 추가 허용).
+    const duplicate = findDuplicateInState(sortedPicked, currentSlipLines, slipQueue);
+    if (duplicate) {
+      const where = formatDuplicateLocation(duplicate);
+      const ok = window.confirm(
+        `이 6개 번호 조합 (${sortedPicked.join(', ')})은 이미 ${where}에 있습니다.\n` +
+          `그래도 ${currentLabel}줄로 추가할까요?`
+      );
+      if (!ok) {
+        setError(`중복으로 ${currentLabel}줄 저장 취소됨. 번호를 바꿔서 다시 시도하세요.`);
+        return;
+      }
+    }
+
+    const line: SavedLine = { label: currentLabel, numbers: sortedPicked };
     const nextLines = [...currentSlipLines, line];
     setError(null);
     if (nextLines.length >= GAME_LABELS.length) {
@@ -1033,28 +1089,69 @@ export default function PhotoAnalysisPage() {
   };
 
   /**
-   * 대량 입력 처리.
+   * 대량 입력 처리 — 중복 자동 필터.
    *
-   * 받은 6-튜플 배열을 5줄씩 슬립으로 묶어 slipQueue 에 append.
-   * 현재 진행 중인 currentSlipLines / picked 는 보존 — 사용자 작업 보호.
-   * 마지막 슬립이 5줄 미만이면 부분 슬립으로 추가됨 (백엔드가 허용).
+   * 처리 순서:
+   *   1. 기존 currentSlipLines / slipQueue 의 모든 6-튜플 키 수집
+   *   2. 입력 lines 를 순회하며:
+   *      - 기존 상태와 중복 → 'external' 카운트, 제외
+   *      - 같은 입력 안에서 이미 본 줄 → 'internal' 카운트, 제외
+   *      - 그 외 → freshLines 에 추가
+   *   3. freshLines 만 5줄씩 슬립화하여 append
+   *   4. 결과 메시지에 필터링된 카운트 명시
    */
   const handleBulkInsert = (lines: number[][]) => {
     if (!lines.length) return;
+
+    const existingKeys = new Set<string>();
+    for (const l of currentSlipLines) existingKeys.add(dupKey(l.numbers));
+    for (const slip of slipQueue) {
+      for (const l of slip.lines) existingKeys.add(dupKey(l.numbers));
+    }
+
+    const freshLines: number[][] = [];
+    const seenInBulk = new Set<string>();
+    let externalDupCount = 0;
+    let internalDupCount = 0;
+
+    for (const nums of lines) {
+      const sorted = [...nums].sort((a, b) => a - b);
+      const key = dupKey(sorted);
+      if (existingKeys.has(key)) {
+        externalDupCount += 1;
+        continue;
+      }
+      if (seenInBulk.has(key)) {
+        internalDupCount += 1;
+        continue;
+      }
+      seenInBulk.add(key);
+      freshLines.push(sorted);
+    }
+
+    if (freshLines.length === 0) {
+      setError(
+        `입력 ${lines.length}줄 모두 중복으로 제외 (기존 ${externalDupCount} · 입력 내 ${internalDupCount}). 추가된 줄이 없습니다.`
+      );
+      return;
+    }
+
     const newSlips: ManualSlipInput[] = [];
-    for (let i = 0; i < lines.length; i += GAME_LABELS.length) {
-      const chunk = lines.slice(i, i + GAME_LABELS.length);
+    for (let i = 0; i < freshLines.length; i += GAME_LABELS.length) {
+      const chunk = freshLines.slice(i, i + GAME_LABELS.length);
       const slipLines: SavedLine[] = chunk.map((numbers, idx) => ({
         label: GAME_LABELS[idx],
-        numbers: [...numbers].sort((a, b) => a - b),
+        numbers,
       }));
       newSlips.push(slipFromLines(slipLines));
     }
     patchManual({ slipQueue: [...slipQueue, ...newSlips] });
     setError(null);
-    setNotice(
-      `${lines.length}줄 → ${newSlips.length}장 추가 완료 (총 ${slipQueue.length + newSlips.length}장 누적)`
-    );
+
+    let msg = `${freshLines.length}줄 → ${newSlips.length}장 추가 완료 (총 ${slipQueue.length + newSlips.length}장 누적)`;
+    if (externalDupCount > 0) msg += ` · 기존 중복 ${externalDupCount}줄 제외`;
+    if (internalDupCount > 0) msg += ` · 입력 내 중복 ${internalDupCount}줄 제외`;
+    setNotice(msg);
   };
 
   const removeCurrentLine = (idx: number) => {

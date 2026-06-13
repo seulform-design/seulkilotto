@@ -109,6 +109,87 @@ function formatRelativeTime(timestamp: number): string {
   return `${Math.floor(diffSec / 86400)}일 전`;
 }
 
+// ── 게임 줄별 적중 분석 (반자동 bulkTickets 기반) ───────────────
+// SemiAutoComparePanel 에서 저장한 bulkTickets 를 동일 localStorage 키
+// 로 로드하여, 선택된 백테스트 회차의 당첨번호와 비교한다.
+const SEMI_AUTO_STORAGE_KEY = 'lotto:semiAuto:v1';
+
+function loadBulkTickets(): number[][] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(SEMI_AUTO_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { bulkTickets?: unknown };
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.bulkTickets)) {
+      return [];
+    }
+    const result: number[][] = [];
+    for (const t of parsed.bulkTickets) {
+      if (!Array.isArray(t)) continue;
+      const nums: number[] = [];
+      for (const n of t) {
+        if (Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 45) {
+          nums.push(n as number);
+        }
+      }
+      if (nums.length === 6) result.push(nums);
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+type PrizeTier = '1등' | '2등' | '3등' | '4등' | '5등' | '미당첨';
+
+const TIER_ORDER: PrizeTier[] = ['1등', '2등', '3등', '4등', '5등', '미당첨'];
+const TIER_COLORS: Record<PrizeTier, string> = {
+  '1등': '#FF4D4D',
+  '2등': '#FFA94D',
+  '3등': '#FBC400',
+  '4등': '#69C8F2',
+  '5등': '#B0D840',
+  '미당첨': '#9CA3AF',
+};
+
+function classifyPrize(hitCount: number, bonusMatch: boolean): PrizeTier {
+  if (hitCount === 6) return '1등';
+  if (hitCount === 5 && bonusMatch) return '2등';
+  if (hitCount === 5) return '3등';
+  if (hitCount === 4) return '4등';
+  if (hitCount === 3) return '5등';
+  return '미당첨';
+}
+
+interface TicketLineAnalysis {
+  idx: number;
+  ticket: number[];
+  matchedNumbers: number[];
+  hitCount: number;
+  bonusMatch: boolean;
+  tier: PrizeTier;
+}
+
+function analyzeTicketLines(
+  tickets: number[][],
+  winning: number[],
+  bonus: number
+): TicketLineAnalysis[] {
+  const winningSet = new Set(winning);
+  return tickets.map((ticket, idx) => {
+    const matchedNumbers = ticket.filter((n) => winningSet.has(n));
+    const bonusMatch = ticket.includes(bonus);
+    return {
+      idx,
+      ticket,
+      matchedNumbers,
+      hitCount: matchedNumbers.length,
+      bonusMatch,
+      tier: classifyPrize(matchedNumbers.length, bonusMatch),
+    };
+  });
+}
+
 function findComboMatches(
   ticket: number[],
   combos: ComboDuplicatePatterns | null | undefined
@@ -195,6 +276,10 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
     retry: false, // 404 는 재시도해도 같은 결과 — 콘솔 노이즈 방지
   });
 
+  // 반자동 bulkTickets 로드 (localStorage 직접 — SemiAutoComparePanel 과 키 공유)
+  // round.data 변화 시 재로드 (사용자가 회차 전환 등으로 화면 다시 그릴 때)
+  const bulkTickets = useMemo(() => loadBulkTickets(), [round.data]);
+
   // 백테스트 가능성 판정:
   //   - 슬라이스가 존재해야 함
   //   - 대상 회차가 결정되어야 함
@@ -265,6 +350,41 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
       grade,
     };
   }, [hasSlice, roundDrawn, round.data, slice, accumulated]);
+
+  // 반자동 게임 줄별 적중 분석 — 선택된 회차 vs 모든 bulkTickets
+  const lineAnalysis = useMemo(() => {
+    if (!analysis || bulkTickets.length === 0) return null;
+    return analyzeTicketLines(bulkTickets, analysis.winning, analysis.bonus);
+  }, [analysis, bulkTickets]);
+
+  const lineGroupsByTier = useMemo(() => {
+    if (!lineAnalysis) return null;
+    const groups: Record<PrizeTier, TicketLineAnalysis[]> = {
+      '1등': [],
+      '2등': [],
+      '3등': [],
+      '4등': [],
+      '5등': [],
+      '미당첨': [],
+    };
+    for (const a of lineAnalysis) {
+      groups[a.tier].push(a);
+    }
+    return groups;
+  }, [lineAnalysis]);
+
+  const [expandedTiers, setExpandedTiers] = useState<Record<PrizeTier, boolean>>({
+    '1등': true,
+    '2등': true,
+    '3등': true,
+    '4등': true,
+    '5등': true,
+    '미당첨': false,
+  });
+
+  const toggleTier = (tier: PrizeTier) => {
+    setExpandedTiers((prev) => ({ ...prev, [tier]: !prev[tier] }));
+  };
 
   // 분석 성공 시 이력에 자동 저장 (snapshot)
   useEffect(() => {
@@ -646,6 +766,167 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
               </Typography>
             )}
           </Paper>
+
+          {/* ── 🎯 게임 줄별 적중 분석 (반자동 bulkTickets vs 선택 회차) ── */}
+          {lineAnalysis && lineGroupsByTier && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+                🎯 반자동 게임 줄별 적중 ({bulkTickets.length}줄 vs {targetRound}회 당첨)
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                반자동 비교 패널에 입력된 {bulkTickets.length}장 전체를 {targetRound}회 당첨번호로 재검증합니다.
+              </Typography>
+
+              {/* 등수별 분포 */}
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+                {TIER_ORDER.map((tier) => {
+                  const count = lineGroupsByTier[tier].length;
+                  if (count === 0) return null;
+                  const pct = bulkTickets.length > 0 ? (count / bulkTickets.length) * 100 : 0;
+                  return (
+                    <Chip
+                      key={tier}
+                      size="small"
+                      label={`${tier}: ${count}장 (${pct.toFixed(2)}%)`}
+                      sx={{
+                        bgcolor: TIER_COLORS[tier],
+                        color: '#fff',
+                        fontWeight: 700,
+                      }}
+                    />
+                  );
+                })}
+              </Stack>
+
+              {/* 등수별 상세 (스크롤 + 토글) */}
+              {TIER_ORDER.map((tier) => {
+                const tickets = lineGroupsByTier[tier];
+                if (tickets.length === 0) return null;
+                const isExpanded = expandedTiers[tier];
+                return (
+                  <Box key={tier} sx={{ mb: 1 }}>
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      spacing={0.75}
+                      sx={{ mb: 0.5, cursor: 'pointer' }}
+                      onClick={() => toggleTier(tier)}
+                    >
+                      <Box
+                        sx={{
+                          bgcolor: TIER_COLORS[tier],
+                          color: '#fff',
+                          px: 0.75,
+                          py: 0.25,
+                          borderRadius: 0.5,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          minWidth: 50,
+                          textAlign: 'center',
+                        }}
+                      >
+                        {tier}
+                      </Box>
+                      <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                        {tickets.length}장
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {isExpanded ? '▼ 접기' : '▶ 펼치기'}
+                      </Typography>
+                    </Stack>
+                    {isExpanded && (
+                      <Box
+                        sx={{
+                          maxHeight: 240,
+                          overflowY: 'auto',
+                          bgcolor: 'action.hover',
+                          borderRadius: 1,
+                          p: 0.75,
+                        }}
+                      >
+                        <Stack spacing={0.5}>
+                          {tickets.map((t) => (
+                            <Stack
+                              key={`tier-${tier}-${t.idx}`}
+                              direction="row"
+                              alignItems="center"
+                              spacing={0.5}
+                              flexWrap="wrap"
+                              useFlexGap
+                            >
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  minWidth: 40,
+                                  color: 'text.secondary',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                #{t.idx + 1}
+                              </Typography>
+                              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                {t.ticket.map((n) => {
+                                  const isMatched = t.matchedNumbers.includes(n);
+                                  return (
+                                    <Box
+                                      key={`${t.idx}-${n}`}
+                                      sx={{
+                                        width: 26,
+                                        height: 26,
+                                        borderRadius: '50%',
+                                        bgcolor: isMatched ? TIER_COLORS[tier] : '#4a4f57',
+                                        color: '#fff',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        opacity: isMatched ? 1 : 0.55,
+                                        boxShadow: isMatched ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+                                      }}
+                                    >
+                                      {n}
+                                    </Box>
+                                  );
+                                })}
+                              </Stack>
+                              <Chip
+                                size="small"
+                                label={`${t.hitCount}/6${t.bonusMatch ? ' +🎁' : ''}`}
+                                color={t.hitCount >= 3 ? 'success' : 'default'}
+                                variant={t.hitCount >= 3 ? 'filled' : 'outlined'}
+                                sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
+                              />
+                              {t.matchedNumbers.length > 0 && (
+                                <Typography variant="caption" color="text.secondary">
+                                  ({t.matchedNumbers.join(', ')})
+                                </Typography>
+                              )}
+                            </Stack>
+                          ))}
+                        </Stack>
+                      </Box>
+                    )}
+                  </Box>
+                );
+              })}
+
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ mt: 1, display: 'block' }}
+              >
+                ※ 등수 헤더를 클릭하면 펼치기/접기. 회차 변경 시 즉시 재계산됩니다.
+              </Typography>
+            </Paper>
+          )}
+
+          {lineAnalysis === null && bulkTickets.length === 0 && (
+            <Alert severity="info" sx={{ mb: 1.5 }}>
+              반자동 비교 패널에 게임 줄을 입력하면(대량 입력 권장) {targetRound}회 기준
+              줄별 적중 상세가 여기에 표시됩니다.
+            </Alert>
+          )}
 
           <Divider sx={{ my: 1 }} />
           <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block' }}>

@@ -94,16 +94,29 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
   const sliceTicketRoundStr = slice?.ticket_round?.trim();
 
   // 백테스트 대상 회차 결정:
-  //   1) 슬라이스의 ticket_round 가 명시되면 그것
-  //   2) 없으면 meta.latest_round - 1 (방금 이번회차였다가 추첨된 것으로 가정)
+  //   1) 슬라이스 ticket_round 가 latest_round 이하 (이미 추첨됨) → 그것
+  //   2) ticket_round 가 미래 회차 (미추첨) → latest_round 폴백
+  //   3) ticket_round 없음 → latest_round
+  // 이렇게 해야 사용자가 '이번회차 예측' (= 다음 회차) 으로 만든 ticket_round
+  // 가 아직 미추첨일 때 무용한 404 호출이 발생하지 않음.
   const latestRound = meta.data?.latest_round ?? null;
   const targetRound = useMemo(() => {
+    if (!latestRound) return null;
     if (sliceTicketRoundStr) {
       const parsed = Number(sliceTicketRoundStr);
-      if (Number.isInteger(parsed) && parsed > 0) return parsed;
+      if (Number.isInteger(parsed) && parsed > 0 && parsed <= latestRound) {
+        return parsed; // 이미 추첨된 회차만 백테스트
+      }
+      // ticket_round 가 미래 (미추첨) → latest_round 폴백
     }
-    if (latestRound) return latestRound;
-    return null;
+    return latestRound;
+  }, [sliceTicketRoundStr, latestRound]);
+
+  // 미래 회차 예측인지 표시 — UI에 명시
+  const isPredictingFutureRound = useMemo(() => {
+    if (!sliceTicketRoundStr || !latestRound) return false;
+    const parsed = Number(sliceTicketRoundStr);
+    return Number.isInteger(parsed) && parsed > latestRound;
   }, [sliceTicketRoundStr, latestRound]);
 
   const round = useQuery({
@@ -111,6 +124,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
     queryFn: () => v1Api.getRound(targetRound as number),
     enabled: !!targetRound,
     staleTime: 60_000,
+    retry: false, // 404 는 재시도해도 같은 결과 — 콘솔 노이즈 방지
   });
 
   // 백테스트 가능성 판정:
@@ -245,10 +259,18 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
         </Stack>
       )}
 
-      {/* 추첨 전 */}
+      {/* 미래 회차 예측 안내 */}
+      {isPredictingFutureRound && (
+        <Alert severity="info" sx={{ mb: 1 }}>
+          누적 데이터의 예측 대상은 {sliceTicketRoundStr}회 (미추첨)입니다.
+          {targetRound}회 (이미 추첨됨) 기준으로 백테스트 결과를 보여드립니다.
+        </Alert>
+      )}
+
+      {/* 추첨 전 / 데이터 없음 */}
       {!round.isLoading && !roundDrawn && (
         <Alert severity="warning">
-          {targetRound}회는 아직 추첨 데이터가 없습니다. 추첨 후 회차 업데이트를 실행하면 백테스트가 활성됩니다.
+          {targetRound}회 데이터를 찾지 못했습니다. 회차 업데이트를 실행하거나, 추첨 후 다시 확인해 주세요.
         </Alert>
       )}
 

@@ -21,6 +21,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import BulkLineInputDialog from '../components/BulkLineInputDialog';
 import LottoBall from '../components/LottoBall';
+import SemiAutoComparePanel from '../components/SemiAutoComparePanel';
 import {
   v1Api,
   type ComboDuplicatePatterns,
@@ -1539,6 +1540,9 @@ export default function PhotoAnalysisPage() {
 
       {notice && <Alert severity="info">{notice}</Alert>}
       {error && <Alert severity="error" sx={{ whiteSpace: 'pre-wrap' }}>{error}</Alert>}
+
+      <SemiAutoComparePanel slipQueue={slipQueue} accumulated={accumulated} />
+
       <Divider />
       <Typography variant="h6" fontWeight={700}>
         {activeTab === 'review' ? '복기' : '이번회차'} 누적

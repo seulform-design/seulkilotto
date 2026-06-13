@@ -456,50 +456,66 @@ function IntentAccumulatedPanel({
           />
         </Paper>
       ) : null}
-      {slice.entries_summary?.length ? (
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-            {slice.video_intent_label} 분석 이력
-          </Typography>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>용지</TableCell>
-                <TableCell>회차</TableCell>
-                <TableCell>분석 시각</TableCell>
-                <TableCell align="right">삭제</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {slice.entries_summary.map((e) => (
-                <TableRow key={e.id}>
-                  <TableCell sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {e.video_title || e.url}
-                  </TableCell>
-                  <TableCell>{e.ticket_round ? `${e.ticket_round}회` : '-'}</TableCell>
-                  <TableCell>
-                    {e.analyzed_at
-                      ? new Date(e.analyzed_at).toLocaleString('ko-KR', {
-                          year: 'numeric',
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })
-                      : '-'}
-                  </TableCell>
-                  <TableCell align="right">
-                    <IconButton size="small" color="error" onClick={() => onDeleteEntry(e.id)} aria-label="삭제">
-                      ×
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Paper>
-      ) : null}
     </Stack>
+  );
+}
+
+/**
+ * 백엔드 누적 분석 이력 테이블 — IntentAccumulatedPanel 에서 분리하여
+ * 페이지 가장 하단 (§4 고급 설정 다음) 으로 배치 (사용자 요청).
+ * 다른 누적 분석 결과 (당첨번호 vs 게임줄 / 강한 후보 / 빈도 등) 와
+ * 시각적 분리하여 데이터 관리 영역으로 노출.
+ */
+function HistoryEntriesPanel({
+  slice,
+  onDeleteEntry,
+}: {
+  slice?: PhotoAnalysisIntentSlice | null;
+  onDeleteEntry: (id: string) => void;
+}) {
+  if (!slice?.entries_summary?.length) return null;
+  return (
+    <Paper sx={{ p: 2 }}>
+      <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+        {slice.video_intent_label} 분석 이력 ({slice.entries_summary.length}건)
+      </Typography>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>용지</TableCell>
+            <TableCell>회차</TableCell>
+            <TableCell>분석 시각</TableCell>
+            <TableCell align="right">삭제</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {slice.entries_summary.map((e) => (
+            <TableRow key={e.id}>
+              <TableCell sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {e.video_title || e.url}
+              </TableCell>
+              <TableCell>{e.ticket_round ? `${e.ticket_round}회` : '-'}</TableCell>
+              <TableCell>
+                {e.analyzed_at
+                  ? new Date(e.analyzed_at).toLocaleString('ko-KR', {
+                      year: 'numeric',
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })
+                  : '-'}
+              </TableCell>
+              <TableCell align="right">
+                <IconButton size="small" color="error" onClick={() => onDeleteEntry(e.id)} aria-label="삭제">
+                  ×
+                </IconButton>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Paper>
   );
 }
 
@@ -1332,6 +1348,23 @@ export default function PhotoAnalysisPage() {
           </Stack>
         )}
       </Paper>
+
+      {/* ════════════ § 5. 분석 이력 (페이지 최하단) ════════════ */}
+      {activeSlice?.entries_summary?.length ? (
+        <>
+          <Divider textAlign="left" sx={{ mt: 1 }}>
+            <Typography
+              variant="overline"
+              fontWeight={800}
+              color="text.secondary"
+              sx={{ letterSpacing: 1.2 }}
+            >
+              § 5. {activeTab === 'review' ? '복기' : '이번회차'} 분석 이력
+            </Typography>
+          </Divider>
+          <HistoryEntriesPanel slice={activeSlice} onDeleteEntry={deleteHistoryEntry} />
+        </>
+      ) : null}
 
       <BulkLineInputDialog
         open={bulkOpen}

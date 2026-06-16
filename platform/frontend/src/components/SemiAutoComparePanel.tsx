@@ -2452,9 +2452,11 @@ export default function SemiAutoComparePanel({
               </Box>
             )}
           </Paper>
+        </>
+      )}
 
-          {/* ── 자동 ↔ 반자동 줄 페어 1:1 매칭 ── */}
-          {(groupLineMatching.autoLineCount > 0 && groupLineMatching.semiLineCount > 0) && (
+      {/* ── 자동 ↔ 반자동 줄 페어 1:1 매칭 — picked 와 무관, 누적 데이터만 있으면 표시 ── */}
+      {(groupLineMatching.autoLineCount > 0 && groupLineMatching.semiLineCount > 0) && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
                 🔀 자동 ↔ 반자동 줄 1:1 매칭 (공통 번호 2~6개)
@@ -2745,6 +2747,8 @@ export default function SemiAutoComparePanel({
             </Paper>
           )}
 
+      {picked.length === 6 && bulkComparison && (
+        <>
           {/* ── 누적 자동 페어/트리플 콤보 교집합 ──────────────── */}
           {bulkComparison.comboDataAvailable && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>

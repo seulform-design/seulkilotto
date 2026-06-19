@@ -1120,7 +1120,7 @@ export default function PhotoAnalysisPage() {
           이번회차 탭에 등록한 번호는 이제 <strong>복기 탭</strong>에서 당첨번호와 비교할 수 있습니다.
           <br />
           <Typography variant="caption" color="text.secondary">
-            복기 탭 → 1228회 당첨번호 기준 비교 | 이번회차 탭 → {currentRound}회 (미추첨)
+            복기 탭 → {latestRound}회 당첨번호 기준 비교 | 이번회차 탭 → {currentRound}회 (미추첨)
           </Typography>
         </Alert>
       )}
@@ -1148,30 +1148,46 @@ export default function PhotoAnalysisPage() {
         </Stack>
         <ManualNumberGrid picked={picked} onToggle={togglePicked} currentLabel={currentLabel} />
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 2 }}>
-          <Button variant="outlined" color="inherit" onClick={resetCurrentSlip}>
+          <Button type="button" variant="outlined" color="inherit" onClick={resetCurrentSlip}>
             용지 초기화
           </Button>
-          <Button variant="outlined" color="primary" onClick={() => setBulkOpen(true)}>
-            ⬆ 대량 입력 (텍스트)
+          <Button type="button" variant="outlined" color="primary" onClick={() => setBulkOpen(true)}>
+            ⬆ 대량 입력 (반자동 500줄+)
           </Button>
           <Button
+            type="button"
             variant="contained"
+            color="success"
             onClick={runManualAnalyze}
-            disabled={manualLoading}
+            disabled={manualLoading || (
+              slipQueue.length === 0 &&
+              currentSlipLines.length === 0 &&
+              bulkAutoTickets.length === 0
+            )}
+            sx={{ minWidth: 180 }}
           >
             {(() => {
               if (manualLoading) {
-                return <CircularProgress size={22} color="inherit" />;
+                return <><CircularProgress size={16} color="inherit" sx={{ mr: 1 }} />저장 중…</>;
               }
-              const analyzeChunks =
-                slipQueue.length +
-                (currentSlipLines.length > 0 ? 1 : 0) +
-                Math.ceil(bulkAutoTickets.length / GAME_LABELS.length);
-              const label = activeTab === 'review' ? '복기 분석 · 저장' : '이번회차 분석 · 저장';
-              return `${label} (${analyzeChunks}장)`;
+              const totalLines =
+                currentSlipLines.length +
+                slipQueue.reduce((s, sl) => s + sl.lines.length, 0) +
+                bulkAutoTickets.length;
+              const label = activeTab === 'review' ? '복기 분석·저장' : '이번회차 분석·저장';
+              return totalLines > 0
+                ? `💾 ${label} (${totalLines}줄)`
+                : `💾 ${label}`;
             })()}
           </Button>
         </Stack>
+        {/* 대량 입력 후 미저장 경고 */}
+        {bulkAutoTickets.length > 0 && (
+          <Alert severity="info" sx={{ mt: 1 }}>
+            📋 대량 입력 {bulkAutoTickets.length}줄이 로컬에 저장됐습니다.
+            위 <strong>[💾 {activeTab === 'review' ? '복기' : '이번회차'} 분석·저장]</strong> 버튼을 눌러야 통계에 반영됩니다.
+          </Alert>
+        )}
         <Divider sx={{ my: 2 }} />
         <Typography variant="subtitle2" fontWeight={700} gutterBottom>
           저장 누적

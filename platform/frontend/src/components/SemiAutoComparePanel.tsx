@@ -19,6 +19,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   Divider,
   IconButton,
   Paper,
@@ -27,7 +28,7 @@ import {
   Typography,
 } from '@mui/material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BulkLineInputDialog from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
 import NumberFrequencyPanel from './NumberFrequencyPanel';
@@ -675,6 +676,12 @@ export default function SemiAutoComparePanel({
     initial.semiSlipQueue
   );
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   /** 사용자가 명시적으로 [누적·저장] 누른 마지막 시각 (ISO). */
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(initial.lastSavedAt);
 
@@ -765,14 +772,33 @@ export default function SemiAutoComparePanel({
       .sort((a, b) => b.count - a.count || a.number - b.number);
   }, [slipQueue]);
 
-  // 추천 조합 생성 — 자동 강한 후보 + 반자동 상위 빈도 결합 → 5세트
+  // 추천 조합 생성 — 반자동 빈도 + 자동 강한 후보 결합 (누적 없어도 반자동 데이터만으로 생성 가능)
   const generateRecommendations = () => {
-    const topFreq = numberFrequency.slice(0, 20).map((f) => f.number);
+    // 1순위: 반자동 상위 빈도 번호 (bulkTickets + semiSlipQueue + semiCurrentLines 포함)
+    const allSemiNums: number[] = [
+      ...bulkTickets.flat(),
+      ...semiSlipQueue.flatMap((sl) => sl.lines.flatMap((l) => l.numbers)),
+      ...semiCurrentLines.flatMap((l) => l.numbers),
+    ];
+    const semiFreqMap: Record<number, number> = {};
+    for (const n of allSemiNums) {
+      semiFreqMap[n] = (semiFreqMap[n] ?? 0) + 1;
+    }
+    const topSemiFreq = Object.entries(semiFreqMap)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 20)
+      .map(([n]) => Number(n));
+
+    // 2순위: 누적 자동 강한 후보 (있으면)
+    const topFreq = numberFrequency.slice(0, 15).map((f) => f.number);
     const strong = getCurrentRoundStrongCandidates(accumulated);
     const excluded = new Set(getCurrentRoundExcludedCandidates(accumulated));
-    const pool = Array.from(new Set([...strong, ...topFreq])).filter(
+
+    // 반자동 우선 + 자동 강한 후보 + 자동 빈도 순으로 풀 구성
+    const pool = Array.from(new Set([...topSemiFreq, ...strong, ...topFreq])).filter(
       (n) => !excluded.has(n) && n >= 1 && n <= 45
     );
+
     // 풀이 부족하면 1~45 무작위로 보충
     if (pool.length < 12) {
       const all = Array.from({ length: 45 }, (_, i) => i + 1).filter(
@@ -783,10 +809,11 @@ export default function SemiAutoComparePanel({
         pool.push(all.splice(idx, 1)[0]);
       }
     }
+
     const result: number[][] = [];
     const seen = new Set<string>();
     let attempts = 0;
-    while (result.length < 5 && attempts < 200) {
+    while (result.length < 5 && attempts < 300) {
       attempts += 1;
       const shuffled = [...pool].sort(() => Math.random() - 0.5);
       const combo = shuffled.slice(0, 6).sort((a, b) => a - b);
@@ -942,31 +969,68 @@ export default function SemiAutoComparePanel({
   };
 
   /**
-   * [누적·저장] — 명시적 영속 확인.
-   * 반자동 누적은 이미 localStorage 자동 영속 중이지만, 사용자가 명시적으로
-   * '지금까지의 누적을 확정' 하는 행위로 마지막 저장 시각을 기록.
-   * 자동 누적 store 와는 분리 (사용자 선택).
+   * [누적·저장] — 백엔드 저장 + localStorage 이중 영속.
+   * - semiSlipQueue(완성 용지) + semiCurrentLines(부분 용지) + bulkTickets(대량) 모두 포함
+   * - 저장 후 semiSlipQueue/semiCurrentLines 초기화 (bulkTickets 는 유지)
+   * - accumulated 갱신 콜백으로 상위 컴포넌트에 결과 전달
    */
-  const confirmAccumulate = () => {
-    const total =
-      semiCurrentLines.length + semiSlipQueue.reduce((s, sl) => s + sl.lines.length, 0);
-    if (total === 0) {
-      setSaveNotice('⚠ 저장할 줄이 없습니다.');
+  const confirmAccumulate = useCallback(async () => {
+    // 저장 대상 집계
+    let slips: ManualSlipInput[] = [...semiSlipQueue];
+    if (semiCurrentLines.length > 0) {
+      slips = [...slips, { lines: semiCurrentLines }];
+    }
+    // bulkTickets도 5줄씩 묶어서 포함
+    for (let i = 0; i < bulkTickets.length; i += GAME_LABELS.length) {
+      const chunk = bulkTickets.slice(i, i + GAME_LABELS.length);
+      const chunkLines: SavedLine[] = chunk.map((numbers, idx) => ({
+        label: GAME_LABELS[idx],
+        numbers,
+      }));
+      slips.push({ lines: chunkLines });
+    }
+
+    if (slips.length === 0) {
+      setSaveNotice('⚠ 저장할 번호가 없습니다. 그리드에서 줄 저장 또는 대량 입력을 먼저 하세요.');
       return;
     }
-    const nowIso = new Date().toISOString();
-    setLastSavedAt(nowIso);
-    const stamp = new Date(nowIso).toLocaleString('ko-KR', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-    setSaveNotice(
-      `✅ ${semiSlipQueue.length}장 · 입력 중 ${semiCurrentLines.length}줄 (총 ${total}줄) 저장 확정 — ${stamp}.`
-    );
-  };
+
+    setIsSaving(true);
+    setSaveNotice(null);
+    try {
+      // 백엔드에 current_round intent 로 저장
+      const res = await v1Api.analyzeManualSlips(slips, {
+        sheetIntent: 'current_round',
+        persist: true,
+      });
+      if (!mountedRef.current) return;
+
+      const nowIso = new Date().toISOString();
+      setLastSavedAt(nowIso);
+
+      // 저장된 줄은 초기화 (bulkTickets는 대량비교에 계속 활용)
+      setSemiSlipQueue([]);
+      setSemiCurrentLines([]);
+
+      const totalLines = slips.reduce((s, sl) => s + sl.lines.length, 0);
+      if (res.duplicate_skipped) {
+        setSaveNotice(`⚠ 이미 등록된 용지입니다: ${res.duplicate_message ?? ''}`);
+      } else {
+        setSaveNotice(
+          `✅ ${slips.length}장 (${totalLines}줄) 백엔드 저장 완료. 아래 통계가 업데이트됩니다.`
+        );
+      }
+      // 상위에서 accumulated 를 갱신할 수 있도록 query 무효화
+      qc.invalidateQueries({ queryKey: ['photo-analysis-accumulated'] });
+    } catch (e) {
+      if (!mountedRef.current) return;
+      setSaveNotice(
+        `❌ 저장 실패: ${e instanceof Error ? e.message : '서버 오류'}. 데이터는 localStorage에 보존됩니다.`
+      );
+    } finally {
+      if (mountedRef.current) setIsSaving(false);
+    }
+  }, [semiSlipQueue, semiCurrentLines, bulkTickets, qc]);
 
   const comparison = useMemo(
     () =>
@@ -1312,11 +1376,12 @@ export default function SemiAutoComparePanel({
    */
   const handleBulkInsert = (lines: number[][]) => {
     if (!lines.length) return;
+    let addedCount = 0;
+    let dupCount = 0;
     setBulkTickets((prev) => {
       const existingKeys = new Set(
         prev.map((t) => [...t].sort((a, b) => a - b).join('-'))
       );
-      let dupCount = 0;
       const merged = [...prev];
       for (const line of lines) {
         const key = [...line].sort((a, b) => a - b).join('-');
@@ -1326,13 +1391,19 @@ export default function SemiAutoComparePanel({
         }
         existingKeys.add(key);
         merged.push([...line].sort((a, b) => a - b));
-      }
-      // 누적 카운트는 다음 렌더에서 chip 으로 표현되므로 여기서는 console 로 디버그
-      if (dupCount > 0) {
-        // setNotice 등을 이용해도 좋지만 SemiAutoComparePanel 은 자체 notice state 가 없음 — 향후 추가 가능
+        addedCount += 1;
       }
       return merged;
     });
+    // 대량 입력 후 안내 메시지 (다음 렌더 후 반영)
+    setTimeout(() => {
+      const msg = addedCount > 0
+        ? `✅ ${addedCount}줄 대량 추가 완료. ` +
+          (dupCount > 0 ? `중복 ${dupCount}줄 제외. ` : '') +
+          `[누적·저장] 버튼으로 백엔드에 저장하면 통계에 반영됩니다.`
+        : `⚠ ${dupCount}줄 모두 중복으로 추가된 줄이 없습니다.`;
+      setSaveNotice(msg);
+    }, 0);
   };
 
   const resetBulk = () => setBulkTickets([]);
@@ -1418,9 +1489,10 @@ export default function SemiAutoComparePanel({
         </Box>
       </Box>
 
-      {/* 하단 액션 행 — 자동 패턴 [용지 초기화] [⬆ 대량 입력] [누적·저장] */}
+      {/* 하단 액션 행 — [용지 초기화] [⬆ 대량 입력] [누적·저장] */}
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1.5 }}>
         <Button
+          type="button"
           variant="outlined"
           color="inherit"
           onClick={resetCurrentSlip}
@@ -1429,6 +1501,7 @@ export default function SemiAutoComparePanel({
           용지 초기화
         </Button>
         <Button
+          type="button"
           variant="outlined"
           color="primary"
           onClick={() => setBulkOpen(true)}
@@ -1436,11 +1509,26 @@ export default function SemiAutoComparePanel({
           ⬆ 대량 입력 (반자동 500줄+)
         </Button>
         <Button
+          type="button"
           variant="contained"
+          color="success"
           onClick={confirmAccumulate}
-          disabled={semiCurrentLines.length === 0 && semiSlipQueue.length === 0}
+          disabled={isSaving || (
+            semiCurrentLines.length === 0 &&
+            semiSlipQueue.length === 0 &&
+            bulkTickets.length === 0
+          )}
+          sx={{ minWidth: 160 }}
         >
-          누적·저장 ({semiSlipQueue.length}장)
+          {isSaving ? (
+            <><CircularProgress size={16} color="inherit" sx={{ mr: 1 }} />저장 중…</>
+          ) : (() => {
+            const totalLines =
+              semiCurrentLines.length +
+              semiSlipQueue.reduce((s, sl) => s + sl.lines.length, 0) +
+              bulkTickets.length;
+            return `💾 누적·저장 (${totalLines}줄)`;
+          })()}
         </Button>
       </Stack>
 
@@ -1532,11 +1620,22 @@ export default function SemiAutoComparePanel({
         ];
         return (
           <>
-            <Typography variant="body2" sx={{ mb: 0.5 }}>
-              반자동 누적: {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkTickets.length}장 · 총 {ticketLines.length}줄
-            </Typography>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5, flexWrap: 'wrap' }}>
+              <Typography variant="body2">
+                반자동 누적: {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkTickets.length}장 · 총 {ticketLines.length}줄
+              </Typography>
+              {ticketLines.length > 0 && (
+                <Chip
+                  size="small"
+                  color={lastSavedAt ? 'success' : 'warning'}
+                  label={lastSavedAt ? `마지막 저장: ${new Date(lastSavedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}` : '미저장 — [💾 누적·저장] 클릭'}
+                  sx={{ fontSize: 11 }}
+                />
+              )}
+            </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              아래 목록의 [×] 로 개별 줄 삭제. 하단 [전체 삭제] 는 반자동 누적만 (저장 줄 + 입력 중 + 대량 + 마지막 저장 시각). 자동은 §1 추가 세팅에서 따로.
+              ※ [💾 누적·저장] 클릭 시 백엔드에 저장되어 통계에 반영됩니다. 새로고침 전에 반드시 저장하세요.
+              아래 목록의 [×] 로 개별 줄 삭제.
             </Typography>
             {ticketLines.length === 0 ? (
               <Alert severity="info" sx={{ mb: 1.5 }}>
@@ -2058,19 +2157,34 @@ export default function SemiAutoComparePanel({
             );
           })()}
 
-          {/* 추천 조합 생성 — 자동+반자동 누적 데이터 기반 */}
+          {/* 추천 조합 생성 — 반자동 빈도 + 자동 누적 기반 */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
               <Typography variant="body2" fontWeight={700}>
-                🎲 자동+반자동 누적 기반 추천 조합
+                🎲 반자동+자동 누적 기반 추천 조합
               </Typography>
-              <Button size="small" variant="contained" color="success" onClick={generateRecommendations}>
+              <Button
+                type="button"
+                size="small"
+                variant="contained"
+                color="success"
+                onClick={generateRecommendations}
+                disabled={
+                  bulkTickets.length === 0 &&
+                  semiSlipQueue.length === 0 &&
+                  semiCurrentLines.length === 0 &&
+                  !accumulated
+                }
+              >
                 추천 5세트 생성
               </Button>
             </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              누적 자동의 강한 후보 + 반자동의 상위 빈도 번호 결합 → 배제 후보 제외 → 6-튜플 무작위 추출. 정직성:
-              어떤 조합도 1/8,145,060 의 동일 확률.
+              반자동 상위 빈도 번호 우선 + 자동 강한 후보 결합 → 배제 후보 제외 → 6-튜플 추출.
+              {bulkTickets.length === 0 && semiSlipQueue.length === 0
+                ? ' ※ 반자동 번호를 먼저 입력하세요.'
+                : ` 반자동 ${bulkTickets.length + semiSlipQueue.length}장 기반.`}
+              {' '}정직성: 어떤 조합도 1/8,145,060 의 동일 확률.
             </Typography>
             {recommendations.length > 0 && (
               <Stack spacing={0.75}>

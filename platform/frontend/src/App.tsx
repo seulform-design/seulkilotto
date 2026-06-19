@@ -5,7 +5,7 @@
  *      탭 전환 시 처음 진입한 페이지만 다운로드되어 초기 번들이 작아짐.
  *      Suspense fallback 으로 로딩 인디케이터 노출.
  */
-import { Suspense, lazy, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import {
   AppBar,
   Box,
@@ -69,9 +69,32 @@ const TABS = [
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
+const APP_TAB_STORAGE_KEY = 'lotto:app:active-tab:v1';
+
+function loadInitialTab(): TabId {
+  if (typeof window === 'undefined') return 'dashboard';
+  try {
+    const raw = window.localStorage.getItem(APP_TAB_STORAGE_KEY);
+    if (raw && TABS.some((t) => t.id === raw)) {
+      return raw as TabId;
+    }
+  } catch {
+    /* ignore */
+  }
+  return 'dashboard';
+}
 
 export default function App() {
-  const [tab, setTab] = useState<TabId>('dashboard');
+  const [tab, setTab] = useState<TabId>(loadInitialTab);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(APP_TAB_STORAGE_KEY, tab);
+    } catch {
+      /* ignore */
+    }
+  }, [tab]);
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>

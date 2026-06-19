@@ -1138,10 +1138,16 @@ export default function PhotoAnalysisPage() {
             📋 구입번호 직접입력 <Typography component="span" variant="caption" color="text.secondary">(자동)</Typography>
           </Typography>
           <Stack direction="row" spacing={1}>
-            <Button type="button" size="small" onClick={resetPicked}>
+            <Button type="button" size="small" onClick={(e) => { e.preventDefault(); e.stopPropagation(); resetPicked(); }}>
               초기화
             </Button>
-            <Button type="button" size="small" variant="contained" onClick={saveCurrentLine} disabled={picked.length !== 6}>
+            <Button
+              type="button"
+              size="small"
+              variant="contained"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); saveCurrentLine(); }}
+              disabled={picked.length !== 6}
+            >
               줄 저장
             </Button>
           </Stack>
@@ -1158,7 +1164,11 @@ export default function PhotoAnalysisPage() {
             type="button"
             variant="contained"
             color="success"
-            onClick={runManualAnalyze}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              void runManualAnalyze();
+            }}
             disabled={manualLoading || (
               slipQueue.length === 0 &&
               currentSlipLines.length === 0 &&

@@ -1435,7 +1435,7 @@ export default function SemiAutoComparePanel({
         </Box>
         <Stack direction="row" spacing={1}>
           {picked.length > 0 && (
-            <Button type="button" size="small" onClick={reset}>
+            <Button type="button" size="small" onClick={(e) => { e.preventDefault(); e.stopPropagation(); reset(); }}>
               초기화
             </Button>
           )}
@@ -1443,7 +1443,11 @@ export default function SemiAutoComparePanel({
             type="button"
             size="small"
             variant="contained"
-            onClick={saveCurrentLine}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              saveCurrentLine();
+            }}
             disabled={picked.length !== 6}
           >
             줄 저장

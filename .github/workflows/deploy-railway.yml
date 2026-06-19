@@ -1,0 +1,63 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches:
+      - main
+      - "cursor/**"
+  workflow_dispatch:
+
+concurrency:
+  group: railway-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Railway deploy
+    runs-on: ubuntu-latest
+    container: ghcr.io/railwayapp/cli:latest
+    permissions:
+      contents: read
+    env:
+      RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
+      RAILWAY_SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
+      RAILWAY_PUBLIC_URL: ${{ vars.RAILWAY_PUBLIC_URL }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check Railway configuration
+        id: cfg
+        run: |
+          if [ -n "$RAILWAY_TOKEN" ] && [ -n "$RAILWAY_PROJECT_ID" ] && [ -n "$RAILWAY_ENVIRONMENT_ID" ] && [ -n "$RAILWAY_SERVICE_ID" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy latest pushed commit
+        if: ${{ steps.cfg.outputs.configured == 'true' }}
+        run: |
+          railway up --ci \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID"
+
+      - name: Publish deployment summary
+        if: ${{ steps.cfg.outputs.configured == 'true' && env.RAILWAY_PUBLIC_URL != '' }}
+        run: |
+          {
+            echo "### Railway deployment"
+            echo ""
+            echo "- Branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- URL: ${RAILWAY_PUBLIC_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Explain missing Railway settings
+        if: ${{ steps.cfg.outputs.configured != 'true' }}
+        run: |
+          echo "Railway auto-deploy skipped."
+          echo "Set GitHub secret RAILWAY_TOKEN and repository variables RAILWAY_PROJECT_ID, RAILWAY_ENVIRONMENT_ID, RAILWAY_SERVICE_ID."

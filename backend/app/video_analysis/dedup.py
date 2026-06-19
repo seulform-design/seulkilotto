@@ -6,26 +6,65 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+def _normalize_numbers(raw_numbers: Any) -> List[int]:
+    nums: List[int] = []
+    for raw in raw_numbers or []:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= value <= 45:
+            nums.append(value)
+    return sorted(set(nums))
+
+
+def _sheet_signature(detail: Dict[str, Any]) -> str:
+    line_parts: List[str] = []
+    for idx, raw_line in enumerate(detail.get("lines") or []):
+        if not isinstance(raw_line, dict):
+            continue
+        nums = _normalize_numbers(raw_line.get("numbers"))
+        if len(nums) < 2:
+            continue
+        label = str(raw_line.get("label") or idx).strip().upper()
+        line_parts.append(f"{label}:{','.join(str(n) for n in nums)}")
+    if line_parts:
+        return "LINES|" + "|".join(line_parts)
+
+    sheet_nums = _normalize_numbers(detail.get("numbers"))
+    if len(sheet_nums) >= 2:
+        return "SHEET|" + ",".join(str(n) for n in sheet_nums)
+    return ""
+
+
 def compute_ticket_fingerprint(result: Dict[str, Any]) -> str:
-    """용지 패턴 지문 — 회차·의도·용지별 표시번호 기반."""
+    """용지 패턴 지문 — source id 와 무관한 회차·의도·번호 패턴 기반."""
     vva = result.get("video_visual_analysis") or {}
     meta = result.get("meta") or {}
 
     parts: List[str] = [
         str(vva.get("ticket_round") or vva.get("detected_round") or ""),
         str(vva.get("video_intent") or meta.get("sheet_intent") or ""),
-        str(vva.get("video_id") or ""),
     ]
-    sheet_sets = meta.get("sheet_number_sets") or []
-    if sheet_sets:
-        for raw in sorted(sheet_sets, key=lambda xs: ",".join(str(n) for n in xs)):
-            try:
-                nums = sorted({int(n) for n in raw if 1 <= int(n) <= 45})
-                if len(nums) >= 2:
-                    parts.append("SH:" + ",".join(str(n) for n in nums))
-            except (TypeError, ValueError):
-                pass
+
+    sheet_details = meta.get("sheet_details") or []
+    signatures = sorted(
+        sig
+        for detail in sheet_details
+        if isinstance(detail, dict)
+        for sig in [_sheet_signature(detail)]
+        if sig
+    )
+    if signatures:
+        parts.extend(f"SD:{sig}" for sig in signatures)
     else:
+        sheet_sets = meta.get("sheet_number_sets") or []
+        for raw in sorted(sheet_sets, key=lambda xs: ",".join(str(n) for n in xs)):
+            nums = _normalize_numbers(raw)
+            if len(nums) >= 2:
+                parts.append("SH:" + ",".join(str(n) for n in nums))
+
+    if len(parts) <= 2:
         evp = result.get("extracted_visual_patterns") or {}
         fop = evp.get("frequency_overlap_patterns") or {}
         fp = result.get("final_predictions") or {}

@@ -16,6 +16,8 @@ def _sample_result(image_id: str, round_no: str, nums: list[int]) -> dict:
             "video_title": f"photo-{image_id}",
             "ticket_round": round_no,
             "detected_round": round_no,
+            "video_intent": "review",
+            "video_intent_label": "복기",
         },
         "extracted_visual_patterns": {
             "frequency_overlap_patterns": {
@@ -26,6 +28,46 @@ def _sample_result(image_id: str, round_no: str, nums: list[int]) -> dict:
             }
         },
         "final_predictions": {"strong_candidates": nums, "excluded_candidates": []},
+        "meta": {
+            "sheet_intent": "review",
+            "sheet_number_sets": [nums],
+        },
+        "app_ui_message": "test",
+    }
+
+
+def _sample_result_with_lines(image_id: str, round_no: str, lines: list[list[int]]) -> dict:
+    detail_lines = [
+        {"label": chr(ord("A") + idx), "numbers": nums}
+        for idx, nums in enumerate(lines)
+    ]
+    return {
+        "video_visual_analysis": {
+            "video_id": image_id,
+            "video_title": f"photo-{image_id}",
+            "ticket_round": round_no,
+            "detected_round": round_no,
+            "video_intent": "review",
+            "video_intent_label": "복기",
+        },
+        "extracted_visual_patterns": {
+            "frequency_overlap_patterns": {
+                "summary": "t",
+                "all_frequent": [],
+                "tiers": [],
+                "triple_plus_overlap": {"pattern_label": "", "items": []},
+            }
+        },
+        "final_predictions": {"strong_candidates": [], "excluded_candidates": []},
+        "meta": {
+            "sheet_intent": "review",
+            "sheet_details": [
+                {
+                    "numbers": sorted({n for row in lines for n in row}),
+                    "lines": detail_lines,
+                }
+            ],
+        },
         "app_ui_message": "test",
     }
 
@@ -47,3 +89,22 @@ def test_duplicate_same_source(monkeypatch, tmp_path):
     assert hit is not None
     with pytest.raises(DuplicateAnalysisError):
         append_analysis("img1", r1)
+
+
+def test_duplicate_same_ticket_with_different_source(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.video_analysis.store.STORE_PATH", tmp_path / "store.json")
+    clear_store()
+    r1 = _sample_result("img1", "1227", [3, 7, 12, 18, 24, 30])
+    r2 = _sample_result("img2", "1227", [3, 7, 12, 18, 24, 30])
+    assert compute_ticket_fingerprint(r1) == compute_ticket_fingerprint(r2)
+    append_analysis("img1", r1, source_label="test-a.jpg")
+    hit = check_stored_duplicate("img2", r2)
+    assert hit is not None
+    with pytest.raises(DuplicateAnalysisError):
+        append_analysis("img2", r2, source_label="test-b.jpg")
+
+
+def test_line_level_fingerprint_avoids_union_collisions():
+    r1 = _sample_result_with_lines("img1", "1227", [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]])
+    r2 = _sample_result_with_lines("img2", "1227", [[1, 2, 3, 7, 8, 9], [4, 5, 6, 10, 11, 12]])
+    assert compute_ticket_fingerprint(r1) != compute_ticket_fingerprint(r2)

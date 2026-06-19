@@ -276,6 +276,7 @@ function findComboMatches(
 interface SemiAutoComparePanelProps {
   slipQueue: ManualSlipInput[];
   accumulated: PhotoAnalysisAccumulated | null;
+  onAccumulatedChange?: (next: PhotoAnalysisAccumulated) => void;
   /** 사용자 정정: '구입번호 직접입력' (slipQueue) = 자동. 그 줄 단위 삭제 콜백. */
   onRemoveSlipLine?: (slipIdx: number, lineIdx: number) => void;
   /** 자동 누적의 '입력 중' 줄 (currentSlipLines). 전체 티켓 목록 카운트·표시에 합산. */
@@ -665,6 +666,7 @@ function MatchBadge({ label, count, of, color = 'default' }: { label: string; co
 export default function SemiAutoComparePanel({
   slipQueue,
   accumulated,
+  onAccumulatedChange,
   onRemoveSlipLine,
   currentSlipLines = [],
   bulkAutoTickets = [],
@@ -1022,6 +1024,9 @@ export default function SemiAutoComparePanel({
       setSemiCurrentLines([]);
 
       const totalLines = slips.reduce((s, sl) => s + sl.lines.length, 0);
+      if (res.accumulated) {
+        onAccumulatedChange?.(res.accumulated);
+      }
       if (res.duplicate_skipped) {
         setSaveNotice(`⚠ 이미 등록된 용지입니다: ${res.duplicate_message ?? ''}`);
       } else {
@@ -1039,7 +1044,7 @@ export default function SemiAutoComparePanel({
     } finally {
       if (mountedRef.current) setIsSaving(false);
     }
-  }, [semiSlipQueue, semiCurrentLines, bulkTickets, qc]);
+  }, [semiSlipQueue, semiCurrentLines, bulkTickets, onAccumulatedChange, qc]);
 
   const comparison = useMemo(
     () =>
@@ -1430,11 +1435,12 @@ export default function SemiAutoComparePanel({
         </Box>
         <Stack direction="row" spacing={1}>
           {picked.length > 0 && (
-            <Button size="small" onClick={reset}>
+            <Button type="button" size="small" onClick={reset}>
               초기화
             </Button>
           )}
           <Button
+            type="button"
             size="small"
             variant="contained"
             onClick={saveCurrentLine}
@@ -1521,7 +1527,11 @@ export default function SemiAutoComparePanel({
           type="button"
           variant="contained"
           color="success"
-          onClick={confirmAccumulate}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void confirmAccumulate();
+          }}
           disabled={isSaving || (
             semiCurrentLines.length === 0 &&
             semiSlipQueue.length === 0 &&

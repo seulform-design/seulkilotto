@@ -1138,10 +1138,10 @@ export default function PhotoAnalysisPage() {
             📋 구입번호 직접입력 <Typography component="span" variant="caption" color="text.secondary">(자동)</Typography>
           </Typography>
           <Stack direction="row" spacing={1}>
-            <Button size="small" onClick={resetPicked}>
+            <Button type="button" size="small" onClick={resetPicked}>
               초기화
             </Button>
-            <Button size="small" variant="contained" onClick={saveCurrentLine} disabled={picked.length !== 6}>
+            <Button type="button" size="small" variant="contained" onClick={saveCurrentLine} disabled={picked.length !== 6}>
               줄 저장
             </Button>
           </Stack>
@@ -1353,6 +1353,7 @@ export default function PhotoAnalysisPage() {
       <SemiAutoComparePanel
         slipQueue={slipQueue}
         accumulated={accumulated}
+        onAccumulatedChange={setAccumulated}
         onRemoveSlipLine={removeSlipLine}
         currentSlipLines={currentSlipLines}
         bulkAutoTickets={bulkAutoTickets}

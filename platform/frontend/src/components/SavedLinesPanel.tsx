@@ -82,6 +82,7 @@ export default function SavedLinesPanel({
                 ))}
               </Stack>
               <Button
+                type="button"
                 size="small"
                 variant="text"
                 onClick={() => onEditCurrentLine(idx)}
@@ -91,6 +92,7 @@ export default function SavedLinesPanel({
                 수정
               </Button>
               <IconButton
+                type="button"
                 size="small"
                 onClick={() => onRemoveCurrentLine(idx)}
                 aria-label={`${line.label}줄 삭제`}
@@ -113,6 +115,7 @@ export default function SavedLinesPanel({
               용지 {slipIdx + 1} (저장됨 · {slip.lines.length}줄)
             </Typography>
             <IconButton
+              type="button"
               size="small"
               onClick={() => onRemoveSlip(slipIdx)}
               aria-label={`용지 ${slipIdx + 1} 전체 삭제`}
@@ -135,6 +138,7 @@ export default function SavedLinesPanel({
                 ))}
               </Stack>
               <IconButton
+                type="button"
                 size="small"
                 onClick={() => onRemoveSlipLine(slipIdx, lineIdx)}
                 aria-label={`용지 ${slipIdx + 1} ${line.label}줄 삭제`}

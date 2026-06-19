@@ -11,7 +11,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { parseBulkLines, type ParseError } from '../utils/bulkLineParser';
 
 interface BulkLineInputDialogProps {
@@ -112,10 +112,10 @@ function ErrorRow({ error, onDelete, onEdit }: ErrorRowProps) {
             if (e.key === 'Escape') cancelEdit();
           }}
         />
-        <Button size="small" variant="contained" onClick={applyEdit} sx={{ flexShrink: 0 }}>
+        <Button type="button" size="small" variant="contained" onClick={applyEdit} sx={{ flexShrink: 0 }}>
           적용
         </Button>
-        <Button size="small" onClick={cancelEdit} sx={{ flexShrink: 0 }}>
+        <Button type="button" size="small" onClick={cancelEdit} sx={{ flexShrink: 0 }}>
           취소
         </Button>
       </Stack>
@@ -157,10 +157,11 @@ function ErrorRow({ error, onDelete, onEdit }: ErrorRowProps) {
           {error.raw || '(빈 줄)'}
         </Typography>
       </Box>
-      <Button size="small" variant="text" onClick={startEdit} sx={{ flexShrink: 0, minWidth: 'auto', px: 1 }}>
+      <Button type="button" size="small" variant="text" onClick={startEdit} sx={{ flexShrink: 0, minWidth: 'auto', px: 1 }}>
         수정
       </Button>
       <IconButton
+        type="button"
         size="small"
         onClick={onDelete}
         aria-label={`줄 ${error.lineNum} 삭제`}
@@ -186,7 +187,9 @@ export default function BulkLineInputDialog({
   const handleClose = () => onClose();
   const handleClear = () => setText('');
 
-  const handleConfirm = () => {
+  const handleConfirm = (e?: React.MouseEvent<HTMLButtonElement>) => {
+    e?.preventDefault();
+    e?.stopPropagation();
     if (result.parsed.length === 0) return;
     onConfirm(result.parsed.map((p) => p.numbers));
     setText('');
@@ -226,7 +229,10 @@ export default function BulkLineInputDialog({
       onClose={handleClose}
       maxWidth="md"
       fullWidth
-      PaperProps={{ sx: { bgcolor: 'background.paper' } }}
+      PaperProps={{
+        sx: { bgcolor: 'background.paper' },
+        component: 'div',
+      }}
     >
       <DialogTitle>
         대량 줄 입력
@@ -286,6 +292,7 @@ export default function BulkLineInputDialog({
             />
             {errorCount > 0 && (
               <Button
+                type="button"
                 size="small"
                 color="error"
                 variant="outlined"
@@ -367,12 +374,13 @@ export default function BulkLineInputDialog({
       </DialogContent>
       <DialogActions>
         {text && (
-          <Button onClick={handleClear} color="inherit">
+          <Button type="button" onClick={handleClear} color="inherit">
             지우기
           </Button>
         )}
-        <Button onClick={handleClose}>취소</Button>
+        <Button type="button" onClick={handleClose}>취소</Button>
         <Button
+          type="button"
           onClick={handleConfirm}
           variant="contained"
           disabled={validCount === 0}

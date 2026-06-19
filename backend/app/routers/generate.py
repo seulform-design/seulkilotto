@@ -18,8 +18,10 @@ from fastapi import APIRouter, HTTPException, Query
 from .. import analytics
 from .. import epo as epo_module
 from ..config import settings
+from ..data_meta import effective_current_round
 from ..database import load_history
 from ..schemas import EpoResponse, GenerateResponse
+from ..video_analysis.store import record_current_rule_engine_output
 
 router = APIRouter(prefix="/api/v1/generate", tags=["generate"])
 
@@ -41,7 +43,7 @@ def generate_weighted(
     df = load_history()
     if df.empty:
         raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
-    return analytics.generate_weighted_sets(
+    payload = analytics.generate_weighted_sets(
         df,
         n_sets=n_sets,
         unseen_bonus=settings.UNSEEN_WEIGHT_BONUS,  # 0.15 (=15%)
@@ -49,6 +51,21 @@ def generate_weighted(
         exclude_consecutive=exclude_consecutive,
         seed=seed,
     )
+    latest_round = int(df["round"].max())
+    record_current_rule_engine_output(
+        "weighted_generation",
+        round_no=effective_current_round(latest_round),
+        latest_round=latest_round,
+        payload=payload,
+        rule_snapshot={
+            "n_sets": n_sets,
+            "lookback": lookback,
+            "exclude_consecutive": exclude_consecutive,
+            "seed": seed,
+            "unseen_bonus": settings.UNSEEN_WEIGHT_BONUS,
+        },
+    )
+    return payload
 
 
 @router.get("/smart", response_model=GenerateResponse)
@@ -63,7 +80,7 @@ def generate_smart(
     df = load_history()
     if df.empty:
         raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
-    return analytics.generate_smart_sets(
+    payload = analytics.generate_smart_sets(
         df,
         n_sets=n_sets,
         lookback=lookback,
@@ -71,6 +88,21 @@ def generate_smart(
         max_overlap=max_overlap,
         seed=seed,
     )
+    latest_round = int(df["round"].max())
+    record_current_rule_engine_output(
+        "smart_generation",
+        round_no=effective_current_round(latest_round),
+        latest_round=latest_round,
+        payload=payload,
+        rule_snapshot={
+            "n_sets": n_sets,
+            "lookback": lookback,
+            "exclude_consecutive": exclude_consecutive,
+            "max_overlap": max_overlap,
+            "seed": seed,
+        },
+    )
+    return payload
 
 
 @router.get("/epo", response_model=EpoResponse)
@@ -127,7 +159,7 @@ def generate_epo(
     profile = asdict(result.profile)
     profile["last_round_combo"] = list(profile.get("last_round_combo") or [])
 
-    return EpoResponse(
+    response = EpoResponse(
         engine=result.engine,
         combinations=result.combinations,
         profile=profile,
@@ -136,3 +168,29 @@ def generate_epo(
         backtest=result.backtest_meta,
         honesty=result.honesty,
     )
+    latest_round = int(df["round"].max())
+    record_current_rule_engine_output(
+        "epo_generation",
+        round_no=effective_current_round(latest_round),
+        latest_round=latest_round,
+        payload=response.model_dump(mode="json"),
+        rule_snapshot={
+            "n_sets": n_sets,
+            "lookback": lookback,
+            "hot_bonus": hot_bonus,
+            "cold_bonus": cold_bonus,
+            "sum_min": sum_min,
+            "sum_max": sum_max,
+            "max_consecutive_run": max_consecutive_run,
+            "min_ac_value": min_ac_value,
+            "max_same_decade": max_same_decade,
+            "min_last_digit_unique": min_last_digit_unique,
+            "max_last_round_overlap": max_last_round_overlap,
+            "inter_set_max_overlap": inter_set_max_overlap,
+            "enable_backtest": enable_backtest,
+            "backtest_holdout": backtest_holdout,
+            "backtest_threshold": backtest_threshold,
+            "seed": seed,
+        },
+    )
+    return response

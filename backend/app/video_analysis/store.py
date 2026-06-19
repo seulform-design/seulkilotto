@@ -31,31 +31,70 @@ class DuplicateAnalysisError(Exception):
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 STORE_PATH = DATA_DIR / "video_analysis_store.json"
+CURRENT_STORE_BASENAME = "video_analysis_current_store.json"
+HISTORICAL_STORE_VERSION = 3
+CURRENT_STORE_VERSION = 1
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _load_raw() -> Dict[str, Any]:
-    if not STORE_PATH.exists():
-        return {"version": 2, "updated_at": _now_iso(), "entries": []}
+def _current_store_path() -> Path:
+    return STORE_PATH.with_name(CURRENT_STORE_BASENAME)
+
+
+def _empty_historical_raw() -> Dict[str, Any]:
+    return {
+        "version": HISTORICAL_STORE_VERSION,
+        "updated_at": _now_iso(),
+        "entries": [],
+        "archived_current_rounds": [],
+    }
+
+
+def _default_current_round_no() -> int:
     try:
-        data = json.loads(STORE_PATH.read_text(encoding="utf-8"))
+        from .draw_template import get_current_round_no
+
+        return int(get_current_round_no())
+    except Exception:
+        return 0
+
+
+def _empty_current_raw(round_no: int | None = None) -> Dict[str, Any]:
+    return {
+        "version": CURRENT_STORE_VERSION,
+        "updated_at": _now_iso(),
+        "current_round": int(round_no if round_no is not None else _default_current_round_no()),
+        "status": "open",
+        "entries": [],
+        "derived_datasets": {},
+        "rule_snapshots": {},
+        "frozen_at": None,
+    }
+
+
+def _load_json_store(path: Path, default_factory) -> Dict[str, Any]:
+    if not path.exists():
+        return default_factory()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError("invalid store")
-        data.setdefault("entries", [])
-        data.setdefault("version", 2)
         return data
     except Exception:
-        return {"version": 2, "updated_at": _now_iso(), "entries": []}
+        return default_factory()
 
 
-def _save_raw(data: Dict[str, Any]) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    data["updated_at"] = _now_iso()
-    data["version"] = 2
-    STORE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+def _save_json_store(path: Path, data: Dict[str, Any], version: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.loads(json.dumps(data, ensure_ascii=False))
+    payload["updated_at"] = _now_iso()
+    payload["version"] = version
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def _strip_for_store(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -77,6 +116,94 @@ def _entry_round(entry: Dict[str, Any]) -> str:
     return str(vva.get("ticket_round") or vva.get("detected_round") or "미확인")
 
 
+def _deep_copy(data: Any) -> Any:
+    return json.loads(json.dumps(data, ensure_ascii=False))
+
+
+def _maybe_migrate_legacy_store() -> None:
+    current_path = _current_store_path()
+    if current_path.exists() or not STORE_PATH.exists():
+        return
+    raw = _load_json_store(STORE_PATH, _empty_historical_raw)
+    entries = raw.get("entries") or []
+    if not entries:
+        return
+    current_entries = [e for e in entries if e.get("video_intent") == "current_round"]
+    if not current_entries:
+        return
+    historical_raw = _empty_historical_raw()
+    historical_raw["entries"] = [e for e in entries if e.get("video_intent") != "current_round"]
+    historical_raw["archived_current_rounds"] = raw.get("archived_current_rounds") or []
+    round_candidates = [int(_entry_round(e)) for e in current_entries if str(_entry_round(e)).isdigit()]
+    current_raw = _empty_current_raw(max(round_candidates) if round_candidates else None)
+    current_raw["entries"] = current_entries
+    _save_json_store(STORE_PATH, historical_raw, HISTORICAL_STORE_VERSION)
+    _save_json_store(current_path, current_raw, CURRENT_STORE_VERSION)
+
+
+def _load_historical_raw() -> Dict[str, Any]:
+    _maybe_migrate_legacy_store()
+    data = _load_json_store(STORE_PATH, _empty_historical_raw)
+    data.setdefault("entries", [])
+    data.setdefault("archived_current_rounds", [])
+    data.setdefault("version", HISTORICAL_STORE_VERSION)
+    return data
+
+
+def _save_historical_raw(data: Dict[str, Any]) -> None:
+    data.setdefault("entries", [])
+    data.setdefault("archived_current_rounds", [])
+    _save_json_store(STORE_PATH, data, HISTORICAL_STORE_VERSION)
+
+
+def _load_current_raw() -> Dict[str, Any]:
+    _maybe_migrate_legacy_store()
+    data = _load_json_store(_current_store_path(), _empty_current_raw)
+    data.setdefault("entries", [])
+    data.setdefault("derived_datasets", {})
+    data.setdefault("rule_snapshots", {})
+    data.setdefault("status", "open")
+    data.setdefault("frozen_at", None)
+    if "current_round" not in data:
+        data["current_round"] = _default_current_round_no()
+    data.setdefault("version", CURRENT_STORE_VERSION)
+    return data
+
+
+def _save_current_raw(data: Dict[str, Any]) -> None:
+    data.setdefault("entries", [])
+    data.setdefault("derived_datasets", {})
+    data.setdefault("rule_snapshots", {})
+    data.setdefault("status", "open")
+    data.setdefault("frozen_at", None)
+    if "current_round" not in data:
+        data["current_round"] = _default_current_round_no()
+    _save_json_store(_current_store_path(), data, CURRENT_STORE_VERSION)
+
+
+def _archived_current_entries(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    archived: List[Dict[str, Any]] = []
+    for batch in data.get("archived_current_rounds") or []:
+        archived.extend(batch.get("entries") or [])
+    return archived
+
+
+def _live_entries() -> List[Dict[str, Any]]:
+    historical = _load_historical_raw()
+    current = _load_current_raw()
+    return list(historical.get("entries") or []) + list(current.get("entries") or [])
+
+
+def _all_duplicate_scan_entries() -> List[Dict[str, Any]]:
+    historical = _load_historical_raw()
+    current = _load_current_raw()
+    return (
+        list(historical.get("entries") or [])
+        + _archived_current_entries(historical)
+        + list(current.get("entries") or [])
+    )
+
+
 def check_stored_duplicate(
     source_id: str,
     result: Dict[str, Any] | None = None,
@@ -86,8 +213,7 @@ def check_stored_duplicate(
     """저장소에 동일 사진/용지가 있으면 기존 엔트리 반환."""
     if allow_duplicate:
         return None
-    data = _load_raw()
-    entries = data.get("entries") or []
+    entries = _all_duplicate_scan_entries()
     sid = (result or {}).get("video_visual_analysis", {}).get("video_id") or source_id
 
     if sid:
@@ -126,7 +252,6 @@ def append_analysis(
             reason = "same_source" if same_source else "same_ticket"
             raise DuplicateAnalysisError(reason, existing)
 
-    data = _load_raw()
     vva = result.get("video_visual_analysis") or {}
     evp = result.get("extracted_visual_patterns") or {}
     fop = evp.get("frequency_overlap_patterns") or build_frequency_overlap_patterns({})
@@ -164,9 +289,107 @@ def append_analysis(
         "analyzed_at": _now_iso(),
         "result": _strip_for_store(result),
     }
-    data["entries"].append(entry)
-    _save_raw(data)
+    if entry.get("video_intent") == "current_round":
+        current_data = _load_current_raw()
+        entry_round = int(str(entry.get("ticket_round") or current_data.get("current_round") or 0) or 0)
+        if current_data.get("entries") and int(current_data.get("current_round") or 0) != entry_round:
+            raise ValueError(
+                "현재회차 샌드박스가 다른 회차를 가리키고 있습니다. "
+                "회차 롤오버를 먼저 완료한 뒤 다시 시도하세요."
+            )
+        if not current_data.get("entries"):
+            current_data["current_round"] = entry_round or int(current_data.get("current_round") or 0)
+        current_data["status"] = "open"
+        current_data["entries"].append(entry)
+        _refresh_current_dataset(current_data)
+        _save_current_raw(current_data)
+    else:
+        data = _load_historical_raw()
+        data["entries"].append(entry)
+        _save_historical_raw(data)
     return entry
+
+
+def _current_dataset_summary(current_data: Dict[str, Any]) -> Dict[str, Any]:
+    entries = current_data.get("entries") or []
+    entry_acc = _accumulate_entries(entries) if entries else {"final_predictions": {"strong_candidates": [], "excluded_candidates": []}}
+    combo = _recompute_intent_combo(entries, "current_round") if entries else {
+        "summary": "분석 없음",
+        "pair_duplicates": [],
+        "triple_duplicates": [],
+    }
+    return {
+        "round_no": int(current_data.get("current_round") or 0),
+        "generated_at": _now_iso(),
+        "entry_count": len(entries),
+        "final_predictions": entry_acc.get("final_predictions") or {
+            "strong_candidates": [],
+            "excluded_candidates": [],
+        },
+        "accumulated_combo_patterns": combo,
+    }
+
+
+def _current_rule_snapshot(current_data: Dict[str, Any], summary: Dict[str, Any]) -> Dict[str, Any]:
+    combo = summary.get("accumulated_combo_patterns") or {}
+    verification = combo.get("combo_verification") or {}
+    review_reference = get_photo_review_template().get("marked_numbers") or []
+    return {
+        "engine": "photo_analysis_current_round",
+        "generated_at": summary.get("generated_at"),
+        "round_no": summary.get("round_no"),
+        "reference_source": "historical_review_template",
+        "review_reference_count": len(review_reference),
+        "analysis_mode": combo.get("analysis_mode"),
+        "min_repeat": combo.get("min_repeat"),
+        "criteria": verification.get("criteria"),
+    }
+
+
+def _refresh_current_dataset(current_data: Dict[str, Any]) -> None:
+    summary = _current_dataset_summary(current_data)
+    current_data.setdefault("derived_datasets", {})
+    current_data.setdefault("rule_snapshots", {})
+    current_data["derived_datasets"]["photo_analysis_current_round"] = summary
+    current_data["rule_snapshots"]["photo_analysis_current_round"] = _current_rule_snapshot(
+        current_data,
+        summary,
+    )
+
+
+def record_current_rule_engine_output(
+    engine_name: str,
+    *,
+    round_no: int,
+    latest_round: int,
+    payload: Dict[str, Any],
+    rule_snapshot: Dict[str, Any],
+) -> bool:
+    """현재회차 전용 파생 데이터와 규칙 스냅숏을 샌드박스에만 기록."""
+    current_data = _load_current_raw()
+    if current_data.get("entries") and int(current_data.get("current_round") or 0) != int(round_no):
+        return False
+    if not current_data.get("entries"):
+        current_data["current_round"] = int(round_no)
+    current_data.setdefault("derived_datasets", {})
+    current_data.setdefault("rule_snapshots", {})
+    current_data["status"] = "open"
+    current_data["derived_datasets"][engine_name] = {
+        "engine": engine_name,
+        "round_no": int(round_no),
+        "latest_round": int(latest_round),
+        "generated_at": _now_iso(),
+        "payload": _deep_copy(payload),
+    }
+    current_data["rule_snapshots"][engine_name] = {
+        "engine": engine_name,
+        "round_no": int(round_no),
+        "latest_round": int(latest_round),
+        "generated_at": _now_iso(),
+        "rules": _deep_copy(rule_snapshot),
+    }
+    _save_current_raw(current_data)
+    return True
 
 
 def _entry_combo_patterns(entry: Dict[str, Any]) -> Dict[str, Any] | None:
@@ -415,7 +638,7 @@ def _entry_photo_review_template(entry: Dict[str, Any]) -> Dict[str, Any] | None
 
 def get_saved_review_templates(limit: int = 20) -> List[Dict[str, Any]]:
     """저장된 복기 용지(사진 OCR) 템플릿."""
-    data = _load_raw()
+    data = _load_historical_raw()
     out: List[Dict[str, Any]] = []
     for entry in reversed(data.get("entries") or []):
         if entry.get("video_intent") != "review":
@@ -445,26 +668,173 @@ def get_merged_review_template() -> Dict[str, Any]:
     return photo
 
 
+def _evaluate_combo_payload(payload: Dict[str, Any], winning_numbers: List[int], bonus: int) -> Dict[str, Any]:
+    winning_set = set(winning_numbers)
+    combos = payload.get("combinations") or []
+    hit_distribution: Dict[str, int] = {}
+    best_hit = 0
+    bonus_hits = 0
+    for combo in combos:
+        nums = combo.get("numbers") if isinstance(combo, dict) else None
+        if not isinstance(nums, list):
+            continue
+        hit_count = sum(1 for n in nums if n in winning_set)
+        bonus_hit = bonus in nums
+        best_hit = max(best_hit, hit_count)
+        bonus_hits += 1 if bonus_hit else 0
+        key = f"{hit_count}+{'b' if bonus_hit else '-'}"
+        hit_distribution[key] = hit_distribution.get(key, 0) + 1
+    return {
+        "combo_count": len(combos),
+        "best_hit": best_hit,
+        "bonus_hits": bonus_hits,
+        "hit_distribution": hit_distribution,
+    }
+
+
+def _evaluate_predictions_payload(payload: Dict[str, Any], winning_numbers: List[int], bonus: int) -> Dict[str, Any]:
+    predictions = payload.get("final_predictions") or {}
+    winning_set = set(winning_numbers)
+    strong = [int(n) for n in predictions.get("strong_candidates") or []]
+    excluded = [int(n) for n in predictions.get("excluded_candidates") or []]
+    return {
+        "strong_hits": [n for n in strong if n in winning_set],
+        "excluded_hits": [n for n in excluded if n in winning_set],
+        "bonus_in_strong": bonus in strong,
+        "bonus_in_excluded": bonus in excluded,
+    }
+
+
+def _evaluate_current_dataset(current_data: Dict[str, Any], winning_numbers: List[int], bonus: int) -> Dict[str, Any]:
+    evaluations: Dict[str, Any] = {}
+    for key, dataset in (current_data.get("derived_datasets") or {}).items():
+        payload = dataset.get("payload") if isinstance(dataset, dict) else None
+        if not isinstance(payload, dict):
+            payload = dataset if isinstance(dataset, dict) else {}
+        result: Dict[str, Any] = {}
+        if isinstance(payload.get("combinations"), list):
+            result.update(_evaluate_combo_payload(payload, winning_numbers, bonus))
+        if isinstance(payload.get("final_predictions"), dict):
+            result.update(_evaluate_predictions_payload(payload, winning_numbers, bonus))
+        evaluations[key] = result
+    return evaluations
+
+
+def rollover_current_dataset(
+    *,
+    drawn_round: int,
+    next_round: int,
+    winning_numbers: List[int],
+    bonus: int,
+) -> Dict[str, Any]:
+    """현재회차 샌드박스를 동결하고 historical 아카이브로 원자적으로 이관."""
+    historical = _load_historical_raw()
+    current = _load_current_raw()
+    archived = historical.get("archived_current_rounds") or []
+    if any(int(batch.get("round_no") or 0) == int(drawn_round) for batch in archived):
+        if int(current.get("current_round") or 0) != int(next_round):
+            current = _empty_current_raw(next_round)
+            _save_current_raw(current)
+        return {"ok": True, "rolled_over": False, "reason": "already_archived"}
+    if int(current.get("current_round") or 0) != int(drawn_round):
+        return {"ok": True, "rolled_over": False, "reason": "no_matching_current_round"}
+
+    entries = list(current.get("entries") or [])
+    for entry in entries:
+        if entry.get("video_intent") != "current_round":
+            return {"ok": False, "error": "현재회차 샌드박스에 비현재회차 데이터가 섞여 있습니다."}
+        if str(_entry_round(entry)) != str(drawn_round):
+            return {"ok": False, "error": "현재회차 샌드박스 엔트리의 회차가 일치하지 않습니다."}
+    if int(next_round) != int(drawn_round) + 1:
+        return {"ok": False, "error": "회차 시퀀스가 연속적이지 않습니다."}
+    if any(
+        entry.get("video_intent") == "current_round" and str(_entry_round(entry)) == str(drawn_round)
+        for entry in historical.get("entries") or []
+    ):
+        return {"ok": False, "error": "현재회차 임시 데이터가 historical review 저장소에 유출되어 있습니다."}
+
+    previous_historical = _deep_copy(historical)
+    previous_current = _deep_copy(current)
+    frozen_at = _now_iso()
+    current["status"] = "frozen"
+    current["frozen_at"] = frozen_at
+    backtest = {
+        "round_no": int(drawn_round),
+        "winning_numbers": list(winning_numbers),
+        "bonus": int(bonus),
+        "engine_results": _evaluate_current_dataset(current, winning_numbers, bonus),
+    }
+    archive_batch = {
+        "round_no": int(drawn_round),
+        "frozen_at": frozen_at,
+        "merged_at": _now_iso(),
+        "entries": _deep_copy(entries),
+        "derived_datasets": _deep_copy(current.get("derived_datasets") or {}),
+        "rule_snapshots": _deep_copy(current.get("rule_snapshots") or {}),
+        "backtest": backtest,
+    }
+
+    try:
+        historical.setdefault("archived_current_rounds", [])
+        historical["archived_current_rounds"].append(archive_batch)
+        _save_historical_raw(historical)
+        _save_current_raw(_empty_current_raw(next_round))
+    except Exception:
+        _save_historical_raw(previous_historical)
+        _save_current_raw(previous_current)
+        raise
+
+    return {
+        "ok": True,
+        "rolled_over": True,
+        "archived_round": int(drawn_round),
+        "next_round": int(next_round),
+        "entry_count": len(entries),
+    }
+
+
+def get_current_dataset_state() -> Dict[str, Any]:
+    return _load_current_raw()
+
+
+def get_historical_dataset_state() -> Dict[str, Any]:
+    return _load_historical_raw()
+
+
 def list_entries(limit: int = 100) -> List[Dict[str, Any]]:
-    data = _load_raw()
-    return list(reversed((data.get("entries") or [])[-limit:]))
+    return list(reversed(_live_entries()[-limit:]))
 
 
 def clear_store() -> int:
-    data = _load_raw()
-    count = len(data.get("entries") or [])
-    _save_raw({"version": 2, "updated_at": _now_iso(), "entries": []})
+    historical = _load_historical_raw()
+    current = _load_current_raw()
+    count = (
+        len(historical.get("entries") or [])
+        + len(_archived_current_entries(historical))
+        + len(current.get("entries") or [])
+    )
+    _save_historical_raw(_empty_historical_raw())
+    _save_current_raw(_empty_current_raw())
     return count
 
 
 def delete_entry(entry_id: str) -> bool:
-    data = _load_raw()
-    entries = data.get("entries") or []
+    historical = _load_historical_raw()
+    entries = historical.get("entries") or []
     new_entries = [e for e in entries if e.get("id") != entry_id]
-    if len(new_entries) == len(entries):
+    if len(new_entries) != len(entries):
+        historical["entries"] = new_entries
+        _save_historical_raw(historical)
+        return True
+
+    current = _load_current_raw()
+    current_entries = current.get("entries") or []
+    new_current_entries = [e for e in current_entries if e.get("id") != entry_id]
+    if len(new_current_entries) == len(current_entries):
         return False
-    data["entries"] = new_entries
-    _save_raw(data)
+    current["entries"] = new_current_entries
+    _refresh_current_dataset(current)
+    _save_current_raw(current)
     return True
 
 
@@ -619,6 +989,9 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     group = [e for e in entries if e.get("video_intent") == intent]
     label = "복기" if intent == "review" else "이번회차"
     round_no = str(get_review_round_no()) if intent == "review" else str(get_current_round_no())
+    entry_acc = _accumulate_entries(group) if group else {
+        "final_predictions": {"strong_candidates": [], "excluded_candidates": []}
+    }
     combo = _recompute_intent_combo(entries, intent) if group else {
         "summary": f"{label} 분석 없음",
         "pair_duplicates": [],
@@ -636,6 +1009,10 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         "ticket_round": round_no,
         "total_analyses": len(group),
         "accumulated_combo_patterns": combo,
+        "final_predictions": entry_acc.get("final_predictions") or {
+            "strong_candidates": [],
+            "excluded_candidates": [],
+        },
         "entries_summary": _entries_summary_for(group),
         "app_ui_message": " · ".join(p for p in parts if p),
     }
@@ -652,8 +1029,9 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
 
 
 def build_accumulated() -> Dict[str, Any]:
-    data = _load_raw()
-    entries: List[Dict[str, Any]] = data.get("entries") or []
+    historical = _load_historical_raw()
+    current = _load_current_raw()
+    entries: List[Dict[str, Any]] = _live_entries()
     overall = _accumulate_entries(entries)
 
     by_round: Dict[str, Any] = {}
@@ -717,11 +1095,34 @@ def build_accumulated() -> Dict[str, Any]:
         "total_analyses": len(entries),
         "unique_videos": len(unique_ids),
         "unique_photos": len(unique_ids),
-        "updated_at": data.get("updated_at"),
+        "updated_at": max(
+            str(historical.get("updated_at") or ""),
+            str(current.get("updated_at") or ""),
+        ),
         "legacy_entry_count": legacy_count,
         "accumulated_combo_patterns": accumulated_combo,
         "saved_review_template": review_template if review_template.get("marked_numbers") else None,
         **overall,
+        "historical_dataset": {
+            "review_entries": len(historical.get("entries") or []),
+            "archived_current_rounds": len(historical.get("archived_current_rounds") or []),
+            "latest_archived_round": next(
+                (
+                    batch.get("round_no")
+                    for batch in reversed(historical.get("archived_current_rounds") or [])
+                    if batch.get("round_no") is not None
+                ),
+                None,
+            ),
+        },
+        "current_dataset": {
+            "round_no": int(current.get("current_round") or 0),
+            "status": current.get("status") or "open",
+            "entry_count": len(current.get("entries") or []),
+            "derived_datasets": sorted((current.get("derived_datasets") or {}).keys()),
+            "rule_snapshots": sorted((current.get("rule_snapshots") or {}).keys()),
+            "frozen_at": current.get("frozen_at"),
+        },
         "by_ticket_round": by_round,
         "by_video_intent": {
             k: {"count": len(v), "ticket_rounds": sorted({_entry_round(e) for e in v})}

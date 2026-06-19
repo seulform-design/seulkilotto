@@ -754,6 +754,10 @@ export interface PhotoAnalysisIntentSlice {
   ticket_round?: string;
   total_analyses: number;
   accumulated_combo_patterns?: ComboDuplicatePatterns;
+  final_predictions?: {
+    strong_candidates: number[];
+    excluded_candidates: number[];
+  };
   saved_review_template?: SavedReviewTemplate | null;
   draw_template?: DrawReviewTemplate;
   pattern_ready?: boolean;
@@ -766,6 +770,19 @@ export interface PhotoAnalysisAccumulated {
   unique_videos?: number;
   unique_photos?: number;
   updated_at?: string;
+  historical_dataset?: {
+    review_entries: number;
+    archived_current_rounds: number;
+    latest_archived_round?: number | null;
+  };
+  current_dataset?: {
+    round_no: number;
+    status: string;
+    entry_count: number;
+    derived_datasets: string[];
+    rule_snapshots: string[];
+    frozen_at?: string | null;
+  };
   strong_candidate_votes: VideoVoteItem[];
   excluded_candidate_votes: VideoVoteItem[];
   multiples_votes: VideoVoteItem[];

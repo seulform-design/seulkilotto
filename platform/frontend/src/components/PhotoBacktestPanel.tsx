@@ -294,10 +294,14 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
     const winning: number[] = round.data.numbers;
     const bonus: number = round.data.bonus;
     const winningSet = new Set<number>(winning);
-    // PhotoAnalysisIntentSlice 에는 final_predictions 가 없어 루트 accumulated 의 것을 사용.
-    // 사용자가 current_round 작업을 절대 다수로 했으면 루트 ≈ current_round 누적.
-    const strongCandidates: number[] = accumulated.final_predictions?.strong_candidates ?? [];
-    const excludedCandidates: number[] = accumulated.final_predictions?.excluded_candidates ?? [];
+    const strongCandidates: number[] =
+      slice?.final_predictions?.strong_candidates ??
+      accumulated.final_predictions?.strong_candidates ??
+      [];
+    const excludedCandidates: number[] =
+      slice?.final_predictions?.excluded_candidates ??
+      accumulated.final_predictions?.excluded_candidates ??
+      [];
 
     const strongHits = strongCandidates.filter((n: number) => winningSet.has(n));
     const strongMisses = strongCandidates.filter((n: number) => !winningSet.has(n));

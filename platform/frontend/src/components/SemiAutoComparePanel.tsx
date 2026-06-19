@@ -218,22 +218,25 @@ function getCurrentRoundComboPatterns(
 
 /**
  * 자동 누적의 강한 후보.
- *
- * 주의: PhotoAnalysisIntentSlice 타입 자체에는 final_predictions 가 없으므로
- * 루트 accumulated.final_predictions 만 사용. 이는 전체 누적이지만
- * 현재 백엔드는 current_round 가 절대 다수일 때 root 값이 사실상
- * current_round 누적과 같다.
  */
 function getCurrentRoundStrongCandidates(
   accumulated: PhotoAnalysisAccumulated | null
 ): number[] {
-  return accumulated?.final_predictions?.strong_candidates ?? [];
+  return (
+    accumulated?.by_intent?.current_round?.final_predictions?.strong_candidates ??
+    accumulated?.final_predictions?.strong_candidates ??
+    []
+  );
 }
 
 function getCurrentRoundExcludedCandidates(
   accumulated: PhotoAnalysisAccumulated | null
 ): number[] {
-  return accumulated?.final_predictions?.excluded_candidates ?? [];
+  return (
+    accumulated?.by_intent?.current_round?.final_predictions?.excluded_candidates ??
+    accumulated?.final_predictions?.excluded_candidates ??
+    []
+  );
 }
 
 /**
@@ -596,7 +599,10 @@ function buildComparison(
       b.userOverlap.length + b.autoOverlap.length - (a.userOverlap.length + a.autoOverlap.length)
   );
 
-  const strongCandidates = accumulated?.final_predictions?.strong_candidates ?? [];
+  const strongCandidates =
+    accumulated?.by_intent?.current_round?.final_predictions?.strong_candidates ??
+    accumulated?.final_predictions?.strong_candidates ??
+    [];
   const strongSet = new Set(strongCandidates);
   const vsStrong = {
     available: strongCandidates.length > 0,
@@ -605,7 +611,10 @@ function buildComparison(
     autoMatch: autoPicks.filter((n) => strongSet.has(n)),
   };
 
-  const excludedCandidates = accumulated?.final_predictions?.excluded_candidates ?? [];
+  const excludedCandidates =
+    accumulated?.by_intent?.current_round?.final_predictions?.excluded_candidates ??
+    accumulated?.final_predictions?.excluded_candidates ??
+    [];
   const excludedSet = new Set(excludedCandidates);
   const userExcluded = userPicks.filter((n) => excludedSet.has(n));
   const autoExcluded = autoPicks.filter((n) => excludedSet.has(n));

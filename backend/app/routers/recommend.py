@@ -7,9 +7,11 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..classic_methods import METHOD_IDS, build_classic_recommendation
+from ..data_meta import effective_current_round
 from ..database import load_history
 from ..json_utils import to_jsonable
 from ..machine_analytics import build_round_recommendation
+from ..video_analysis.store import record_current_rule_engine_output
 
 router = APIRouter(prefix="/api/v1/recommend", tags=["recommend"])
 
@@ -77,6 +79,20 @@ def recommend_next_round(
         raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
 
     payload = build_round_recommendation(df, machine_id=machine, seed=seed)
+    record_current_rule_engine_output(
+        "round_recommendation",
+        round_no=int(payload["next_round"]),
+        latest_round=int(payload["latest_round"]),
+        payload=payload,
+        rule_snapshot={
+            "machine": machine,
+            "seed": seed,
+            "filter_rule": payload.get("filter_rule"),
+            "compose_rule": payload.get("compose_rule"),
+            "auto_machine_id": payload.get("auto_machine_id"),
+            "machine_id": payload.get("machine_id"),
+        },
+    )
     if not payload["combinations"] and payload["stats"].get("draw_count", 0) == 0:
         raise HTTPException(
             status_code=404,
@@ -115,6 +131,20 @@ def recommend_classic(
     df = load_history()
     if df.empty:
         raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
-    return to_jsonable(
+    payload = to_jsonable(
         build_classic_recommendation(df, method=method, seed=seed, recent_n=recent_n)
     )
+    record_current_rule_engine_output(
+        "classic_recommendation",
+        round_no=effective_current_round(int(df["round"].max())),
+        latest_round=int(df["round"].max()),
+        payload=payload,
+        rule_snapshot={
+            "method": method,
+            "seed": seed,
+            "recent_n": recent_n,
+            "filter_rule": payload.get("filter_rule"),
+            "compose_rule": payload.get("compose_rule"),
+        },
+    )
+    return payload

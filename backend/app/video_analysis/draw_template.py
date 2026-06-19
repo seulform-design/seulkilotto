@@ -18,18 +18,67 @@ def number_to_grid_pos(n: int) -> Dict[str, int]:
 
 
 def get_review_round_no() -> int:
-    """복기 기준 = 최신 추첨 완료 회차 (예: 1226)."""
+    """복기 기준 = 최신 추첨 완료 회차 (예: 1228).
+
+    CSV의 latest_round 가 가장 정확한 소스.
+    """
     meta = get_history_meta()
     latest = int(meta.get("latest_round") or 0)
     if latest > 0:
         return latest
-    current = int(meta.get("current_round") or 1227)
+    current = int(meta.get("current_round") or 1)
     return max(1, current - 1)
 
 
 def get_current_round_no() -> int:
+    """이번 회차 = 아직 추첨되지 않은 다음 회차 (예: 1229)."""
     meta = get_history_meta()
-    return int(meta.get("current_round") or meta.get("next_round") or 1227)
+    return int(meta.get("current_round") or meta.get("next_round") or 1)
+
+
+def is_current_round_drawn() -> bool:
+    """이번회차(current_round) 당첨번호가 이미 CSV에 존재하면 True.
+
+    즉 당첨 발표 후 CSV 업데이트가 완료된 상태임.
+    이 경우 'current_round'로 등록된 번호를 '복기' 대상으로 볼 수 있음.
+    """
+    meta = get_history_meta()
+    current = int(meta.get("current_round") or 0)
+    latest = int(meta.get("latest_round") or 0)
+    # current_round 는 항상 latest+1 이므로, latest >= current 이면 이미 추첨됨
+    # (정상 상태에선 current = latest + 1, 즉 이 조건은 false)
+    return latest >= current
+
+
+def get_effective_review_round_no() -> int:
+    """실질적 복기 회차.
+
+    당첨 발표 직후(CSV 업데이트 전) 갭이 생길 수 있으므로
+    항상 latest_round 기준을 사용.
+    """
+    return get_review_round_no()
+
+
+def round_status() -> dict:
+    """현재 회차 상태 요약.
+
+    Returns
+    -------
+    dict with keys:
+      latest_round   : CSV에 있는 가장 최신 추첨 완료 회차
+      current_round  : 다음 추첨 예정 회차 (= latest + 1)
+      review_round   : 복기 대상 회차 (= latest)
+      drawn          : 이번회차가 이미 추첨됐는지 여부 (항상 False가 정상)
+    """
+    meta = get_history_meta()
+    latest = int(meta.get("latest_round") or 0)
+    current = int(meta.get("current_round") or latest + 1)
+    return {
+        "latest_round": latest,
+        "current_round": current,
+        "review_round": latest,
+        "drawn": is_current_round_drawn(),
+    }
 
 
 def load_draw_result(round_no: int) -> Dict[str, Any]:

@@ -11,6 +11,13 @@ export interface AppMeta {
   is_complete: boolean;
 }
 
+export interface RoundStatus {
+  latest_round: number;   // 가장 최근 추첨 완료 회차 (복기 대상)
+  current_round: number;  // 다음 추첨 예정 회차 (이번회차)
+  review_round: number;   // 복기 탭 기준 회차 (= latest_round)
+  drawn: boolean;         // 이번회차 당첨번호 발표 여부 (True 면 CSV 업데이트 필요)
+}
+
 export interface LatestDraw {
   round: number;
   draw_date: string;
@@ -292,6 +299,7 @@ export interface EpoResponse {
 
 export const v1Api = {
   getMeta: () => fetchJson<AppMeta>('/api/v1/meta'),
+  getRoundStatus: () => fetchJson<RoundStatus>('/api/v1/round-status'),
 
   getLatestDraw: () => fetchJson<LatestDraw>('/api/v1/history/latest'),
 

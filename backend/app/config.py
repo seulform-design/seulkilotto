@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     UNSEEN_LOOKBACK_DRAWS: int = 5
 
     # 현재 로또 회차 하한. 실제 값은 max(최신회차+1, CURRENT_ROUND) 로 자동 계산.
-    CURRENT_ROUND: int = 1227
+    # ※ CSV에 최신 회차가 있으면 해당 값+1이 우선 적용됨.
+    #    하드코딩 없이 CSV 기반으로 동작하도록 최솟값(1)으로 설정.
+    CURRENT_ROUND: int = 1
 
     # load_history() 캐시 TTL(초). CSV mtime 변경 시 즉시 무효화.
     HISTORY_CACHE_TTL: int = 300
@@ -30,7 +32,7 @@ class Settings(BaseSettings):
     # 회차 업그레이드
     CRAWL_SOURCE: str = "lottis"  # auto | dhlottery | lottis
     CRAWL_DELAY_SEC: float = 0.35
-    SCHEDULER_ENABLED: bool = False  # True 시 매주 토 22:30 자동 크롤
+    SCHEDULER_ENABLED: bool = True   # 매주 토 22:35 KST 자동 크롤 (False 로 비활성화 가능)
     UPGRADE_API_KEY: str = ""  # 설정 시 POST /data/upgrade 에 X-Upgrade-Key 필요
 
     # 용지 사진 Vision 분석 (선택 — False 이면 OpenCV 로컬 분석만 사용)

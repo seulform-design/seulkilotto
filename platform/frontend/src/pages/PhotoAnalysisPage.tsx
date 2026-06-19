@@ -739,6 +739,7 @@ export default function PhotoAnalysisPage() {
   const [visionSaveMsg, setVisionSaveMsg] = useState<string | null>(null);
   const [latestRound, setLatestRound] = useState<number | null>(null);
   const [currentRound, setCurrentRound] = useState<number | null>(null);
+  const [roundDrawn, setRoundDrawn] = useState<boolean>(false); // 이번회차 당첨 발표 여부
 
   const refreshAccumulated = useCallback(async () => {
     try {
@@ -757,6 +758,16 @@ export default function PhotoAnalysisPage() {
         if (!mountedRef.current) return;
         setLatestRound(m.latest_round);
         setCurrentRound(m.current_round);
+      })
+      .catch(() => {});
+    // 회차 상태 (당첨 발표 여부) 별도 조회
+    v1Api
+      .getRoundStatus()
+      .then((s) => {
+        if (!mountedRef.current) return;
+        setLatestRound(s.latest_round);
+        setCurrentRound(s.current_round);
+        setRoundDrawn(s.drawn);
       })
       .catch(() => {});
     v1Api
@@ -1054,13 +1065,20 @@ export default function PhotoAnalysisPage() {
         >
           <Tab
             value="review"
-            label={`복기 (${latestRound ?? '1226'}회 당첨)`}
+            label={`복기 (${latestRound ?? '?'}회 당첨)`}
             sx={{ fontWeight: activeTab === 'review' ? 700 : 400 }}
           />
           <Tab
             value="current_round"
-            label={`이번회차 (${currentRound ?? '1227'}회)`}
-            sx={{ fontWeight: activeTab === 'current_round' ? 700 : 400 }}
+            label={
+              roundDrawn
+                ? `이번회차 (${currentRound ?? '?'}회) ⚠️`
+                : `이번회차 (${currentRound ?? '?'}회)`
+            }
+            sx={{
+              fontWeight: activeTab === 'current_round' ? 700 : 400,
+              color: roundDrawn && activeTab !== 'current_round' ? 'warning.main' : undefined,
+            }}
           />
         </Tabs>
       </Paper>
@@ -1070,9 +1088,9 @@ export default function PhotoAnalysisPage() {
         <Stack spacing={0.5}>
           <Typography variant="body2">
             {activeTab === 'review' ? (
-              <><strong>복기 탭</strong> — {latestRound ?? '1226'}회 <strong>당첨번호</strong>와 수기 등록 <strong>A~E 줄</strong> 일치 확인. 다른 줄에 겹치는 2·3·4번호 조합도 표시합니다.</>
+              <><strong>복기 탭</strong> — {latestRound ?? '?'}회 <strong>당첨번호</strong>와 수기 등록 <strong>A~E 줄</strong> 일치 확인. 다른 줄에 겹치는 2·3·4번호 조합도 표시합니다.</>
             ) : (
-              <><strong>이번회차 탭</strong> — {currentRound ?? '1227'}회 수기 등록 <strong>A~E 줄</strong>의 <strong>다른 줄·다른 용지</strong> 겹침 (2·3·4번호) 을 검사합니다.</>
+              <><strong>이번회차 탭</strong> — {currentRound ?? '?'}회 수기 등록 <strong>A~E 줄</strong>의 <strong>다른 줄·다른 용지</strong> 겹침 (2·3·4번호) 을 검사합니다.</>
             )}
           </Typography>
           <Typography variant="caption" color="text.secondary">
@@ -1080,6 +1098,32 @@ export default function PhotoAnalysisPage() {
           </Typography>
         </Stack>
       </Alert>
+
+      {/* ══ 당첨 발표 후 알림 배너 (이번회차 탭 한정) ══ */}
+      {activeTab === 'current_round' && roundDrawn && (
+        <Alert
+          severity="warning"
+          sx={{ mt: 1, fontWeight: 600 }}
+          action={
+            <Button
+              type="button"
+              color="warning"
+              size="small"
+              variant="outlined"
+              onClick={() => setActiveTab('review')}
+            >
+              복기 탭으로 이동
+            </Button>
+          }
+        >
+          🎯 <strong>{currentRound}회 당첨번호가 발표됐습니다.</strong>{' '}
+          이번회차 탭에 등록한 번호는 이제 <strong>복기 탭</strong>에서 당첨번호와 비교할 수 있습니다.
+          <br />
+          <Typography variant="caption" color="text.secondary">
+            복기 탭 → 1228회 당첨번호 기준 비교 | 이번회차 탭 → {currentRound}회 (미추첨)
+          </Typography>
+        </Alert>
+      )}
 
       {/* ════════════ § 1. 번호 입력 ════════════ */}
       <Divider textAlign="left" sx={{ mt: 1 }}>

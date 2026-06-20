@@ -8,9 +8,10 @@ from .classic_methods import analyze_all_classic, build_classic_recommendation
 from .database import load_history
 from .machine_analytics import build_round_recommendation, predict_next_round
 from .post_occurrence_engine import run_post_occurrence_analysis
+from .parallel_round_analysis import analyze_parallel_rounds
 from .video_analysis.store import build_accumulated
 
-RULES_VERSION = "1.0"
+RULES_VERSION = "1.1"
 STRONG_LIMIT = 18
 
 # 출처별 가중치 (규칙 문서화 — 프론트와 동기화)
@@ -28,6 +29,9 @@ SOURCE_WEIGHTS: Dict[str, float] = {
     "photo-vote": 8.0,
     "photo-pair": 4.0,
     "photo-triple": 6.0,
+    "parallel-strong": 9.0,
+    "parallel-expected": 5.0,
+    "parallel-fixed": 11.0,
 }
 
 
@@ -75,6 +79,8 @@ def _category_set(source_ids: List[str]) -> int:
             cats.add("classic")
         elif sid.startswith("photo"):
             cats.add("photo")
+        elif sid.startswith("parallel"):
+            cats.add("parallel")
     return len(cats)
 
 
@@ -230,17 +236,66 @@ def _apply_photo_signals(
     }
 
 
+def _apply_parallel_signals(
+    scores: Dict[int, float],
+    sources: Dict[int, List[str]],
+    df,
+    target_round: int,
+) -> Dict[str, Any]:
+    payload = analyze_parallel_rounds(df, target_round=target_round)
+    if not payload.get("draw_table"):
+        return {"available": False, "suffix": payload.get("suffix")}
+
+    for rank, n in enumerate(payload.get("parallel_strong") or []):
+        _bump(
+            scores,
+            sources,
+            n,
+            _rank_decay(rank, SOURCE_WEIGHTS["parallel-strong"]),
+            "parallel-strong",
+        )
+    for rank, n in enumerate(payload.get("parallel_expected") or []):
+        _bump(
+            scores,
+            sources,
+            n,
+            _rank_decay(rank, SOURCE_WEIGHTS["parallel-expected"]),
+            "parallel-expected",
+        )
+    for rank, n in enumerate(payload.get("semi_auto_fixed_hint") or []):
+        _bump(
+            scores,
+            sources,
+            n,
+            _rank_decay(rank, SOURCE_WEIGHTS["parallel-fixed"]),
+            "parallel-fixed",
+        )
+
+    return {
+        "available": True,
+        "suffix": payload.get("suffix"),
+        "suffix_label": payload.get("suffix_label"),
+        "parallel_count": payload.get("parallel_count", 0),
+        "parallel_rounds": (payload.get("parallel_rounds") or [])[-5:],
+        "parallel_strong": (payload.get("parallel_strong") or [])[:6],
+        "semi_auto_fixed_hint": payload.get("semi_auto_fixed_hint") or [],
+        "ending_digits": (payload.get("ending_digits") or [])[:5],
+        "summary": payload.get("summary"),
+    }
+
+
 def build_prediction_signals(
     *,
     intent: str = "current_round",
     seed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    4개 탭 신호 통합:
+    5개 신호 통합:
     - 추첨기 추천 (machine)
     - 후속출현 통계 (post)
     - 클래식 추천 (classic blend + wilson/huygens/fermat)
     - 용지 분석 intent 슬라이스 (photo line_overlap + votes)
+    - 평행회차 분석 (동일 끝2자리 회차군)
     """
     if intent not in ("review", "current_round"):
         intent = "current_round"
@@ -265,6 +320,7 @@ def build_prediction_signals(
     post_src = _apply_post_signals(scores, sources, post_payload)
     classic_src = _apply_classic_signals(scores, sources, classic_payload)
     photo_src = _apply_photo_signals(scores, sources, excluded, intent, accumulated)
+    parallel_src = _apply_parallel_signals(scores, sources, df, next_round)
 
     ranked: List[Dict[str, Any]] = []
     for n in range(1, 46):
@@ -313,9 +369,10 @@ def build_prediction_signals(
             "post_occurrence": post_src,
             "classic": classic_src,
             "photo_sheet": photo_src,
+            "parallel_round": parallel_src,
         },
         "disclaimer": (
-            "강한 후보는 4개 독립 통계 신호의 가중 합산입니다. "
+            "강한 후보는 5개 독립 통계 신호의 가중 합산입니다. "
             "수학적 1등 확률(1/8,145,060)은 변하지 않습니다."
         ),
     }

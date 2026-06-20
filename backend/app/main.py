@@ -22,6 +22,7 @@ from .routers import (
     history,
     meta,
     patterns,
+    parallel_round,
     photo_analysis,
     post_occurrence,
     prediction_signals,
@@ -96,6 +97,7 @@ app.include_router(data.router)
 app.include_router(post_occurrence.router)
 app.include_router(photo_analysis.router)
 app.include_router(prediction_signals.router)
+app.include_router(parallel_round.router)
 app.include_router(datasets.router)
 
 

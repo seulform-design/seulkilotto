@@ -458,6 +458,15 @@ export const v1Api = {
     return fetchJson<PredictionSignalsResponse>(`/api/v1/prediction/signals?${q.toString()}`);
   },
 
+  getParallelRoundAnalysis: (targetRound?: number) => {
+    const q = new URLSearchParams();
+    if (targetRound != null) q.set('target_round', String(targetRound));
+    const qs = q.toString();
+    return fetchJson<ParallelRoundAnalysisResponse>(
+      `/api/v1/analysis/parallel-round${qs ? `?${qs}` : ''}`
+    );
+  },
+
   getPhotoVisionConfig: () =>
     fetchJson<{
       configured: boolean;
@@ -959,6 +968,53 @@ export interface PredictionSignalsResponse {
       total_analyses?: number;
       ticket_round?: string;
     };
+    parallel_round: {
+      available: boolean;
+      suffix?: number;
+      suffix_label?: string;
+      parallel_count?: number;
+      parallel_strong?: number[];
+      semi_auto_fixed_hint?: number[];
+      ending_digits?: { digit: number; count: number }[];
+      summary?: string;
+    };
   };
   disclaimer: string;
+}
+
+export interface ParallelRoundDecadeBucket {
+  range: [number, number];
+  strong: number[];
+  expected: number[];
+  freq_top: [number, number][];
+}
+
+export interface ParallelRoundDrawRow {
+  round: number;
+  numbers: number[];
+  bonus: number;
+  draw_date?: string;
+}
+
+export interface ParallelRoundAnalysisResponse {
+  target_round: number;
+  suffix: number;
+  suffix_label: string;
+  parallel_rounds: number[];
+  parallel_count: number;
+  draw_table: ParallelRoundDrawRow[];
+  by_decade: Record<string, ParallelRoundDecadeBucket>;
+  ending_digits: { digit: number; count: number }[];
+  parallel_strong: number[];
+  parallel_expected: number[];
+  semi_auto_fixed_hint: number[];
+  travel_highlights: {
+    number: number;
+    travel_score: number;
+    appearances: { round: number; position: number }[];
+  }[];
+  bonus_freq: { number: number; count: number }[];
+  summary: string;
+  disclaimer: string;
+  error?: string;
 }

@@ -31,7 +31,8 @@ def test_prediction_signals_returns_unified_strong_candidates():
     assert out["strong_candidates"]
     assert out["sources"]["machine"]["available"]
     assert out["sources"]["classic"]["available"]
-    assert "machine-hot" in out["source_weights"]
+    assert out["sources"]["parallel_round"]["available"]
+    assert "parallel-strong" in out["source_weights"]
 
 
 def test_prediction_signals_uses_intent_photo_slice(monkeypatch, tmp_path):
@@ -50,8 +51,10 @@ def test_prediction_signals_uses_intent_photo_slice(monkeypatch, tmp_path):
     review_out = build_prediction_signals(intent="review")
     current_out = build_prediction_signals(intent="current_round")
 
-    assert 7 in review_out["strong_candidates"] or any(
-        7 in (x.get("sources") or []) for x in review_out["ranked_numbers"] if x["number"] == 7
+    review_ranked = {x["number"]: x for x in review_out["ranked_numbers"]}
+    assert any(
+        "photo-vote" in (review_ranked.get(n, {}).get("sources") or [])
+        for n in review_nums
     )
     assert review_out["sources"]["photo_sheet"]["intent"] == "review"
     assert current_out["sources"]["photo_sheet"]["intent"] == "current_round"

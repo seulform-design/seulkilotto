@@ -2212,7 +2212,7 @@ export default function SemiAutoComparePanel({
               {predictionSignalsQuery.isFetching && <CircularProgress size={16} />}
             </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              추첨기 추천 + 후속출현 통계 + 클래식(윌슨/blend) + 용지({intentSectionLabel}) 줄겹침 — 가중 합산으로 강한 후보 산출.
+              추첨기 + 후속출현 + 클래식 + 용지({intentSectionLabel}) + 평행회차 — 가중 합산으로 강한 후보 산출.
               대상 회차: <strong>{predictionSignals?.target_round ?? effectiveRound ?? '?'}</strong>회
               {predictionSignals?.machine_id ? ` · ${predictionSignals.machine_id}호기` : ''}.
             </Typography>
@@ -2241,6 +2241,16 @@ export default function SemiAutoComparePanel({
                     size="small"
                     color={predictionSignals.sources.photo_sheet.available ? 'success' : 'default'}
                     label={`용지 ${predictionSignals.sources.photo_sheet.available ? `✓ ${predictionSignals.sources.photo_sheet.total_analyses ?? 0}건` : '—'}`}
+                    variant="outlined"
+                  />
+                  <Chip
+                    size="small"
+                    color={predictionSignals.sources.parallel_round?.available ? 'success' : 'default'}
+                    label={
+                      predictionSignals.sources.parallel_round?.available
+                        ? `평행 ${predictionSignals.sources.parallel_round.suffix_label ?? '✓'}`
+                        : '평행 —'
+                    }
                     variant="outlined"
                   />
                 </Stack>
@@ -2900,7 +2910,7 @@ export default function SemiAutoComparePanel({
             )}
             {strongCandidateSource === 'unified-rules' && predictionSignals && (
               <Typography variant="caption" color="success.main" sx={{ mt: 0.5, display: 'block' }}>
-                ※ 규칙 v{predictionSignals.rules_version} — 추첨기·후속출현·클래식·용지 4신호 통합 강한 후보 {resolvedStrongCandidates.length}개 (대상 {predictionSignals.target_round}회)
+                ※ 규칙 v{predictionSignals.rules_version} — 추첨기·후속출현·클래식·용지·평행회차 5신호 통합 강한 후보 {resolvedStrongCandidates.length}개 (대상 {predictionSignals.target_round}회)
               </Typography>
             )}
 

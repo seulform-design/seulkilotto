@@ -21,14 +21,9 @@ import AppStatusBar from './components/AppStatusBar';
 
 // 라우트 단위 코드 스플리팅 — 각 페이지는 첫 진입 시 동적 import
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
-const GeneratorPage = lazy(() => import('./pages/GeneratorPage'));
-const SmartPickPage = lazy(() => import('./pages/SmartPickPage'));
-const EpoPage = lazy(() => import('./pages/EpoPage'));
 const PostOccurrencePage = lazy(() => import('./pages/PostOccurrencePage'));
-const ClassicRecommendPage = lazy(() => import('./pages/ClassicRecommendPage'));
 const RoundsPage = lazy(() => import('./pages/RoundsPage'));
 const RoundRecommendPage = lazy(() => import('./pages/RoundRecommendPage'));
-const ResearchPage = lazy(() => import('./pages/ResearchPage'));
 const PhotoAnalysisPage = lazy(() => import('./pages/PhotoAnalysisPage'));
 const ComposedAnalysisPage = lazy(() => import('./pages/ComposedAnalysisPage'));
 
@@ -45,27 +40,16 @@ function PageFallback() {
 
 /**
  * 탭 분류:
- *  - 데이터 그룹: dashboard, rounds (관찰)
- *  - 추천 그룹: epo (권장), smart, weighted, classic, machine (5종 차별화)
- *  - 분석 그룹: post, photo, research
- *
- * 라벨링 원칙:
- *  - "AI" 단어는 ML/딥러닝 실체가 있을 때만 사용 (통계 엔진은 "통계"로 표기)
- *  - 각 추천 탭은 핵심 알고리즘 키워드를 라벨에 포함시켜 사용자가 비교 가능하게 함
- *  - EPO 는 가장 발전된 엔진임을 시각적 우선순위 + 권장 표시로 명시
+ *  - 데이터: dashboard, rounds
+ *  - 분석·추천: composite, recommend, post, photo
  */
 const TABS = [
   { id: 'dashboard', label: '대시보드' },
   { id: 'rounds', label: '회차' },
   { id: 'composite', label: '🎯 종합 분석' },
-  { id: 'epo', label: '⚡ EPO 추천 (권장)' },
-  { id: 'smart', label: '스마트 추천' },
-  { id: 'generator', label: '가중치 추천' },
-  { id: 'classic', label: '클래식 (수학자)' },
   { id: 'recommend', label: '추첨기 추천' },
   { id: 'post', label: '후속 출현 통계' },
   { id: 'photo', label: '용지 분석' },
-  { id: 'research', label: '연구 (v2)' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -90,12 +74,7 @@ export default function App() {
           sx={{ px: 1, bgcolor: '#1C1F24' }}
         >
           {TABS.map((t) => (
-            <Tab
-              key={t.id}
-              value={t.id}
-              label={t.label}
-              sx={t.id === 'epo' ? { color: '#FBC400', fontWeight: 700 } : undefined}
-            />
+            <Tab key={t.id} value={t.id} label={t.label} />
           ))}
         </Tabs>
       </AppBar>
@@ -105,14 +84,9 @@ export default function App() {
           {tab === 'dashboard' && <DashboardPage />}
           {tab === 'rounds' && <RoundsPage />}
           {tab === 'composite' && <ComposedAnalysisPage />}
-          {tab === 'generator' && <GeneratorPage />}
-          {tab === 'smart' && <SmartPickPage />}
-          {tab === 'epo' && <EpoPage />}
           {tab === 'post' && <PostOccurrencePage />}
           {tab === 'photo' && <PhotoAnalysisPage />}
           {tab === 'recommend' && <RoundRecommendPage />}
-          {tab === 'classic' && <ClassicRecommendPage />}
-          {tab === 'research' && <ResearchPage />}
         </Suspense>
       </Container>
     </Box>

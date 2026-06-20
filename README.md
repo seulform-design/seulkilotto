@@ -12,7 +12,8 @@
 **v1 설계서:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)  
 **v2 실행:** [platform/README.md](platform/README.md)  
 **데이터 격리:** [docs/DATA_ISOLATION.md](docs/DATA_ISOLATION.md)  
-**공개 저장소:** [github.com/seulform-design/seulkilotto](https://github.com/seulform-design/seulkilotto)
+**공개 저장소:** [github.com/seulform-design/seulkilotto](https://github.com/seulform-design/seulkilotto)  
+**공개 앱 (Railway):** https://lotto-analyzer-production-8678.up.railway.app/
 
 ## 용지 분석 (5천원 자동 용지)
 
@@ -65,7 +66,7 @@ lotto-analyzer/
 ## 실행 방법 (통합 웹 앱)
 
 **로컬 주소:** http://localhost:5173  
-**공개 배포:** [deploy/README.md](deploy/README.md) 참고 (Render 영구 배포 / localtunnel 즉시 공개)
+**공개 배포:** https://lotto-analyzer-production-8678.up.railway.app/ ([deploy/README.md](deploy/README.md))
 
 터미널 3개에서 각각 실행:
 

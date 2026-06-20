@@ -36,6 +36,7 @@ from .scheduler import start_scheduler, stop_scheduler
 _DEFAULT_ORIGIN_PATTERNS = (
     r"https://[a-z0-9-]+\.trycloudflare\.com",
     r"https://[a-z0-9-]+\.onrender\.com",
+    r"https://[a-z0-9-]+\.up\.railway\.app",
     r"http://localhost(:\d+)?",
     r"http://127\.0\.0\.1(:\d+)?",
 )

@@ -530,7 +530,8 @@ def append_analysis(
         "result": _strip_for_store(result),
     }
     if entry.get("video_intent") == "current_round":
-        current_data = _load_current_raw()
+        entry_round = int(str(entry.get("ticket_round") or 0) or 0)
+        current_data = _auto_align_current_sandbox_round(entry_round) if entry_round > 0 else _load_current_raw()
         entry_round = int(str(entry.get("ticket_round") or current_data.get("current_round") or 0) or 0)
         if current_data.get("entries") and int(current_data.get("current_round") or 0) != entry_round:
             raise ValueError(
@@ -568,6 +569,52 @@ def _current_dataset_summary(current_data: Dict[str, Any]) -> Dict[str, Any]:
         },
         "accumulated_combo_patterns": combo,
     }
+
+
+def _historical_draw_result(round_no: int) -> tuple[List[int], int] | None:
+    from ..database import load_history
+
+    df = load_history()
+    if df.empty:
+        return None
+    row = df[df["round"].astype(int) == int(round_no)]
+    if row.empty:
+        return None
+    row0 = row.sort_values("round").iloc[-1]
+    return ([int(row0[f"num{i}"]) for i in range(1, 7)], int(row0["bonus"]))
+
+
+def _auto_align_current_sandbox_round(target_round: int) -> Dict[str, Any]:
+    current_data = _load_current_raw()
+    current_round = int(current_data.get("current_round") or 0)
+    if current_round >= target_round:
+        return current_data
+
+    while current_data.get("entries") and current_round < target_round:
+        draw = _historical_draw_result(current_round)
+        if draw is None:
+            break
+        winning_numbers, bonus = draw
+        rollover = rollover_current_dataset(
+            drawn_round=current_round,
+            next_round=current_round + 1,
+            winning_numbers=winning_numbers,
+            bonus=bonus,
+        )
+        if rollover.get("ok") is not True:
+            break
+        current_data = _load_current_raw()
+        current_round = int(current_data.get("current_round") or 0)
+        if rollover.get("reason") == "already_archived":
+            break
+
+    if int(current_data.get("current_round") or 0) < target_round and not current_data.get("entries"):
+        current_data["current_round"] = target_round
+        current_data["status"] = "open"
+        current_data["frozen_at"] = None
+        _save_current_raw(current_data)
+        current_data = _load_current_raw()
+    return current_data
 
 
 def _current_rule_snapshot(current_data: Dict[str, Any], summary: Dict[str, Any]) -> Dict[str, Any]:

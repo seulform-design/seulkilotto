@@ -126,3 +126,31 @@ def test_clear_store_intent_only_clears_target_slice(monkeypatch, tmp_path):
     assert removed_current == 1
     acc2 = build_accumulated()
     assert acc2["by_intent"]["current_round"]["total_analyses"] == 0
+
+
+def test_append_current_round_auto_aligns_stale_sandbox(monkeypatch, tmp_path):
+    store_path = tmp_path / "store.json"
+    monkeypatch.setattr("app.video_analysis.store.STORE_PATH", store_path)
+    monkeypatch.setattr("app.video_analysis.draw_template.get_current_round_no", lambda: 1229)
+    monkeypatch.setattr("app.video_analysis.draw_template.get_review_round_no", lambda: 1228)
+    clear_store()
+
+    append_analysis("current-old", _result("current-old", "current_round", "1228", [1, 2, 3, 4, 5, 6]))
+
+    import app.video_analysis.store as store_mod
+
+    monkeypatch.setattr(
+        store_mod,
+        "_historical_draw_result",
+        lambda round_no: ([24, 29, 30, 31, 35, 44], 1) if round_no == 1228 else None,
+    )
+
+    append_analysis("current-new", _result("current-new", "current_round", "1229", [7, 8, 9, 10, 11, 12]))
+
+    current = get_current_dataset_state()
+    historical = get_historical_dataset_state()
+    assert current["current_round"] == 1229
+    assert len(current["entries"]) == 1
+    assert current["entries"][0]["ticket_round"] == "1229"
+    assert len(historical["archived_current_rounds"]) == 1
+    assert historical["archived_current_rounds"][0]["round_no"] == 1228

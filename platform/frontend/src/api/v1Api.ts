@@ -419,6 +419,7 @@ export const v1Api = {
   ) =>
     fetchJson<PhotoAnalysisJobResult>('/api/v1/photo-analysis/manual', {
       method: 'POST',
+      timeoutMs: 120_000,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
         sheet_intent: opts.sheetIntent ?? 'current_round',

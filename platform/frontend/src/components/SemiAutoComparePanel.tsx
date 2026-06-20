@@ -82,6 +82,8 @@ const SIGNAL_SOURCE_LABELS: Record<string, string> = {
   'parallel-strong': '평행 강수',
   'parallel-expected': '평행 기대수',
   'parallel-fixed': '평행 고정후보',
+  'local-derived': '로컬 추정',
+  'accumulated-fallback': '누적 보조',
 };
 
 function signalSourceLabel(source: string): string {
@@ -856,11 +858,53 @@ function MatchBadge({ label, count, of, color = 'default' }: { label: string; co
 
 function SignalExplanationPanel({
   predictionSignals,
+  resolvedStrongCandidates,
+  resolvedExcludedCandidates,
+  strongCandidateSource,
 }: {
-  predictionSignals: PredictionSignalsResponse;
+  predictionSignals: PredictionSignalsResponse | null;
+  resolvedStrongCandidates: number[];
+  resolvedExcludedCandidates: number[];
+  strongCandidateSource: 'unified-rules' | 'backend' | 'local' | 'none';
 }) {
-  const strongItems = predictionSignals.strong_details.slice(0, 8);
-  const excludedItems = predictionSignals.excluded_details.slice(0, 6);
+  const buildFallbackStrongItems = (): PredictionSignalNumber[] => {
+    const source =
+      strongCandidateSource === 'local'
+        ? 'local-derived'
+        : strongCandidateSource === 'backend'
+          ? 'accumulated-fallback'
+          : 'local-derived';
+    return resolvedStrongCandidates.slice(0, 8).map((number, idx) => ({
+      number,
+      score: Math.max(0, resolvedStrongCandidates.length - idx),
+      source_count: 1,
+      signal_count: 1,
+      sources: [source],
+      excluded_by: [],
+      grade: 'C' as const,
+    }));
+  };
+
+  const buildFallbackExcludedItems = (): PredictionSignalNumber[] =>
+    resolvedExcludedCandidates.slice(0, 6).map((number, idx) => ({
+      number,
+      score: idx,
+      source_count: 1,
+      signal_count: 1,
+      sources: [],
+      excluded_by: ['photo-excluded'],
+      grade: 'X' as const,
+    }));
+
+  const strongItems =
+    predictionSignals?.strong_details?.length
+      ? predictionSignals.strong_details.slice(0, 8)
+      : buildFallbackStrongItems();
+  const excludedItems =
+    predictionSignals?.excluded_details?.length
+      ? predictionSignals.excluded_details.slice(0, 6)
+      : buildFallbackExcludedItems();
+  const usingFallback = !predictionSignals?.strong_details?.length && strongItems.length > 0;
 
   const renderItems = (
     title: string,
@@ -909,7 +953,11 @@ function SignalExplanationPanel({
                     key={`src-${item.number}-${src}`}
                     size="small"
                     variant="outlined"
-                    label={`${signalSourceLabel(src)} (+${(predictionSignals.source_weights[src] ?? 0).toFixed(1)})`}
+                    label={
+                      predictionSignals?.source_weights?.[src] != null
+                        ? `${signalSourceLabel(src)} (+${predictionSignals.source_weights[src].toFixed(1)})`
+                        : signalSourceLabel(src)
+                    }
                   />
                 ))}
                 {item.excluded_by.map((src) => (
@@ -937,6 +985,11 @@ function SignalExplanationPanel({
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
         강한 후보는 점수·계열 합의로, 배제 후보는 exclusion 신호가 붙은 번호로 설명합니다.
       </Typography>
+      {usingFallback && (
+        <Alert severity="info" sx={{ mb: 1 }}>
+          통합 신호 상세가 비어 있어 현재 화면에서 사용 중인 강한 후보를 로컬/누적 기준으로 설명합니다.
+        </Alert>
+      )}
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
         {renderItems('강한 후보 근거', strongItems, '표시할 강한 후보 근거가 없습니다.')}
         {renderItems('배제 후보 근거', excludedItems, '표시할 배제 후보 근거가 없습니다.')}
@@ -3843,7 +3896,12 @@ export default function SemiAutoComparePanel({
                 />
               ))}
             </Stack>
-            <SignalExplanationPanel predictionSignals={predictionSignals} />
+            <SignalExplanationPanel
+              predictionSignals={predictionSignals}
+              resolvedStrongCandidates={resolvedStrongCandidates}
+              resolvedExcludedCandidates={resolvedExcludedCandidates}
+              strongCandidateSource={strongCandidateSource}
+            />
           </>
         ) : predictionSignalsQuery.isError ? (
           <Alert severity="warning" sx={{ py: 0.5 }}>

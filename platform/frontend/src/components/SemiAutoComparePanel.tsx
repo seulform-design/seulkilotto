@@ -529,7 +529,19 @@ interface BulkComparisonResult {
   avgPairMatches: number;
   avgTripleMatches: number;
   bestComboTickets: BulkTicketResult[];
+  /** 강한후보·콤보 패턴 종합 — 당첨번호 미사용 (예측 신호용). */
+  bestSignalTickets: BulkTicketResult[];
   comboDataAvailable: boolean;
+}
+
+function ticketSignalScore(t: BulkTicketResult): number {
+  return (
+    t.comboScore +
+    t.vsStrongMatch.length * 4 +
+    t.matchedPairCount * 2 +
+    t.matchedTripleCount * 5 +
+    t.matchedQuadCount * 8
+  );
 }
 
 function buildBulkComparison(
@@ -660,6 +672,11 @@ function buildBulkComparison(
     .sort((a, b) => b.comboScore - a.comboScore || b.vsStrongMatch.length - a.vsStrongMatch.length)
     .slice(0, 5);
 
+  const bestSignalTickets = [...perTicket]
+    .filter((t) => ticketSignalScore(t) > 0)
+    .sort((a, b) => ticketSignalScore(b) - ticketSignalScore(a))
+    .slice(0, 5);
+
   // 교집합 세트 그룹을 크기별로 분류 + 빈도순 정렬 (상한 없음 — 모든 세트 노출)
   const allGroups = Object.values(intersectionGroupsByKey);
   const twoIntersectionGroups = allGroups
@@ -692,6 +709,7 @@ function buildBulkComparison(
     avgPairMatches,
     avgTripleMatches,
     bestComboTickets,
+    bestSignalTickets,
     comboDataAvailable,
   };
 }
@@ -955,6 +973,7 @@ export default function SemiAutoComparePanel({
 
   // UI 토글 상태
   const [showAllTickets, setShowAllTickets] = useState(false);
+  const [showBacktestTop, setShowBacktestTop] = useState(false);
   const [recommendations, setRecommendations] = useState<ScoredRecommendation[]>([]);
 
   const togglePick = (n: number) => {
@@ -2578,16 +2597,20 @@ export default function SemiAutoComparePanel({
             )}
           </Paper>
 
-          {/* 상위 5개 매칭 티켓 */}
-          {activeComparison.bestTickets.length > 0 && (
-            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
-              <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>
-                🏆 최근 당첨 대비 매치 상위 5장
+          {/* 신호 매치 상위 — 당첨번호 없이 강한후보·콤보 패턴 기준 */}
+          {activeComparison.bestSignalTickets.length > 0 && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+                🏆 {intentSectionLabel} 신호 매치 상위 5장
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                강한 후보·누적 페어/트리플 콤보와의 일치 점수 기준 —{' '}
+                <strong>이미 나온 당첨번호(예: {effectiveRound ?? '?'}회)와 무관</strong>한 예측 신호입니다.
               </Typography>
               <Stack spacing={1}>
-                {activeComparison.bestTickets.map((t) => (
+                {activeComparison.bestSignalTickets.map((t) => (
                   <Stack
-                    key={t.index}
+                    key={`signal-${t.index}`}
                     direction="row"
                     alignItems="center"
                     spacing={0.75}
@@ -2606,24 +2629,106 @@ export default function SemiAutoComparePanel({
                           key={n}
                           number={n}
                           size={24}
-                          dimmed={winningSet ? !winningSet.has(n) : false}
+                          dimmed={
+                            winningSet && compareWinning ? !winningSet.has(n) : false
+                          }
                         />
                       ))}
                     </Stack>
                     <Chip
                       size="small"
-                      color={t.vsLatestMatch.length >= 3 ? 'success' : 'default'}
-                      label={`매치 ${t.vsLatestMatch.length}/6${t.bonusMatch ? ' +🎁' : ''}`}
+                      color={t.vsStrongMatch.length >= 3 ? 'success' : t.vsStrongMatch.length >= 2 ? 'warning' : 'default'}
+                      label={`강한후보 ${t.vsStrongMatch.length}`}
                       sx={{ fontWeight: 700 }}
                     />
-                    {t.vsLatestMatch.length > 0 && (
-                      <Typography variant="caption" color="text.secondary">
-                        ({t.vsLatestMatch.join(', ')})
-                      </Typography>
+                    {(t.matchedPairCount > 0 || t.matchedTripleCount > 0) && (
+                      <Chip
+                        size="small"
+                        color="primary"
+                        variant="outlined"
+                        label={`콤보 P${t.matchedPairCount} T${t.matchedTripleCount}`}
+                        sx={{ fontWeight: 700 }}
+                      />
                     )}
+                    <Typography variant="caption" color="text.secondary">
+                      신호점수 {ticketSignalScore(t).toFixed(0)}
+                    </Typography>
                   </Stack>
                 ))}
               </Stack>
+            </Paper>
+          )}
+
+          {/* 복기 사후 검증 — 당첨번호 일치 상위 (접기, 기본 숨김) */}
+          {compareWinning &&
+            winningNumbers.length > 0 &&
+            activeComparison.bestTickets.some((t) => t.vsLatestMatch.length > 0) && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'divider', opacity: 0.92 }}>
+              <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{ mb: showBacktestTop ? 1 : 0 }}
+              >
+                <Box>
+                  <Typography variant="body2" fontWeight={700}>
+                    📋 {effectiveRound ?? '?'}회 복기 검증 — 당첨 일치 상위 (사후 확인)
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    이미 추첨된 {effectiveRound ?? '?'}회 당첨번호와 비교 — 다음 회차 예측에는 의미 없음
+                  </Typography>
+                </Box>
+                <Button
+                  type="button"
+                  size="small"
+                  variant="text"
+                  onClick={() => setShowBacktestTop((v) => !v)}
+                >
+                  {showBacktestTop ? '접기' : '펼치기'}
+                </Button>
+              </Stack>
+              {showBacktestTop && (
+                <Stack spacing={1}>
+                  {activeComparison.bestTickets
+                    .filter((t) => t.vsLatestMatch.length > 0)
+                    .map((t) => (
+                      <Stack
+                        key={t.index}
+                        direction="row"
+                        alignItems="center"
+                        spacing={0.75}
+                        sx={{ flexWrap: 'wrap' }}
+                        useFlexGap
+                      >
+                        <Chip
+                          size="small"
+                          label={`#${t.index + 1}`}
+                          variant="outlined"
+                          sx={{ minWidth: 48 }}
+                        />
+                        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                          {t.ticket.map((n) => (
+                            <LottoBall
+                              key={n}
+                              number={n}
+                              size={24}
+                              dimmed={winningSet ? !winningSet.has(n) : false}
+                            />
+                          ))}
+                        </Stack>
+                        <Chip
+                          size="small"
+                          color={t.vsLatestMatch.length >= 3 ? 'success' : 'default'}
+                          label={`당첨 ${t.vsLatestMatch.length}/6${t.bonusMatch ? ' +🎁' : ''}`}
+                          sx={{ fontWeight: 700 }}
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                          ({t.vsLatestMatch.join(', ')})
+                        </Typography>
+                      </Stack>
+                    ))}
+                </Stack>
+              )}
             </Paper>
           )}
 

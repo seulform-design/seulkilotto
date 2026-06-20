@@ -16,7 +16,7 @@ import {
   Typography,
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { v1Api, type ParallelRoundAnalysisResponse } from '../api/v1Api';
 import LottoBall from './LottoBall';
 
@@ -94,10 +94,6 @@ export default function ParallelRoundPanel({
   });
 
   const data = query.data;
-  const recentDraws = useMemo(
-    () => (data?.draw_table ? data.draw_table.slice(-8) : []),
-    [data?.draw_table],
-  );
 
   return (
     <Paper variant="outlined" sx={{ p: 1.5, borderColor: 'warning.main' }}>
@@ -135,8 +131,8 @@ export default function ParallelRoundPanel({
                 </Typography>
               )}
 
-              {recentDraws.length > 0 && (
-                <Box sx={{ overflowX: 'auto', mb: 1 }}>
+              {(data.draw_table?.length ?? 0) > 0 && (
+                <Box sx={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 420, mb: 1 }}>
                   <Table size="small" sx={{ minWidth: 480 }}>
                     <TableHead>
                       <TableRow>
@@ -151,7 +147,7 @@ export default function ParallelRoundPanel({
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {recentDraws.map((row) => {
+                      {data.draw_table.map((row) => {
                         const strongSet = new Set(data.parallel_strong.slice(0, 6));
                         return (
                           <TableRow key={row.round}>
@@ -173,11 +169,6 @@ export default function ParallelRoundPanel({
                       })}
                     </TableBody>
                   </Table>
-                  {data.draw_table.length > recentDraws.length && (
-                    <Typography variant="caption" color="text.secondary">
-                      최근 {recentDraws.length}회차만 표시 (전체 {data.draw_table.length}회)
-                    </Typography>
-                  )}
                 </Box>
               )}
 

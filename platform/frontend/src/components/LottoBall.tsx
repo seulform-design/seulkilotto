@@ -7,6 +7,8 @@ interface LottoBallProps {
   size?: number;
   /** 복기 등 — 당첨번호가 아닐 때 회색 처리 */
   dimmed?: boolean;
+  /** 입력 그리드 등 — 공식 볼 색 대신 무채색 표시 */
+  neutral?: boolean;
 }
 
 /**
@@ -15,10 +17,15 @@ interface LottoBallProps {
  * 성능: 대시보드/패널/그리드에서 수십 회 렌더되므로 React.memo 적용.
  * props 가 모두 primitive(number/boolean) 라 얕은 비교로 충분.
  */
-function LottoBallImpl({ number, size = 44, dimmed = false }: LottoBallProps) {
-  const bg = dimmed ? '#4a4f57' : getBallColor(number);
-  const isLight = dimmed || number <= 10 || number > 40;
-  const textColor = dimmed ? '#9ba1a9' : isLight ? '#2A2A2A' : '#FFFFFF';
+function LottoBallImpl({ number, size = 44, dimmed = false, neutral = false }: LottoBallProps) {
+  const bg = neutral
+    ? (dimmed ? '#3f454d' : '#d7dde5')
+    : (dimmed ? '#4a4f57' : getBallColor(number));
+  const isLight = neutral ? !dimmed : (dimmed || number <= 10 || number > 40);
+  const textColor = neutral
+    ? (dimmed ? '#7f8894' : '#1f2933')
+    : (dimmed ? '#9ba1a9' : isLight ? '#2A2A2A' : '#FFFFFF');
+  const border = neutral && !dimmed ? '1px solid rgba(255,255,255,0.18)' : 'none';
 
   return (
     <Box
@@ -30,6 +37,7 @@ function LottoBallImpl({ number, size = 44, dimmed = false }: LottoBallProps) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        border,
         boxShadow: dimmed ? '0 1px 3px rgba(0,0,0,0.25)' : '0 2px 6px rgba(0,0,0,0.35)',
         opacity: dimmed ? 0.72 : 1,
         flexShrink: 0,

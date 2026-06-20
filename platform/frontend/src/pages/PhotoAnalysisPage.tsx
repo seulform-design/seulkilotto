@@ -539,7 +539,7 @@ function ManualNumberGrid({
         </Typography>
         <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
           {picked.map((n) => (
-            <LottoBall key={n} number={n} size={32} />
+            <LottoBall key={n} number={n} size={32} neutral />
           ))}
         </Stack>
       </Stack>
@@ -568,7 +568,7 @@ function ManualNumberGrid({
                 transition: 'transform 0.12s ease, opacity 0.12s ease',
               }}
             >
-              <LottoBall number={n} size={36} dimmed={!selected} />
+              <LottoBall number={n} size={36} dimmed={!selected} neutral />
             </Box>
           );
         })}

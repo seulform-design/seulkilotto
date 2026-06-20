@@ -1471,7 +1471,7 @@ export default function SemiAutoComparePanel({
                 .slice()
                 .sort((a, b) => a - b)
                 .map((n) => (
-                  <LottoBall key={n} number={n} size={32} />
+                  <LottoBall key={n} number={n} size={32} neutral />
                 ))}
             </Stack>
           )}
@@ -1501,7 +1501,7 @@ export default function SemiAutoComparePanel({
                   transition: 'transform 0.12s ease, opacity 0.12s ease',
                 }}
               >
-                <LottoBall number={n} size={36} dimmed={!isPicked} />
+                <LottoBall number={n} size={36} dimmed={!isPicked} neutral />
               </Box>
             );
           })}

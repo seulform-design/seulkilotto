@@ -45,16 +45,22 @@ shutdown_all() {
 
 trap 'shutdown_all' INT TERM EXIT
 
-cd /app/backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
-V1_PID=$!
+start_v1() {
+  cd /app/backend
+  python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+  V1_PID=$!
+  wait_for_http "http://127.0.0.1:8000/health" "v1 backend"
+}
 
-cd /app/platform/backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8100 &
-V2_PID=$!
+start_v2() {
+  cd /app/platform/backend
+  python -m uvicorn app.main:app --host 127.0.0.1 --port 8100 &
+  V2_PID=$!
+  wait_for_http "http://127.0.0.1:8100/health" "v2 backend"
+}
 
-wait_for_http "http://127.0.0.1:8000/health" "v1 backend"
-wait_for_http "http://127.0.0.1:8100/health" "v2 backend"
+start_v1
+start_v2
 
 envsubst '${PORT}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
 nginx -g 'daemon off;' &
@@ -64,12 +70,18 @@ echo "[start] nginx pid=${NGINX_PID}, v1 pid=${V1_PID}, v2 pid=${V2_PID}"
 
 while true; do
   if ! kill -0 "$V1_PID" 2>/dev/null; then
-    echo "[fatal] v1 backend exited; stopping container for Railway restart" >&2
-    exit 1
+    echo "[warn] v1 backend exited; attempting restart" >&2
+    start_v1 || {
+      echo "[fatal] v1 backend restart failed; stopping container for Railway restart" >&2
+      exit 1
+    }
   fi
   if ! kill -0 "$V2_PID" 2>/dev/null; then
-    echo "[fatal] v2 backend exited; stopping container for Railway restart" >&2
-    exit 1
+    echo "[warn] v2 backend exited; attempting restart" >&2
+    start_v2 || {
+      echo "[fatal] v2 backend restart failed; stopping container for Railway restart" >&2
+      exit 1
+    }
   fi
   if ! kill -0 "$NGINX_PID" 2>/dev/null; then
     echo "[fatal] nginx exited; stopping container" >&2

@@ -306,21 +306,28 @@ def build_prediction_signals(
 
     next_round, next_date, auto_machine = predict_next_round(df)
     latest_round = int(df["round"].max())
+    latest_row = df.sort_values("round").iloc[-1]
+    latest_draw_date = str(latest_row["draw_date"])
+    review_mode = intent == "review"
 
     scores: Dict[int, float] = defaultdict(float)
     sources: Dict[int, List[str]] = defaultdict(list)
     excluded: Dict[int, List[str]] = defaultdict(list)
-
-    machine_payload = build_round_recommendation(df, machine_id=auto_machine, seed=seed)
-    post_payload = run_post_occurrence_analysis(df, trigger_round=latest_round)
-    classic_payload = build_classic_recommendation(df, method="blend", seed=seed)
     accumulated = build_accumulated()
-
-    machine_src = _apply_machine_signals(scores, sources, machine_payload)
-    post_src = _apply_post_signals(scores, sources, post_payload)
-    classic_src = _apply_classic_signals(scores, sources, classic_payload)
     photo_src = _apply_photo_signals(scores, sources, excluded, intent, accumulated)
-    parallel_src = _apply_parallel_signals(scores, sources, df, next_round)
+    if review_mode:
+        machine_src = {"available": False, "reason": "review_mode"}
+        post_src = {"available": False, "reason": "review_mode"}
+        classic_src = {"available": False, "reason": "review_mode"}
+        parallel_src = {"available": False, "reason": "review_mode"}
+    else:
+        machine_payload = build_round_recommendation(df, machine_id=auto_machine, seed=seed)
+        post_payload = run_post_occurrence_analysis(df, trigger_round=latest_round)
+        classic_payload = build_classic_recommendation(df, method="blend", seed=seed)
+        machine_src = _apply_machine_signals(scores, sources, machine_payload)
+        post_src = _apply_post_signals(scores, sources, post_payload)
+        classic_src = _apply_classic_signals(scores, sources, classic_payload)
+        parallel_src = _apply_parallel_signals(scores, sources, df, next_round)
 
     ranked: List[Dict[str, Any]] = []
     for n in range(1, 46):
@@ -354,11 +361,11 @@ def build_prediction_signals(
 
     return {
         "rules_version": RULES_VERSION,
-        "target_round": next_round,
-        "target_draw_date": next_date,
+        "target_round": latest_round if review_mode else next_round,
+        "target_draw_date": latest_draw_date if review_mode else next_date,
         "latest_round": latest_round,
         "intent": intent,
-        "machine_id": machine_src.get("machine_id") or auto_machine,
+        "machine_id": machine_src.get("machine_id") if not review_mode else None,
         "source_weights": SOURCE_WEIGHTS,
         "strong_candidates": strong_candidates,
         "excluded_candidates": excluded_candidates,

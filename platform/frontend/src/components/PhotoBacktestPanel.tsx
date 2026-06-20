@@ -112,29 +112,35 @@ function formatRelativeTime(timestamp: number): string {
 // ── 게임 줄별 적중 분석 (반자동 bulkTickets 기반) ───────────────
 // SemiAutoComparePanel 에서 저장한 bulkTickets 를 동일 localStorage 키
 // 로 로드하여, 선택된 백테스트 회차의 당첨번호와 비교한다.
-const SEMI_AUTO_STORAGE_KEY = 'lotto:semiAuto:v1';
+const SEMI_AUTO_STORAGE_KEYS = [
+  'lotto:semiAuto:v1:current_round',
+  'lotto:semiAuto:v1',
+] as const;
 
 function loadBulkTickets(): number[][] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = window.localStorage.getItem(SEMI_AUTO_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as { bulkTickets?: unknown };
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.bulkTickets)) {
-      return [];
-    }
-    const result: number[][] = [];
-    for (const t of parsed.bulkTickets) {
-      if (!Array.isArray(t)) continue;
-      const nums: number[] = [];
-      for (const n of t) {
-        if (Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 45) {
-          nums.push(n as number);
-        }
+    for (const key of SEMI_AUTO_STORAGE_KEYS) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as { bulkTickets?: unknown };
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.bulkTickets)) {
+        continue;
       }
-      if (nums.length === 6) result.push(nums);
+      const result: number[][] = [];
+      for (const t of parsed.bulkTickets) {
+        if (!Array.isArray(t)) continue;
+        const nums: number[] = [];
+        for (const n of t) {
+          if (Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 45) {
+            nums.push(n as number);
+          }
+        }
+        if (nums.length === 6) result.push(nums);
+      }
+      if (result.length > 0) return result;
     }
-    return result;
+    return [];
   } catch {
     return [];
   }
@@ -294,14 +300,8 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
     const winning: number[] = round.data.numbers;
     const bonus: number = round.data.bonus;
     const winningSet = new Set<number>(winning);
-    const strongCandidates: number[] =
-      slice?.final_predictions?.strong_candidates ??
-      accumulated.final_predictions?.strong_candidates ??
-      [];
-    const excludedCandidates: number[] =
-      slice?.final_predictions?.excluded_candidates ??
-      accumulated.final_predictions?.excluded_candidates ??
-      [];
+    const strongCandidates: number[] = slice?.final_predictions?.strong_candidates ?? [];
+    const excludedCandidates: number[] = slice?.final_predictions?.excluded_candidates ?? [];
 
     const strongHits = strongCandidates.filter((n: number) => winningSet.has(n));
     const strongMisses = strongCandidates.filter((n: number) => !winningSet.has(n));
@@ -310,7 +310,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
     const bonusInExcluded = excludedCandidates.includes(bonus);
 
     // 콤보 매치: 당첨 조합 안에 누적 자주-페어/트리플/쿼드가 통째로 들어 있는지
-    const comboPatterns = slice?.accumulated_combo_patterns ?? accumulated.accumulated_combo_patterns;
+    const comboPatterns = slice?.accumulated_combo_patterns ?? null;
     const { matchedPairs, matchedTriples, matchedQuads } = findComboMatches(winning, comboPatterns);
 
     // 누적 자주-페어/트리플 총 개수 (모집단)

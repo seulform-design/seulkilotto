@@ -72,6 +72,7 @@ def recommend_next_round(
         description="분석 호기 (1~3). 미지정 시 자동 예측 호기",
     ),
     seed: Optional[int] = Query(default=None, description="난수 시드"),
+    scope: str = Query(default="ephemeral", description="ephemeral | current"),
 ):
     """다음 회차 호기 패턴 기반 추천 번호 5게임을 반환한다."""
     df = load_history()
@@ -79,20 +80,21 @@ def recommend_next_round(
         raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
 
     payload = build_round_recommendation(df, machine_id=machine, seed=seed)
-    record_current_rule_engine_output(
-        "round_recommendation",
-        round_no=int(payload["next_round"]),
-        latest_round=int(payload["latest_round"]),
-        payload=payload,
-        rule_snapshot={
-            "machine": machine,
-            "seed": seed,
-            "filter_rule": payload.get("filter_rule"),
-            "compose_rule": payload.get("compose_rule"),
-            "auto_machine_id": payload.get("auto_machine_id"),
-            "machine_id": payload.get("machine_id"),
-        },
-    )
+    if scope == "current":
+        record_current_rule_engine_output(
+            "round_recommendation",
+            round_no=int(payload["next_round"]),
+            latest_round=int(payload["latest_round"]),
+            payload=payload,
+            rule_snapshot={
+                "machine": machine,
+                "seed": seed,
+                "filter_rule": payload.get("filter_rule"),
+                "compose_rule": payload.get("compose_rule"),
+                "auto_machine_id": payload.get("auto_machine_id"),
+                "machine_id": payload.get("machine_id"),
+            },
+        )
     if not payload["combinations"] and payload["stats"].get("draw_count", 0) == 0:
         raise HTTPException(
             status_code=404,
@@ -121,6 +123,7 @@ def recommend_classic(
     ),
     seed: Optional[int] = Query(default=None),
     recent_n: Optional[int] = Query(default=None, ge=1),
+    scope: str = Query(default="ephemeral", description="ephemeral | current"),
 ):
     """윌슨·가우스·호이겐스·페르마 패턴 기반 추천 번호."""
     if method.lower() not in METHOD_IDS:
@@ -134,17 +137,18 @@ def recommend_classic(
     payload = to_jsonable(
         build_classic_recommendation(df, method=method, seed=seed, recent_n=recent_n)
     )
-    record_current_rule_engine_output(
-        "classic_recommendation",
-        round_no=effective_current_round(int(df["round"].max())),
-        latest_round=int(df["round"].max()),
-        payload=payload,
-        rule_snapshot={
-            "method": method,
-            "seed": seed,
-            "recent_n": recent_n,
-            "filter_rule": payload.get("filter_rule"),
-            "compose_rule": payload.get("compose_rule"),
-        },
-    )
+    if scope == "current":
+        record_current_rule_engine_output(
+            "classic_recommendation",
+            round_no=effective_current_round(int(df["round"].max())),
+            latest_round=int(df["round"].max()),
+            payload=payload,
+            rule_snapshot={
+                "method": method,
+                "seed": seed,
+                "recent_n": recent_n,
+                "filter_rule": payload.get("filter_rule"),
+                "compose_rule": payload.get("compose_rule"),
+            },
+        )
     return payload

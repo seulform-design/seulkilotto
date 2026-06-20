@@ -61,3 +61,12 @@ def test_prediction_signals_uses_intent_photo_slice(monkeypatch, tmp_path):
 
     acc = build_accumulated()
     assert acc["by_intent"]["review"]["total_analyses"] == 1
+
+
+def test_prediction_signals_review_mode_disables_next_round_sources():
+    out = build_prediction_signals(intent="review")
+    assert out["target_round"] == out["latest_round"]
+    assert out["sources"]["photo_sheet"]["intent"] == "review"
+    assert out["sources"]["machine"]["available"] is False
+    assert out["sources"]["classic"]["available"] is False
+    assert out["sources"]["parallel_round"]["available"] is False

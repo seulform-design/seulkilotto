@@ -74,20 +74,6 @@ def generate_weighted(
         exclude_consecutive=exclude_consecutive,
         seed=seed,
     )
-    latest_round = int(df["round"].max())
-    record_current_rule_engine_output(
-        "weighted_generation",
-        round_no=effective_current_round(latest_round),
-        latest_round=latest_round,
-        payload=payload,
-        rule_snapshot={
-            "n_sets": n_sets,
-            "lookback": lookback,
-            "exclude_consecutive": exclude_consecutive,
-            "seed": seed,
-            "unseen_bonus": settings.UNSEEN_WEIGHT_BONUS,
-        },
-    )
     return payload
 
 
@@ -127,20 +113,6 @@ def generate_smart(
         max_overlap=max_overlap,
         seed=seed,
     )
-    latest_round = int(df["round"].max())
-    record_current_rule_engine_output(
-        "smart_generation",
-        round_no=effective_current_round(latest_round),
-        latest_round=latest_round,
-        payload=payload,
-        rule_snapshot={
-            "n_sets": n_sets,
-            "lookback": lookback,
-            "exclude_consecutive": exclude_consecutive,
-            "max_overlap": max_overlap,
-            "seed": seed,
-        },
-    )
     return payload
 
 
@@ -162,6 +134,7 @@ def generate_epo(
     backtest_holdout: int = Query(default=200, ge=20, le=2000),
     backtest_threshold: float = Query(default=0.50, ge=0.0, le=1.0),
     seed: int | None = Query(default=None),
+    scope: str = Query(default="ephemeral", description="ephemeral | current"),
 ):
     """EPO (Expected Payout Optimization) 엔진.
 
@@ -207,29 +180,30 @@ def generate_epo(
         backtest=result.backtest_meta,
         honesty=result.honesty,
     )
-    latest_round = int(df["round"].max())
-    record_current_rule_engine_output(
-        "epo_generation",
-        round_no=effective_current_round(latest_round),
-        latest_round=latest_round,
-        payload=response.model_dump(mode="json"),
-        rule_snapshot={
-            "n_sets": n_sets,
-            "lookback": lookback,
-            "hot_bonus": hot_bonus,
-            "cold_bonus": cold_bonus,
-            "sum_min": sum_min,
-            "sum_max": sum_max,
-            "max_consecutive_run": max_consecutive_run,
-            "min_ac_value": min_ac_value,
-            "max_same_decade": max_same_decade,
-            "min_last_digit_unique": min_last_digit_unique,
-            "max_last_round_overlap": max_last_round_overlap,
-            "inter_set_max_overlap": inter_set_max_overlap,
-            "enable_backtest": enable_backtest,
-            "backtest_holdout": backtest_holdout,
-            "backtest_threshold": backtest_threshold,
-            "seed": seed,
-        },
-    )
+    if scope == "current":
+        latest_round = int(df["round"].max())
+        record_current_rule_engine_output(
+            "epo_generation",
+            round_no=effective_current_round(latest_round),
+            latest_round=latest_round,
+            payload=response.model_dump(mode="json"),
+            rule_snapshot={
+                "n_sets": n_sets,
+                "lookback": lookback,
+                "hot_bonus": hot_bonus,
+                "cold_bonus": cold_bonus,
+                "sum_min": sum_min,
+                "sum_max": sum_max,
+                "max_consecutive_run": max_consecutive_run,
+                "min_ac_value": min_ac_value,
+                "max_same_decade": max_same_decade,
+                "min_last_digit_unique": min_last_digit_unique,
+                "max_last_round_overlap": max_last_round_overlap,
+                "inter_set_max_overlap": inter_set_max_overlap,
+                "enable_backtest": enable_backtest,
+                "backtest_holdout": backtest_holdout,
+                "backtest_threshold": backtest_threshold,
+                "seed": seed,
+            },
+        )
     return response

@@ -29,6 +29,8 @@ def test_prediction_signals_returns_unified_strong_candidates():
     assert out.get("error") is None
     assert out["rules_version"] == RULES_VERSION
     assert out["strong_candidates"]
+    assert out["strong_details"]
+    assert all("sources" in item for item in out["strong_details"])
     assert out["sources"]["machine"]["available"]
     assert out["sources"]["classic"]["available"]
     assert out["sources"]["parallel_round"]["available"]

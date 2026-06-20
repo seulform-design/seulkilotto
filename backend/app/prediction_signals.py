@@ -354,6 +354,8 @@ def build_prediction_signals(
         if not x["excluded_by"] and x["score"] > 0
     ][:STRONG_LIMIT]
     excluded_candidates = [n for n, exc in excluded.items() if exc][:12]
+    strong_details = [item for item in ranked if item["number"] in strong_candidates][:STRONG_LIMIT]
+    excluded_details = [item for item in ranked if item["number"] in excluded_candidates][:12]
 
     by_grade: Dict[str, List[int]] = {"S": [], "A": [], "B": [], "C": [], "X": []}
     for item in ranked:
@@ -369,6 +371,8 @@ def build_prediction_signals(
         "source_weights": SOURCE_WEIGHTS,
         "strong_candidates": strong_candidates,
         "excluded_candidates": excluded_candidates,
+        "strong_details": strong_details,
+        "excluded_details": excluded_details,
         "ranked_numbers": ranked[:25],
         "by_grade": by_grade,
         "sources": {

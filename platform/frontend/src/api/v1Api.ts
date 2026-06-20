@@ -995,6 +995,8 @@ export interface PredictionSignalsResponse {
   source_weights: Record<string, number>;
   strong_candidates: number[];
   excluded_candidates: number[];
+  strong_details: PredictionSignalNumber[];
+  excluded_details: PredictionSignalNumber[];
   ranked_numbers: PredictionSignalNumber[];
   by_grade: Record<'S' | 'A' | 'B' | 'C' | 'X', number[]>;
   sources: {

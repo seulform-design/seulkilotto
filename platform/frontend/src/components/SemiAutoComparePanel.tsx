@@ -47,6 +47,8 @@ import {
   type ComboDuplicatePatterns,
   type ManualSlipInput,
   type PhotoAnalysisAccumulated,
+  type PredictionSignalNumber,
+  type PredictionSignalsResponse,
 } from '../api/v1Api';
 import { GRADE_COLORS, GRADE_LABELS } from '../utils/compositeAnalysis';
 
@@ -61,6 +63,37 @@ function semiAutoStorageKey(intent: SheetIntent): string {
 }
 
 type SheetIntent = 'review' | 'current_round';
+
+const SIGNAL_SOURCE_LABELS: Record<string, string> = {
+  'machine-hot': '추첨기 고빈도',
+  'machine-synergy': '추첨기 궁합',
+  'post-S': '후속출현 S',
+  'post-A': '후속출현 A',
+  'post-top20': '후속출현 Top20',
+  'classic-wilson': '클래식 윌슨',
+  'classic-huygens': '클래식 호이겐스',
+  'classic-fermat': '클래식 페르마',
+  'classic-blend': '클래식 혼합',
+  'photo-line-overlap': '용지 줄겹침',
+  'photo-vote': '용지 누적투표',
+  'photo-pair': '용지 페어',
+  'photo-triple': '용지 트리플',
+  'photo-excluded': '용지 배제',
+  'parallel-strong': '평행 강수',
+  'parallel-expected': '평행 기대수',
+  'parallel-fixed': '평행 고정후보',
+};
+
+function signalSourceLabel(source: string): string {
+  return SIGNAL_SOURCE_LABELS[source] ?? source;
+}
+
+function summarizeSignalReason(item: PredictionSignalNumber): string {
+  if (item.excluded_by.length > 0) {
+    return `배제 근거 ${item.excluded_by.length}개 · ${item.excluded_by.map(signalSourceLabel).join(', ')}`;
+  }
+  return `${item.signal_count}개 신호 · ${item.source_count}개 계열 합의`;
+}
 
 type PersistedSemiAutoState = {
   picked: number[];
@@ -818,6 +851,97 @@ function MatchBadge({ label, count, of, color = 'default' }: { label: string; co
         fontWeight: 700,
       }}
     />
+  );
+}
+
+function SignalExplanationPanel({
+  predictionSignals,
+}: {
+  predictionSignals: PredictionSignalsResponse;
+}) {
+  const strongItems = predictionSignals.strong_details.slice(0, 8);
+  const excludedItems = predictionSignals.excluded_details.slice(0, 6);
+
+  const renderItems = (
+    title: string,
+    items: PredictionSignalNumber[],
+    emptyHint: string,
+  ) => (
+    <Box sx={{ flex: 1, minWidth: 0 }}>
+      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.75 }}>
+        {title}
+      </Typography>
+      {items.length === 0 ? (
+        <Typography variant="caption" color="text.secondary">
+          {emptyHint}
+        </Typography>
+      ) : (
+        <Stack spacing={1}>
+          {items.map((item) => (
+            <Box
+              key={`explain-${title}-${item.number}`}
+              sx={{
+                p: 1,
+                borderRadius: 1,
+                bgcolor: 'action.hover',
+                border: '1px solid',
+                borderColor: 'divider',
+              }}
+            >
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                <LottoBall number={item.number} size={28} />
+                <Chip
+                  size="small"
+                  label={`${item.grade} · 점수 ${item.score.toFixed(1)}`}
+                  sx={{
+                    bgcolor: GRADE_COLORS[item.grade],
+                    color: item.grade === 'C' ? 'text.primary' : '#fff',
+                    fontWeight: 700,
+                  }}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  {summarizeSignalReason(item)}
+                </Typography>
+              </Stack>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                {item.sources.map((src) => (
+                  <Chip
+                    key={`src-${item.number}-${src}`}
+                    size="small"
+                    variant="outlined"
+                    label={`${signalSourceLabel(src)} (+${(predictionSignals.source_weights[src] ?? 0).toFixed(1)})`}
+                  />
+                ))}
+                {item.excluded_by.map((src) => (
+                  <Chip
+                    key={`exc-${item.number}-${src}`}
+                    size="small"
+                    color="error"
+                    variant="outlined"
+                    label={`${signalSourceLabel(src)} (배제)`}
+                  />
+                ))}
+              </Stack>
+            </Box>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  );
+
+  return (
+    <Box sx={{ mt: 1.5 }}>
+      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.75 }}>
+        왜 이 번호가 나왔나요?
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+        강한 후보는 점수·계열 합의로, 배제 후보는 exclusion 신호가 붙은 번호로 설명합니다.
+      </Typography>
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+        {renderItems('강한 후보 근거', strongItems, '표시할 강한 후보 근거가 없습니다.')}
+        {renderItems('배제 후보 근거', excludedItems, '표시할 배제 후보 근거가 없습니다.')}
+      </Stack>
+    </Box>
   );
 }
 
@@ -2295,6 +2419,7 @@ export default function SemiAutoComparePanel({
                     />
                   ))}
                 </Stack>
+                <SignalExplanationPanel predictionSignals={predictionSignals} />
               </>
             ) : (
               <Alert severity="info" sx={{ py: 0.5 }}>

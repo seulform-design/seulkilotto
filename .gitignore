@@ -25,6 +25,7 @@ htmlcov/
 lotto_research.db
 platform/backend/lotto_research.db
 backend/data/video_analysis_store.json
+backend/data/video_analysis_current_store.json
 
 # tsc 잔여물 (src 내 .js/.js.map)
 platform/frontend/src/**/*.js

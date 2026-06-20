@@ -1,7 +1,8 @@
-"""용지 사진 분석 결과 누적 저장 (JSON)."""
+"""용지 사진 분석 결과 누적 저장 (SQLite-backed)."""
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -44,6 +45,10 @@ def _current_store_path() -> Path:
     return STORE_PATH.with_name(CURRENT_STORE_BASENAME)
 
 
+def _db_path() -> Path:
+    return STORE_PATH.with_suffix(".db")
+
+
 def _empty_historical_raw() -> Dict[str, Any]:
     return {
         "version": HISTORICAL_STORE_VERSION,
@@ -75,6 +80,87 @@ def _empty_current_raw(round_no: int | None = None) -> Dict[str, Any]:
     }
 
 
+def _connect_db() -> sqlite3.Connection:
+    path = _db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS store_meta (
+            scope TEXT PRIMARY KEY,
+            version INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS historical_review_entries (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id TEXT UNIQUE NOT NULL,
+            analyzed_at TEXT,
+            payload TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS archived_current_batches (
+            round_no INTEGER PRIMARY KEY,
+            merged_at TEXT,
+            payload TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS current_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            round_no INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            frozen_at TEXT,
+            updated_at TEXT NOT NULL,
+            version INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS current_entries (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id TEXT UNIQUE NOT NULL,
+            round_no INTEGER NOT NULL,
+            analyzed_at TEXT,
+            payload TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS current_derived_datasets (
+            name TEXT PRIMARY KEY,
+            payload TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS current_rule_snapshots (
+            name TEXT PRIMARY KEY,
+            payload TEXT NOT NULL
+        );
+        """
+    )
+    return conn
+
+
+def _update_meta(conn: sqlite3.Connection, scope: str, version: int, updated_at: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO store_meta(scope, version, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(scope) DO UPDATE SET
+            version = excluded.version,
+            updated_at = excluded.updated_at
+        """,
+        (scope, version, updated_at),
+    )
+
+
+def _meta_updated_at(conn: sqlite3.Connection, scope: str) -> str | None:
+    row = conn.execute("SELECT updated_at FROM store_meta WHERE scope = ?", (scope,)).fetchone()
+    return str(row["updated_at"]) if row and row["updated_at"] else None
+
+
+def _db_has_content(conn: sqlite3.Connection) -> bool:
+    checks = (
+        "SELECT 1 FROM historical_review_entries LIMIT 1",
+        "SELECT 1 FROM archived_current_batches LIMIT 1",
+        "SELECT 1 FROM current_entries LIMIT 1",
+        "SELECT 1 FROM current_state LIMIT 1",
+    )
+    return any(conn.execute(sql).fetchone() is not None for sql in checks)
+
+
 def _load_json_store(path: Path, default_factory) -> Dict[str, Any]:
     if not path.exists():
         return default_factory()
@@ -95,6 +181,142 @@ def _save_json_store(path: Path, data: Dict[str, Any], version: int) -> None:
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp_path.replace(path)
+
+
+def _write_historical_raw_db(conn: sqlite3.Connection, data: Dict[str, Any]) -> None:
+    payload = _deep_copy(data)
+    entries = payload.get("entries") or []
+    archived = payload.get("archived_current_rounds") or []
+    updated_at = str(payload.get("updated_at") or _now_iso())
+    version = int(payload.get("version") or HISTORICAL_STORE_VERSION)
+
+    conn.execute("DELETE FROM historical_review_entries")
+    conn.execute("DELETE FROM archived_current_batches")
+    for entry in entries:
+        conn.execute(
+            "INSERT INTO historical_review_entries(entry_id, analyzed_at, payload) VALUES (?, ?, ?)",
+            (
+                str(entry.get("id") or uuid.uuid4()),
+                str(entry.get("analyzed_at") or ""),
+                json.dumps(entry, ensure_ascii=False),
+            ),
+        )
+    for batch in archived:
+        round_no = int(batch.get("round_no") or 0)
+        if round_no <= 0:
+            continue
+        conn.execute(
+            "INSERT INTO archived_current_batches(round_no, merged_at, payload) VALUES (?, ?, ?)",
+            (
+                round_no,
+                str(batch.get("merged_at") or ""),
+                json.dumps(batch, ensure_ascii=False),
+            ),
+        )
+    _update_meta(conn, "historical", version, updated_at)
+
+
+def _write_current_raw_db(conn: sqlite3.Connection, data: Dict[str, Any]) -> None:
+    payload = _deep_copy(data)
+    entries = payload.get("entries") or []
+    derived = payload.get("derived_datasets") or {}
+    snapshots = payload.get("rule_snapshots") or {}
+    updated_at = str(payload.get("updated_at") or _now_iso())
+    version = int(payload.get("version") or CURRENT_STORE_VERSION)
+    round_no = int(payload.get("current_round") or _default_current_round_no())
+    status = str(payload.get("status") or "open")
+    frozen_at = payload.get("frozen_at")
+
+    conn.execute("DELETE FROM current_entries")
+    conn.execute("DELETE FROM current_derived_datasets")
+    conn.execute("DELETE FROM current_rule_snapshots")
+    conn.execute(
+        """
+        INSERT INTO current_state(id, round_no, status, frozen_at, updated_at, version)
+        VALUES (1, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            round_no = excluded.round_no,
+            status = excluded.status,
+            frozen_at = excluded.frozen_at,
+            updated_at = excluded.updated_at,
+            version = excluded.version
+        """,
+        (round_no, status, frozen_at, updated_at, version),
+    )
+    for entry in entries:
+        conn.execute(
+            "INSERT INTO current_entries(entry_id, round_no, analyzed_at, payload) VALUES (?, ?, ?, ?)",
+            (
+                str(entry.get("id") or uuid.uuid4()),
+                round_no,
+                str(entry.get("analyzed_at") or ""),
+                json.dumps(entry, ensure_ascii=False),
+            ),
+        )
+    for name, item in derived.items():
+        conn.execute(
+            "INSERT INTO current_derived_datasets(name, payload) VALUES (?, ?)",
+            (str(name), json.dumps(item, ensure_ascii=False)),
+        )
+    for name, item in snapshots.items():
+        conn.execute(
+            "INSERT INTO current_rule_snapshots(name, payload) VALUES (?, ?)",
+            (str(name), json.dumps(item, ensure_ascii=False)),
+        )
+    _update_meta(conn, "current", version, updated_at)
+
+
+def _read_historical_raw_db(conn: sqlite3.Connection) -> Dict[str, Any]:
+    entries = [
+        json.loads(row["payload"])
+        for row in conn.execute(
+            "SELECT payload FROM historical_review_entries ORDER BY seq ASC"
+        ).fetchall()
+    ]
+    archived = [
+        json.loads(row["payload"])
+        for row in conn.execute(
+            "SELECT payload FROM archived_current_batches ORDER BY round_no ASC"
+        ).fetchall()
+    ]
+    return {
+        "version": HISTORICAL_STORE_VERSION,
+        "updated_at": _meta_updated_at(conn, "historical") or _now_iso(),
+        "entries": entries,
+        "archived_current_rounds": archived,
+    }
+
+
+def _read_current_raw_db(conn: sqlite3.Connection) -> Dict[str, Any]:
+    state_row = conn.execute(
+        "SELECT round_no, status, frozen_at, updated_at, version FROM current_state WHERE id = 1"
+    ).fetchone()
+    if state_row is None:
+        return _empty_current_raw()
+    entries = [
+        json.loads(row["payload"])
+        for row in conn.execute(
+            "SELECT payload FROM current_entries ORDER BY seq ASC"
+        ).fetchall()
+    ]
+    derived = {
+        str(row["name"]): json.loads(row["payload"])
+        for row in conn.execute("SELECT name, payload FROM current_derived_datasets").fetchall()
+    }
+    snapshots = {
+        str(row["name"]): json.loads(row["payload"])
+        for row in conn.execute("SELECT name, payload FROM current_rule_snapshots").fetchall()
+    }
+    return {
+        "version": int(state_row["version"] or CURRENT_STORE_VERSION),
+        "updated_at": str(state_row["updated_at"] or _now_iso()),
+        "current_round": int(state_row["round_no"] or _default_current_round_no()),
+        "status": str(state_row["status"] or "open"),
+        "entries": entries,
+        "derived_datasets": derived,
+        "rule_snapshots": snapshots,
+        "frozen_at": state_row["frozen_at"],
+    }
 
 
 def _strip_for_store(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -121,44 +343,56 @@ def _deep_copy(data: Any) -> Any:
 
 
 def _maybe_migrate_legacy_store() -> None:
-    current_path = _current_store_path()
-    if current_path.exists() or not STORE_PATH.exists():
-        return
-    raw = _load_json_store(STORE_PATH, _empty_historical_raw)
-    entries = raw.get("entries") or []
-    if not entries:
-        return
-    current_entries = [e for e in entries if e.get("video_intent") == "current_round"]
-    if not current_entries:
-        return
-    historical_raw = _empty_historical_raw()
-    historical_raw["entries"] = [e for e in entries if e.get("video_intent") != "current_round"]
-    historical_raw["archived_current_rounds"] = raw.get("archived_current_rounds") or []
-    round_candidates = [int(_entry_round(e)) for e in current_entries if str(_entry_round(e)).isdigit()]
-    current_raw = _empty_current_raw(max(round_candidates) if round_candidates else None)
-    current_raw["entries"] = current_entries
-    _save_json_store(STORE_PATH, historical_raw, HISTORICAL_STORE_VERSION)
-    _save_json_store(current_path, current_raw, CURRENT_STORE_VERSION)
+    with _connect_db() as conn:
+        if _db_has_content(conn):
+            return
+
+        historical_raw = _load_json_store(STORE_PATH, _empty_historical_raw)
+        current_raw = _load_json_store(_current_store_path(), _empty_current_raw)
+        entries = historical_raw.get("entries") or []
+        if entries and not (current_raw.get("entries") or []):
+            current_entries = [e for e in entries if e.get("video_intent") == "current_round"]
+            if current_entries:
+                historical_raw["entries"] = [e for e in entries if e.get("video_intent") != "current_round"]
+                historical_raw["archived_current_rounds"] = historical_raw.get("archived_current_rounds") or []
+                round_candidates = [
+                    int(_entry_round(e))
+                    for e in current_entries
+                    if str(_entry_round(e)).isdigit()
+                ]
+                current_raw = _empty_current_raw(max(round_candidates) if round_candidates else None)
+                current_raw["entries"] = current_entries
+        _write_historical_raw_db(conn, historical_raw)
+        _write_current_raw_db(conn, current_raw)
+        conn.commit()
+
+
+def _ensure_db_ready() -> None:
+    _maybe_migrate_legacy_store()
 
 
 def _load_historical_raw() -> Dict[str, Any]:
-    _maybe_migrate_legacy_store()
-    data = _load_json_store(STORE_PATH, _empty_historical_raw)
-    data.setdefault("entries", [])
-    data.setdefault("archived_current_rounds", [])
-    data.setdefault("version", HISTORICAL_STORE_VERSION)
-    return data
+    _ensure_db_ready()
+    with _connect_db() as conn:
+        return _read_historical_raw_db(conn)
 
 
 def _save_historical_raw(data: Dict[str, Any]) -> None:
-    data.setdefault("entries", [])
-    data.setdefault("archived_current_rounds", [])
-    _save_json_store(STORE_PATH, data, HISTORICAL_STORE_VERSION)
+    payload = _deep_copy(data)
+    payload.setdefault("entries", [])
+    payload.setdefault("archived_current_rounds", [])
+    payload.setdefault("version", HISTORICAL_STORE_VERSION)
+    payload["updated_at"] = _now_iso()
+    _ensure_db_ready()
+    with _connect_db() as conn:
+        _write_historical_raw_db(conn, payload)
+        conn.commit()
 
 
 def _load_current_raw() -> Dict[str, Any]:
-    _maybe_migrate_legacy_store()
-    data = _load_json_store(_current_store_path(), _empty_current_raw)
+    _ensure_db_ready()
+    with _connect_db() as conn:
+        data = _read_current_raw_db(conn)
     data.setdefault("entries", [])
     data.setdefault("derived_datasets", {})
     data.setdefault("rule_snapshots", {})
@@ -171,14 +405,20 @@ def _load_current_raw() -> Dict[str, Any]:
 
 
 def _save_current_raw(data: Dict[str, Any]) -> None:
-    data.setdefault("entries", [])
-    data.setdefault("derived_datasets", {})
-    data.setdefault("rule_snapshots", {})
-    data.setdefault("status", "open")
-    data.setdefault("frozen_at", None)
-    if "current_round" not in data:
-        data["current_round"] = _default_current_round_no()
-    _save_json_store(_current_store_path(), data, CURRENT_STORE_VERSION)
+    payload = _deep_copy(data)
+    payload.setdefault("entries", [])
+    payload.setdefault("derived_datasets", {})
+    payload.setdefault("rule_snapshots", {})
+    payload.setdefault("status", "open")
+    payload.setdefault("frozen_at", None)
+    if "current_round" not in payload:
+        payload["current_round"] = _default_current_round_no()
+    payload.setdefault("version", CURRENT_STORE_VERSION)
+    payload["updated_at"] = _now_iso()
+    _ensure_db_ready()
+    with _connect_db() as conn:
+        _write_current_raw_db(conn, payload)
+        conn.commit()
 
 
 def _archived_current_entries(data: Dict[str, Any]) -> List[Dict[str, Any]]:

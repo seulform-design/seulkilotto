@@ -38,7 +38,8 @@ def _result(image_id: str, intent: str, round_no: str, numbers: list[int]) -> di
 
 
 def test_current_and_historical_datasets_are_isolated(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.video_analysis.store.STORE_PATH", tmp_path / "store.json")
+    store_path = tmp_path / "store.json"
+    monkeypatch.setattr("app.video_analysis.store.STORE_PATH", store_path)
     monkeypatch.setattr("app.video_analysis.draw_template.get_current_round_no", lambda: 1227)
     monkeypatch.setattr("app.video_analysis.draw_template.get_review_round_no", lambda: 1226)
     clear_store()
@@ -55,6 +56,7 @@ def test_current_and_historical_datasets_are_isolated(monkeypatch, tmp_path):
     assert set(acc["by_intent"]["review"]["final_predictions"]["strong_candidates"]) == {1, 2, 3, 4, 5, 6}
     assert set(acc["by_intent"]["current_round"]["final_predictions"]["strong_candidates"]) == {7, 8, 9, 10, 11, 12}
     assert acc["current_dataset"]["round_no"] == 1227
+    assert store_path.with_suffix(".db").exists()
 
 
 def test_current_rule_outputs_archive_idempotently(monkeypatch, tmp_path):

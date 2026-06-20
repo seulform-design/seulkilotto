@@ -32,6 +32,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BulkLineInputDialog from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
 import NumberFrequencyPanel from './NumberFrequencyPanel';
+import {
+  generateScoredRecommendations,
+  type ScoredRecommendation,
+} from './reviewRecommendationEngine';
 import SavedLinesPanel, {
   GAME_LABELS,
   type GameLabel,
@@ -922,83 +926,7 @@ export default function SemiAutoComparePanel({
 
   // UI 토글 상태
   const [showAllTickets, setShowAllTickets] = useState(false);
-  const [recommendations, setRecommendations] = useState<number[][]>([]);
-
-  // 사용자 정정 (이번 turn): '구입번호 직접입력' = 자동.
-  // 즉 slipQueue 가 자동 데이터 소스.
-  // 전체 번호 빈도 = slipQueue 의 모든 줄에서 1~45 등장 횟수.
-  const numberFrequency = useMemo(() => {
-    if (slipQueue.length === 0) return [];
-    const counter: Record<number, number> = {};
-    for (let n = 1; n <= 45; n += 1) counter[n] = 0;
-    for (const slip of slipQueue) {
-      for (const line of slip.lines) {
-        for (const n of line.numbers) {
-          if (Number.isInteger(n) && n >= 1 && n <= 45) {
-            counter[n] = (counter[n] ?? 0) + 1;
-          }
-        }
-      }
-    }
-    return Object.entries(counter)
-      .map(([n, count]) => ({ number: Number(n), count }))
-      .filter((item) => item.count > 0)
-      .sort((a, b) => b.count - a.count || a.number - b.number);
-  }, [slipQueue]);
-
-  // 추천 조합 생성 — 반자동 빈도 + 자동 강한 후보 결합 (누적 없어도 반자동 데이터만으로 생성 가능)
-  const generateRecommendations = () => {
-    // 1순위: 반자동 상위 빈도 번호 (bulkTickets + semiSlipQueue + semiCurrentLines 포함)
-    const allSemiNums: number[] = [
-      ...bulkTickets.flat(),
-      ...semiSlipQueue.flatMap((sl) => sl.lines.flatMap((l) => l.numbers)),
-      ...semiCurrentLines.flatMap((l) => l.numbers),
-    ];
-    const semiFreqMap: Record<number, number> = {};
-    for (const n of allSemiNums) {
-      semiFreqMap[n] = (semiFreqMap[n] ?? 0) + 1;
-    }
-    const topSemiFreq = Object.entries(semiFreqMap)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 20)
-      .map(([n]) => Number(n));
-
-    // 2순위: 누적 자동 강한 후보 (있으면)
-    const topFreq = numberFrequency.slice(0, 15).map((f) => f.number);
-    const strong = resolvedStrongCandidates;
-    const excluded = new Set(getCurrentRoundExcludedCandidates(accumulated));
-
-    // 반자동 우선 + 자동 강한 후보 + 자동 빈도 순으로 풀 구성
-    const pool = Array.from(new Set([...topSemiFreq, ...strong, ...topFreq])).filter(
-      (n) => !excluded.has(n) && n >= 1 && n <= 45
-    );
-
-    // 풀이 부족하면 1~45 무작위로 보충
-    if (pool.length < 12) {
-      const all = Array.from({ length: 45 }, (_, i) => i + 1).filter(
-        (n) => !pool.includes(n) && !excluded.has(n)
-      );
-      while (pool.length < 12 && all.length > 0) {
-        const idx = Math.floor(Math.random() * all.length);
-        pool.push(all.splice(idx, 1)[0]);
-      }
-    }
-
-    const result: number[][] = [];
-    const seen = new Set<string>();
-    let attempts = 0;
-    while (result.length < 5 && attempts < 300) {
-      attempts += 1;
-      const shuffled = [...pool].sort(() => Math.random() - 0.5);
-      const combo = shuffled.slice(0, 6).sort((a, b) => a - b);
-      const key = combo.join('-');
-      if (combo.length === 6 && !seen.has(key)) {
-        seen.add(key);
-        result.push(combo);
-      }
-    }
-    setRecommendations(result);
-  };
+  const [recommendations, setRecommendations] = useState<ScoredRecommendation[]>([]);
 
   const togglePick = (n: number) => {
     if (picked.includes(n)) {
@@ -1278,10 +1206,10 @@ export default function SemiAutoComparePanel({
   /**
    * 강한 후보 교집합 패널 전용 alias.
    * 자동+반자동 통합 통계 (combinedComparison) 우선, 없을 때만 bulkComparison
-   * 으로 폴백. 사용은 패널의 외부 가드 (`bulkComparison && (...)`) 안에서만
-   * 일어나므로 non-null 보장 — TS 어설션으로 표시.
+   * 으로 폴백.
    */
-  const intersectionCmp = (combinedComparison ?? bulkComparison)!;
+  const activeComparison = combinedComparison ?? bulkComparison;
+  const intersectionCmp = activeComparison!;
 
   /**
    * 자동 그룹의 각 줄 ↔ 반자동 그룹의 각 줄 1:1 전수 비교 매칭.
@@ -1544,6 +1472,124 @@ export default function SemiAutoComparePanel({
     accumulated,
     sheetIntent,
     resolvedStrongCandidates,
+  ]);
+
+  const generateRecommendations = useCallback(() => {
+    const semiFreq: Record<number, number> = {};
+    for (const n of [
+      ...bulkTickets.flat(),
+      ...semiSlipQueue.flatMap((sl) => sl.lines.flatMap((l) => l.numbers)),
+      ...semiCurrentLines.flatMap((l) => l.numbers),
+    ]) {
+      if (Number.isInteger(n) && n >= 1 && n <= 45) {
+        semiFreq[n] = (semiFreq[n] ?? 0) + 1;
+      }
+    }
+
+    const autoFreq: Record<number, number> = {};
+    for (const line of autoOnlyLines) {
+      for (const n of line) {
+        if (Number.isInteger(n) && n >= 1 && n <= 45) {
+          autoFreq[n] = (autoFreq[n] ?? 0) + 1;
+        }
+      }
+    }
+
+    const cmp = activeComparison;
+    const lineMatchGroups = [
+      ...groupLineMatching.groups6,
+      ...groupLineMatching.groups5,
+      ...groupLineMatching.groups4,
+      ...groupLineMatching.groups3,
+      ...groupLineMatching.groups2,
+    ].map((g) => ({
+      matchCount: g.matchCount,
+      matchedNumbers: g.matchedNumbers,
+      cardWeight: g.autoList.length + g.semiList.length,
+    }));
+
+    const seedTickets: {
+      ticket: number[];
+      weight: number;
+      label: string;
+    }[] = [];
+    if (cmp) {
+      for (const t of cmp.bestTickets) {
+        seedTickets.push({
+          ticket: t.ticket,
+          weight: 12 + t.vsLatestMatch.length * 3 + t.vsStrongMatch.length,
+          label: '당첨매치상위',
+        });
+      }
+      for (const t of cmp.bestComboTickets) {
+        seedTickets.push({
+          ticket: t.ticket,
+          weight: 10 + t.comboScore,
+          label: '콤보상위',
+        });
+      }
+      const ticketSeeds = [...cmp.perTicket]
+        .filter(
+          (t) =>
+            t.comboScore > 0 ||
+            t.vsStrongMatch.length >= 3 ||
+            (compareWinning && t.vsLatestMatch.length >= 3)
+        )
+        .sort(
+          (a, b) =>
+            b.comboScore +
+            b.vsStrongMatch.length * 2 +
+            b.vsLatestMatch.length * 3 -
+            (a.comboScore + a.vsStrongMatch.length * 2 + a.vsLatestMatch.length * 3)
+        )
+        .slice(0, 25);
+      for (const t of ticketSeeds) {
+        seedTickets.push({
+          ticket: t.ticket,
+          weight: 6 + t.comboScore + t.vsStrongMatch.length,
+          label: '통계상위티켓',
+        });
+      }
+    }
+
+    const results = generateScoredRecommendations(
+      {
+        sheetIntent,
+        strongCandidates: resolvedStrongCandidates,
+        excludedCandidates: getIntentExcludedCandidates(accumulated, sheetIntent),
+        winningNumbers: compareWinning ? winningNumbers : [],
+        comboPatterns: getIntentComboPatterns(accumulated, sheetIntent),
+        semiFreq,
+        autoFreq,
+        intersection: cmp
+          ? {
+              two: cmp.twoIntersectionGroups,
+              three: cmp.threeIntersectionGroups,
+              fourPlus: cmp.fourPlusIntersectionGroups,
+            }
+          : { two: [], three: [], fourPlus: [] },
+        lineMatchGroups,
+        seedTickets,
+      },
+      5
+    );
+    setRecommendations(results);
+  }, [
+    accumulated,
+    activeComparison,
+    autoOnlyLines,
+    bulkTickets,
+    compareWinning,
+    groupLineMatching.groups2,
+    groupLineMatching.groups3,
+    groupLineMatching.groups4,
+    groupLineMatching.groups5,
+    groupLineMatching.groups6,
+    resolvedStrongCandidates,
+    semiCurrentLines,
+    semiSlipQueue,
+    sheetIntent,
+    winningNumbers,
   ]);
 
   /**
@@ -2043,7 +2089,7 @@ export default function SemiAutoComparePanel({
       )}
 
       {/* ─── 대량 비교 결과 ─────────────────────────────────────── */}
-      {bulkComparison && (
+      {activeComparison && (
         <>
           <Divider sx={{ my: 2 }} />
           {!compareWinning && (
@@ -2057,7 +2103,7 @@ export default function SemiAutoComparePanel({
           )}
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }} flexWrap="wrap" gap={1}>
             <Typography variant="subtitle1" fontWeight={700}>
-              📋 대량 비교 결과 ({bulkComparison.ticketCount}장)
+              📋 대량 비교 결과 ({activeComparison.ticketCount}장)
             </Typography>
             <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" gap={0.5}>
               <Button size="small" variant="outlined" onClick={handleRefreshAll}>
@@ -2114,31 +2160,31 @@ export default function SemiAutoComparePanel({
               <Chip
                 size="small"
                 color="primary"
-                label={`평균 적중 ${bulkComparison.avgHits.toFixed(3)} / 6`}
+                label={`평균 적중 ${activeComparison.avgHits.toFixed(3)} / 6`}
                 sx={{ fontWeight: 700 }}
               />
-              <Chip size="small" label={`고유 번호 ${bulkComparison.uniqueNumberCount}/45`} variant="outlined" />
+              <Chip size="small" label={`고유 번호 ${activeComparison.uniqueNumberCount}/45`} variant="outlined" />
               <Chip
                 size="small"
                 color="success"
-                label={`3등이상 ${(bulkComparison.hitRates.threePlus * 100).toFixed(2)}%`}
+                label={`3등이상 ${(activeComparison.hitRates.threePlus * 100).toFixed(2)}%`}
                 sx={{ fontWeight: 700 }}
               />
               <Chip
                 size="small"
                 color="warning"
-                label={`4등이상 ${(bulkComparison.hitRates.fourPlus * 100).toFixed(2)}%`}
+                label={`4등이상 ${(activeComparison.hitRates.fourPlus * 100).toFixed(2)}%`}
               />
               <Chip
                 size="small"
                 color="error"
-                label={`1등 ${(bulkComparison.hitRates.six * 100).toFixed(4)}%`}
+                label={`1등 ${(activeComparison.hitRates.six * 100).toFixed(4)}%`}
               />
-              {bulkComparison.excludedWarningCount > 0 && (
+              {activeComparison.excludedWarningCount > 0 && (
                 <Chip
                   size="small"
                   color="error"
-                  label={`⚠ 배제 매치 2+ 티켓: ${bulkComparison.excludedWarningCount}`}
+                  label={`⚠ 배제 매치 2+ 티켓: ${activeComparison.excludedWarningCount}`}
                 />
               )}
             </Stack>
@@ -2155,9 +2201,9 @@ export default function SemiAutoComparePanel({
             </Typography>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
               {[0, 1, 2, 3, 4, 5, 6].map((hits) => {
-                const count = bulkComparison.hitDistribution[hits] ?? 0;
-                const pct = bulkComparison.ticketCount > 0
-                  ? (count / bulkComparison.ticketCount) * 100
+                const count = activeComparison.hitDistribution[hits] ?? 0;
+                const pct = activeComparison.ticketCount > 0
+                  ? (count / activeComparison.ticketCount) * 100
                   : 0;
                 return (
                   <Chip
@@ -2176,13 +2222,13 @@ export default function SemiAutoComparePanel({
           {!compareWinning && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                <Chip size="small" label={`고유 번호 ${bulkComparison.uniqueNumberCount}/45`} variant="outlined" />
+                <Chip size="small" label={`고유 번호 ${activeComparison.uniqueNumberCount}/45`} variant="outlined" />
                 <Chip
                   size="small"
                   color="secondary"
-                  label={`2개+ 강한후보 겹침 ${bulkComparison.twoPlusStrongCount}장`}
+                  label={`2개+ 강한후보 겹침 ${activeComparison.twoPlusStrongCount}장`}
                 />
-                <Chip size="small" label={`3개+ 강한후보 겹침 ${bulkComparison.threePlusStrongCount}장`} />
+                <Chip size="small" label={`3개+ 강한후보 겹침 ${activeComparison.threePlusStrongCount}장`} />
               </Stack>
             </Paper>
           )}
@@ -2373,11 +2419,11 @@ export default function SemiAutoComparePanel({
             );
           })()}
 
-          {/* 추천 조합 생성 — 반자동 빈도 + 자동 누적 기반 */}
+          {/* 추천 조합 — 복기 탭 통계 종합 스코어링 */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
               <Typography variant="body2" fontWeight={700}>
-                🎲 반자동+자동 누적 기반 추천 조합
+                🎲 {compareWinning ? '복기 통계 종합' : '반자동+자동 누적'} 추천 조합
               </Typography>
               <Button
                 type="button"
@@ -2385,26 +2431,30 @@ export default function SemiAutoComparePanel({
                 variant="contained"
                 color="success"
                 onClick={generateRecommendations}
-                disabled={
-                  bulkTickets.length === 0 &&
-                  semiSlipQueue.length === 0 &&
-                  semiCurrentLines.length === 0 &&
-                  !accumulated
-                }
+                disabled={combinedTickets.length === 0 && !accumulated}
               >
                 추천 5세트 생성
               </Button>
             </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              반자동 상위 빈도 번호 우선 + 자동 강한 후보 결합 → 배제 후보 제외 → 6-튜플 추출.
-              {bulkTickets.length === 0 && semiSlipQueue.length === 0
-                ? ' ※ 반자동 번호를 먼저 입력하세요.'
-                : ` 반자동 ${bulkTickets.length + semiSlipQueue.length}장 기반.`}
-              {' '}정직성: 어떤 조합도 1/8,145,060 의 동일 확률.
+              {compareWinning ? (
+                <>
+                  강한 후보·교집합·자동∩반자동 매칭·콤보 패턴·당첨 매치 상위 티켓을 종합 점수화해
+                  복기 탭 분석과 가장 잘 맞는 6번호 5세트를 생성합니다.
+                </>
+              ) : (
+                <>
+                  반자동/자동 빈도 + 강한 후보 + 줄간 겹침 신호를 종합해 6번호 5세트를 생성합니다.
+                </>
+              )}
+              {combinedTickets.length === 0
+                ? ' ※ 자동·반자동 번호를 먼저 입력하세요.'
+                : ` 분석 대상 ${combinedTickets.length}줄.`}
+              {' '}정직성: 수학적 당첨 확률(1/8,145,060)은 동일하며, 복기 신호와의 정합성을 높입니다.
             </Typography>
             {recommendations.length > 0 && (
               <Stack spacing={0.75}>
-                {recommendations.map((combo, idx) => (
+                {recommendations.map((rec, idx) => (
                   <Stack
                     key={`rec-${idx}`}
                     direction="row"
@@ -2415,18 +2465,38 @@ export default function SemiAutoComparePanel({
                   >
                     <Chip size="small" label={`${idx + 1}`} variant="outlined" sx={{ minWidth: 32, fontWeight: 700 }} />
                     <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      {combo.map((n) => (
+                      {rec.combo.map((n) => (
                         <LottoBall key={n} number={n} size={28} dimmed={winningSet ? !winningSet.has(n) : false} />
                       ))}
                     </Stack>
-                    {winningSet && (
+                    {compareWinning && winningSet && (
                       <Chip
                         size="small"
-                        color={combo.filter((n) => winningSet.has(n)).length >= 3 ? 'success' : 'default'}
-                        label={`${combo.filter((n) => winningSet.has(n)).length}/6`}
+                        color={rec.winMatch >= 3 ? 'success' : rec.winMatch >= 2 ? 'warning' : 'default'}
+                        label={`당첨 ${rec.winMatch}/6`}
                         sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
                       />
                     )}
+                    {rec.strongMatch >= 2 && (
+                      <Chip
+                        size="small"
+                        color={rec.strongMatch >= 3 ? 'success' : 'warning'}
+                        variant="outlined"
+                        label={`강한후보 ${rec.strongMatch}`}
+                        sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                      />
+                    )}
+                    {rec.signals.length > 0 && (
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={rec.signals.slice(0, 4).join(' · ')}
+                        sx={{ height: 18, fontSize: 10 }}
+                      />
+                    )}
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                      점수 {rec.totalScore.toFixed(0)}
+                    </Typography>
                   </Stack>
                 ))}
               </Stack>
@@ -2434,13 +2504,13 @@ export default function SemiAutoComparePanel({
           </Paper>
 
           {/* 상위 5개 매칭 티켓 */}
-          {bulkComparison.bestTickets.length > 0 && (
+          {activeComparison.bestTickets.length > 0 && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>
                 🏆 최근 당첨 대비 매치 상위 5장
               </Typography>
               <Stack spacing={1}>
-                {bulkComparison.bestTickets.map((t) => (
+                {activeComparison.bestTickets.map((t) => (
                   <Stack
                     key={t.index}
                     direction="row"
@@ -3082,10 +3152,10 @@ export default function SemiAutoComparePanel({
             </Paper>
           )}
 
-      {picked.length === 6 && bulkComparison && (
+      {picked.length === 6 && activeComparison && (
         <>
           {/* ── 누적 자동 페어/트리플 콤보 교집합 ──────────────── */}
-          {bulkComparison.comboDataAvailable && (
+          {activeComparison.comboDataAvailable && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
                 🔗 자동 누적 페어/트리플 콤보 교집합
@@ -3094,13 +3164,13 @@ export default function SemiAutoComparePanel({
                 <Chip
                   size="small"
                   color="primary"
-                  label={`평균 페어 매치 ${bulkComparison.avgPairMatches.toFixed(2)} / 티켓`}
+                  label={`평균 페어 매치 ${activeComparison.avgPairMatches.toFixed(2)} / 티켓`}
                   sx={{ fontWeight: 700 }}
                 />
                 <Chip
                   size="small"
                   color="primary"
-                  label={`평균 트리플 매치 ${bulkComparison.avgTripleMatches.toFixed(3)} / 티켓`}
+                  label={`평균 트리플 매치 ${activeComparison.avgTripleMatches.toFixed(3)} / 티켓`}
                   variant="outlined"
                 />
               </Stack>
@@ -3108,12 +3178,12 @@ export default function SemiAutoComparePanel({
                 페어 매치 분포 (티켓 안에 자동 누적의 자주-페어가 통째로 들어 있는지):
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-                {Object.entries(bulkComparison.pairMatchDistribution)
+                {Object.entries(activeComparison.pairMatchDistribution)
                   .map(([k, v]) => [Number(k), v] as [number, number])
                   .sort((a, b) => a[0] - b[0])
                   .map(([k, v]) => {
-                    const pct = bulkComparison.ticketCount > 0
-                      ? (v / bulkComparison.ticketCount) * 100
+                    const pct = activeComparison.ticketCount > 0
+                      ? (v / activeComparison.ticketCount) * 100
                       : 0;
                     return (
                       <Chip
@@ -3130,12 +3200,12 @@ export default function SemiAutoComparePanel({
                 트리플 매치 분포:
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                {Object.entries(bulkComparison.tripleMatchDistribution)
+                {Object.entries(activeComparison.tripleMatchDistribution)
                   .map(([k, v]) => [Number(k), v] as [number, number])
                   .sort((a, b) => a[0] - b[0])
                   .map(([k, v]) => {
-                    const pct = bulkComparison.ticketCount > 0
-                      ? (v / bulkComparison.ticketCount) * 100
+                    const pct = activeComparison.ticketCount > 0
+                      ? (v / activeComparison.ticketCount) * 100
                       : 0;
                     return (
                       <Chip
@@ -3152,13 +3222,13 @@ export default function SemiAutoComparePanel({
           )}
 
           {/* ── 콤보 점수 상위 5장 ─────────────────────────────── */}
-          {bulkComparison.bestComboTickets.length > 0 && (
+          {activeComparison.bestComboTickets.length > 0 && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>
                 🥇 누적 자동과 가장 잘 맞은 티켓 5장 (페어 1점 · 트리플 3점 · 쿼드 6점)
               </Typography>
               <Stack spacing={0.75}>
-                {bulkComparison.bestComboTickets.map((t) => (
+                {activeComparison.bestComboTickets.map((t) => (
                   <Stack
                     key={`combo-best-${t.index}`}
                     direction="row"

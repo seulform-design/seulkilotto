@@ -960,6 +960,7 @@ export default function SemiAutoComparePanel({
   onRemoveBulkAutoTicket,
   onRefreshAccumulated,
 }: SemiAutoComparePanelProps) {
+  const lineMatchingRef = useRef<HTMLDivElement | null>(null);
   const compareWinning = sheetIntent === 'review';
 
   // localStorage — 탭별 격리
@@ -1679,6 +1680,8 @@ export default function SemiAutoComparePanel({
     sheetIntent,
     resolvedStrongCandidates,
   ]);
+  const hasLineMatchingInputs = groupLineMatching.autoLineCount > 0 || groupLineMatching.semiLineCount > 0;
+  const canRenderLineMatching = groupLineMatching.autoLineCount > 0 && groupLineMatching.semiLineCount > 0;
 
   const generateRecommendations = useCallback(() => {
     const semiFreq: Record<number, number> = {};
@@ -2436,6 +2439,51 @@ export default function SemiAutoComparePanel({
               )}
             </Alert>
           )}
+
+          {hasLineMatchingInputs && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                alignItems={{ xs: 'flex-start', sm: 'center' }}
+                justifyContent="space-between"
+                spacing={1}
+                sx={{ mb: 0.5 }}
+              >
+                <Typography variant="body2" fontWeight={700}>
+                  🔀 자동 ↔ 반자동 줄 1:1 전수비교 요약
+                </Typography>
+                {canRenderLineMatching && (
+                  <Button
+                    type="button"
+                    size="small"
+                    variant="outlined"
+                    onClick={() => lineMatchingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  >
+                    상세 보기
+                  </Button>
+                )}
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                {intentSectionLabel} 탭 기준으로 자동 누적 줄과 반자동 누적 줄을 전수 비교해 공통 번호 2개 이상인 매치를 찾습니다.
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                <Chip size="small" variant="outlined" label={`자동 ${groupLineMatching.autoLineCount}줄`} />
+                <Chip size="small" variant="outlined" label={`반자동 ${groupLineMatching.semiLineCount}줄`} />
+                {canRenderLineMatching && (
+                  <>
+                    <Chip size="small" color="secondary" variant="outlined" label={`원본 페어 ${groupLineMatching.rawPairCount}건`} />
+                    <Chip size="small" color="secondary" label={`통합 카드 ${groupLineMatching.groupCount}건`} sx={{ fontWeight: 700 }} />
+                  </>
+                )}
+              </Stack>
+              {!canRenderLineMatching && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  자동과 반자동 누적 줄이 모두 있어야 1:1 전수비교가 표시됩니다.
+                </Alert>
+              )}
+            </Paper>
+          )}
+
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }} flexWrap="wrap" gap={1}>
             <Typography variant="subtitle1" fontWeight={700}>
               📋 대량 비교 결과 ({activeComparison.ticketCount}장)
@@ -3306,7 +3354,8 @@ export default function SemiAutoComparePanel({
       )}
 
       {/* ── 자동 ↔ 반자동 줄 페어 1:1 매칭 — picked 와 무관, 누적 데이터만 있으면 표시 ── */}
-      {(groupLineMatching.autoLineCount > 0 && groupLineMatching.semiLineCount > 0) && (
+      {canRenderLineMatching && (
+            <Box ref={lineMatchingRef}>
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
                 🔀 자동 ↔ 반자동 줄 1:1 매칭 (공통 번호 2~6개)
@@ -3595,6 +3644,7 @@ export default function SemiAutoComparePanel({
                 );
               })()}
             </Paper>
+            </Box>
           )}
 
       {picked.length === 6 && activeComparison && (

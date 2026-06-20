@@ -86,6 +86,9 @@ const SIGNAL_SOURCE_LABELS: Record<string, string> = {
   'accumulated-fallback': '누적 보조',
 };
 
+const HEAVY_COMPARISON_TICKET_LIMIT = 180;
+const HEAVY_LINE_PAIR_LIMIT = 8_000;
+
 function signalSourceLabel(source: string): string {
   return SIGNAL_SOURCE_LABELS[source] ?? source;
 }
@@ -476,6 +479,20 @@ interface SlipOverlap {
   lineLabel: string;
   userOverlap: number[];
   autoOverlap: number[];
+}
+
+interface MatchedLineEntry {
+  idx: number;
+  label: string;
+  numbers: number[];
+}
+
+interface LineMatchGroup {
+  key: string;
+  matchCount: number;
+  matchedNumbers: number[];
+  autoList: MatchedLineEntry[];
+  semiList: MatchedLineEntry[];
 }
 
 interface ComparisonResult {
@@ -1110,6 +1127,16 @@ export default function SemiAutoComparePanel({
     () => collectAutoOnlyLines(currentSlipLines, slipQueue, bulkAutoTickets),
     [currentSlipLines, slipQueue, bulkAutoTickets]
   );
+  const autoLineCountEstimate = autoOnlyLines.length;
+  const semiLineCountEstimate =
+    semiCurrentLines.length +
+    semiSlipQueue.reduce((sum, slip) => sum + slip.lines.length, 0) +
+    bulkTickets.length;
+  const combinedTicketEstimate = autoLineCountEstimate + semiLineCountEstimate;
+  const estimatedLinePairCount = autoLineCountEstimate * semiLineCountEstimate;
+  const suspendHeavyComparison =
+    combinedTicketEstimate > HEAVY_COMPARISON_TICKET_LIMIT ||
+    estimatedLinePairCount > HEAVY_LINE_PAIR_LIMIT;
 
   const strongCandidateResolution = useMemo(
     () => resolveStrongCandidates(accumulated, sheetIntent, autoOnlyLines, winningNumbers),
@@ -1412,7 +1439,7 @@ export default function SemiAutoComparePanel({
 
   const bulkComparison = useMemo(
     () =>
-      bulkTickets.length > 0
+      !suspendHeavyComparison && bulkTickets.length > 0
         ? buildBulkComparison(
             bulkTickets,
             slipQueue,
@@ -1423,7 +1450,7 @@ export default function SemiAutoComparePanel({
             resolvedStrongCandidates
           )
         : null,
-    [bulkTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates]
+    [bulkTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates, suspendHeavyComparison]
   );
 
   /**
@@ -1451,7 +1478,7 @@ export default function SemiAutoComparePanel({
 
   const combinedComparison = useMemo(
     () =>
-      combinedTickets.length > 0
+      !suspendHeavyComparison && combinedTickets.length > 0
         ? buildBulkComparison(
             combinedTickets,
             slipQueue,
@@ -1462,7 +1489,7 @@ export default function SemiAutoComparePanel({
             resolvedStrongCandidates
           )
         : null,
-    [combinedTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates]
+    [combinedTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates, suspendHeavyComparison]
   );
 
   /**
@@ -1493,6 +1520,27 @@ export default function SemiAutoComparePanel({
    * 매칭으로 교체.
    */
   const groupLineMatching = useMemo(() => {
+    if (suspendHeavyComparison) {
+      return {
+        autoLineCount: autoLineCountEstimate,
+        semiLineCount: semiLineCountEstimate,
+        autoDupRemoved: 0,
+        semiDupRemoved: 0,
+        autoDupSamples: [] as string[],
+        semiDupSamples: [] as string[],
+        totalPairCount: estimatedLinePairCount,
+        groups6: [] as LineMatchGroup[],
+        groups5: [] as LineMatchGroup[],
+        groups4: [] as LineMatchGroup[],
+        groups3: [] as LineMatchGroup[],
+        groups2: [] as LineMatchGroup[],
+        rawPairCount: 0,
+        groupCount: 0,
+        strongCandidateCount: resolvedStrongCandidates.length,
+        strongDist: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 } as Record<number, number>,
+        strongAvailable: resolvedStrongCandidates.length > 0,
+      };
+    }
     type LineRef = { idx: number; numbers: number[]; sourceLabel: string };
     type PairMatch = {
       autoIdx: number;
@@ -1610,15 +1658,7 @@ export default function SemiAutoComparePanel({
      * 같은 매치 번호를 갖는 모든 자동 줄과 모든 반자동 줄을 한 카드로 통합.
      * 한 그룹 항목: { matchedNumbers, autoList[], semiList[] }.
      */
-    type LineEntry = { idx: number; label: string; numbers: number[] };
-    type GroupEntry = {
-      key: string;
-      matchCount: number;
-      matchedNumbers: number[];
-      autoList: LineEntry[];
-      semiList: LineEntry[];
-    };
-    const groupMap = new Map<string, GroupEntry>();
+    const groupMap = new Map<string, LineMatchGroup>();
     for (const p of pairs) {
       const key = p.matchedNumbers.join('-');
       if (!groupMap.has(key)) {
@@ -1645,13 +1685,13 @@ export default function SemiAutoComparePanel({
     // 카운터 정의:
     //   winCount(g): 매치 번호 중 당첨번호 개수 (복기 탭).
     //   strongMatchCount(g): 매치 번호 중 강한 후보 개수 (이번회차 탭).
-    const winCount = (g: GroupEntry): number =>
+      const winCount = (g: LineMatchGroup): number =>
       winningSet ? g.matchedNumbers.filter((n) => winningSet.has(n)).length : 0;
-    const strongMatchCount = (g: GroupEntry): number =>
+    const strongMatchCount = (g: LineMatchGroup): number =>
       g.matchedNumbers.filter((n) => strongSet.has(n)).length;
-    const lineWinCount = (line: LineEntry): number =>
+    const lineWinCount = (line: MatchedLineEntry): number =>
       winningSet ? line.numbers.filter((n) => winningSet.has(n)).length : 0;
-    const lineStrongCount = (line: LineEntry): number =>
+    const lineStrongCount = (line: MatchedLineEntry): number =>
       line.numbers.filter((n) => strongSet.has(n)).length;
 
     // 정렬:
@@ -1734,6 +1774,10 @@ export default function SemiAutoComparePanel({
     accumulated,
     sheetIntent,
     resolvedStrongCandidates,
+    suspendHeavyComparison,
+    autoLineCountEstimate,
+    semiLineCountEstimate,
+    estimatedLinePairCount,
   ]);
   const hasLineMatchingInputs = groupLineMatching.autoLineCount > 0 || groupLineMatching.semiLineCount > 0;
   const canRenderLineMatching = groupLineMatching.autoLineCount > 0 && groupLineMatching.semiLineCount > 0;
@@ -2086,6 +2130,13 @@ export default function SemiAutoComparePanel({
           onClose={() => setSaveNotice(null)}
         >
           {saveNotice}
+        </Alert>
+      )}
+
+      {suspendHeavyComparison && (
+        <Alert severity="info" sx={{ mb: 1.5 }}>
+          대량 입력이 많아 브라우저 보호를 위해 상세 교집합/1:1 전수비교 계산을 잠시 보류합니다.
+          저장은 정상 동작하며, 저장 후 필요한 범위만 다시 보거나 줄 수를 줄이면 세부 비교가 다시 표시됩니다.
         </Alert>
       )}
 

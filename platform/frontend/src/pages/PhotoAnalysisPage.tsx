@@ -623,6 +623,7 @@ function ManualNumberGrid({
 // 다른 탭으로 이동했다 돌아와도, 새로고침해도 보존됨.
 // '용지 초기화' / '누적 삭제' / 사용자가 직접 비우는 경우에만 사라진다.
 const MANUAL_STORAGE_KEY = 'lotto:photoAnalysis:manual:v1';
+const PHOTO_ANALYSIS_TAB_KEY = 'lotto:photoAnalysis:active-tab:v1';
 
 type ManualDraft = {
   picked: number[];
@@ -697,6 +698,26 @@ function saveManualByIntent(state: Record<SheetIntent, ManualDraft>): void {
   }
 }
 
+function loadPhotoAnalysisTab(): SheetIntent {
+  if (typeof window === 'undefined') return 'review';
+  try {
+    const raw = window.localStorage.getItem(PHOTO_ANALYSIS_TAB_KEY);
+    if (raw === 'review' || raw === 'current_round') return raw;
+  } catch {
+    /* ignore */
+  }
+  return 'review';
+}
+
+function savePhotoAnalysisTab(tab: SheetIntent): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(PHOTO_ANALYSIS_TAB_KEY, tab);
+  } catch {
+    /* ignore */
+  }
+}
+
 // ── 중복 검사 헬퍼 ───────────────────────────────────────────────
 // 같은 6-튜플(정렬 기준)이 이미 저장돼 있는지 확인.
 // 만약 발견되면 어느 위치에서 발견됐는지 정보 반환.
@@ -750,7 +771,7 @@ function formatDuplicateLocation(loc: DuplicateLocation): string {
 }
 
 export default function PhotoAnalysisPage() {
-  const [activeTab, setActiveTab] = useState<SheetIntent>('review');
+  const [activeTab, setActiveTab] = useState<SheetIntent>(loadPhotoAnalysisTab);
   const [manualByIntent, setManualByIntent] = useState<Record<SheetIntent, ManualDraft>>(
     loadManualByIntent
   );
@@ -759,6 +780,9 @@ export default function PhotoAnalysisPage() {
   useEffect(() => {
     saveManualByIntent(manualByIntent);
   }, [manualByIntent]);
+  useEffect(() => {
+    savePhotoAnalysisTab(activeTab);
+  }, [activeTab]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [manualLoading, setManualLoading] = useState(false);
   // 비동기 작업 중 unmount 가드 (메모리 안정성)

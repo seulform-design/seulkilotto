@@ -1219,6 +1219,11 @@ export default function PhotoAnalysisPage() {
         </Alert>
       )}
 
+      <ParallelRoundPanel
+        targetRound={activeTab === 'review' ? (latestRound ?? currentRound) : (currentRound ?? latestRound)}
+        modeLabel={activeTab === 'review' ? '복기회차' : '이번회차'}
+      />
+
       {/* ════════════ § 1. 번호 입력 ════════════ */}
       <Divider textAlign="left" sx={{ mt: 1 }}>
         <Typography variant="overline" fontWeight={800} color="primary.main" sx={{ letterSpacing: 1.2 }}>
@@ -1453,11 +1458,6 @@ export default function PhotoAnalysisPage() {
       {activeTab === 'current_round' && (activeSlice?.total_analyses ?? 0) === 0 && (
         <ArchivedCurrentRoundPanel snapshot={archivedCurrentSnapshot} />
       )}
-
-      <ParallelRoundPanel
-        targetRound={activeTab === 'review' ? (latestRound ?? currentRound) : (currentRound ?? latestRound)}
-        modeLabel={activeTab === 'review' ? '복기회차' : '이번회차'}
-      />
 
       {/* ════════════ § 3. 비교 · 백테스트 ════════════ */}
       <Divider textAlign="left" sx={{ mt: 1 }}>

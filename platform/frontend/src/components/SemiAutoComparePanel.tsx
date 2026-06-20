@@ -961,6 +961,8 @@ export default function SemiAutoComparePanel({
   onRefreshAccumulated,
 }: SemiAutoComparePanelProps) {
   const lineMatchingRef = useRef<HTMLDivElement | null>(null);
+  const [lineMatchFilter, setLineMatchFilter] = useState<'all' | 2 | 3 | 4 | 5 | 6>('all');
+  const [lineMatchNumberFilter, setLineMatchNumberFilter] = useState('');
   const compareWinning = sheetIntent === 'review';
 
   // localStorage — 탭별 격리
@@ -1682,6 +1684,24 @@ export default function SemiAutoComparePanel({
   ]);
   const hasLineMatchingInputs = groupLineMatching.autoLineCount > 0 || groupLineMatching.semiLineCount > 0;
   const canRenderLineMatching = groupLineMatching.autoLineCount > 0 && groupLineMatching.semiLineCount > 0;
+  const lineMatchNumber = lineMatchNumberFilter ? Number(lineMatchNumberFilter) : null;
+  const filterLineMatchGroups = <T extends { matchCount: number; matchedNumbers: number[] }>(groups: T[]): T[] =>
+    groups.filter((g) => {
+      if (lineMatchFilter !== 'all' && g.matchCount !== lineMatchFilter) return false;
+      if (lineMatchNumber != null && !g.matchedNumbers.includes(lineMatchNumber)) return false;
+      return true;
+    });
+  const visibleGroupMatch6 = filterLineMatchGroups(groupLineMatching.groups6);
+  const visibleGroupMatch5 = filterLineMatchGroups(groupLineMatching.groups5);
+  const visibleGroupMatch4 = filterLineMatchGroups(groupLineMatching.groups4);
+  const visibleGroupMatch3 = filterLineMatchGroups(groupLineMatching.groups3);
+  const visibleGroupMatch2 = filterLineMatchGroups(groupLineMatching.groups2);
+  const visibleGroupMatchTotal =
+    visibleGroupMatch6.length +
+    visibleGroupMatch5.length +
+    visibleGroupMatch4.length +
+    visibleGroupMatch3.length +
+    visibleGroupMatch2.length;
 
   const generateRecommendations = useCallback(() => {
     const semiFreq: Record<number, number> = {};
@@ -2473,6 +2493,7 @@ export default function SemiAutoComparePanel({
                   <>
                     <Chip size="small" color="secondary" variant="outlined" label={`원본 페어 ${groupLineMatching.rawPairCount}건`} />
                     <Chip size="small" color="secondary" label={`통합 카드 ${groupLineMatching.groupCount}건`} sx={{ fontWeight: 700 }} />
+                    <Chip size="small" variant="outlined" label={`현재 표시 ${visibleGroupMatchTotal}건`} />
                   </>
                 )}
               </Stack>
@@ -3425,6 +3446,47 @@ export default function SemiAutoComparePanel({
                   )}
                 </Alert>
               )}
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={1}
+                alignItems={{ xs: 'stretch', sm: 'center' }}
+                sx={{ mb: 1.25 }}
+              >
+                <TextField
+                  size="small"
+                  label="매치 번호 검색"
+                  value={lineMatchNumberFilter}
+                  onChange={(e) => setLineMatchNumberFilter(e.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="예: 29"
+                  sx={{ width: { xs: '100%', sm: 140 } }}
+                />
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                  {(['all', 6, 5, 4, 3, 2] as const).map((value) => (
+                    <Chip
+                      key={`match-filter-${value}`}
+                      size="small"
+                      clickable
+                      color={lineMatchFilter === value ? 'primary' : 'default'}
+                      variant={lineMatchFilter === value ? 'filled' : 'outlined'}
+                      label={value === 'all' ? '전체' : `${value}개 일치`}
+                      onClick={() => setLineMatchFilter(value)}
+                    />
+                  ))}
+                </Stack>
+                {(lineMatchFilter !== 'all' || lineMatchNumberFilter) && (
+                  <Button
+                    type="button"
+                    size="small"
+                    color="inherit"
+                    onClick={() => {
+                      setLineMatchFilter('all');
+                      setLineMatchNumberFilter('');
+                    }}
+                  >
+                    초기화
+                  </Button>
+                )}
+              </Stack>
               {(() => {
                 const matchedSet = (matched: number[]): Set<number> => new Set(matched);
                 const renderGroupSection = (
@@ -3616,30 +3678,35 @@ export default function SemiAutoComparePanel({
                       <Chip
                         size="small"
                         variant="outlined"
-                        label={`통합 카드 총 ${groupLineMatching.groupCount}건 (원본 페어 ${groupLineMatching.rawPairCount}건)`}
+                        label={`통합 카드 총 ${groupLineMatching.groupCount}건 (현재 표시 ${visibleGroupMatchTotal}건 / 원본 페어 ${groupLineMatching.rawPairCount}건)`}
                         sx={{ fontWeight: 700 }}
                       />
-                      {groupLineMatching.groups6.length > 0 && (
-                        <Chip size="small" color="error" label={`6개 일치: ${groupLineMatching.groups6.length}건`} sx={{ fontWeight: 700 }} />
+                      {visibleGroupMatch6.length > 0 && (
+                        <Chip size="small" color="error" label={`6개 일치: ${visibleGroupMatch6.length}건`} sx={{ fontWeight: 700 }} />
                       )}
-                      {groupLineMatching.groups5.length > 0 && (
-                        <Chip size="small" color="warning" label={`5개 일치: ${groupLineMatching.groups5.length}건`} sx={{ fontWeight: 700 }} />
+                      {visibleGroupMatch5.length > 0 && (
+                        <Chip size="small" color="warning" label={`5개 일치: ${visibleGroupMatch5.length}건`} sx={{ fontWeight: 700 }} />
                       )}
-                      {groupLineMatching.groups4.length > 0 && (
-                        <Chip size="small" color="success" label={`4개 일치: ${groupLineMatching.groups4.length}건`} sx={{ fontWeight: 700 }} />
+                      {visibleGroupMatch4.length > 0 && (
+                        <Chip size="small" color="success" label={`4개 일치: ${visibleGroupMatch4.length}건`} sx={{ fontWeight: 700 }} />
                       )}
-                      {groupLineMatching.groups3.length > 0 && (
-                        <Chip size="small" color="primary" label={`3개 일치: ${groupLineMatching.groups3.length}건`} sx={{ fontWeight: 700 }} />
+                      {visibleGroupMatch3.length > 0 && (
+                        <Chip size="small" color="primary" label={`3개 일치: ${visibleGroupMatch3.length}건`} sx={{ fontWeight: 700 }} />
                       )}
-                      {groupLineMatching.groups2.length > 0 && (
-                        <Chip size="small" color="info" label={`2개 일치: ${groupLineMatching.groups2.length}건`} sx={{ fontWeight: 700 }} />
+                      {visibleGroupMatch2.length > 0 && (
+                        <Chip size="small" color="info" label={`2개 일치: ${visibleGroupMatch2.length}건`} sx={{ fontWeight: 700 }} />
                       )}
                     </Stack>
-                    {renderGroupSection('🟣 6개 일치 (한 줄 통째 일치 — 매우 희귀)', 'error', groupLineMatching.groups6)}
-                    {renderGroupSection('🔴 5개 일치 (희귀)', 'warning', groupLineMatching.groups5)}
-                    {renderGroupSection('🟠 4개 일치', 'success', groupLineMatching.groups4)}
-                    {renderGroupSection('🟢 3개 일치', 'primary', groupLineMatching.groups3)}
-                    {renderGroupSection('🟡 2개 일치 (가장 많음)', 'info', groupLineMatching.groups2)}
+                    {visibleGroupMatchTotal === 0 && (
+                      <Alert severity="info" sx={{ mb: 1 }}>
+                        현재 필터 조건에 맞는 1:1 전수비교 카드가 없습니다.
+                      </Alert>
+                    )}
+                    {renderGroupSection('🟣 6개 일치 (한 줄 통째 일치 — 매우 희귀)', 'error', visibleGroupMatch6)}
+                    {renderGroupSection('🔴 5개 일치 (희귀)', 'warning', visibleGroupMatch5)}
+                    {renderGroupSection('🟠 4개 일치', 'success', visibleGroupMatch4)}
+                    {renderGroupSection('🟢 3개 일치', 'primary', visibleGroupMatch3)}
+                    {renderGroupSection('🟡 2개 일치 (가장 많음)', 'info', visibleGroupMatch2)}
                   </>
                 );
               })()}

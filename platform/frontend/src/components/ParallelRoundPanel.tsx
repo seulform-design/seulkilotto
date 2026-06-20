@@ -1,5 +1,5 @@
 /**
- * 평행회차 분석 패널 — 전회차(복기 기준)의 동일 끝2자리 회차군 당첨 패턴.
+ * 평행회차 분석 패널 — 선택된 회차의 동일 끝2자리 회차군 당첨 패턴.
  */
 import {
   Alert,
@@ -23,6 +23,7 @@ import LottoBall from './LottoBall';
 interface ParallelRoundPanelProps {
   targetRound?: number | null;
   defaultOpen?: boolean;
+  modeLabel?: string;
 }
 
 const DECADE_ORDER = ['단번대', '10번대', '20번대', '30번대', '40번대'] as const;
@@ -81,6 +82,7 @@ function DecadeSummary({ data }: { data: ParallelRoundAnalysisResponse }) {
 export default function ParallelRoundPanel({
   targetRound,
   defaultOpen = true,
+  modeLabel = '확인',
 }: ParallelRoundPanelProps) {
   const [open, setOpen] = useState(defaultOpen);
 
@@ -118,13 +120,13 @@ export default function ParallelRoundPanel({
         <Box sx={{ mt: 1 }}>
           {query.isError && (
             <Alert severity="warning" sx={{ mb: 1 }}>
-              전회차 평행회차 데이터를 불러오지 못했습니다.
+              {modeLabel} 평행회차 데이터를 불러오지 못했습니다.
             </Alert>
           )}
           {data && (
             <>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                전회차 확인 기준 · {data.summary} · 대상 {data.target_round}회 · 반자동 고정 후보{' '}
+                {modeLabel} 기준 · {data.summary} · 대상 {data.target_round}회 · 반자동 고정 후보{' '}
                 {data.semi_auto_fixed_hint.join(', ') || '—'}
               </Typography>
               {data.disclaimer && (

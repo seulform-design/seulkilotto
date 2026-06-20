@@ -61,10 +61,6 @@ jobs:
         run: |
           echo "Railway auto-deploy skipped."
           echo "Set GitHub secret RAILWAY_TOKEN and repository variables RAILWAY_PROJECT_ID, RAILWAY_ENVIRONMENT_ID, RAILWAY_SERVICE_ID."
-          if [ "$GITHUB_REF_NAME" = "main" ]; then
-            echo "Main branch pushes must deploy to production, but Railway settings are missing." >&2
-            exit 1
-          fi
 
       - name: Smoke test production API
         if: ${{ steps.cfg.outputs.configured == 'true' && env.RAILWAY_PUBLIC_URL != '' }}

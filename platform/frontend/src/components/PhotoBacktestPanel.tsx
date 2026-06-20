@@ -35,6 +35,7 @@ import { useEffect, useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
 import {
   v1Api,
+  type ArchivedCurrentRoundSnapshot,
   type ComboDuplicateItem,
   type ComboDuplicatePatterns,
   type PhotoAnalysisAccumulated,
@@ -243,7 +244,10 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
   });
 
   // 누적 current_round 슬라이스 — 이전 회차에 대한 예측
-  const slice = accumulated?.by_intent?.current_round ?? null;
+  const liveSlice = accumulated?.by_intent?.current_round ?? null;
+  const archivedSlice: ArchivedCurrentRoundSnapshot | null =
+    accumulated?.historical_dataset?.latest_archived_current_snapshot ?? null;
+  const slice = ((liveSlice?.total_analyses ?? 0) > 0 ? liveSlice : archivedSlice) ?? null;
   const sliceTicketRoundStr = slice?.ticket_round?.trim();
 
   // 백테스트 대상 회차 결정 (3단계 fallback):
@@ -291,6 +295,11 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
   //   - 대상 회차가 결정되어야 함
   //   - 대상 회차가 실제 추첨됐어야 함 (round.data 가 winning numbers 보유)
   const hasSlice = !!slice && (slice.total_analyses ?? 0) > 0;
+  const usingArchivedSlice = Boolean(
+    archivedSlice &&
+    ((liveSlice?.total_analyses ?? 0) === 0) &&
+    ((archivedSlice.total_analyses ?? 0) > 0)
+  );
   const roundDrawn = !!round.data && round.data.numbers?.length === 6;
 
   // 분석 계산
@@ -443,7 +452,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
           </Typography>
           <Typography variant="caption" color="text.secondary">
             {targetRound
-              ? `${targetRound}회 자동 누적 ${slice?.total_analyses ?? 0}건 → 실제 결과 비교`
+              ? `${targetRound}회 자동 누적 ${slice?.total_analyses ?? 0}건 → 실제 결과 비교${usingArchivedSlice ? ' (보관본)' : ''}`
               : '회차 정보 없음'}
           </Typography>
         </Box>
@@ -469,6 +478,12 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
         <Alert severity="info" sx={{ mb: 1.5 }}>
           신규 회차 {upgradeStatus.data.pending_count}개 ({upgradeStatus.data.pending_rounds?.join(', ')})
           업데이트 가능. 업데이트 후 백테스트가 갱신됩니다.
+        </Alert>
+      )}
+
+      {usingArchivedSlice && (
+        <Alert severity="info" sx={{ mb: 1.5 }}>
+          이번회차 실시간 누적이 비어 있어, 마지막 롤오버 때 보관된 {slice?.ticket_round}회 스냅숏으로 백테스트를 표시합니다.
         </Alert>
       )}
 

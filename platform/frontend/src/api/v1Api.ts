@@ -783,6 +783,37 @@ export interface PhotoAnalysisIntentSlice {
   app_ui_message: string;
 }
 
+export interface ArchivedCurrentRoundSnapshot {
+  archived: true;
+  ticket_round?: string | null;
+  round_no: number;
+  total_analyses: number;
+  final_predictions: {
+    strong_candidates: number[];
+    excluded_candidates: number[];
+  };
+  accumulated_combo_patterns?: ComboDuplicatePatterns;
+  entries_summary: PhotoAnalysisAccumulated['entries_summary'];
+  app_ui_message: string;
+  frozen_at?: string | null;
+  merged_at?: string | null;
+  backtest?: {
+    round_no?: number;
+    winning_numbers?: number[];
+    bonus?: number;
+    engine_results?: Record<string, {
+      combo_count?: number;
+      best_hit?: number;
+      bonus_hits?: number;
+      hit_distribution?: Record<string, number>;
+      strong_hits?: number[];
+      excluded_hits?: number[];
+      bonus_in_strong?: boolean;
+      bonus_in_excluded?: boolean;
+    }>;
+  };
+}
+
 export interface PhotoAnalysisAccumulated {
   total_analyses: number;
   unique_videos?: number;
@@ -792,6 +823,7 @@ export interface PhotoAnalysisAccumulated {
     review_entries: number;
     archived_current_rounds: number;
     latest_archived_round?: number | null;
+    latest_archived_current_snapshot?: ArchivedCurrentRoundSnapshot | null;
   };
   current_dataset?: {
     round_no: number;

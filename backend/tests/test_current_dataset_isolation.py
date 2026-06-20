@@ -88,6 +88,11 @@ def test_current_rule_outputs_archive_idempotently(monkeypatch, tmp_path):
     archived = historical["archived_current_rounds"][0]
     assert archived["round_no"] == 1227
     assert archived["backtest"]["engine_results"]["round_recommendation"]["best_hit"] == 6
+    acc = build_accumulated()
+    archived_snapshot = acc["historical_dataset"]["latest_archived_current_snapshot"]
+    assert archived_snapshot["archived"] is True
+    assert archived_snapshot["round_no"] == 1227
+    assert archived_snapshot["final_predictions"]["strong_candidates"] == [7, 8, 9, 10, 11, 12]
 
     rollover_again = rollover_current_dataset(
         drawn_round=1227,

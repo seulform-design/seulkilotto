@@ -801,6 +801,45 @@ def get_historical_dataset_state() -> Dict[str, Any]:
     return _load_historical_raw()
 
 
+def _latest_archived_current_snapshot(historical: Dict[str, Any]) -> Dict[str, Any] | None:
+    batches = historical.get("archived_current_rounds") or []
+    if not batches:
+        return None
+    batch = batches[-1]
+    entries = list(batch.get("entries") or [])
+    derived = batch.get("derived_datasets") or {}
+    photo_summary = derived.get("photo_analysis_current_round") or {}
+    final_predictions = photo_summary.get("final_predictions") or (
+        _accumulate_entries(entries).get("final_predictions") if entries else {
+            "strong_candidates": [],
+            "excluded_candidates": [],
+        }
+    )
+    combo_patterns = photo_summary.get("accumulated_combo_patterns") or (
+        _recompute_intent_combo(entries, "current_round")
+        if entries
+        else {"summary": "분석 없음", "pair_duplicates": [], "triple_duplicates": []}
+    )
+    round_no = int(batch.get("round_no") or 0)
+    return {
+        "archived": True,
+        "ticket_round": str(round_no) if round_no > 0 else None,
+        "round_no": round_no,
+        "total_analyses": len(entries),
+        "final_predictions": final_predictions,
+        "accumulated_combo_patterns": combo_patterns,
+        "entries_summary": _entries_summary_for(entries),
+        "app_ui_message": (
+            f"보관된 이번회차 {len(entries)}건 · {round_no}회 백테스트 보관본"
+            if round_no > 0
+            else f"보관된 이번회차 {len(entries)}건"
+        ),
+        "frozen_at": batch.get("frozen_at"),
+        "merged_at": batch.get("merged_at"),
+        "backtest": batch.get("backtest") or {},
+    }
+
+
 def list_entries(limit: int = 100) -> List[Dict[str, Any]]:
     return list(reversed(_live_entries()[-limit:]))
 
@@ -1060,6 +1099,7 @@ def build_accumulated() -> Dict[str, Any]:
     historical = _load_historical_raw()
     current = _load_current_raw()
     entries: List[Dict[str, Any]] = _live_entries()
+    archived_current_snapshot = _latest_archived_current_snapshot(historical)
     overall = _accumulate_entries(entries)
 
     by_round: Dict[str, Any] = {}
@@ -1142,6 +1182,7 @@ def build_accumulated() -> Dict[str, Any]:
                 ),
                 None,
             ),
+            "latest_archived_current_snapshot": archived_current_snapshot,
         },
         "current_dataset": {
             "round_no": int(current.get("current_round") or 0),

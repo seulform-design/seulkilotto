@@ -455,7 +455,9 @@ export const v1Api = {
   getPredictionSignals: (intent: 'review' | 'current_round' = 'current_round', seed?: number) => {
     const q = new URLSearchParams({ intent });
     if (seed != null) q.set('seed', String(seed));
-    return fetchJson<PredictionSignalsResponse>(`/api/v1/prediction/signals?${q.toString()}`);
+    return fetchJson<PredictionSignalsResponse>(`/api/v1/prediction/signals?${q.toString()}`, {
+      timeoutMs: 60_000,
+    });
   },
 
   getParallelRoundAnalysis: (targetRound?: number) => {

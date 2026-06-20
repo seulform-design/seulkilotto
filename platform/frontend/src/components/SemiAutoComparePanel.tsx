@@ -2360,96 +2360,6 @@ export default function SemiAutoComparePanel({
       {activeComparison && (
         <>
           <Divider sx={{ my: 2 }} />
-          {/* 통합 예측 신호 — 4탭 규칙 기반 강한 후보 */}
-          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'info.main' }}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
-              <Typography variant="body2" fontWeight={700}>
-                📡 통합 예측 신호 (규칙 v{predictionSignals?.rules_version ?? '…'})
-              </Typography>
-              {predictionSignalsQuery.isFetching && <CircularProgress size={16} />}
-            </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              추첨기 + 후속출현 + 클래식 + 용지({intentSectionLabel}) + 평행회차 — 가중 합산으로 강한 후보 산출.
-              대상 회차: <strong>{predictionSignals?.target_round ?? effectiveRound ?? '?'}</strong>회
-              {predictionSignals?.machine_id ? ` · ${predictionSignals.machine_id}호기` : ''}.
-            </Typography>
-            {predictionSignals ? (
-              <>
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-                  <Chip
-                    size="small"
-                    color={predictionSignals.sources.machine.available ? 'success' : 'default'}
-                    label={`추첨기 ${predictionSignals.sources.machine.available ? '✓' : '—'}`}
-                    variant="outlined"
-                  />
-                  <Chip
-                    size="small"
-                    color={predictionSignals.sources.post_occurrence.available ? 'success' : 'default'}
-                    label={`후속출현 ${predictionSignals.sources.post_occurrence.available ? '✓' : '—'}`}
-                    variant="outlined"
-                  />
-                  <Chip
-                    size="small"
-                    color={predictionSignals.sources.classic.available ? 'success' : 'default'}
-                    label={`클래식 ${predictionSignals.sources.classic.available ? '✓' : '—'}`}
-                    variant="outlined"
-                  />
-                  <Chip
-                    size="small"
-                    color={predictionSignals.sources.photo_sheet.available ? 'success' : 'default'}
-                    label={`용지 ${predictionSignals.sources.photo_sheet.available ? `✓ ${predictionSignals.sources.photo_sheet.total_analyses ?? 0}건` : '—'}`}
-                    variant="outlined"
-                  />
-                  <Chip
-                    size="small"
-                    color={predictionSignals.sources.parallel_round?.available ? 'success' : 'default'}
-                    label={
-                      predictionSignals.sources.parallel_round?.available
-                        ? `평행 ${predictionSignals.sources.parallel_round.suffix_label ?? '✓'}`
-                        : '평행 —'
-                    }
-                    variant="outlined"
-                  />
-                </Stack>
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-                  {(['S', 'A', 'B'] as const).map((g) => (
-                    <Chip
-                      key={g}
-                      size="small"
-                      label={`${GRADE_LABELS[g].split('·')[0].trim()} ${predictionSignals.by_grade[g]?.length ?? 0}개`}
-                      sx={{ bgcolor: GRADE_COLORS[g], color: '#fff', fontWeight: 700 }}
-                    />
-                  ))}
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    label={`강한후보 ${resolvedStrongCandidates.length}개`}
-                  />
-                </Stack>
-                <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
-                  {predictionSignals.ranked_numbers.slice(0, 12).map((r) => (
-                    <Chip
-                      key={`sig-${r.number}`}
-                      size="small"
-                      label={`${r.number}·${r.grade}`}
-                      sx={{
-                        bgcolor: GRADE_COLORS[r.grade],
-                        color: r.grade === 'C' ? 'text.primary' : '#fff',
-                        fontWeight: 700,
-                        height: 22,
-                        fontSize: 11,
-                      }}
-                    />
-                  ))}
-                </Stack>
-                <SignalExplanationPanel predictionSignals={predictionSignals} />
-              </>
-            ) : (
-              <Alert severity="info" sx={{ py: 0.5 }}>
-                통합 신호 로딩 중… 재분석 버튼으로 갱신할 수 있습니다.
-              </Alert>
-            )}
-          </Paper>
           {!compareWinning && (
             <Alert severity="info" sx={{ mb: 1.5 }}>
               <strong>이번회차 모드</strong> — 당첨번호·적중률 비교는 표시하지 않습니다.
@@ -3850,6 +3760,101 @@ export default function SemiAutoComparePanel({
           </Typography>
         </>
       )}
+
+      <Divider sx={{ my: 2 }} />
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'info.main' }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+          <Typography variant="body2" fontWeight={700}>
+            📡 통합 예측 신호 (규칙 v{predictionSignals?.rules_version ?? '…'})
+          </Typography>
+          {predictionSignalsQuery.isFetching && <CircularProgress size={16} />}
+        </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          추첨기 + 후속출현 + 클래식 + 용지({intentSectionLabel}) + 평행회차 — 가중 합산으로 강한 후보 산출.
+          대상 회차: <strong>{predictionSignals?.target_round ?? effectiveRound ?? '?'}</strong>회
+          {predictionSignals?.machine_id ? ` · ${predictionSignals.machine_id}호기` : ''}.
+        </Typography>
+        {predictionSignals ? (
+          <>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+              <Chip
+                size="small"
+                color={predictionSignals.sources.machine.available ? 'success' : 'default'}
+                label={`추첨기 ${predictionSignals.sources.machine.available ? '✓' : '—'}`}
+                variant="outlined"
+              />
+              <Chip
+                size="small"
+                color={predictionSignals.sources.post_occurrence.available ? 'success' : 'default'}
+                label={`후속출현 ${predictionSignals.sources.post_occurrence.available ? '✓' : '—'}`}
+                variant="outlined"
+              />
+              <Chip
+                size="small"
+                color={predictionSignals.sources.classic.available ? 'success' : 'default'}
+                label={`클래식 ${predictionSignals.sources.classic.available ? '✓' : '—'}`}
+                variant="outlined"
+              />
+              <Chip
+                size="small"
+                color={predictionSignals.sources.photo_sheet.available ? 'success' : 'default'}
+                label={`용지 ${predictionSignals.sources.photo_sheet.available ? `✓ ${predictionSignals.sources.photo_sheet.total_analyses ?? 0}건` : '—'}`}
+                variant="outlined"
+              />
+              <Chip
+                size="small"
+                color={predictionSignals.sources.parallel_round?.available ? 'success' : 'default'}
+                label={
+                  predictionSignals.sources.parallel_round?.available
+                    ? `평행 ${predictionSignals.sources.parallel_round.suffix_label ?? '✓'}`
+                    : '평행 —'
+                }
+                variant="outlined"
+              />
+            </Stack>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+              {(['S', 'A', 'B'] as const).map((g) => (
+                <Chip
+                  key={g}
+                  size="small"
+                  label={`${GRADE_LABELS[g].split('·')[0].trim()} ${predictionSignals.by_grade[g]?.length ?? 0}개`}
+                  sx={{ bgcolor: GRADE_COLORS[g], color: '#fff', fontWeight: 700 }}
+                />
+              ))}
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`강한후보 ${resolvedStrongCandidates.length}개`}
+              />
+            </Stack>
+            <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+              {predictionSignals.ranked_numbers.slice(0, 12).map((r) => (
+                <Chip
+                  key={`sig-${r.number}`}
+                  size="small"
+                  label={`${r.number}·${r.grade}`}
+                  sx={{
+                    bgcolor: GRADE_COLORS[r.grade],
+                    color: r.grade === 'C' ? 'text.primary' : '#fff',
+                    fontWeight: 700,
+                    height: 22,
+                    fontSize: 11,
+                  }}
+                />
+              ))}
+            </Stack>
+            <SignalExplanationPanel predictionSignals={predictionSignals} />
+          </>
+        ) : predictionSignalsQuery.isError ? (
+          <Alert severity="warning" sx={{ py: 0.5 }}>
+            통합 예측 신호를 불러오지 못했습니다. 재분석 버튼으로 다시 시도해 주세요.
+          </Alert>
+        ) : (
+          <Alert severity="info" sx={{ py: 0.5 }}>
+            통합 신호 로딩 중… 이번회차는 계산에 시간이 걸릴 수 있습니다.
+          </Alert>
+        )}
+      </Paper>
 
       <BulkLineInputDialog
         open={bulkOpen}

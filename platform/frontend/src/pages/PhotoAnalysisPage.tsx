@@ -35,6 +35,7 @@ import SavedLinesPanel, {
 import SemiAutoComparePanel from '../components/SemiAutoComparePanel';
 import {
   v1Api,
+  type ArchivedCurrentRoundSnapshot,
   type ComboDuplicatePatterns,
   type CrossLineAnalysisReport,
   type DrawReviewTemplate,
@@ -454,6 +455,46 @@ function IntentAccumulatedPanel({
   );
 }
 
+function ArchivedCurrentRoundPanel({
+  snapshot,
+}: {
+  snapshot?: ArchivedCurrentRoundSnapshot | null;
+}) {
+  if (!snapshot) return null;
+  const strong = snapshot.final_predictions?.strong_candidates ?? [];
+  const excluded = snapshot.final_predictions?.excluded_candidates ?? [];
+  return (
+    <Paper sx={{ p: 2, border: '1px dashed', borderColor: 'warning.main' }}>
+      <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+        보관된 이번회차 스냅숏 ({snapshot.ticket_round}회)
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+        {snapshot.app_ui_message}
+      </Typography>
+      {strong.length > 0 && (
+        <Box sx={{ mb: 1 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+            강한 후보
+          </Typography>
+          <Stack direction="row" flexWrap="wrap" gap={0.5}>
+            {strong.map((n) => (
+              <LottoBall key={`archived-strong-${n}`} number={n} size={28} />
+            ))}
+          </Stack>
+        </Box>
+      )}
+      {excluded.length > 0 && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+          배제 후보: {excluded.join(', ')}
+        </Typography>
+      )}
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+        실시간 이번회차 누적이 비어 있을 때 마지막 롤오버 보관본을 표시합니다.
+      </Typography>
+    </Paper>
+  );
+}
+
 /**
  * 백엔드 누적 분석 이력 테이블 — IntentAccumulatedPanel 에서 분리하여
  * 페이지 가장 하단 (§4 고급 설정 다음) 으로 배치 (사용자 요청).
@@ -774,6 +815,10 @@ export default function PhotoAnalysisPage() {
   }, [refreshAccumulated]);
 
   const activeSlice = accumulated?.by_intent?.[activeTab] ?? null;
+  const archivedCurrentSnapshot =
+    activeTab === 'current_round'
+      ? (accumulated?.historical_dataset?.latest_archived_current_snapshot ?? null)
+      : null;
 
   const latestRound = useMemo(() => {
     const fromStatus = roundStatusQuery.data?.review_round ?? roundStatusQuery.data?.latest_round;
@@ -1405,9 +1450,12 @@ export default function PhotoAnalysisPage() {
         legacyCount={accumulated?.legacy_entry_count}
         onDeleteEntry={deleteHistoryEntry}
       />
+      {activeTab === 'current_round' && (activeSlice?.total_analyses ?? 0) === 0 && (
+        <ArchivedCurrentRoundPanel snapshot={archivedCurrentSnapshot} />
+      )}
 
       <ParallelRoundPanel
-        targetRound={activeTab === 'review' ? (latestRound ?? currentRound) : (currentRound ?? latestRound)}
+        targetRound={latestRound ?? currentRound}
       />
 
       {/* ════════════ § 3. 비교 · 백테스트 ════════════ */}

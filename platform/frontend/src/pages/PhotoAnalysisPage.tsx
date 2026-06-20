@@ -1454,9 +1454,11 @@ export default function PhotoAnalysisPage() {
         <ArchivedCurrentRoundPanel snapshot={archivedCurrentSnapshot} />
       )}
 
-      <ParallelRoundPanel
-        targetRound={latestRound ?? currentRound}
-      />
+      {activeTab === 'review' && (
+        <ParallelRoundPanel
+          targetRound={latestRound ?? currentRound}
+        />
+      )}
 
       {/* ════════════ § 3. 비교 · 백테스트 ════════════ */}
       <Divider textAlign="left" sx={{ mt: 1 }}>

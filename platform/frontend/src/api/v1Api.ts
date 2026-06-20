@@ -452,6 +452,12 @@ export const v1Api = {
   getPhotoAnalysisAccumulated: () =>
     fetchJson<PhotoAnalysisAccumulated>('/api/v1/photo-analysis/accumulated'),
 
+  getPredictionSignals: (intent: 'review' | 'current_round' = 'current_round', seed?: number) => {
+    const q = new URLSearchParams({ intent });
+    if (seed != null) q.set('seed', String(seed));
+    return fetchJson<PredictionSignalsResponse>(`/api/v1/prediction/signals?${q.toString()}`);
+  },
+
   getPhotoVisionConfig: () =>
     fetchJson<{
       configured: boolean;
@@ -910,4 +916,49 @@ export interface PostOccurrenceResponse {
   }[];
   similar_rounds_top20?: { round: number; similarity: number; jaccard: number }[];
   evidence?: { match_rounds_used: number; backtest_rounds: number; trusted_only: boolean };
+}
+
+export interface PredictionSignalNumber {
+  number: number;
+  score: number;
+  source_count: number;
+  signal_count: number;
+  sources: string[];
+  excluded_by: string[];
+  grade: 'S' | 'A' | 'B' | 'C' | 'X';
+}
+
+export interface PredictionSignalsResponse {
+  rules_version: string;
+  target_round: number;
+  target_draw_date: string;
+  latest_round: number;
+  intent: 'review' | 'current_round';
+  machine_id: number;
+  source_weights: Record<string, number>;
+  strong_candidates: number[];
+  excluded_candidates: number[];
+  ranked_numbers: PredictionSignalNumber[];
+  by_grade: Record<'S' | 'A' | 'B' | 'C' | 'X', number[]>;
+  sources: {
+    machine: {
+      available: boolean;
+      machine_id?: number;
+      hot_top5?: { number: number; count: number }[];
+      next_round?: number;
+    };
+    post_occurrence: {
+      available: boolean;
+      trigger_round?: number;
+      grades?: { S?: number[]; A?: number[]; B?: number[] };
+    };
+    classic: { available: boolean; method?: string; combo_count?: number };
+    photo_sheet: {
+      available: boolean;
+      intent?: string;
+      total_analyses?: number;
+      ticket_round?: string;
+    };
+  };
+  disclaimer: string;
 }

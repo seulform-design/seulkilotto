@@ -18,6 +18,13 @@ export interface SeedTicketInput {
   label: string;
 }
 
+export interface UnifiedSignalInput {
+  number: number;
+  grade: 'S' | 'A' | 'B' | 'C' | 'X';
+  score: number;
+  sources: string[];
+}
+
 export interface RecommendationContext {
   sheetIntent: 'review' | 'current_round';
   strongCandidates: number[];
@@ -33,6 +40,8 @@ export interface RecommendationContext {
   };
   lineMatchGroups: LineMatchGroupInput[];
   seedTickets: SeedTicketInput[];
+  /** 서버 통합 예측 신호 (/api/v1/prediction/signals) */
+  unifiedSignals?: UnifiedSignalInput[];
 }
 
 export interface ScoredRecommendation {
@@ -60,6 +69,14 @@ function buildNumberScores(ctx: RecommendationContext): Record<number, number> {
   ctx.strongCandidates.forEach((n, idx) => {
     bump(scores, n, 18 - idx * 0.6);
   });
+
+  if (ctx.unifiedSignals?.length) {
+    const gradeBonus: Record<string, number> = { S: 16, A: 11, B: 7, C: 3, X: -50 };
+    for (const sig of ctx.unifiedSignals) {
+      if (sig.grade === 'X') continue;
+      bump(scores, sig.number, (gradeBonus[sig.grade] ?? 0) + sig.score * 0.35);
+    }
+  }
 
   for (const [n, count] of Object.entries(ctx.semiFreq)) {
     bump(scores, Number(n), count * 2.5);

@@ -48,6 +48,7 @@ import {
   type ManualSlipInput,
   type PhotoAnalysisAccumulated,
 } from '../api/v1Api';
+import { GRADE_COLORS, GRADE_LABELS } from '../utils/compositeAnalysis';
 
 const NUMBERS = Array.from({ length: 45 }, (_, i) => i + 1);
 
@@ -931,7 +932,32 @@ export default function SemiAutoComparePanel({
     () => resolveStrongCandidates(accumulated, sheetIntent, autoOnlyLines, winningNumbers),
     [accumulated, sheetIntent, autoOnlyLines, winningNumbers]
   );
-  const resolvedStrongCandidates = strongCandidateResolution.candidates;
+
+  const predictionSignalsQuery = useQuery({
+    queryKey: ['v1-prediction-signals', sheetIntent],
+    queryFn: () => v1Api.getPredictionSignals(sheetIntent),
+    staleTime: 120_000,
+    retry: 1,
+  });
+  const predictionSignals = predictionSignalsQuery.data ?? null;
+
+  const resolvedStrongCandidates = useMemo(() => {
+    if (predictionSignals?.strong_candidates?.length) {
+      return predictionSignals.strong_candidates;
+    }
+    return strongCandidateResolution.candidates;
+  }, [predictionSignals, strongCandidateResolution.candidates]);
+
+  const resolvedExcludedCandidates = useMemo(() => {
+    if (predictionSignals?.excluded_candidates?.length) {
+      return predictionSignals.excluded_candidates;
+    }
+    return getIntentExcludedCandidates(accumulated, sheetIntent);
+  }, [predictionSignals, accumulated, sheetIntent]);
+
+  const strongCandidateSource = predictionSignals?.strong_candidates?.length
+    ? 'unified-rules'
+    : strongCandidateResolution.source;
 
   const winningSet = useMemo<Set<number> | null>(() => {
     if (!compareWinning || !winningNumbers.length) return null;
@@ -960,6 +986,8 @@ export default function SemiAutoComparePanel({
       if (onRefreshAccumulated) {
         await onRefreshAccumulated();
       }
+      await qc.invalidateQueries({ queryKey: ['v1-prediction-signals', sheetIntent] });
+      await qc.refetchQueries({ queryKey: ['v1-prediction-signals', sheetIntent] });
       setRecommendations([]);
       setReanalyzeNotice('✅ 재분석 완료 — 당첨번호·서버 누적·통계를 갱신했습니다.');
     } catch (e) {
@@ -969,7 +997,7 @@ export default function SemiAutoComparePanel({
     } finally {
       setIsReanalyzing(false);
     }
-  }, [compareRound, isReanalyzing, onRefreshAccumulated, qc]);
+  }, [compareRound, isReanalyzing, onRefreshAccumulated, qc, sheetIntent]);
 
   // UI 토글 상태
   const [showAllTickets, setShowAllTickets] = useState(false);
@@ -1604,7 +1632,7 @@ export default function SemiAutoComparePanel({
       {
         sheetIntent,
         strongCandidates: resolvedStrongCandidates,
-        excludedCandidates: getIntentExcludedCandidates(accumulated, sheetIntent),
+        excludedCandidates: resolvedExcludedCandidates,
         winningNumbers: compareWinning ? winningNumbers : [],
         comboPatterns: getIntentComboPatterns(accumulated, sheetIntent),
         semiFreq,
@@ -1618,6 +1646,12 @@ export default function SemiAutoComparePanel({
           : { two: [], three: [], fourPlus: [] },
         lineMatchGroups,
         seedTickets,
+        unifiedSignals: predictionSignals?.ranked_numbers?.map((r) => ({
+          number: r.number,
+          grade: r.grade,
+          score: r.score,
+          sources: r.sources,
+        })),
       },
       5
     );
@@ -1638,6 +1672,8 @@ export default function SemiAutoComparePanel({
     semiSlipQueue,
     sheetIntent,
     winningNumbers,
+    predictionSignals,
+    resolvedExcludedCandidates,
   ]);
 
   /**
@@ -2167,6 +2203,85 @@ export default function SemiAutoComparePanel({
       {activeComparison && (
         <>
           <Divider sx={{ my: 2 }} />
+          {/* 통합 예측 신호 — 4탭 규칙 기반 강한 후보 */}
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'info.main' }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+              <Typography variant="body2" fontWeight={700}>
+                📡 통합 예측 신호 (규칙 v{predictionSignals?.rules_version ?? '…'})
+              </Typography>
+              {predictionSignalsQuery.isFetching && <CircularProgress size={16} />}
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              추첨기 추천 + 후속출현 통계 + 클래식(윌슨/blend) + 용지({intentSectionLabel}) 줄겹침 — 가중 합산으로 강한 후보 산출.
+              대상 회차: <strong>{predictionSignals?.target_round ?? effectiveRound ?? '?'}</strong>회
+              {predictionSignals?.machine_id ? ` · ${predictionSignals.machine_id}호기` : ''}.
+            </Typography>
+            {predictionSignals ? (
+              <>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                  <Chip
+                    size="small"
+                    color={predictionSignals.sources.machine.available ? 'success' : 'default'}
+                    label={`추첨기 ${predictionSignals.sources.machine.available ? '✓' : '—'}`}
+                    variant="outlined"
+                  />
+                  <Chip
+                    size="small"
+                    color={predictionSignals.sources.post_occurrence.available ? 'success' : 'default'}
+                    label={`후속출현 ${predictionSignals.sources.post_occurrence.available ? '✓' : '—'}`}
+                    variant="outlined"
+                  />
+                  <Chip
+                    size="small"
+                    color={predictionSignals.sources.classic.available ? 'success' : 'default'}
+                    label={`클래식 ${predictionSignals.sources.classic.available ? '✓' : '—'}`}
+                    variant="outlined"
+                  />
+                  <Chip
+                    size="small"
+                    color={predictionSignals.sources.photo_sheet.available ? 'success' : 'default'}
+                    label={`용지 ${predictionSignals.sources.photo_sheet.available ? `✓ ${predictionSignals.sources.photo_sheet.total_analyses ?? 0}건` : '—'}`}
+                    variant="outlined"
+                  />
+                </Stack>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                  {(['S', 'A', 'B'] as const).map((g) => (
+                    <Chip
+                      key={g}
+                      size="small"
+                      label={`${GRADE_LABELS[g].split('·')[0].trim()} ${predictionSignals.by_grade[g]?.length ?? 0}개`}
+                      sx={{ bgcolor: GRADE_COLORS[g], color: '#fff', fontWeight: 700 }}
+                    />
+                  ))}
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`강한후보 ${resolvedStrongCandidates.length}개`}
+                  />
+                </Stack>
+                <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                  {predictionSignals.ranked_numbers.slice(0, 12).map((r) => (
+                    <Chip
+                      key={`sig-${r.number}`}
+                      size="small"
+                      label={`${r.number}·${r.grade}`}
+                      sx={{
+                        bgcolor: GRADE_COLORS[r.grade],
+                        color: r.grade === 'C' ? 'text.primary' : '#fff',
+                        fontWeight: 700,
+                        height: 22,
+                        fontSize: 11,
+                      }}
+                    />
+                  ))}
+                </Stack>
+              </>
+            ) : (
+              <Alert severity="info" sx={{ py: 0.5 }}>
+                통합 신호 로딩 중… 재분석 버튼으로 갱신할 수 있습니다.
+              </Alert>
+            )}
+          </Paper>
           {!compareWinning && (
             <Alert severity="info" sx={{ mb: 1.5 }}>
               <strong>이번회차 모드</strong> — 당첨번호·적중률 비교는 표시하지 않습니다.
@@ -2604,8 +2719,8 @@ export default function SemiAutoComparePanel({
                 🏆 {intentSectionLabel} 신호 매치 상위 5장
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                강한 후보·누적 페어/트리플 콤보와의 일치 점수 기준 —{' '}
-                <strong>이미 나온 당첨번호(예: {effectiveRound ?? '?'}회)와 무관</strong>한 예측 신호입니다.
+                추첨기·후속출현·클래식·용지 4신호 통합 강한후보 + 누적 페어/트리플 콤보 일치 점수 —{' '}
+                <strong>당첨번호 사후 비교와 무관</strong>한 예측 신호입니다.
               </Typography>
               <Stack spacing={1}>
                 {activeComparison.bestSignalTickets.map((t) => (
@@ -2773,14 +2888,19 @@ export default function SemiAutoComparePanel({
                 sx={{ fontWeight: 700 }}
               />
             </Stack>
-            {strongCandidateResolution.source === 'none' && (
+            {strongCandidateSource === 'none' && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
                 ※ {intentSectionLabel} 자동 누적 데이터가 없습니다. 자동 용지를 분석하여 누적을 만들면 교집합 분석이 활성화됩니다.
               </Typography>
             )}
-            {strongCandidateResolution.source === 'local' && (
+            {strongCandidateSource === 'local' && (
               <Typography variant="caption" color="warning.main" sx={{ mt: 0.5, display: 'block' }}>
-                ※ 서버 누적 없음 — 등록한 자동 줄 {autoOnlyLines.length}개에서 강한 후보 {resolvedStrongCandidates.length}개를 추정했습니다. [분석·저장] 시 정확도가 올라갑니다.
+                ※ 서버 누적 없음 — 등록한 자동 줄 {autoOnlyLines.length}개에서 강한 후보 {resolvedStrongCandidates.length}개를 추정했습니다. [분석·저장] 또는 재분석으로 통합 신호를 불러오세요.
+              </Typography>
+            )}
+            {strongCandidateSource === 'unified-rules' && predictionSignals && (
+              <Typography variant="caption" color="success.main" sx={{ mt: 0.5, display: 'block' }}>
+                ※ 규칙 v{predictionSignals.rules_version} — 추첨기·후속출현·클래식·용지 4신호 통합 강한 후보 {resolvedStrongCandidates.length}개 (대상 {predictionSignals.target_round}회)
               </Typography>
             )}
 

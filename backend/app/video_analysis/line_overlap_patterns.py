@@ -365,7 +365,7 @@ def _line_overlap_candidates(
     same_line: List[Dict[str, Any]],
     cross: List[Dict[str, Any]],
     *,
-    limit: int = 12,
+    limit: int = 18,
 ) -> List[int]:
     scores: Counter = Counter()
     for m in same_line:

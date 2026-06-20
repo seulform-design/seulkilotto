@@ -11,6 +11,7 @@
 
 **v1 설계서:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)  
 **v2 실행:** [platform/README.md](platform/README.md)  
+**데이터 격리:** [docs/DATA_ISOLATION.md](docs/DATA_ISOLATION.md)  
 **공개 저장소:** [github.com/seulform-design/seulkilotto](https://github.com/seulform-design/seulkilotto)
 
 ## 용지 분석 (5천원 자동 용지)

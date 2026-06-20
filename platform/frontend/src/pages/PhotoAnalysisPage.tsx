@@ -396,8 +396,8 @@ function IntentAccumulatedPanel({
     return (
       <Alert severity="info">
         {intent === 'review'
-          ? '복기 탭에 저장된 분석이 없습니다. 당첨번호 검증용 사진을 업로드해 분석하세요.'
-          : '이번회차 탭에 저장된 분석이 없습니다. 복기 분석 후 이번회차 용지를 분석하세요.'}
+          ? '복기 탭에 저장된 분석이 없습니다. 당첨번호 검증용 용지를 등록·분석하세요.'
+          : '이번회차 탭에 저장된 분석이 없습니다. A~E 줄을 등록한 뒤 분석·저장하세요.'}
       </Alert>
     );
   }
@@ -425,14 +425,6 @@ function IntentAccumulatedPanel({
       )}
       {intent === 'review' && (
         <SavedReviewTemplatePanel data={slice.saved_review_template} winningSet={winningSet} />
-      )}
-      {intent === 'current_round' && (
-        <>
-          <SavedReviewTemplatePanel data={slice.saved_review_template} />
-          {slice.pattern_ready === false && (
-            <Alert severity="warning">복기 탭에서 사진 분석을 먼저 완료해야 이번회차 패턴이 적용됩니다.</Alert>
-          )}
-        </>
       )}
       {slice.accumulated_combo_patterns?.cross_line_analysis && (
         <CrossLineAnalysisPanel
@@ -1351,6 +1343,10 @@ export default function PhotoAnalysisPage() {
       </Divider>
 
       <SemiAutoComparePanel
+        sheetIntent={activeTab}
+        currentRound={currentRound}
+        latestRound={latestRound}
+        roundDrawn={roundDrawn}
         slipQueue={slipQueue}
         accumulated={accumulated}
         onRemoveSlipLine={removeSlipLine}
@@ -1364,7 +1360,7 @@ export default function PhotoAnalysisPage() {
         }
       />
 
-      <PhotoBacktestPanel accumulated={accumulated} />
+      {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
 
       {/* ════════════ § 4. 고급 설정 ════════════ */}
       <Divider textAlign="left" sx={{ mt: 1 }}>

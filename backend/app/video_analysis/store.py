@@ -11,6 +11,13 @@ from typing import Any, Dict, List
 from .dedup import compute_ticket_fingerprint, find_duplicate_entry
 from .overlap_patterns import accumulate_frequency_patterns, build_frequency_overlap_patterns
 from .position_template import build_sheet_template, merge_review_templates
+from ..datasets.photo_bridge import (
+    append_current_round_entry,
+    clear_sandbox_photo_entries,
+    delete_merged_entry,
+    list_merged_entries,
+    migrate_legacy_current_entries,
+)
 
 
 class DuplicateAnalysisError(Exception):
@@ -69,6 +76,15 @@ def _strip_for_store(result: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _all_entries(data: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+    raw = data if data is not None else _load_raw()
+    legacy = migrate_legacy_current_entries(list(raw.get("entries") or []))
+    if legacy != (raw.get("entries") or []):
+        raw["entries"] = legacy
+        _save_raw(raw)
+    return list_merged_entries(legacy)
+
+
 def _entry_round(entry: Dict[str, Any]) -> str:
     r = entry.get("ticket_round")
     if r:
@@ -87,7 +103,7 @@ def check_stored_duplicate(
     if allow_duplicate:
         return None
     data = _load_raw()
-    entries = data.get("entries") or []
+    entries = _all_entries(data)
     sid = (result or {}).get("video_visual_analysis", {}).get("video_id") or source_id
 
     if sid:
@@ -164,6 +180,9 @@ def append_analysis(
         "analyzed_at": _now_iso(),
         "result": _strip_for_store(result),
     }
+    intent = entry.get("video_intent")
+    if intent == "current_round":
+        return append_current_round_entry(entry)
     data["entries"].append(entry)
     _save_raw(data)
     return entry
@@ -344,7 +363,7 @@ def _accumulate_combo_patterns(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     if current_details or current_sheets:
         from .combo_patterns import analyze_current_round_sheet_combos
 
-        review_ref = get_photo_review_template().get("marked_numbers") or []
+        review_ref = []  # 이번회차: 복기 기준번호 참조 금지 (데이터 격리)
         current_out = analyze_current_round_sheet_combos(
             sheet_details=current_details or None,
             sheet_number_sets=current_sheets if not current_details else None,
@@ -446,22 +465,22 @@ def get_merged_review_template() -> Dict[str, Any]:
 
 
 def list_entries(limit: int = 100) -> List[Dict[str, Any]]:
-    data = _load_raw()
-    return list(reversed((data.get("entries") or [])[-limit:]))
+    return list(reversed(_all_entries()[-limit:]))
 
 
 def clear_store() -> int:
     data = _load_raw()
-    count = len(data.get("entries") or [])
+    count = len(_all_entries(data))
     _save_raw({"version": 2, "updated_at": _now_iso(), "entries": []})
+    clear_sandbox_photo_entries()
     return count
 
 
 def delete_entry(entry_id: str) -> bool:
     data = _load_raw()
-    entries = data.get("entries") or []
-    new_entries = [e for e in entries if e.get("id") != entry_id]
-    if len(new_entries) == len(entries):
+    entries = list(data.get("entries") or [])
+    ok, new_entries = delete_merged_entry(entry_id, entries)
+    if not ok:
         return False
     data["entries"] = new_entries
     _save_raw(data)
@@ -604,7 +623,7 @@ def _recompute_intent_combo(entries: List[Dict[str, Any]], intent: str) -> Dict[
     for entry in group:
         details.extend(_entry_sheet_details(entry))
     sheets = _collect_deduped_sheet_sets(group)
-    review_ref = get_photo_review_template().get("marked_numbers") or []
+    review_ref: list[int] = []  # 복기 템플릿 미참조 — 이번회차 저장분 줄간 겹침만
     return analyze_current_round_sheet_combos(
         sheet_details=details or None,
         sheet_number_sets=sheets if not details else None,
@@ -645,15 +664,15 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         slice_out["draw_template"] = official
         slice_out["saved_review_template"] = photo if photo.get("marked_numbers") else None
     else:
-        slice_out["saved_review_template"] = get_photo_review_template()
-        if group:
-            slice_out["pattern_ready"] = bool(slice_out["saved_review_template"].get("marked_numbers"))
+        # 이번회차: 복기 saved_review_template 노출·참조 금지
+        slice_out["saved_review_template"] = None
+        slice_out["pattern_ready"] = len(group) > 0
     return slice_out
 
 
 def build_accumulated() -> Dict[str, Any]:
     data = _load_raw()
-    entries: List[Dict[str, Any]] = data.get("entries") or []
+    entries: List[Dict[str, Any]] = _all_entries(data)
     overall = _accumulate_entries(entries)
 
     by_round: Dict[str, Any] = {}

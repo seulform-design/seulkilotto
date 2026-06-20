@@ -19,6 +19,8 @@ from .. import analytics
 from .. import epo as epo_module
 from ..config import settings
 from ..database import load_history
+from ..datasets.historical import get_historical_dataset
+from ..pipeline.rule_engine import build_rule_engine_for_current
 from ..schemas import EpoResponse, GenerateResponse
 
 router = APIRouter(prefix="/api/v1/generate", tags=["generate"])
@@ -36,8 +38,29 @@ def generate_weighted(
         default=False, description="연속 번호가 포함된 조합 제외 여부"
     ),
     seed: int | None = Query(default=None, description="재현용 랜덤 시드(선택)"),
+    scope: str = Query(
+        default="ephemeral",
+        description="ephemeral=일회성 응답 | current=이번회차 샌드박스 독립 생산·저장",
+    ),
 ):
     """최근 N주 미출현 번호에 +15% 가중치를 부여한 통계 기반 추천 조합을 생성한다."""
+    if scope == "current":
+        engine = build_rule_engine_for_current(
+            "weighted",
+            params={"unseen_bonus": settings.UNSEEN_WEIGHT_BONUS, "lookback": lookback},
+        )
+        hist = get_historical_dataset()
+        if hist.get_completed_rounds_only().empty:
+            raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
+        wrapped = engine.produce_and_persist_weighted(
+            n_sets=n_sets,
+            lookback=lookback,
+            exclude_consecutive=exclude_consecutive,
+            seed=seed,
+            historical=hist,
+        )
+        return GenerateResponse.model_validate(wrapped["result"])
+
     df = load_history()
     if df.empty:
         raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
@@ -58,8 +81,24 @@ def generate_smart(
     exclude_consecutive: bool = Query(default=True),
     max_overlap: int = Query(default=2, ge=0, le=4, description="게임 간 최대 겹치는 번호 수"),
     seed: int | None = Query(default=None),
+    scope: str = Query(default="ephemeral", description="ephemeral | current (샌드박스 저장)"),
 ):
     """다양화·역사적 필터·희귀도 기반 스마트 조합 (당첨 확률 보장 아님)."""
+    if scope == "current":
+        engine = build_rule_engine_for_current("smart", params={"lookback": lookback})
+        hist = get_historical_dataset()
+        if hist.get_completed_rounds_only().empty:
+            raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
+        wrapped = engine.produce_and_persist_smart(
+            n_sets=n_sets,
+            lookback=lookback,
+            exclude_consecutive=exclude_consecutive,
+            max_overlap=max_overlap,
+            seed=seed,
+            historical=hist,
+        )
+        return GenerateResponse.model_validate(wrapped["result"])
+
     df = load_history()
     if df.empty:
         raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")

@@ -357,37 +357,37 @@ def analyze_from_sheet_payloads(
             bonus=draw_template.get("bonus"),
         )
     else:
-        from .store import get_photo_review_template
+        from .line_overlap_patterns import extract_betting_lines
 
-        review_reference_template = get_photo_review_template()
-        position_template = review_reference_template if review_reference_template.get("marked_numbers") else None
-        if review_reference_template.get("marked_numbers"):
-            pattern_application = apply_template_to_current(review_reference_template, sheet_payloads)
-        else:
-            pattern_application = {
-                "summary": "저장된 복기 용지 패턴이 없습니다. 먼저 「복기」 탭에서 용지를 등록·저장해 주세요.",
-                "review_round": str(round_ctx["review_round_ref"]),
-                "review_rounds": [],
-                "position_matches": [],
-                "number_matches": [],
-                "combo_hits": [],
-                "position_match_numbers": [],
-                "number_only_matches": [],
-            }
-        review_ref_nums = review_reference_template.get("marked_numbers") or []
+        # 이번회차: 복기 템플릿·당첨번호 참조 금지 — Current 샌드박스 내 줄간 겹침만 분석
+        position_template = None
+        photo_review_template = None
+        review_reference_template = None
+        pattern_application = {
+            "summary": "이번회차 — 등록한 용지 줄 간 2·3·4번호 겹침만 분석 (복기 데이터 미사용)",
+            "review_round": None,
+            "review_rounds": [],
+            "position_matches": [],
+            "number_matches": [],
+            "combo_hits": [],
+            "position_match_numbers": [],
+            "number_only_matches": [],
+        }
+        line_count = len(extract_betting_lines(sheet_payloads))
         combo_patterns = (
             analyze_current_round_sheet_combos(
                 sheet_details=sheet_payloads,
                 raw_sheet_count=count_for_combo,
-                reference_numbers=review_ref_nums,
+                reference_numbers=None,
             )
-            if len(sheet_sets) >= 2
+            if line_count >= 2
             else {
-                "summary": "용지 2장 이상 필요 — 게임 줄 겹침 분석",
+                "summary": "게임 줄 2줄 이상 필요 — A~E 줄 저장 후 겹침 분석",
                 "pair_duplicates": [],
                 "triple_duplicates": [],
                 "quad_duplicates": [],
-                "sheet_count": len(sheet_sets),
+                "sheet_count": len(sheet_payloads),
+                "line_count": line_count,
                 "min_repeat": 2,
             }
         )

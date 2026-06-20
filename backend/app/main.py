@@ -17,6 +17,7 @@ from .database import get_last_data_source
 from .routers import (
     analyze,
     data,
+    datasets,
     generate,
     history,
     meta,
@@ -92,6 +93,7 @@ app.include_router(meta.router)
 app.include_router(data.router)
 app.include_router(post_occurrence.router)
 app.include_router(photo_analysis.router)
+app.include_router(datasets.router)
 
 
 @app.get("/health", tags=["system"])

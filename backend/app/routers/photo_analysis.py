@@ -18,6 +18,7 @@ from app.video_analysis.store import (
     append_analysis,
     build_accumulated,
     clear_store,
+    clear_store_intent,
     delete_entry,
     list_entries,
 )
@@ -262,8 +263,13 @@ def get_history(limit: int = Query(50, ge=1, le=200)):
 
 
 @router.delete("/store")
-def delete_store():
-    removed = clear_store()
+def delete_store(intent: str | None = Query(default=None)):
+    if intent is not None:
+        if intent not in ("review", "current_round"):
+            raise HTTPException(status_code=400, detail="intent 는 review 또는 current_round 이어야 합니다.")
+        removed = clear_store_intent(intent)
+    else:
+        removed = clear_store()
     return {"ok": True, "removed": removed}
 
 

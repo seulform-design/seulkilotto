@@ -2,6 +2,7 @@ from app.video_analysis.store import (
     append_analysis,
     build_accumulated,
     clear_store,
+    clear_store_intent,
     get_current_dataset_state,
     get_historical_dataset_state,
     record_current_rule_engine_output,
@@ -97,3 +98,24 @@ def test_current_rule_outputs_archive_idempotently(monkeypatch, tmp_path):
     assert rollover_again["ok"] is True
     assert rollover_again["rolled_over"] is False
     assert rollover_again["reason"] == "already_archived"
+
+
+def test_clear_store_intent_only_clears_target_slice(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.video_analysis.store.STORE_PATH", tmp_path / "store.json")
+    monkeypatch.setattr("app.video_analysis.draw_template.get_current_round_no", lambda: 1227)
+    monkeypatch.setattr("app.video_analysis.draw_template.get_review_round_no", lambda: 1226)
+    clear_store()
+
+    append_analysis("review-a", _result("review-a", "review", "1226", [1, 2, 3, 4, 5, 6]))
+    append_analysis("current-a", _result("current-a", "current_round", "1227", [7, 8, 9, 10, 11, 12]))
+
+    removed_review = clear_store_intent("review")
+    assert removed_review == 1
+    acc = build_accumulated()
+    assert acc["by_intent"]["review"]["total_analyses"] == 0
+    assert acc["by_intent"]["current_round"]["total_analyses"] == 1
+
+    removed_current = clear_store_intent("current_round")
+    assert removed_current == 1
+    acc2 = build_accumulated()
+    assert acc2["by_intent"]["current_round"]["total_analyses"] == 0

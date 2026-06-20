@@ -493,10 +493,13 @@ export const v1Api = {
       { method: 'DELETE' }
     ),
 
-  clearPhotoAnalysisStore: () =>
-    fetchJson<{ ok: boolean; removed: number }>('/api/v1/photo-analysis/store', {
+  clearPhotoAnalysisStore: (intent?: 'review' | 'current_round') =>
+    fetchJson<{ ok: boolean; removed: number }>(
+      `/api/v1/photo-analysis/store${intent ? `?intent=${intent}` : ''}`,
+      {
       method: 'DELETE',
-    }),
+      }
+    ),
 
   deletePhotoAnalysisEntry: (entryId: string) =>
     fetchJson<{ ok: boolean; accumulated: PhotoAnalysisAccumulated }>(

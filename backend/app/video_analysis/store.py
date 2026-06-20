@@ -818,6 +818,30 @@ def clear_store() -> int:
     return count
 
 
+def clear_store_intent(intent: str) -> int:
+    """특정 intent 에 해당하는 저장소만 비운다."""
+    if intent == "review":
+        historical = _load_historical_raw()
+        kept_entries = [e for e in historical.get("entries") or [] if e.get("video_intent") != "review"]
+        removed = len(historical.get("entries") or []) - len(kept_entries)
+        historical["entries"] = kept_entries
+        _save_historical_raw(historical)
+        return removed
+
+    if intent == "current_round":
+        current = _load_current_raw()
+        removed = len(current.get("entries") or [])
+        current["entries"] = []
+        current["derived_datasets"] = {}
+        current["rule_snapshots"] = {}
+        current["status"] = "open"
+        current["frozen_at"] = None
+        _save_current_raw(current)
+        return removed
+
+    raise ValueError("intent must be 'review' or 'current_round'")
+
+
 def delete_entry(entry_id: str) -> bool:
     historical = _load_historical_raw()
     entries = historical.get("entries") or []

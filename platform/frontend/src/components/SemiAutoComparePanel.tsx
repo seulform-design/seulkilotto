@@ -721,6 +721,7 @@ function buildComparison(
   pickFlags: Record<number, PickType>,
   slipQueue: ManualSlipInput[],
   accumulated: PhotoAnalysisAccumulated | null,
+  sheetIntent: SheetIntent,
   latestNumbers: number[],
   latestBonus: number | null,
   strongCandidates: number[]
@@ -772,10 +773,7 @@ function buildComparison(
     autoMatch: autoPicks.filter((n) => strongSet.has(n)),
   };
 
-  const excludedCandidates =
-    accumulated?.by_intent?.current_round?.final_predictions?.excluded_candidates ??
-    accumulated?.final_predictions?.excluded_candidates ??
-    [];
+  const excludedCandidates = getIntentExcludedCandidates(accumulated, sheetIntent);
   const excludedSet = new Set(excludedCandidates);
   const userExcluded = userPicks.filter((n) => excludedSet.has(n));
   const autoExcluded = autoPicks.filter((n) => excludedSet.has(n));
@@ -1181,27 +1179,26 @@ export default function SemiAutoComparePanel({
     setIsSaving(true);
     setSaveNotice(null);
     try {
-      // 백엔드에 current_round intent 로 저장
+      // 현재 탭 intent 로 저장
       const res = await v1Api.analyzeManualSlips(slips, {
-        sheetIntent: 'current_round',
+        sheetIntent,
         persist: true,
       });
       if (!mountedRef.current) return;
-
-      const nowIso = new Date().toISOString();
-      setLastSavedAt(nowIso);
-
-      // 저장된 줄은 초기화 (bulkTickets는 대량비교에 계속 활용)
-      setSemiSlipQueue([]);
-      setSemiCurrentLines([]);
 
       const totalLines = slips.reduce((s, sl) => s + sl.lines.length, 0);
       if (res.accumulated) {
         onAccumulatedChange?.(res.accumulated);
       }
       if (res.duplicate_skipped) {
-        setSaveNotice(`⚠ 이미 등록된 용지입니다: ${res.duplicate_message ?? ''}`);
+        setSaveNotice(`⚠ 이미 등록된 용지입니다: ${res.duplicate_message ?? ''} 입력 데이터는 유지됩니다.`);
       } else {
+        const nowIso = new Date().toISOString();
+        setLastSavedAt(nowIso);
+        // 저장 성공 시에만 초기화 — 중복/실패 시 사용자가 재조정할 수 있게 유지
+        setSemiSlipQueue([]);
+        setSemiCurrentLines([]);
+        setBulkTickets([]);
         setSaveNotice(
           `✅ ${slips.length}장 (${totalLines}줄) 백엔드 저장 완료. 아래 통계가 업데이트됩니다.`
         );
@@ -1216,7 +1213,7 @@ export default function SemiAutoComparePanel({
     } finally {
       if (mountedRef.current) setIsSaving(false);
     }
-  }, [semiSlipQueue, semiCurrentLines, bulkTickets, onAccumulatedChange, qc]);
+  }, [semiSlipQueue, semiCurrentLines, bulkTickets, onAccumulatedChange, qc, sheetIntent]);
 
   const comparison = useMemo(
     () =>
@@ -1225,11 +1222,12 @@ export default function SemiAutoComparePanel({
         {},
         slipQueue,
         accumulated,
+        sheetIntent,
         winningNumbers,
         winningBonus,
         resolvedStrongCandidates
       ),
-    [picked, slipQueue, accumulated, winningNumbers, winningBonus, resolvedStrongCandidates]
+    [picked, slipQueue, accumulated, sheetIntent, winningNumbers, winningBonus, resolvedStrongCandidates]
   );
 
   const bulkComparison = useMemo(

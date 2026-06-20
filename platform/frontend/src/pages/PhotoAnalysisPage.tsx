@@ -1068,12 +1068,17 @@ export default function PhotoAnalysisPage() {
   };
 
   const clearStore = async () => {
-    if (!window.confirm('누적된 모든 사진 분석 데이터를 삭제할까요?')) return;
+    const targetLabel = activeTab === 'review' ? '복기 탭' : '이번회차 탭';
+    if (!window.confirm(`${targetLabel}의 서버 분석 데이터와 자동 입력 누적만 삭제할까요? 다른 탭 데이터는 유지됩니다.`)) return;
     try {
-      await v1Api.clearPhotoAnalysisStore();
-      setAccumulated(null);
-      setManualByIntent(emptyManualByIntent());
+      await v1Api.clearPhotoAnalysisStore(activeTab);
+      setManualByIntent((prev) => ({
+        ...prev,
+        [activeTab]: emptyManualDraft(),
+      }));
       await refreshAccumulated();
+      setNotice(`${targetLabel} 데이터가 삭제되었습니다.`);
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : '삭제 실패');
     }
@@ -1302,7 +1307,7 @@ export default function PhotoAnalysisPage() {
                 자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkAutoTickets.length}장 · 총 {ticketLines.length}줄
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                아래 목록의 [×] 로 개별 줄 삭제. 하단 [전체 삭제] 는 자동 누적만 (백엔드 store 포함). 반자동은 § 3 추가 세팅에서 따로.
+                아래 목록의 [×] 로 개별 줄 삭제. 하단 [자동 입력 초기화] 는 현재 탭의 자동 입력 서버 데이터 + 로컬 자동 누적만 삭제합니다. 반자동은 § 3 추가 세팅에서 따로 관리됩니다.
               </Typography>
               {ticketLines.length === 0 ? (
                 <Alert severity="info" sx={{ mb: 1.5 }}>
@@ -1364,7 +1369,7 @@ export default function PhotoAnalysisPage() {
                     (!accumulated || accumulated.total_analyses === 0)
                   }
                 >
-                  자동 누적 전체 삭제
+                  자동 입력 초기화
                 </Button>
               </Stack>
             </>

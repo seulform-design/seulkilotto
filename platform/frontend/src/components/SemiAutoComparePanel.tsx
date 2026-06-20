@@ -32,6 +32,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BulkLineInputDialog from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
 import NumberFrequencyPanel from './NumberFrequencyPanel';
+import {
+  generateScoredRecommendations,
+  type ScoredRecommendation,
+} from './reviewRecommendationEngine';
 import SavedLinesPanel, {
   GAME_LABELS,
   type GameLabel,
@@ -44,12 +48,19 @@ import {
   type ManualSlipInput,
   type PhotoAnalysisAccumulated,
 } from '../api/v1Api';
+import { GRADE_COLORS, GRADE_LABELS } from '../utils/compositeAnalysis';
 
 const NUMBERS = Array.from({ length: 45 }, (_, i) => i + 1);
 
 // ── 반자동 비교 영속화 (localStorage) ─────────────────────────────
-// 새로고침/페이지 이탈 시에도 사용자 입력 보존. 명시 초기화 시에만 사라짐.
-const SEMI_AUTO_STORAGE_KEY = 'lotto:semiAuto:v1';
+// 탭별 격리: 복기 / 이번회차 각각 별도 저장 (데이터 오염 방지).
+const SEMI_AUTO_STORAGE_PREFIX = 'lotto:semiAuto:v1';
+
+function semiAutoStorageKey(intent: SheetIntent): string {
+  return `${SEMI_AUTO_STORAGE_PREFIX}:${intent}`;
+}
+
+type SheetIntent = 'review' | 'current_round';
 
 type PersistedSemiAutoState = {
   picked: number[];
@@ -100,10 +111,13 @@ function sanitizeSlipInput(raw: unknown): ManualSlipInput | null {
   return { lines };
 }
 
-function loadSemiAutoState(): PersistedSemiAutoState {
+function loadSemiAutoState(intent: SheetIntent): PersistedSemiAutoState {
   if (typeof window === 'undefined') return defaultPersistedState();
   try {
-    const raw = window.localStorage.getItem(SEMI_AUTO_STORAGE_KEY);
+    const raw =
+      window.localStorage.getItem(semiAutoStorageKey(intent)) ??
+      // 레거시 단일 키 → 복기 탭으로 1회 이관
+      (intent === 'review' ? window.localStorage.getItem('lotto:semiAuto:v1') : null);
     if (!raw) return defaultPersistedState();
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object') return defaultPersistedState();
@@ -190,53 +204,177 @@ function loadSemiAutoState(): PersistedSemiAutoState {
   }
 }
 
-function saveSemiAutoState(state: PersistedSemiAutoState): void {
+function saveSemiAutoState(intent: SheetIntent, state: PersistedSemiAutoState): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(SEMI_AUTO_STORAGE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(semiAutoStorageKey(intent), JSON.stringify(state));
   } catch {
     /* quota / private mode — silent */
   }
 }
 
-/**
- * '이번회차 자동 누적' 데이터 슬라이스 우선순위:
- *   1) accumulated.by_intent.current_round.accumulated_combo_patterns (가장 정확)
- *   2) accumulated.accumulated_combo_patterns (전체 누적 폴백)
- * 둘 다 없으면 null.
- */
-function getCurrentRoundComboPatterns(
-  accumulated: PhotoAnalysisAccumulated | null
+function getIntentComboPatterns(
+  accumulated: PhotoAnalysisAccumulated | null,
+  intent: SheetIntent
 ): ComboDuplicatePatterns | null {
   if (!accumulated) return null;
-  return (
-    accumulated.by_intent?.current_round?.accumulated_combo_patterns ??
-    accumulated.accumulated_combo_patterns ??
-    null
-  );
+  return accumulated.by_intent?.[intent]?.accumulated_combo_patterns ?? null;
 }
 
-/**
- * 자동 누적의 강한 후보.
- */
+function collectAutoOnlyLines(
+  currentSlipLines: SavedLine[],
+  slipQueue: ManualSlipInput[],
+  bulkAutoTickets: number[][]
+): number[][] {
+  const out: number[][] = [];
+  for (const line of currentSlipLines) out.push(line.numbers);
+  for (const slip of slipQueue) {
+    for (const line of slip.lines) out.push(line.numbers);
+  }
+  for (const ticket of bulkAutoTickets) out.push(ticket);
+  return out;
+}
+
+/** 서버 누적 없을 때 자동 줄 빈도·줄간 겹침으로 강한 후보 추정 (백엔드 line_overlap 근사). */
+function deriveLocalStrongCandidates(
+  autoLines: number[][],
+  winningNumbers: number[],
+  intent: SheetIntent,
+  limit = 18
+): number[] {
+  if (autoLines.length === 0) return [];
+
+  const scores: Record<number, number> = {};
+  const bump = (n: number, w: number) => {
+    if (Number.isInteger(n) && n >= 1 && n <= 45) {
+      scores[n] = (scores[n] ?? 0) + w;
+    }
+  };
+
+  const normalized = autoLines.map((line) =>
+    Array.from(new Set(line.filter((n) => Number.isInteger(n) && n >= 1 && n <= 45))).sort(
+      (a, b) => a - b
+    )
+  );
+
+  const pairLineHits: Record<string, number> = {};
+  const tripleLineHits: Record<string, number> = {};
+  for (const nums of normalized) {
+    for (let i = 0; i < nums.length; i += 1) {
+      for (let j = i + 1; j < nums.length; j += 1) {
+        const key = `${nums[i]}-${nums[j]}`;
+        pairLineHits[key] = (pairLineHits[key] ?? 0) + 1;
+      }
+    }
+    for (let i = 0; i < nums.length; i += 1) {
+      for (let j = i + 1; j < nums.length; j += 1) {
+        for (let k = j + 1; k < nums.length; k += 1) {
+          const key = `${nums[i]}-${nums[j]}-${nums[k]}`;
+          tripleLineHits[key] = (tripleLineHits[key] ?? 0) + 1;
+        }
+      }
+    }
+  }
+
+  for (const [key, lineCount] of Object.entries(pairLineHits)) {
+    if (lineCount >= 2) {
+      for (const n of key.split('-').map(Number)) bump(n, 2 * lineCount);
+    }
+  }
+  for (const [key, lineCount] of Object.entries(tripleLineHits)) {
+    if (lineCount >= 2) {
+      for (const n of key.split('-').map(Number)) bump(n, 3 * lineCount);
+    }
+  }
+
+  if (intent === 'review' && winningNumbers.length > 0) {
+    const winSet = new Set(winningNumbers);
+    for (const nums of normalized) {
+      const overlap = nums.filter((n) => winSet.has(n));
+      const weight = overlap.length ** 2;
+      for (const n of overlap) bump(n, weight);
+    }
+  }
+
+  for (const nums of normalized) {
+    for (const n of nums) bump(n, 1);
+  }
+
+  return Object.entries(scores)
+    .sort(([, a], [, b]) => b - a || Number(a) - Number(b))
+    .slice(0, limit)
+    .map(([n]) => Number(n));
+}
+
+function getIntentStrongCandidates(
+  accumulated: PhotoAnalysisAccumulated | null,
+  intent: SheetIntent
+): number[] {
+  const combo = getIntentComboPatterns(accumulated, intent);
+  if (combo?.strong_candidates?.length) return combo.strong_candidates;
+
+  const sliceStrong = accumulated?.by_intent?.[intent]?.final_predictions?.strong_candidates;
+  if (sliceStrong?.length) return sliceStrong;
+
+  if (intent === 'review') {
+    const votes: Record<number, number> = {};
+    for (const entry of accumulated?.entries_summary ?? []) {
+      if (entry.video_intent !== 'review') continue;
+      for (const n of entry.strong_candidates ?? []) {
+        if (Number.isInteger(n) && n >= 1 && n <= 45) {
+          votes[n] = (votes[n] ?? 0) + 1;
+        }
+      }
+    }
+    const ranked = Object.entries(votes)
+      .sort(([, a], [, b]) => b - a || Number(a) - Number(b))
+      .map(([n]) => Number(n));
+    if (ranked.length) return ranked.slice(0, 18);
+  }
+  return [];
+}
+
+function resolveStrongCandidates(
+  accumulated: PhotoAnalysisAccumulated | null,
+  intent: SheetIntent,
+  autoLines: number[][],
+  winningNumbers: number[]
+): { candidates: number[]; source: 'backend' | 'local' | 'none' } {
+  const backend = getIntentStrongCandidates(accumulated, intent);
+  if (backend.length > 0) return { candidates: backend, source: 'backend' };
+  const local = deriveLocalStrongCandidates(autoLines, winningNumbers, intent);
+  if (local.length > 0) return { candidates: local, source: 'local' };
+  return { candidates: [], source: 'none' };
+}
+
+function getIntentExcludedCandidates(
+  accumulated: PhotoAnalysisAccumulated | null,
+  intent: SheetIntent
+): number[] {
+  const sliceExcluded = accumulated?.by_intent?.[intent]?.final_predictions?.excluded_candidates;
+  if (sliceExcluded?.length) return sliceExcluded;
+  if (intent === 'review') {
+    return accumulated?.final_predictions?.excluded_candidates ?? [];
+  }
+  return [];
+}
+
 function getCurrentRoundStrongCandidates(
   accumulated: PhotoAnalysisAccumulated | null
 ): number[] {
-  return (
-    accumulated?.by_intent?.current_round?.final_predictions?.strong_candidates ??
-    accumulated?.final_predictions?.strong_candidates ??
-    []
-  );
+  return getIntentStrongCandidates(accumulated, 'current_round');
+}
+
+function getCurrentRoundComboPatterns(
+  accumulated: PhotoAnalysisAccumulated | null
+): ComboDuplicatePatterns | null {
+  return getIntentComboPatterns(accumulated, 'current_round');
 }
 
 function getCurrentRoundExcludedCandidates(
   accumulated: PhotoAnalysisAccumulated | null
 ): number[] {
-  return (
-    accumulated?.by_intent?.current_round?.final_predictions?.excluded_candidates ??
-    accumulated?.final_predictions?.excluded_candidates ??
-    []
-  );
+  return getIntentExcludedCandidates(accumulated, 'current_round');
 }
 
 /**
@@ -277,6 +415,11 @@ interface SemiAutoComparePanelProps {
   slipQueue: ManualSlipInput[];
   accumulated: PhotoAnalysisAccumulated | null;
   onAccumulatedChange?: (next: PhotoAnalysisAccumulated) => void;
+  /** 복기 / 이번회차 — 당첨번호 비교는 복기 탭에서만 */
+  sheetIntent: SheetIntent;
+  currentRound?: number | null;
+  latestRound?: number | null;
+  roundDrawn?: boolean;
   /** 사용자 정정: '구입번호 직접입력' (slipQueue) = 자동. 그 줄 단위 삭제 콜백. */
   onRemoveSlipLine?: (slipIdx: number, lineIdx: number) => void;
   /** 자동 누적의 '입력 중' 줄 (currentSlipLines). 전체 티켓 목록 카운트·표시에 합산. */
@@ -287,6 +430,8 @@ interface SemiAutoComparePanelProps {
   onRemoveCurrentLine?: (idx: number) => void;
   /** 자동 대량 1장 단건 삭제 콜백. */
   onRemoveBulkAutoTicket?: (idx: number) => void;
+  /** 서버 누적·당첨번호 재조회 (재분석 버튼). */
+  onRefreshAccumulated?: () => Promise<void>;
 }
 
 type PickType = 'user' | 'auto';
@@ -386,7 +531,19 @@ interface BulkComparisonResult {
   avgPairMatches: number;
   avgTripleMatches: number;
   bestComboTickets: BulkTicketResult[];
+  /** 강한후보·콤보 패턴 종합 — 당첨번호 미사용 (예측 신호용). */
+  bestSignalTickets: BulkTicketResult[];
   comboDataAvailable: boolean;
+}
+
+function ticketSignalScore(t: BulkTicketResult): number {
+  return (
+    t.comboScore +
+    t.vsStrongMatch.length * 4 +
+    t.matchedPairCount * 2 +
+    t.matchedTripleCount * 5 +
+    t.matchedQuadCount * 8
+  );
 }
 
 function buildBulkComparison(
@@ -394,14 +551,14 @@ function buildBulkComparison(
   slipQueue: ManualSlipInput[],
   accumulated: PhotoAnalysisAccumulated | null,
   latestNumbers: number[],
-  latestBonus: number | null
+  latestBonus: number | null,
+  intent: SheetIntent,
+  strongCandidates: number[]
 ): BulkComparisonResult {
   const latestSet = new Set(latestNumbers);
 
-  // 핵심 변경: '이번회차 자동 누적' 슬라이스를 우선 사용
-  const strongCandidates = getCurrentRoundStrongCandidates(accumulated);
-  const excludedCandidates = getCurrentRoundExcludedCandidates(accumulated);
-  const comboPatterns = getCurrentRoundComboPatterns(accumulated);
+  const excludedCandidates = getIntentExcludedCandidates(accumulated, intent);
+  const comboPatterns = getIntentComboPatterns(accumulated, intent);
   const strongSet = new Set(strongCandidates);
   const excludedSet = new Set(excludedCandidates);
   const comboDataAvailable = !!comboPatterns &&
@@ -517,6 +674,11 @@ function buildBulkComparison(
     .sort((a, b) => b.comboScore - a.comboScore || b.vsStrongMatch.length - a.vsStrongMatch.length)
     .slice(0, 5);
 
+  const bestSignalTickets = [...perTicket]
+    .filter((t) => ticketSignalScore(t) > 0)
+    .sort((a, b) => ticketSignalScore(b) - ticketSignalScore(a))
+    .slice(0, 5);
+
   // 교집합 세트 그룹을 크기별로 분류 + 빈도순 정렬 (상한 없음 — 모든 세트 노출)
   const allGroups = Object.values(intersectionGroupsByKey);
   const twoIntersectionGroups = allGroups
@@ -549,6 +711,7 @@ function buildBulkComparison(
     avgPairMatches,
     avgTripleMatches,
     bestComboTickets,
+    bestSignalTickets,
     comboDataAvailable,
   };
 }
@@ -559,7 +722,8 @@ function buildComparison(
   slipQueue: ManualSlipInput[],
   accumulated: PhotoAnalysisAccumulated | null,
   latestNumbers: number[],
-  latestBonus: number | null
+  latestBonus: number | null,
+  strongCandidates: number[]
 ): ComparisonResult {
   // 'auto' 분류는 사진 (단건) 제거 후 더 이상 발생하지 않음.
   // 분류 미지정 (legacy 로딩 / 신규 입력) = user 로 간주 → 비교 결과가 정상 동작.
@@ -600,10 +764,6 @@ function buildComparison(
       b.userOverlap.length + b.autoOverlap.length - (a.userOverlap.length + a.autoOverlap.length)
   );
 
-  const strongCandidates =
-    accumulated?.by_intent?.current_round?.final_predictions?.strong_candidates ??
-    accumulated?.final_predictions?.strong_candidates ??
-    [];
   const strongSet = new Set(strongCandidates);
   const vsStrong = {
     available: strongCandidates.length > 0,
@@ -667,14 +827,21 @@ export default function SemiAutoComparePanel({
   slipQueue,
   accumulated,
   onAccumulatedChange,
+  sheetIntent,
+  currentRound = null,
+  latestRound: latestRoundProp = null,
+  roundDrawn = false,
   onRemoveSlipLine,
   currentSlipLines = [],
   bulkAutoTickets = [],
   onRemoveCurrentLine,
   onRemoveBulkAutoTicket,
+  onRefreshAccumulated,
 }: SemiAutoComparePanelProps) {
-  // localStorage 에서 복원 — 새로고침/이탈 후에도 보존
-  const initial = useMemo(() => loadSemiAutoState(), []);
+  const compareWinning = sheetIntent === 'review';
+
+  // localStorage — 탭별 격리
+  const initial = useMemo(() => loadSemiAutoState(sheetIntent), [sheetIntent]);
   const [picked, setPicked] = useState<number[]>(initial.picked);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkTickets, setBulkTickets] = useState<number[][]>(initial.bulkTickets);
@@ -695,10 +862,22 @@ export default function SemiAutoComparePanel({
   }, []);
   /** 사용자가 명시적으로 [누적·저장] 누른 마지막 시각 (ISO). */
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(initial.lastSavedAt);
+  const [compareRound, setCompareRound] = useState<number | null>(null);
+
+  // 탭 전환 시 해당 탭 전용 localStorage 로드
+  useEffect(() => {
+    const st = loadSemiAutoState(sheetIntent);
+    setPicked(st.picked);
+    setBulkTickets(st.bulkTickets);
+    setSemiCurrentLines(st.semiCurrentLines);
+    setSemiSlipQueue(st.semiSlipQueue);
+    setLastSavedAt(st.lastSavedAt);
+    setCompareRound(null);
+  }, [sheetIntent]);
 
   // 영속 — picked / bulkTickets / semiCurrentLines / semiSlipQueue / lastSavedAt
   useEffect(() => {
-    saveSemiAutoState({
+    saveSemiAutoState(sheetIntent, {
       picked,
       pickFlags: {},
       bulkTickets,
@@ -706,7 +885,7 @@ export default function SemiAutoComparePanel({
       semiSlipQueue,
       lastSavedAt,
     });
-  }, [picked, bulkTickets, semiCurrentLines, semiSlipQueue, lastSavedAt]);
+  }, [sheetIntent, picked, bulkTickets, semiCurrentLines, semiSlipQueue, lastSavedAt]);
 
   /** 다음 저장 시 부여될 라벨 — currentSlipLines 의 크기로 결정. */
   const currentLabel: GameLabel =
@@ -716,6 +895,7 @@ export default function SemiAutoComparePanel({
     queryKey: ['v1-latest-for-semi-auto'],
     queryFn: v1Api.getLatestDraw,
     staleTime: 60_000,
+    enabled: compareWinning,
   });
 
   // 메타 — 최신 회차 가져오기 (회차 선택 상한 클램프용)
@@ -724,118 +904,110 @@ export default function SemiAutoComparePanel({
     queryFn: v1Api.getMeta,
     staleTime: 60_000,
   });
-  const latestRound = meta.data?.latest_round ?? null;
+  const latestRound = latestRoundProp ?? meta.data?.latest_round ?? null;
 
-  // 비교 기준 회차 — 사용자가 수동 선택 가능. 미선택 시 최신 회차.
-  const [compareRound, setCompareRound] = useState<number | null>(null);
-
-  // 선택된 회차의 당첨번호 (수동 회차 선택 시)
   const selectedRoundQuery = useQuery({
     queryKey: ['v1-round-for-semi-auto', compareRound],
     queryFn: () => v1Api.getRound(compareRound as number),
-    enabled: !!compareRound,
+    enabled: compareWinning && !!compareRound,
     staleTime: 60_000,
     retry: false,
   });
 
-  // 실제 비교에 사용할 회차 데이터 결정:
-  //   수동 선택 시 → selectedRoundQuery.data
-  //   미선택 시 → latest.data (최신)
-  const comparisonRoundData = compareRound != null ? selectedRoundQuery.data : latest.data;
-  const effectiveRound = compareRound ?? latest.data?.round ?? null;
+  const comparisonRoundData = compareWinning
+    ? compareRound != null
+      ? selectedRoundQuery.data
+      : latest.data
+    : null;
+  const effectiveRound = compareWinning
+    ? compareRound ?? latest.data?.round ?? latestRound
+    : currentRound;
 
-  // 당첨번호 set — 복기 모드에서 ball 색상 강조용
+  const winningNumbers = compareWinning ? (comparisonRoundData?.numbers ?? []) : [];
+  const winningBonus = compareWinning ? (comparisonRoundData?.bonus ?? null) : null;
+
+  const intentSectionLabel = sheetIntent === 'review' ? '복기' : '이번회차';
+
+  const autoOnlyLines = useMemo(
+    () => collectAutoOnlyLines(currentSlipLines, slipQueue, bulkAutoTickets),
+    [currentSlipLines, slipQueue, bulkAutoTickets]
+  );
+
+  const strongCandidateResolution = useMemo(
+    () => resolveStrongCandidates(accumulated, sheetIntent, autoOnlyLines, winningNumbers),
+    [accumulated, sheetIntent, autoOnlyLines, winningNumbers]
+  );
+
+  const predictionSignalsQuery = useQuery({
+    queryKey: ['v1-prediction-signals', sheetIntent],
+    queryFn: () => v1Api.getPredictionSignals(sheetIntent),
+    staleTime: 120_000,
+    retry: 1,
+  });
+  const predictionSignals = predictionSignalsQuery.data ?? null;
+
+  const resolvedStrongCandidates = useMemo(() => {
+    if (predictionSignals?.strong_candidates?.length) {
+      return predictionSignals.strong_candidates;
+    }
+    return strongCandidateResolution.candidates;
+  }, [predictionSignals, strongCandidateResolution.candidates]);
+
+  const resolvedExcludedCandidates = useMemo(() => {
+    if (predictionSignals?.excluded_candidates?.length) {
+      return predictionSignals.excluded_candidates;
+    }
+    return getIntentExcludedCandidates(accumulated, sheetIntent);
+  }, [predictionSignals, accumulated, sheetIntent]);
+
+  const strongCandidateSource = predictionSignals?.strong_candidates?.length
+    ? 'unified-rules'
+    : strongCandidateResolution.source;
+
   const winningSet = useMemo<Set<number> | null>(() => {
-    if (!comparisonRoundData?.numbers?.length) return null;
-    return new Set(comparisonRoundData.numbers);
-  }, [comparisonRoundData]);
+    if (!compareWinning || !winningNumbers.length) return null;
+    return new Set(winningNumbers);
+  }, [compareWinning, winningNumbers]);
 
   const qc = useQueryClient();
-  const handleRefreshAll = () => {
-    qc.invalidateQueries({ queryKey: ['v1-latest-for-semi-auto'] });
-    qc.invalidateQueries({ queryKey: ['v1-meta-for-semi-auto'] });
-    qc.invalidateQueries({ queryKey: ['v1-round-for-semi-auto'] });
-  };
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
+  const [reanalyzeNotice, setReanalyzeNotice] = useState<string | null>(null);
+
+  const handleReanalyze = useCallback(async () => {
+    if (isReanalyzing) return;
+    setIsReanalyzing(true);
+    setReanalyzeNotice(null);
+    try {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['v1-latest-for-semi-auto'] }),
+        qc.invalidateQueries({ queryKey: ['v1-meta-for-semi-auto'] }),
+        qc.invalidateQueries({ queryKey: ['v1-round-for-semi-auto'] }),
+        qc.refetchQueries({ queryKey: ['v1-latest-for-semi-auto'] }),
+        qc.refetchQueries({ queryKey: ['v1-meta-for-semi-auto'] }),
+        compareRound != null
+          ? qc.refetchQueries({ queryKey: ['v1-round-for-semi-auto', compareRound] })
+          : Promise.resolve(),
+      ]);
+      if (onRefreshAccumulated) {
+        await onRefreshAccumulated();
+      }
+      await qc.invalidateQueries({ queryKey: ['v1-prediction-signals', sheetIntent] });
+      await qc.refetchQueries({ queryKey: ['v1-prediction-signals', sheetIntent] });
+      setRecommendations([]);
+      setReanalyzeNotice('✅ 재분석 완료 — 당첨번호·서버 누적·통계를 갱신했습니다.');
+    } catch (e) {
+      setReanalyzeNotice(
+        `❌ 재분석 실패: ${e instanceof Error ? e.message : '서버 오류'}`
+      );
+    } finally {
+      setIsReanalyzing(false);
+    }
+  }, [compareRound, isReanalyzing, onRefreshAccumulated, qc, sheetIntent]);
 
   // UI 토글 상태
   const [showAllTickets, setShowAllTickets] = useState(false);
-  const [recommendations, setRecommendations] = useState<number[][]>([]);
-
-  // 사용자 정정 (이번 turn): '구입번호 직접입력' = 자동.
-  // 즉 slipQueue 가 자동 데이터 소스.
-  // 전체 번호 빈도 = slipQueue 의 모든 줄에서 1~45 등장 횟수.
-  const numberFrequency = useMemo(() => {
-    if (slipQueue.length === 0) return [];
-    const counter: Record<number, number> = {};
-    for (let n = 1; n <= 45; n += 1) counter[n] = 0;
-    for (const slip of slipQueue) {
-      for (const line of slip.lines) {
-        for (const n of line.numbers) {
-          if (Number.isInteger(n) && n >= 1 && n <= 45) {
-            counter[n] = (counter[n] ?? 0) + 1;
-          }
-        }
-      }
-    }
-    return Object.entries(counter)
-      .map(([n, count]) => ({ number: Number(n), count }))
-      .filter((item) => item.count > 0)
-      .sort((a, b) => b.count - a.count || a.number - b.number);
-  }, [slipQueue]);
-
-  // 추천 조합 생성 — 반자동 빈도 + 자동 강한 후보 결합 (누적 없어도 반자동 데이터만으로 생성 가능)
-  const generateRecommendations = () => {
-    // 1순위: 반자동 상위 빈도 번호 (bulkTickets + semiSlipQueue + semiCurrentLines 포함)
-    const allSemiNums: number[] = [
-      ...bulkTickets.flat(),
-      ...semiSlipQueue.flatMap((sl) => sl.lines.flatMap((l) => l.numbers)),
-      ...semiCurrentLines.flatMap((l) => l.numbers),
-    ];
-    const semiFreqMap: Record<number, number> = {};
-    for (const n of allSemiNums) {
-      semiFreqMap[n] = (semiFreqMap[n] ?? 0) + 1;
-    }
-    const topSemiFreq = Object.entries(semiFreqMap)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 20)
-      .map(([n]) => Number(n));
-
-    // 2순위: 누적 자동 강한 후보 (있으면)
-    const topFreq = numberFrequency.slice(0, 15).map((f) => f.number);
-    const strong = getCurrentRoundStrongCandidates(accumulated);
-    const excluded = new Set(getCurrentRoundExcludedCandidates(accumulated));
-
-    // 반자동 우선 + 자동 강한 후보 + 자동 빈도 순으로 풀 구성
-    const pool = Array.from(new Set([...topSemiFreq, ...strong, ...topFreq])).filter(
-      (n) => !excluded.has(n) && n >= 1 && n <= 45
-    );
-
-    // 풀이 부족하면 1~45 무작위로 보충
-    if (pool.length < 12) {
-      const all = Array.from({ length: 45 }, (_, i) => i + 1).filter(
-        (n) => !pool.includes(n) && !excluded.has(n)
-      );
-      while (pool.length < 12 && all.length > 0) {
-        const idx = Math.floor(Math.random() * all.length);
-        pool.push(all.splice(idx, 1)[0]);
-      }
-    }
-
-    const result: number[][] = [];
-    const seen = new Set<string>();
-    let attempts = 0;
-    while (result.length < 5 && attempts < 300) {
-      attempts += 1;
-      const shuffled = [...pool].sort(() => Math.random() - 0.5);
-      const combo = shuffled.slice(0, 6).sort((a, b) => a - b);
-      const key = combo.join('-');
-      if (combo.length === 6 && !seen.has(key)) {
-        seen.add(key);
-        result.push(combo);
-      }
-    }
-    setRecommendations(result);
-  };
+  const [showBacktestTop, setShowBacktestTop] = useState(false);
+  const [recommendations, setRecommendations] = useState<ScoredRecommendation[]>([]);
 
   const togglePick = (n: number) => {
     if (picked.includes(n)) {
@@ -1053,13 +1225,13 @@ export default function SemiAutoComparePanel({
         {},
         slipQueue,
         accumulated,
-        latest.data?.numbers ?? [],
-        latest.data?.bonus ?? null
+        winningNumbers,
+        winningBonus,
+        resolvedStrongCandidates
       ),
-    [picked, slipQueue, accumulated, latest.data]
+    [picked, slipQueue, accumulated, winningNumbers, winningBonus, resolvedStrongCandidates]
   );
 
-  // 대량 비교 — comparisonRoundData (수동 선택된 회차 OR 최신) 의 당첨번호 사용
   const bulkComparison = useMemo(
     () =>
       bulkTickets.length > 0
@@ -1067,11 +1239,13 @@ export default function SemiAutoComparePanel({
             bulkTickets,
             slipQueue,
             accumulated,
-            comparisonRoundData?.numbers ?? [],
-            comparisonRoundData?.bonus ?? null
+            winningNumbers,
+            winningBonus,
+            sheetIntent,
+            resolvedStrongCandidates
           )
         : null,
-    [bulkTickets, slipQueue, accumulated, comparisonRoundData]
+    [bulkTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates]
   );
 
   /**
@@ -1104,20 +1278,22 @@ export default function SemiAutoComparePanel({
             combinedTickets,
             slipQueue,
             accumulated,
-            comparisonRoundData?.numbers ?? [],
-            comparisonRoundData?.bonus ?? null
+            winningNumbers,
+            winningBonus,
+            sheetIntent,
+            resolvedStrongCandidates
           )
         : null,
-    [combinedTickets, slipQueue, accumulated, comparisonRoundData]
+    [combinedTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates]
   );
 
   /**
    * 강한 후보 교집합 패널 전용 alias.
    * 자동+반자동 통합 통계 (combinedComparison) 우선, 없을 때만 bulkComparison
-   * 으로 폴백. 사용은 패널의 외부 가드 (`bulkComparison && (...)`) 안에서만
-   * 일어나므로 non-null 보장 — TS 어설션으로 표시.
+   * 으로 폴백.
    */
-  const intersectionCmp = (combinedComparison ?? bulkComparison)!;
+  const activeComparison = combinedComparison ?? bulkComparison;
+  const intersectionCmp = activeComparison!;
 
   /**
    * 자동 그룹의 각 줄 ↔ 반자동 그룹의 각 줄 1:1 전수 비교 매칭.
@@ -1285,7 +1461,7 @@ export default function SemiAutoComparePanel({
       }
     }
     // 강한 후보 (이번회차 자동 누적) — 매치 번호 중 강한 후보 개수가 통계 핵심.
-    const strongCandidates = getCurrentRoundStrongCandidates(accumulated);
+    const strongCandidates = resolvedStrongCandidates;
     const strongSet = new Set(strongCandidates);
 
     // 카운터 정의:
@@ -1378,6 +1554,134 @@ export default function SemiAutoComparePanel({
     bulkTickets,
     winningSet,
     accumulated,
+    sheetIntent,
+    resolvedStrongCandidates,
+  ]);
+
+  const generateRecommendations = useCallback(() => {
+    const semiFreq: Record<number, number> = {};
+    for (const n of [
+      ...bulkTickets.flat(),
+      ...semiSlipQueue.flatMap((sl) => sl.lines.flatMap((l) => l.numbers)),
+      ...semiCurrentLines.flatMap((l) => l.numbers),
+    ]) {
+      if (Number.isInteger(n) && n >= 1 && n <= 45) {
+        semiFreq[n] = (semiFreq[n] ?? 0) + 1;
+      }
+    }
+
+    const autoFreq: Record<number, number> = {};
+    for (const line of autoOnlyLines) {
+      for (const n of line) {
+        if (Number.isInteger(n) && n >= 1 && n <= 45) {
+          autoFreq[n] = (autoFreq[n] ?? 0) + 1;
+        }
+      }
+    }
+
+    const cmp = activeComparison;
+    const lineMatchGroups = [
+      ...groupLineMatching.groups6,
+      ...groupLineMatching.groups5,
+      ...groupLineMatching.groups4,
+      ...groupLineMatching.groups3,
+      ...groupLineMatching.groups2,
+    ].map((g) => ({
+      matchCount: g.matchCount,
+      matchedNumbers: g.matchedNumbers,
+      cardWeight: g.autoList.length + g.semiList.length,
+    }));
+
+    const seedTickets: {
+      ticket: number[];
+      weight: number;
+      label: string;
+    }[] = [];
+    if (cmp) {
+      for (const t of cmp.bestTickets) {
+        seedTickets.push({
+          ticket: t.ticket,
+          weight: 12 + t.vsLatestMatch.length * 3 + t.vsStrongMatch.length,
+          label: '당첨매치상위',
+        });
+      }
+      for (const t of cmp.bestComboTickets) {
+        seedTickets.push({
+          ticket: t.ticket,
+          weight: 10 + t.comboScore,
+          label: '콤보상위',
+        });
+      }
+      const ticketSeeds = [...cmp.perTicket]
+        .filter(
+          (t) =>
+            t.comboScore > 0 ||
+            t.vsStrongMatch.length >= 3 ||
+            (compareWinning && t.vsLatestMatch.length >= 3)
+        )
+        .sort(
+          (a, b) =>
+            b.comboScore +
+            b.vsStrongMatch.length * 2 +
+            b.vsLatestMatch.length * 3 -
+            (a.comboScore + a.vsStrongMatch.length * 2 + a.vsLatestMatch.length * 3)
+        )
+        .slice(0, 25);
+      for (const t of ticketSeeds) {
+        seedTickets.push({
+          ticket: t.ticket,
+          weight: 6 + t.comboScore + t.vsStrongMatch.length,
+          label: '통계상위티켓',
+        });
+      }
+    }
+
+    const results = generateScoredRecommendations(
+      {
+        sheetIntent,
+        strongCandidates: resolvedStrongCandidates,
+        excludedCandidates: resolvedExcludedCandidates,
+        winningNumbers: compareWinning ? winningNumbers : [],
+        comboPatterns: getIntentComboPatterns(accumulated, sheetIntent),
+        semiFreq,
+        autoFreq,
+        intersection: cmp
+          ? {
+              two: cmp.twoIntersectionGroups,
+              three: cmp.threeIntersectionGroups,
+              fourPlus: cmp.fourPlusIntersectionGroups,
+            }
+          : { two: [], three: [], fourPlus: [] },
+        lineMatchGroups,
+        seedTickets,
+        unifiedSignals: predictionSignals?.ranked_numbers?.map((r) => ({
+          number: r.number,
+          grade: r.grade,
+          score: r.score,
+          sources: r.sources,
+        })),
+      },
+      5
+    );
+    setRecommendations(results);
+  }, [
+    accumulated,
+    activeComparison,
+    autoOnlyLines,
+    bulkTickets,
+    compareWinning,
+    groupLineMatching.groups2,
+    groupLineMatching.groups3,
+    groupLineMatching.groups4,
+    groupLineMatching.groups5,
+    groupLineMatching.groups6,
+    resolvedStrongCandidates,
+    semiCurrentLines,
+    semiSlipQueue,
+    sheetIntent,
+    winningNumbers,
+    predictionSignals,
+    resolvedExcludedCandidates,
   ]);
 
   /**
@@ -1430,30 +1734,36 @@ export default function SemiAutoComparePanel({
             🔄 반자동 비교
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            반자동 용지의 6개 번호 입력 → 기존 데이터와 비교 (줄 저장으로 누적)
+            {compareWinning
+              ? '복기 — 당첨번호·누적 강한후보·교집합 통계 비교'
+              : '이번회차 — 줄간 겹침·강한 후보 분석 (당첨번호 미사용)'}
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
-          {picked.length > 0 && (
-            <Button type="button" size="small" onClick={(e) => { e.preventDefault(); e.stopPropagation(); reset(); }}>
-              초기화
-            </Button>
+        <Button
+          type="button"
+          size="small"
+          variant="outlined"
+          disabled={isReanalyzing}
+          onClick={() => void handleReanalyze()}
+          sx={{ flexShrink: 0, minWidth: 88, zIndex: 2 }}
+        >
+          {isReanalyzing ? (
+            <><CircularProgress size={14} sx={{ mr: 0.5 }} />재분석…</>
+          ) : (
+            '↻ 재분석'
           )}
-          <Button
-            type="button"
-            size="small"
-            variant="contained"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              saveCurrentLine();
-            }}
-            disabled={picked.length !== 6}
-          >
-            줄 저장
-          </Button>
-        </Stack>
+        </Button>
       </Stack>
+
+      {reanalyzeNotice && (
+        <Alert
+          severity={reanalyzeNotice.startsWith('❌') ? 'error' : 'success'}
+          sx={{ mb: 1.5 }}
+          onClose={() => setReanalyzeNotice(null)}
+        >
+          {reanalyzeNotice}
+        </Alert>
+      )}
 
       <Alert severity="warning" icon={false} sx={{ mb: 1.5, fontSize: 12 }}>
         🟡 본 비교는 패턴 관찰 도구입니다. 어떤 일치도 다음 회차의 1/8,145,060 확률을 변경하지 않습니다.
@@ -1465,8 +1775,25 @@ export default function SemiAutoComparePanel({
           <Typography variant="subtitle2" fontWeight={700}>
             {currentLabel}줄 · {picked.length}/6
           </Typography>
-          {picked.length > 0 && (
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            {picked.length > 0 && (
+              <Button type="button" size="small" onClick={reset}>
+                초기화
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="small"
+              variant="contained"
+              onClick={saveCurrentLine}
+              disabled={picked.length !== 6}
+            >
+              줄 저장
+            </Button>
+          </Stack>
+        </Stack>
+        {picked.length > 0 && (
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
               {picked
                 .slice()
                 .sort((a, b) => a - b)
@@ -1475,7 +1802,6 @@ export default function SemiAutoComparePanel({
                 ))}
             </Stack>
           )}
-        </Stack>
         <Box
           sx={{
             display: 'grid',
@@ -1886,82 +2212,210 @@ export default function SemiAutoComparePanel({
       )}
 
       {/* ─── 대량 비교 결과 ─────────────────────────────────────── */}
-      {bulkComparison && (
+      {activeComparison && (
         <>
           <Divider sx={{ my: 2 }} />
+          {/* 통합 예측 신호 — 4탭 규칙 기반 강한 후보 */}
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'info.main' }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+              <Typography variant="body2" fontWeight={700}>
+                📡 통합 예측 신호 (규칙 v{predictionSignals?.rules_version ?? '…'})
+              </Typography>
+              {predictionSignalsQuery.isFetching && <CircularProgress size={16} />}
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              추첨기 + 후속출현 + 클래식 + 용지({intentSectionLabel}) + 평행회차 — 가중 합산으로 강한 후보 산출.
+              대상 회차: <strong>{predictionSignals?.target_round ?? effectiveRound ?? '?'}</strong>회
+              {predictionSignals?.machine_id ? ` · ${predictionSignals.machine_id}호기` : ''}.
+            </Typography>
+            {predictionSignals ? (
+              <>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                  <Chip
+                    size="small"
+                    color={predictionSignals.sources.machine.available ? 'success' : 'default'}
+                    label={`추첨기 ${predictionSignals.sources.machine.available ? '✓' : '—'}`}
+                    variant="outlined"
+                  />
+                  <Chip
+                    size="small"
+                    color={predictionSignals.sources.post_occurrence.available ? 'success' : 'default'}
+                    label={`후속출현 ${predictionSignals.sources.post_occurrence.available ? '✓' : '—'}`}
+                    variant="outlined"
+                  />
+                  <Chip
+                    size="small"
+                    color={predictionSignals.sources.classic.available ? 'success' : 'default'}
+                    label={`클래식 ${predictionSignals.sources.classic.available ? '✓' : '—'}`}
+                    variant="outlined"
+                  />
+                  <Chip
+                    size="small"
+                    color={predictionSignals.sources.photo_sheet.available ? 'success' : 'default'}
+                    label={`용지 ${predictionSignals.sources.photo_sheet.available ? `✓ ${predictionSignals.sources.photo_sheet.total_analyses ?? 0}건` : '—'}`}
+                    variant="outlined"
+                  />
+                  <Chip
+                    size="small"
+                    color={predictionSignals.sources.parallel_round?.available ? 'success' : 'default'}
+                    label={
+                      predictionSignals.sources.parallel_round?.available
+                        ? `평행 ${predictionSignals.sources.parallel_round.suffix_label ?? '✓'}`
+                        : '평행 —'
+                    }
+                    variant="outlined"
+                  />
+                </Stack>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                  {(['S', 'A', 'B'] as const).map((g) => (
+                    <Chip
+                      key={g}
+                      size="small"
+                      label={`${GRADE_LABELS[g].split('·')[0].trim()} ${predictionSignals.by_grade[g]?.length ?? 0}개`}
+                      sx={{ bgcolor: GRADE_COLORS[g], color: '#fff', fontWeight: 700 }}
+                    />
+                  ))}
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`강한후보 ${resolvedStrongCandidates.length}개`}
+                  />
+                </Stack>
+                <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                  {predictionSignals.ranked_numbers.slice(0, 12).map((r) => (
+                    <Chip
+                      key={`sig-${r.number}`}
+                      size="small"
+                      label={`${r.number}·${r.grade}`}
+                      sx={{
+                        bgcolor: GRADE_COLORS[r.grade],
+                        color: r.grade === 'C' ? 'text.primary' : '#fff',
+                        fontWeight: 700,
+                        height: 22,
+                        fontSize: 11,
+                      }}
+                    />
+                  ))}
+                </Stack>
+              </>
+            ) : (
+              <Alert severity="info" sx={{ py: 0.5 }}>
+                통합 신호 로딩 중… 재분석 버튼으로 갱신할 수 있습니다.
+              </Alert>
+            )}
+          </Paper>
+          {!compareWinning && (
+            <Alert severity="info" sx={{ mb: 1.5 }}>
+              <strong>이번회차 모드</strong> — 당첨번호·적중률 비교는 표시하지 않습니다.
+              줄간 겹침·강한 후보만 분석합니다. 당첨 검증은 <strong>복기 탭</strong>을 사용하세요.
+              {roundDrawn && currentRound != null && (
+                <> ({currentRound}회 추첨 완료 — 복기 탭에서 {latestRound ?? currentRound - 1}회 당첨번호와 비교)</>
+              )}
+            </Alert>
+          )}
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }} flexWrap="wrap" gap={1}>
             <Typography variant="subtitle1" fontWeight={700}>
-              📋 대량 비교 결과 ({bulkComparison.ticketCount}장)
+              📋 대량 비교 결과 ({activeComparison.ticketCount}장)
             </Typography>
-            <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" gap={0.5}>
-              <Button size="small" variant="outlined" onClick={handleRefreshAll}>
-                ↻ 재분석
-              </Button>
-              <TextField
+          </Stack>
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            alignItems={{ xs: 'stretch', sm: 'center' }}
+            spacing={1}
+            sx={{ mb: 1.5, position: 'relative', zIndex: 1 }}
+            useFlexGap
+          >
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              <Button
+                type="button"
                 size="small"
-                label="비교 회차"
-                type="number"
-                value={effectiveRound ?? ''}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  if (Number.isInteger(v) && v > 0 && (!latestRound || v <= latestRound)) {
-                    setCompareRound(v);
-                  } else if (e.target.value === '') {
-                    setCompareRound(null);
-                  }
-                }}
-                inputProps={{ min: 1, max: latestRound ?? undefined, step: 1 }}
-                sx={{ width: 130 }}
-                helperText={
-                  compareRound != null
-                    ? '복기 기준'
-                    : latest.data
-                      ? `최신 ${latest.data.round}회`
-                      : ''
-                }
-              />
-              {compareRound != null && (
-                <Button size="small" onClick={() => setCompareRound(null)}>
-                  ↺ 최신
-                </Button>
-              )}
-              <Button size="small" color="error" variant="outlined" onClick={resetBulk}>
+                variant="outlined"
+                disabled={isReanalyzing}
+                onClick={() => void handleReanalyze()}
+                sx={{ minWidth: 88 }}
+              >
+                {isReanalyzing ? (
+                  <><CircularProgress size={14} sx={{ mr: 0.5 }} />재분석…</>
+                ) : (
+                  '↻ 재분석'
+                )}
+              </Button>
+              <Button type="button" size="small" color="error" variant="outlined" onClick={resetBulk}>
                 초기화
               </Button>
             </Stack>
+            {compareWinning ? (
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
+                <TextField
+                  size="small"
+                  label="비교 회차"
+                  type="number"
+                  value={effectiveRound ?? ''}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isInteger(v) && v > 0 && (!latestRound || v <= latestRound)) {
+                      setCompareRound(v);
+                    } else if (e.target.value === '') {
+                      setCompareRound(null);
+                    }
+                  }}
+                  inputProps={{ min: 1, max: latestRound ?? undefined, step: 1 }}
+                  sx={{ width: 130 }}
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
+                  {compareRound != null
+                    ? '복기 기준'
+                    : latest.data
+                      ? `최신 ${latest.data.round}회`
+                      : ''}
+                </Typography>
+                {compareRound != null && (
+                  <Button type="button" size="small" onClick={() => setCompareRound(null)}>
+                    ↺ 최신
+                  </Button>
+                )}
+              </Stack>
+            ) : (
+              <Chip
+                size="small"
+                color="secondary"
+                label={`이번회차 ${effectiveRound ?? '?'}회 (당첨번호 미사용)`}
+              />
+            )}
           </Stack>
 
-          {/* 집계 메트릭 */}
+          {/* 집계 메트릭 — 복기 탭에서만 당첨 적중률 */}
+          {compareWinning && (
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
             <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
               <Chip
                 size="small"
                 color="primary"
-                label={`평균 적중 ${bulkComparison.avgHits.toFixed(3)} / 6`}
+                label={`평균 적중 ${activeComparison.avgHits.toFixed(3)} / 6`}
                 sx={{ fontWeight: 700 }}
               />
-              <Chip size="small" label={`고유 번호 ${bulkComparison.uniqueNumberCount}/45`} variant="outlined" />
+              <Chip size="small" label={`고유 번호 ${activeComparison.uniqueNumberCount}/45`} variant="outlined" />
               <Chip
                 size="small"
                 color="success"
-                label={`3등이상 ${(bulkComparison.hitRates.threePlus * 100).toFixed(2)}%`}
+                label={`3등이상 ${(activeComparison.hitRates.threePlus * 100).toFixed(2)}%`}
                 sx={{ fontWeight: 700 }}
               />
               <Chip
                 size="small"
                 color="warning"
-                label={`4등이상 ${(bulkComparison.hitRates.fourPlus * 100).toFixed(2)}%`}
+                label={`4등이상 ${(activeComparison.hitRates.fourPlus * 100).toFixed(2)}%`}
               />
               <Chip
                 size="small"
                 color="error"
-                label={`1등 ${(bulkComparison.hitRates.six * 100).toFixed(4)}%`}
+                label={`1등 ${(activeComparison.hitRates.six * 100).toFixed(4)}%`}
               />
-              {bulkComparison.excludedWarningCount > 0 && (
+              {activeComparison.excludedWarningCount > 0 && (
                 <Chip
                   size="small"
                   color="error"
-                  label={`⚠ 배제 매치 2+ 티켓: ${bulkComparison.excludedWarningCount}`}
+                  label={`⚠ 배제 매치 2+ 티켓: ${activeComparison.excludedWarningCount}`}
                 />
               )}
             </Stack>
@@ -1969,17 +2423,18 @@ export default function SemiAutoComparePanel({
               ※ 베이스라인(균등 무작위) 평균 적중 = 0.800 — 본 결과와 비교해 보세요.
             </Typography>
           </Paper>
+          )}
 
-          {/* 적중 분포 테이블 */}
+          {compareWinning && (
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
             <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
               적중 개수 분포
             </Typography>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
               {[0, 1, 2, 3, 4, 5, 6].map((hits) => {
-                const count = bulkComparison.hitDistribution[hits] ?? 0;
-                const pct = bulkComparison.ticketCount > 0
-                  ? (count / bulkComparison.ticketCount) * 100
+                const count = activeComparison.hitDistribution[hits] ?? 0;
+                const pct = activeComparison.ticketCount > 0
+                  ? (count / activeComparison.ticketCount) * 100
                   : 0;
                 return (
                   <Chip
@@ -1993,9 +2448,24 @@ export default function SemiAutoComparePanel({
               })}
             </Stack>
           </Paper>
+          )}
 
-          {/* 당첨번호 표시 (복기 모드 — 회차 수동 선택 시 강조) */}
-          {comparisonRoundData?.numbers && (
+          {!compareWinning && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                <Chip size="small" label={`고유 번호 ${activeComparison.uniqueNumberCount}/45`} variant="outlined" />
+                <Chip
+                  size="small"
+                  color="secondary"
+                  label={`2개+ 강한후보 겹침 ${activeComparison.twoPlusStrongCount}장`}
+                />
+                <Chip size="small" label={`3개+ 강한후보 겹침 ${activeComparison.threePlusStrongCount}장`} />
+              </Stack>
+            </Paper>
+          )}
+
+          {/* 당첨번호 표시 — 복기 탭 전용 */}
+          {compareWinning && comparisonRoundData?.numbers && (
             <Paper
               variant="outlined"
               sx={{
@@ -2180,11 +2650,11 @@ export default function SemiAutoComparePanel({
             );
           })()}
 
-          {/* 추천 조합 생성 — 반자동 빈도 + 자동 누적 기반 */}
+          {/* 추천 조합 — 복기 탭 통계 종합 스코어링 */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
               <Typography variant="body2" fontWeight={700}>
-                🎲 반자동+자동 누적 기반 추천 조합
+                🎲 {compareWinning ? '복기 통계 종합' : '반자동+자동 누적'} 추천 조합
               </Typography>
               <Button
                 type="button"
@@ -2192,26 +2662,30 @@ export default function SemiAutoComparePanel({
                 variant="contained"
                 color="success"
                 onClick={generateRecommendations}
-                disabled={
-                  bulkTickets.length === 0 &&
-                  semiSlipQueue.length === 0 &&
-                  semiCurrentLines.length === 0 &&
-                  !accumulated
-                }
+                disabled={combinedTickets.length === 0 && !accumulated}
               >
                 추천 5세트 생성
               </Button>
             </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              반자동 상위 빈도 번호 우선 + 자동 강한 후보 결합 → 배제 후보 제외 → 6-튜플 추출.
-              {bulkTickets.length === 0 && semiSlipQueue.length === 0
-                ? ' ※ 반자동 번호를 먼저 입력하세요.'
-                : ` 반자동 ${bulkTickets.length + semiSlipQueue.length}장 기반.`}
-              {' '}정직성: 어떤 조합도 1/8,145,060 의 동일 확률.
+              {compareWinning ? (
+                <>
+                  강한 후보·교집합·자동∩반자동 매칭·콤보 패턴·당첨 매치 상위 티켓을 종합 점수화해
+                  복기 탭 분석과 가장 잘 맞는 6번호 5세트를 생성합니다.
+                </>
+              ) : (
+                <>
+                  반자동/자동 빈도 + 강한 후보 + 줄간 겹침 신호를 종합해 6번호 5세트를 생성합니다.
+                </>
+              )}
+              {combinedTickets.length === 0
+                ? ' ※ 자동·반자동 번호를 먼저 입력하세요.'
+                : ` 분석 대상 ${combinedTickets.length}줄.`}
+              {' '}정직성: 수학적 당첨 확률(1/8,145,060)은 동일하며, 복기 신호와의 정합성을 높입니다.
             </Typography>
             {recommendations.length > 0 && (
               <Stack spacing={0.75}>
-                {recommendations.map((combo, idx) => (
+                {recommendations.map((rec, idx) => (
                   <Stack
                     key={`rec-${idx}`}
                     direction="row"
@@ -2222,34 +2696,58 @@ export default function SemiAutoComparePanel({
                   >
                     <Chip size="small" label={`${idx + 1}`} variant="outlined" sx={{ minWidth: 32, fontWeight: 700 }} />
                     <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      {combo.map((n) => (
+                      {rec.combo.map((n) => (
                         <LottoBall key={n} number={n} size={28} dimmed={winningSet ? !winningSet.has(n) : false} />
                       ))}
                     </Stack>
-                    {winningSet && (
+                    {compareWinning && winningSet && (
                       <Chip
                         size="small"
-                        color={combo.filter((n) => winningSet.has(n)).length >= 3 ? 'success' : 'default'}
-                        label={`${combo.filter((n) => winningSet.has(n)).length}/6`}
+                        color={rec.winMatch >= 3 ? 'success' : rec.winMatch >= 2 ? 'warning' : 'default'}
+                        label={`당첨 ${rec.winMatch}/6`}
                         sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
                       />
                     )}
+                    {rec.strongMatch >= 2 && (
+                      <Chip
+                        size="small"
+                        color={rec.strongMatch >= 3 ? 'success' : 'warning'}
+                        variant="outlined"
+                        label={`강한후보 ${rec.strongMatch}`}
+                        sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                      />
+                    )}
+                    {rec.signals.length > 0 && (
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={rec.signals.slice(0, 4).join(' · ')}
+                        sx={{ height: 18, fontSize: 10 }}
+                      />
+                    )}
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                      점수 {rec.totalScore.toFixed(0)}
+                    </Typography>
                   </Stack>
                 ))}
               </Stack>
             )}
           </Paper>
 
-          {/* 상위 5개 매칭 티켓 */}
-          {bulkComparison.bestTickets.length > 0 && (
-            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
-              <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>
-                🏆 최근 당첨 대비 매치 상위 5장
+          {/* 신호 매치 상위 — 당첨번호 없이 강한후보·콤보 패턴 기준 */}
+          {activeComparison.bestSignalTickets.length > 0 && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+                🏆 {intentSectionLabel} 신호 매치 상위 5장
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                추첨기·후속출현·클래식·용지 4신호 통합 강한후보 + 누적 페어/트리플 콤보 일치 점수 —{' '}
+                <strong>당첨번호 사후 비교와 무관</strong>한 예측 신호입니다.
               </Typography>
               <Stack spacing={1}>
-                {bulkComparison.bestTickets.map((t) => (
+                {activeComparison.bestSignalTickets.map((t) => (
                   <Stack
-                    key={t.index}
+                    key={`signal-${t.index}`}
                     direction="row"
                     alignItems="center"
                     spacing={0.75}
@@ -2268,34 +2766,116 @@ export default function SemiAutoComparePanel({
                           key={n}
                           number={n}
                           size={24}
-                          dimmed={winningSet ? !winningSet.has(n) : false}
+                          dimmed={
+                            winningSet && compareWinning ? !winningSet.has(n) : false
+                          }
                         />
                       ))}
                     </Stack>
                     <Chip
                       size="small"
-                      color={t.vsLatestMatch.length >= 3 ? 'success' : 'default'}
-                      label={`매치 ${t.vsLatestMatch.length}/6${t.bonusMatch ? ' +🎁' : ''}`}
+                      color={t.vsStrongMatch.length >= 3 ? 'success' : t.vsStrongMatch.length >= 2 ? 'warning' : 'default'}
+                      label={`강한후보 ${t.vsStrongMatch.length}`}
                       sx={{ fontWeight: 700 }}
                     />
-                    {t.vsLatestMatch.length > 0 && (
-                      <Typography variant="caption" color="text.secondary">
-                        ({t.vsLatestMatch.join(', ')})
-                      </Typography>
+                    {(t.matchedPairCount > 0 || t.matchedTripleCount > 0) && (
+                      <Chip
+                        size="small"
+                        color="primary"
+                        variant="outlined"
+                        label={`콤보 P${t.matchedPairCount} T${t.matchedTripleCount}`}
+                        sx={{ fontWeight: 700 }}
+                      />
                     )}
+                    <Typography variant="caption" color="text.secondary">
+                      신호점수 {ticketSignalScore(t).toFixed(0)}
+                    </Typography>
                   </Stack>
                 ))}
               </Stack>
             </Paper>
           )}
 
+          {/* 복기 사후 검증 — 당첨번호 일치 상위 (접기, 기본 숨김) */}
+          {compareWinning &&
+            winningNumbers.length > 0 &&
+            activeComparison.bestTickets.some((t) => t.vsLatestMatch.length > 0) && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'divider', opacity: 0.92 }}>
+              <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{ mb: showBacktestTop ? 1 : 0 }}
+              >
+                <Box>
+                  <Typography variant="body2" fontWeight={700}>
+                    📋 {effectiveRound ?? '?'}회 복기 검증 — 당첨 일치 상위 (사후 확인)
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    이미 추첨된 {effectiveRound ?? '?'}회 당첨번호와 비교 — 다음 회차 예측에는 의미 없음
+                  </Typography>
+                </Box>
+                <Button
+                  type="button"
+                  size="small"
+                  variant="text"
+                  onClick={() => setShowBacktestTop((v) => !v)}
+                >
+                  {showBacktestTop ? '접기' : '펼치기'}
+                </Button>
+              </Stack>
+              {showBacktestTop && (
+                <Stack spacing={1}>
+                  {activeComparison.bestTickets
+                    .filter((t) => t.vsLatestMatch.length > 0)
+                    .map((t) => (
+                      <Stack
+                        key={t.index}
+                        direction="row"
+                        alignItems="center"
+                        spacing={0.75}
+                        sx={{ flexWrap: 'wrap' }}
+                        useFlexGap
+                      >
+                        <Chip
+                          size="small"
+                          label={`#${t.index + 1}`}
+                          variant="outlined"
+                          sx={{ minWidth: 48 }}
+                        />
+                        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                          {t.ticket.map((n) => (
+                            <LottoBall
+                              key={n}
+                              number={n}
+                              size={24}
+                              dimmed={winningSet ? !winningSet.has(n) : false}
+                            />
+                          ))}
+                        </Stack>
+                        <Chip
+                          size="small"
+                          color={t.vsLatestMatch.length >= 3 ? 'success' : 'default'}
+                          label={`당첨 ${t.vsLatestMatch.length}/6${t.bonusMatch ? ' +🎁' : ''}`}
+                          sx={{ fontWeight: 700 }}
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                          ({t.vsLatestMatch.join(', ')})
+                        </Typography>
+                      </Stack>
+                    ))}
+                </Stack>
+              )}
+            </Paper>
+          )}
+
           {/* ── 누적 자동 강한 후보 교집합 분포 — 자동+반자동 통합 통계 ── */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'primary.main' }}>
             <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-              🔗 이번회차 자동 누적 강한 후보 교집합 (자동+반자동 {intersectionCmp.ticketCount}장 통합 분석)
+              🔗 {intentSectionLabel} 자동 누적 강한 후보 교집합 (자동+반자동 {intersectionCmp.ticketCount}장 통합 분석)
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              ※ <strong>분석 모집단 = 강한 후보 {getCurrentRoundStrongCandidates(accumulated).length}개 안의 부분 조합만</strong>.
+              ※ <strong>분석 모집단 = 강한 후보 {resolvedStrongCandidates.length}개 안의 부분 조합만</strong>.
               각 티켓의 번호 중 강한 후보에 속한 것 (vsStrongMatch) 이 2개 이상일 때만 그 교집합 세트를 그룹화.
               아래 별도 패널인 '🔀 자동 ∩ 반자동' 은 <strong>1~45 전체 모집단</strong>을 보는 다른 분석 — 모집단이 달라 카운트도 다름.
             </Typography>
@@ -2330,9 +2910,19 @@ export default function SemiAutoComparePanel({
                 sx={{ fontWeight: 700 }}
               />
             </Stack>
-            {getCurrentRoundStrongCandidates(accumulated).length === 0 && (
+            {strongCandidateSource === 'none' && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                ※ 이번회차 자동 누적 데이터가 없습니다. 자동 용지를 분석하여 누적을 만들면 교집합 분석이 활성됩니다.
+                ※ {intentSectionLabel} 자동 누적 데이터가 없습니다. 자동 용지를 분석하여 누적을 만들면 교집합 분석이 활성화됩니다.
+              </Typography>
+            )}
+            {strongCandidateSource === 'local' && (
+              <Typography variant="caption" color="warning.main" sx={{ mt: 0.5, display: 'block' }}>
+                ※ 서버 누적 없음 — 등록한 자동 줄 {autoOnlyLines.length}개에서 강한 후보 {resolvedStrongCandidates.length}개를 추정했습니다. [분석·저장] 또는 재분석으로 통합 신호를 불러오세요.
+              </Typography>
+            )}
+            {strongCandidateSource === 'unified-rules' && predictionSignals && (
+              <Typography variant="caption" color="success.main" sx={{ mt: 0.5, display: 'block' }}>
+                ※ 규칙 v{predictionSignals.rules_version} — 추첨기·후속출현·클래식·용지·평행회차 5신호 통합 강한 후보 {resolvedStrongCandidates.length}개 (대상 {predictionSignals.target_round}회)
               </Typography>
             )}
 
@@ -2352,7 +2942,7 @@ export default function SemiAutoComparePanel({
                   sx={{ mb: 1 }}
                 >
                   <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                    📌 강한 후보({getCurrentRoundStrongCandidates(accumulated).length}개) 중 어떤 쌍이 티켓에 자주 함께 나왔는지 — 강한 후보의 부분 조합만
+                    📌 강한 후보({resolvedStrongCandidates.length}개) 중 어떤 쌍이 티켓에 자주 함께 나왔는지 — 강한 후보의 부분 조합만
                   </Typography>
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                     <Chip
@@ -2615,7 +3205,7 @@ export default function SemiAutoComparePanel({
               {groupLineMatching.strongAvailable && (
                 <Box sx={{ mb: 1, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
                   <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.3 }}>
-                    🎯 이번회차 자동 누적 강한 후보 ({groupLineMatching.strongCandidateCount}개) 기반 통계 — 그룹별 매치 번호와의 일치 분포
+                    🎯 {intentSectionLabel} 자동 누적 강한 후보 ({groupLineMatching.strongCandidateCount}개) 기반 통계 — 그룹별 매치 번호와의 일치 분포
                   </Typography>
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                     {[0, 1, 2, 3, 4, 5, 6].map((k) => {
@@ -2744,7 +3334,7 @@ export default function SemiAutoComparePanel({
                                   })()}
                                   {groupLineMatching.strongAvailable && (() => {
                                     const sm = g.matchedNumbers.filter((n) =>
-                                      getCurrentRoundStrongCandidates(accumulated).includes(n)
+                                      resolvedStrongCandidates.includes(n)
                                     ).length;
                                     return (
                                       <Chip
@@ -2884,10 +3474,10 @@ export default function SemiAutoComparePanel({
             </Paper>
           )}
 
-      {picked.length === 6 && bulkComparison && (
+      {picked.length === 6 && activeComparison && (
         <>
           {/* ── 누적 자동 페어/트리플 콤보 교집합 ──────────────── */}
-          {bulkComparison.comboDataAvailable && (
+          {activeComparison.comboDataAvailable && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
                 🔗 자동 누적 페어/트리플 콤보 교집합
@@ -2896,13 +3486,13 @@ export default function SemiAutoComparePanel({
                 <Chip
                   size="small"
                   color="primary"
-                  label={`평균 페어 매치 ${bulkComparison.avgPairMatches.toFixed(2)} / 티켓`}
+                  label={`평균 페어 매치 ${activeComparison.avgPairMatches.toFixed(2)} / 티켓`}
                   sx={{ fontWeight: 700 }}
                 />
                 <Chip
                   size="small"
                   color="primary"
-                  label={`평균 트리플 매치 ${bulkComparison.avgTripleMatches.toFixed(3)} / 티켓`}
+                  label={`평균 트리플 매치 ${activeComparison.avgTripleMatches.toFixed(3)} / 티켓`}
                   variant="outlined"
                 />
               </Stack>
@@ -2910,12 +3500,12 @@ export default function SemiAutoComparePanel({
                 페어 매치 분포 (티켓 안에 자동 누적의 자주-페어가 통째로 들어 있는지):
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-                {Object.entries(bulkComparison.pairMatchDistribution)
+                {Object.entries(activeComparison.pairMatchDistribution)
                   .map(([k, v]) => [Number(k), v] as [number, number])
                   .sort((a, b) => a[0] - b[0])
                   .map(([k, v]) => {
-                    const pct = bulkComparison.ticketCount > 0
-                      ? (v / bulkComparison.ticketCount) * 100
+                    const pct = activeComparison.ticketCount > 0
+                      ? (v / activeComparison.ticketCount) * 100
                       : 0;
                     return (
                       <Chip
@@ -2932,12 +3522,12 @@ export default function SemiAutoComparePanel({
                 트리플 매치 분포:
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                {Object.entries(bulkComparison.tripleMatchDistribution)
+                {Object.entries(activeComparison.tripleMatchDistribution)
                   .map(([k, v]) => [Number(k), v] as [number, number])
                   .sort((a, b) => a[0] - b[0])
                   .map(([k, v]) => {
-                    const pct = bulkComparison.ticketCount > 0
-                      ? (v / bulkComparison.ticketCount) * 100
+                    const pct = activeComparison.ticketCount > 0
+                      ? (v / activeComparison.ticketCount) * 100
                       : 0;
                     return (
                       <Chip
@@ -2954,13 +3544,13 @@ export default function SemiAutoComparePanel({
           )}
 
           {/* ── 콤보 점수 상위 5장 ─────────────────────────────── */}
-          {bulkComparison.bestComboTickets.length > 0 && (
+          {activeComparison.bestComboTickets.length > 0 && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>
                 🥇 누적 자동과 가장 잘 맞은 티켓 5장 (페어 1점 · 트리플 3점 · 쿼드 6점)
               </Typography>
               <Stack spacing={0.75}>
-                {bulkComparison.bestComboTickets.map((t) => (
+                {activeComparison.bestComboTickets.map((t) => (
                   <Stack
                     key={`combo-best-${t.index}`}
                     direction="row"

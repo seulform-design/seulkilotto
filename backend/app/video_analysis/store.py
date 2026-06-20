@@ -567,7 +567,7 @@ def _accumulate_combo_patterns(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     if current_details or current_sheets:
         from .combo_patterns import analyze_current_round_sheet_combos
 
-        review_ref = get_photo_review_template().get("marked_numbers") or []
+        review_ref = []  # 이번회차: 복기 기준번호 참조 금지 (데이터 격리)
         current_out = analyze_current_round_sheet_combos(
             sheet_details=current_details or None,
             sheet_number_sets=current_sheets if not current_details else None,
@@ -974,7 +974,7 @@ def _recompute_intent_combo(entries: List[Dict[str, Any]], intent: str) -> Dict[
     for entry in group:
         details.extend(_entry_sheet_details(entry))
     sheets = _collect_deduped_sheet_sets(group)
-    review_ref = get_photo_review_template().get("marked_numbers") or []
+    review_ref: list[int] = []  # 복기 템플릿 미참조 — 이번회차 저장분 줄간 겹침만
     return analyze_current_round_sheet_combos(
         sheet_details=details or None,
         sheet_number_sets=sheets if not details else None,
@@ -989,9 +989,7 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     group = [e for e in entries if e.get("video_intent") == intent]
     label = "복기" if intent == "review" else "이번회차"
     round_no = str(get_review_round_no()) if intent == "review" else str(get_current_round_no())
-    entry_acc = _accumulate_entries(group) if group else {
-        "final_predictions": {"strong_candidates": [], "excluded_candidates": []}
-    }
+    intent_acc = _accumulate_entries(group) if group else None
     combo = _recompute_intent_combo(entries, intent) if group else {
         "summary": f"{label} 분석 없음",
         "pair_duplicates": [],
@@ -1003,16 +1001,22 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     if combo.get("pair_duplicates") or combo.get("triple_duplicates"):
         parts.append(combo.get("summary", ""))
 
+    slice_fp = (intent_acc or {}).get("final_predictions") or {
+        "strong_candidates": [],
+        "excluded_candidates": [],
+    }
+    combo_strong = combo.get("strong_candidates") or []
+    if combo_strong:
+        merged_strong = list(dict.fromkeys(combo_strong + (slice_fp.get("strong_candidates") or [])))
+        slice_fp = {**slice_fp, "strong_candidates": merged_strong[:18]}
+
     slice_out: Dict[str, Any] = {
         "video_intent": intent,
         "video_intent_label": label,
         "ticket_round": round_no,
         "total_analyses": len(group),
         "accumulated_combo_patterns": combo,
-        "final_predictions": entry_acc.get("final_predictions") or {
-            "strong_candidates": [],
-            "excluded_candidates": [],
-        },
+        "final_predictions": slice_fp,
         "entries_summary": _entries_summary_for(group),
         "app_ui_message": " · ".join(p for p in parts if p),
     }
@@ -1022,9 +1026,9 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         slice_out["draw_template"] = official
         slice_out["saved_review_template"] = photo if photo.get("marked_numbers") else None
     else:
-        slice_out["saved_review_template"] = get_photo_review_template()
-        if group:
-            slice_out["pattern_ready"] = bool(slice_out["saved_review_template"].get("marked_numbers"))
+        # 이번회차: 복기 saved_review_template 노출·참조 금지
+        slice_out["saved_review_template"] = None
+        slice_out["pattern_ready"] = len(group) > 0
     return slice_out
 
 

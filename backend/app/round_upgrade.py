@@ -162,7 +162,7 @@ def upgrade_rounds(force: bool = False) -> Dict[str, Any]:
 
     v2_sync = _sync_v2_database()
 
-    return {
+    result = {
         "ok": fail_c == 0 or new_c > 0,
         "before_latest": latest_csv,
         "after_latest": after_latest,
@@ -176,6 +176,17 @@ def upgrade_rounds(force: bool = False) -> Dict[str, Any]:
         "v2_sync": v2_sync,
         "log_tail": buf.getvalue()[-2000:] if buf.getvalue() else "",
     }
+
+    try:
+        from .pipeline.rollover import maybe_rollover_after_upgrade
+
+        rollover = maybe_rollover_after_upgrade(result)
+        if rollover is not None:
+            result["rollover"] = rollover.to_dict()
+    except Exception as exc:  # noqa: BLE001
+        result["rollover"] = {"ok": False, "error": str(exc)}
+
+    return result
 
 
 def _sync_v2_database() -> Optional[Dict[str, Any]]:

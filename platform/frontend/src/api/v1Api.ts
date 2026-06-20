@@ -452,6 +452,21 @@ export const v1Api = {
   getPhotoAnalysisAccumulated: () =>
     fetchJson<PhotoAnalysisAccumulated>('/api/v1/photo-analysis/accumulated'),
 
+  getPredictionSignals: (intent: 'review' | 'current_round' = 'current_round', seed?: number) => {
+    const q = new URLSearchParams({ intent });
+    if (seed != null) q.set('seed', String(seed));
+    return fetchJson<PredictionSignalsResponse>(`/api/v1/prediction/signals?${q.toString()}`);
+  },
+
+  getParallelRoundAnalysis: (targetRound?: number) => {
+    const q = new URLSearchParams();
+    if (targetRound != null) q.set('target_round', String(targetRound));
+    const qs = q.toString();
+    return fetchJson<ParallelRoundAnalysisResponse>(
+      `/api/v1/analysis/parallel-round${qs ? `?${qs}` : ''}`
+    );
+  },
+
   getPhotoVisionConfig: () =>
     fetchJson<{
       configured: boolean;
@@ -923,4 +938,96 @@ export interface PostOccurrenceResponse {
   }[];
   similar_rounds_top20?: { round: number; similarity: number; jaccard: number }[];
   evidence?: { match_rounds_used: number; backtest_rounds: number; trusted_only: boolean };
+}
+
+export interface PredictionSignalNumber {
+  number: number;
+  score: number;
+  source_count: number;
+  signal_count: number;
+  sources: string[];
+  excluded_by: string[];
+  grade: 'S' | 'A' | 'B' | 'C' | 'X';
+}
+
+export interface PredictionSignalsResponse {
+  rules_version: string;
+  target_round: number;
+  target_draw_date: string;
+  latest_round: number;
+  intent: 'review' | 'current_round';
+  machine_id: number;
+  source_weights: Record<string, number>;
+  strong_candidates: number[];
+  excluded_candidates: number[];
+  ranked_numbers: PredictionSignalNumber[];
+  by_grade: Record<'S' | 'A' | 'B' | 'C' | 'X', number[]>;
+  sources: {
+    machine: {
+      available: boolean;
+      machine_id?: number;
+      hot_top5?: { number: number; count: number }[];
+      next_round?: number;
+    };
+    post_occurrence: {
+      available: boolean;
+      trigger_round?: number;
+      grades?: { S?: number[]; A?: number[]; B?: number[] };
+    };
+    classic: { available: boolean; method?: string; combo_count?: number };
+    photo_sheet: {
+      available: boolean;
+      intent?: string;
+      total_analyses?: number;
+      ticket_round?: string;
+    };
+    parallel_round: {
+      available: boolean;
+      suffix?: number;
+      suffix_label?: string;
+      parallel_count?: number;
+      parallel_strong?: number[];
+      semi_auto_fixed_hint?: number[];
+      ending_digits?: { digit: number; count: number }[];
+      summary?: string;
+    };
+  };
+  disclaimer: string;
+}
+
+export interface ParallelRoundDecadeBucket {
+  range: [number, number];
+  strong: number[];
+  expected: number[];
+  freq_top: [number, number][];
+}
+
+export interface ParallelRoundDrawRow {
+  round: number;
+  numbers: number[];
+  bonus: number;
+  draw_date?: string;
+}
+
+export interface ParallelRoundAnalysisResponse {
+  target_round: number;
+  suffix: number;
+  suffix_label: string;
+  parallel_rounds: number[];
+  parallel_count: number;
+  draw_table: ParallelRoundDrawRow[];
+  by_decade: Record<string, ParallelRoundDecadeBucket>;
+  ending_digits: { digit: number; count: number }[];
+  parallel_strong: number[];
+  parallel_expected: number[];
+  semi_auto_fixed_hint: number[];
+  travel_highlights: {
+    number: number;
+    travel_score: number;
+    appearances: { round: number; position: number }[];
+  }[];
+  bonus_freq: { number: number; count: number }[];
+  summary: string;
+  disclaimer: string;
+  error?: string;
 }

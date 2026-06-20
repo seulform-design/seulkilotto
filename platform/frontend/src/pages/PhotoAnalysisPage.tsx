@@ -19,10 +19,12 @@ import {
   Tabs,
   Typography,
 } from '@mui/material';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import BulkLineInputDialog from '../components/BulkLineInputDialog';
 import LottoBall from '../components/LottoBall';
 import NumberFrequencyPanel from '../components/NumberFrequencyPanel';
+import ParallelRoundPanel from '../components/ParallelRoundPanel';
 import PhotoBacktestPanel from '../components/PhotoBacktestPanel';
 import SavedLinesPanel, {
   GAME_LABELS,
@@ -396,8 +398,8 @@ function IntentAccumulatedPanel({
     return (
       <Alert severity="info">
         {intent === 'review'
-          ? '복기 탭에 저장된 분석이 없습니다. 당첨번호 검증용 사진을 업로드해 분석하세요.'
-          : '이번회차 탭에 저장된 분석이 없습니다. 복기 분석 후 이번회차 용지를 분석하세요.'}
+          ? '복기 탭에 저장된 분석이 없습니다. 당첨번호 검증용 용지를 등록·분석하세요.'
+          : '이번회차 탭에 저장된 분석이 없습니다. A~E 줄을 등록한 뒤 분석·저장하세요.'}
       </Alert>
     );
   }
@@ -425,14 +427,6 @@ function IntentAccumulatedPanel({
       )}
       {intent === 'review' && (
         <SavedReviewTemplatePanel data={slice.saved_review_template} winningSet={winningSet} />
-      )}
-      {intent === 'current_round' && (
-        <>
-          <SavedReviewTemplatePanel data={slice.saved_review_template} />
-          {slice.pattern_ready === false && (
-            <Alert severity="warning">복기 탭에서 사진 분석을 먼저 완료해야 이번회차 패턴이 적용됩니다.</Alert>
-          )}
-        </>
       )}
       {slice.accumulated_combo_patterns?.cross_line_analysis && (
         <CrossLineAnalysisPanel
@@ -521,6 +515,12 @@ function HistoryEntriesPanel({
 
 const GRID_NUMBERS = Array.from({ length: 45 }, (_, i) => i + 1);
 const GRID_COLS = 7;
+
+function parseRoundNo(value?: string | number | null): number | null {
+  if (value == null) return null;
+  const n = typeof value === 'number' ? value : parseInt(String(value).replace(/[^\d]/g, ''), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 function ManualNumberGrid({
   picked,
@@ -737,9 +737,17 @@ export default function PhotoAnalysisPage() {
   const [visionKey, setVisionKey] = useState('');
   const [visionSaving, setVisionSaving] = useState(false);
   const [visionSaveMsg, setVisionSaveMsg] = useState<string | null>(null);
-  const [latestRound, setLatestRound] = useState<number | null>(null);
-  const [currentRound, setCurrentRound] = useState<number | null>(null);
-  const [roundDrawn, setRoundDrawn] = useState<boolean>(false); // 이번회차 당첨 발표 여부
+
+  const metaQuery = useQuery({
+    queryKey: ['v1-meta'],
+    queryFn: v1Api.getMeta,
+    staleTime: 60_000,
+  });
+  const roundStatusQuery = useQuery({
+    queryKey: ['v1-round-status'],
+    queryFn: v1Api.getRoundStatus,
+    staleTime: 60_000,
+  });
 
   const refreshAccumulated = useCallback(async () => {
     try {
@@ -750,26 +758,7 @@ export default function PhotoAnalysisPage() {
   }, []);
 
   useEffect(() => {
-    // mount 시 3개 비동기 호출 — 모두 mountedRef 가드로 보호
     refreshAccumulated();
-    v1Api
-      .getMeta()
-      .then((m) => {
-        if (!mountedRef.current) return;
-        setLatestRound(m.latest_round);
-        setCurrentRound(m.current_round);
-      })
-      .catch(() => {});
-    // 회차 상태 (당첨 발표 여부) 별도 조회
-    v1Api
-      .getRoundStatus()
-      .then((s) => {
-        if (!mountedRef.current) return;
-        setLatestRound(s.latest_round);
-        setCurrentRound(s.current_round);
-        setRoundDrawn(s.drawn);
-      })
-      .catch(() => {});
     v1Api
       .getPhotoVisionConfig()
       .then((c) => {
@@ -785,6 +774,56 @@ export default function PhotoAnalysisPage() {
   }, [refreshAccumulated]);
 
   const activeSlice = accumulated?.by_intent?.[activeTab] ?? null;
+
+  const latestRound = useMemo(() => {
+    const fromStatus = roundStatusQuery.data?.review_round ?? roundStatusQuery.data?.latest_round;
+    if (fromStatus && fromStatus > 0) return fromStatus;
+    const fromMeta = metaQuery.data?.latest_round;
+    if (fromMeta && fromMeta > 0) return fromMeta;
+    const fromReviewSlice = parseRoundNo(accumulated?.by_intent?.review?.ticket_round);
+    if (fromReviewSlice) return fromReviewSlice;
+    const fromTemplate = parseRoundNo(accumulated?.by_intent?.review?.draw_template?.ticket_round);
+    if (fromTemplate) return fromTemplate;
+    return null;
+  }, [roundStatusQuery.data, metaQuery.data, accumulated]);
+
+  const currentRound = useMemo(() => {
+    const fromStatus = roundStatusQuery.data?.current_round;
+    if (fromStatus && fromStatus > 0) return fromStatus;
+    const fromMeta = metaQuery.data?.current_round ?? metaQuery.data?.next_round;
+    if (fromMeta && fromMeta > 0) return fromMeta;
+    const fromCurrentSlice = parseRoundNo(accumulated?.by_intent?.current_round?.ticket_round);
+    if (fromCurrentSlice) return fromCurrentSlice;
+    if (latestRound) return latestRound + 1;
+    return null;
+  }, [roundStatusQuery.data, metaQuery.data, accumulated, latestRound]);
+
+  const roundDrawn = roundStatusQuery.data?.drawn ?? false;
+
+  const reviewWinningSet = useMemo(() => {
+    if (activeTab !== 'review') return null;
+    return toWinningSet(activeSlice?.draw_template);
+  }, [activeTab, activeSlice?.draw_template]);
+
+  const reviewDrawQuery = useQuery({
+    queryKey: ['v1-round-draw', latestRound],
+    queryFn: () => v1Api.getRound(latestRound as number),
+    enabled: activeTab === 'review' && latestRound != null && !reviewWinningSet,
+    staleTime: 300_000,
+  });
+
+  const activeReviewWinningSet = useMemo(() => {
+    if (activeTab !== 'review') return null;
+    if (reviewWinningSet) return reviewWinningSet;
+    const draw = reviewDrawQuery.data;
+    if (!draw?.numbers?.length) return null;
+    const set = new Set(draw.numbers);
+    if (draw.bonus) set.add(draw.bonus);
+    return set;
+  }, [activeTab, reviewWinningSet, reviewDrawQuery.data]);
+
+  const displayReviewRound = latestRound ?? '…';
+  const displayCurrentRound = currentRound ?? '…';
   const manualDraft = manualByIntent[activeTab];
   const { picked, currentSlipLines, slipQueue, bulkAutoTickets } = manualDraft;
 
@@ -1065,15 +1104,15 @@ export default function PhotoAnalysisPage() {
         >
           <Tab
             value="review"
-            label={`복기 (${latestRound ?? '?'}회 당첨)`}
+            label={`복기 (${displayReviewRound}회 당첨)`}
             sx={{ fontWeight: activeTab === 'review' ? 700 : 400 }}
           />
           <Tab
             value="current_round"
             label={
               roundDrawn
-                ? `이번회차 (${currentRound ?? '?'}회) ⚠️`
-                : `이번회차 (${currentRound ?? '?'}회)`
+                ? `이번회차 (${displayCurrentRound}회) ⚠️`
+                : `이번회차 (${displayCurrentRound}회)`
             }
             sx={{
               fontWeight: activeTab === 'current_round' ? 700 : 400,
@@ -1084,13 +1123,18 @@ export default function PhotoAnalysisPage() {
       </Paper>
 
       {/* ━━ 안내 (탭 + 입력 방법 통합) ━━ */}
+      {(metaQuery.isError || roundStatusQuery.isError) && latestRound == null && (
+        <Alert severity="warning" sx={{ mb: 1 }}>
+          회차 정보를 불러오지 못했습니다. 네트워크·API 연결을 확인한 뒤 새로고침해 주세요.
+        </Alert>
+      )}
       <Alert severity="info">
         <Stack spacing={0.5}>
           <Typography variant="body2">
             {activeTab === 'review' ? (
-              <><strong>복기 탭</strong> — {latestRound ?? '?'}회 <strong>당첨번호</strong>와 수기 등록 <strong>A~E 줄</strong> 일치 확인. 다른 줄에 겹치는 2·3·4번호 조합도 표시합니다.</>
+              <><strong>복기 탭</strong> — {displayReviewRound}회 <strong>당첨번호</strong>와 수기 등록 <strong>A~E 줄</strong> 일치 확인. 다른 줄에 겹치는 2·3·4번호 조합도 표시합니다.</>
             ) : (
-              <><strong>이번회차 탭</strong> — {currentRound ?? '?'}회 수기 등록 <strong>A~E 줄</strong>의 <strong>다른 줄·다른 용지</strong> 겹침 (2·3·4번호) 을 검사합니다.</>
+              <><strong>이번회차 탭</strong> — {displayCurrentRound}회 수기 등록 <strong>A~E 줄</strong>의 <strong>다른 줄·다른 용지</strong> 겹침 (2·3·4번호) 을 검사합니다.</>
             )}
           </Typography>
           <Typography variant="caption" color="text.secondary">
@@ -1152,7 +1196,11 @@ export default function PhotoAnalysisPage() {
             </Button>
           </Stack>
         </Stack>
-        <ManualNumberGrid picked={picked} onToggle={togglePicked} currentLabel={currentLabel} />
+        <ManualNumberGrid
+          picked={picked}
+          onToggle={togglePicked}
+          currentLabel={currentLabel}
+        />
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 2 }}>
           <Button type="button" variant="outlined" color="inherit" onClick={resetCurrentSlip}>
             용지 초기화
@@ -1247,7 +1295,7 @@ export default function PhotoAnalysisPage() {
                 }),
             })),
           ];
-          const winSet = activeTab === 'review' ? toWinningSet(activeSlice?.draw_template) : null;
+          const winSet = activeTab === 'review' ? activeReviewWinningSet : null;
           return (
             <>
               <Typography variant="body2" sx={{ mb: 0.5 }}>
@@ -1340,7 +1388,7 @@ export default function PhotoAnalysisPage() {
           ...slipQueue.flatMap((slip) => slip.lines.map((line) => line.numbers)),
           ...bulkAutoTickets,
         ]}
-        winningSet={activeTab === 'review' ? toWinningSet(activeSlice?.draw_template) : null}
+        winningSet={activeTab === 'review' ? activeReviewWinningSet : null}
         sourceLabel="자동 = 구입번호 직접입력"
         bodyLabel="자동 (구입번호 직접입력)"
         emptyHint="자동 데이터가 없습니다. '구입번호 직접입력' 영역에서 줄을 추가하면 여기에 빈도가 표시됩니다."
@@ -1353,6 +1401,10 @@ export default function PhotoAnalysisPage() {
         onDeleteEntry={deleteHistoryEntry}
       />
 
+      <ParallelRoundPanel
+        targetRound={activeTab === 'review' ? (latestRound ?? currentRound) : (currentRound ?? latestRound)}
+      />
+
       {/* ════════════ § 3. 비교 · 백테스트 ════════════ */}
       <Divider textAlign="left" sx={{ mt: 1 }}>
         <Typography variant="overline" fontWeight={800} color="primary.main" sx={{ letterSpacing: 1.2 }}>
@@ -1361,6 +1413,10 @@ export default function PhotoAnalysisPage() {
       </Divider>
 
       <SemiAutoComparePanel
+        sheetIntent={activeTab}
+        currentRound={currentRound}
+        latestRound={latestRound}
+        roundDrawn={roundDrawn}
         slipQueue={slipQueue}
         accumulated={accumulated}
         onAccumulatedChange={setAccumulated}
@@ -1373,9 +1429,10 @@ export default function PhotoAnalysisPage() {
             bulkAutoTickets: bulkAutoTickets.filter((_, i) => i !== idx),
           })
         }
+        onRefreshAccumulated={refreshAccumulated}
       />
 
-      <PhotoBacktestPanel accumulated={accumulated} />
+      {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
 
       {/* ════════════ § 4. 고급 설정 ════════════ */}
       <Divider textAlign="left" sx={{ mt: 1 }}>

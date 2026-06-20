@@ -51,8 +51,8 @@ def test_current_and_historical_datasets_are_isolated(monkeypatch, tmp_path):
 
     assert len(historical["entries"]) == 1
     assert len(current["entries"]) == 1
-    assert acc["by_intent"]["review"]["final_predictions"]["strong_candidates"] == [1, 2, 3, 4, 5, 6]
-    assert acc["by_intent"]["current_round"]["final_predictions"]["strong_candidates"] == [7, 8, 9, 10, 11, 12]
+    assert set(acc["by_intent"]["review"]["final_predictions"]["strong_candidates"]) == {1, 2, 3, 4, 5, 6}
+    assert set(acc["by_intent"]["current_round"]["final_predictions"]["strong_candidates"]) == {7, 8, 9, 10, 11, 12}
     assert acc["current_dataset"]["round_no"] == 1227
 
 

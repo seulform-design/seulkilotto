@@ -17,12 +17,15 @@ from .database import get_last_data_source
 from .routers import (
     analyze,
     data,
+    datasets,
     generate,
     history,
     meta,
     patterns,
+    parallel_round,
     photo_analysis,
     post_occurrence,
+    prediction_signals,
     recommend,
     stats,
 )
@@ -35,6 +38,7 @@ from .scheduler import start_scheduler, stop_scheduler
 _DEFAULT_ORIGIN_PATTERNS = (
     r"https://[a-z0-9-]+\.trycloudflare\.com",
     r"https://[a-z0-9-]+\.onrender\.com",
+    r"https://[a-z0-9-]+\.up\.railway\.app",
     r"http://localhost(:\d+)?",
     r"http://127\.0\.0\.1(:\d+)?",
 )
@@ -92,6 +96,9 @@ app.include_router(meta.router)
 app.include_router(data.router)
 app.include_router(post_occurrence.router)
 app.include_router(photo_analysis.router)
+app.include_router(prediction_signals.router)
+app.include_router(parallel_round.router)
+app.include_router(datasets.router)
 
 
 @app.get("/health", tags=["system"])

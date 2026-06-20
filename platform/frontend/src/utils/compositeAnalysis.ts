@@ -26,6 +26,7 @@ import {
   sumTotal,
 } from './comboMetrics';
 import type {
+  ClassicRecommendResponse,
   PhotoAnalysisAccumulated,
   PostOccurrenceResponse,
   RoundRecommendResponse,
@@ -49,6 +50,7 @@ export interface ConsensusNumber {
 export interface SourceAvailability {
   machine: boolean;
   post: boolean;
+  classic: boolean;
   photo: boolean;
 }
 
@@ -68,6 +70,8 @@ const SOURCE_IDS = {
   machineHot: 'machine-hot',
   postS: 'post-S',
   postTop10: 'post-top10',
+  classicWilson: 'classic-wilson',
+  classicBlend: 'classic-blend',
   photoStrong: 'photo-strong',
   photoExcluded: 'photo-excluded',
 } as const;
@@ -206,13 +210,16 @@ function generateConsensusSets(
 export function buildComposite(
   machine: RoundRecommendResponse | null | undefined,
   post: PostOccurrenceResponse | null | undefined,
-  photo: PhotoAnalysisAccumulated | null | undefined
+  photo: PhotoAnalysisAccumulated | null | undefined,
+  classic?: ClassicRecommendResponse | null,
+  photoIntent: 'review' | 'current_round' = 'current_round'
 ): CompositeAnalysisResult {
   const perNumber = emptyConsensus();
 
   const sourcesAvailable: SourceAvailability = {
     machine: !!machine,
     post: !!post,
+    classic: !!classic,
     photo: !!photo,
   };
   const sourceCount = (Object.values(sourcesAvailable) as boolean[]).filter(Boolean).length;
@@ -238,17 +245,51 @@ export function buildComposite(
     });
   }
 
-  // ── 3) 용지 분석 favor: final_predictions.strong_candidates ──
-  if (photo?.final_predictions?.strong_candidates?.length) {
-    photo.final_predictions.strong_candidates.slice(0, PHOTO_TOP_COUNT).forEach((number) => {
+  // ── 3) 클래식 wilson top + blend 조합 번호 ──
+  const wilsonTop = (classic?.pattern_analysis?.wilson as { top10?: { number: number }[] } | undefined)
+    ?.top10;
+  if (wilsonTop?.length) {
+    wilsonTop.slice(0, 8).forEach(({ number }) => {
+      const item = perNumber[number];
+      if (item) addSignal(item, SOURCE_IDS.classicWilson);
+    });
+  }
+  if (classic?.combinations?.length) {
+    const freq: Record<number, number> = {};
+    classic.combinations.forEach((c) => {
+      c.numbers.forEach((n) => {
+        freq[n] = (freq[n] ?? 0) + 1;
+      });
+    });
+    Object.entries(freq)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 10)
+      .forEach(([n]) => {
+        const item = perNumber[Number(n)];
+        if (item) addSignal(item, SOURCE_IDS.classicBlend);
+      });
+  }
+
+  // ── 4) 용지 분석 — intent 슬라이스 우선 (데이터 격리) ──
+  const photoStrong =
+    photo?.by_intent?.[photoIntent]?.final_predictions?.strong_candidates ??
+    photo?.by_intent?.[photoIntent]?.accumulated_combo_patterns?.strong_candidates ??
+    photo?.final_predictions?.strong_candidates ??
+    [];
+  const photoExcluded =
+    photo?.by_intent?.[photoIntent]?.final_predictions?.excluded_candidates ??
+    photo?.final_predictions?.excluded_candidates ??
+    [];
+
+  if (photoStrong.length) {
+    photoStrong.slice(0, PHOTO_TOP_COUNT).forEach((number) => {
       const item = perNumber[number];
       if (item) addSignal(item, SOURCE_IDS.photoStrong);
     });
   }
 
-  // ── 4) 용지 분석 excluded: final_predictions.excluded_candidates ──
-  if (photo?.final_predictions?.excluded_candidates?.length) {
-    photo.final_predictions.excluded_candidates.forEach((number) => {
+  if (photoExcluded.length) {
+    photoExcluded.forEach((number) => {
       const item = perNumber[number];
       if (item) markExcluded(item, SOURCE_IDS.photoExcluded);
     });
@@ -306,6 +347,8 @@ export const SOURCE_LABELS: Record<string, string> = {
   [SOURCE_IDS.machineHot]: '추첨기 hot',
   [SOURCE_IDS.postS]: '후속출현 grade-S',
   [SOURCE_IDS.postTop10]: '후속출현 top10',
+  [SOURCE_IDS.classicWilson]: '클래식 윌슨',
+  [SOURCE_IDS.classicBlend]: '클래식 blend',
   [SOURCE_IDS.photoStrong]: '용지 strong',
   [SOURCE_IDS.photoExcluded]: '용지 excluded',
 };

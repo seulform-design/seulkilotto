@@ -49,8 +49,12 @@ export default function ComposedAnalysisPage() {
         staleTime: 60_000,
       },
       {
+        queryKey: ['composite', 'classic'],
+        queryFn: () => v1Api.getClassicRecommend('blend'),
+        staleTime: 60_000,
+      },
+      {
         queryKey: ['composite', 'photo'],
-        // 용지 분석은 누적 데이터가 없을 수도 있음 → 실패 시 null
         queryFn: async () => {
           try {
             return await v1Api.getPhotoAnalysisAccumulated();
@@ -63,7 +67,7 @@ export default function ComposedAnalysisPage() {
     ],
   });
 
-  const [machineQuery, postQuery, photoQuery] = queries;
+  const [machineQuery, postQuery, classicQuery, photoQuery] = queries;
 
   const isLoading = queries.some((q) => q.isLoading);
   const isError = queries.every((q) => q.isError);
@@ -73,9 +77,11 @@ export default function ComposedAnalysisPage() {
       buildComposite(
         machineQuery.data ?? null,
         postQuery.data ?? null,
-        photoQuery.data ?? null
+        photoQuery.data ?? null,
+        classicQuery.data ?? null,
+        'current_round'
       ),
-    [machineQuery.data, postQuery.data, photoQuery.data]
+    [machineQuery.data, postQuery.data, photoQuery.data, classicQuery.data]
   );
 
   const handleRefresh = () => {

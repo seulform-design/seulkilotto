@@ -101,7 +101,8 @@ def parse_receipt_lines(img) -> List[Dict[str, Any]] | None:
     up = _upscale(gray)
     margin = int(up.shape[0] * 0.06)
     content_h = up.shape[0] - 2 * margin
-    x0 = int(up.shape[1] * 0.05)
+    # 좌측 라벨(A~E) 영역을 잘라내지 않도록 x 오프셋 없음 — D/E 줄 첫 번호 누락 방지
+    x0 = 0
 
     lines: List[Dict[str, Any]] = []
     for i, label in enumerate(GAME_LINE_LABELS[:GAME_LINE_COUNT]):

@@ -638,6 +638,7 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     group = [e for e in entries if e.get("video_intent") == intent]
     label = "복기" if intent == "review" else "이번회차"
     round_no = str(get_review_round_no()) if intent == "review" else str(get_current_round_no())
+    intent_acc = _accumulate_entries(group) if group else None
     combo = _recompute_intent_combo(entries, intent) if group else {
         "summary": f"{label} 분석 없음",
         "pair_duplicates": [],
@@ -649,12 +650,22 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     if combo.get("pair_duplicates") or combo.get("triple_duplicates"):
         parts.append(combo.get("summary", ""))
 
+    slice_fp = (intent_acc or {}).get("final_predictions") or {
+        "strong_candidates": [],
+        "excluded_candidates": [],
+    }
+    combo_strong = combo.get("strong_candidates") or []
+    if combo_strong:
+        merged_strong = list(dict.fromkeys(combo_strong + (slice_fp.get("strong_candidates") or [])))
+        slice_fp = {**slice_fp, "strong_candidates": merged_strong[:18]}
+
     slice_out: Dict[str, Any] = {
         "video_intent": intent,
         "video_intent_label": label,
         "ticket_round": round_no,
         "total_analyses": len(group),
         "accumulated_combo_patterns": combo,
+        "final_predictions": slice_fp,
         "entries_summary": _entries_summary_for(group),
         "app_ui_message": " · ".join(p for p in parts if p),
     }

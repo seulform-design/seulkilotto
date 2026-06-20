@@ -216,22 +216,138 @@ function getIntentComboPatterns(
   return accumulated.by_intent?.[intent]?.accumulated_combo_patterns ?? null;
 }
 
+function collectAutoOnlyLines(
+  currentSlipLines: SavedLine[],
+  slipQueue: ManualSlipInput[],
+  bulkAutoTickets: number[][]
+): number[][] {
+  const out: number[][] = [];
+  for (const line of currentSlipLines) out.push(line.numbers);
+  for (const slip of slipQueue) {
+    for (const line of slip.lines) out.push(line.numbers);
+  }
+  for (const ticket of bulkAutoTickets) out.push(ticket);
+  return out;
+}
+
+/** 서버 누적 없을 때 자동 줄 빈도·줄간 겹침으로 강한 후보 추정 (백엔드 line_overlap 근사). */
+function deriveLocalStrongCandidates(
+  autoLines: number[][],
+  winningNumbers: number[],
+  intent: SheetIntent,
+  limit = 18
+): number[] {
+  if (autoLines.length === 0) return [];
+
+  const scores: Record<number, number> = {};
+  const bump = (n: number, w: number) => {
+    if (Number.isInteger(n) && n >= 1 && n <= 45) {
+      scores[n] = (scores[n] ?? 0) + w;
+    }
+  };
+
+  const normalized = autoLines.map((line) =>
+    Array.from(new Set(line.filter((n) => Number.isInteger(n) && n >= 1 && n <= 45))).sort(
+      (a, b) => a - b
+    )
+  );
+
+  const pairLineHits: Record<string, number> = {};
+  const tripleLineHits: Record<string, number> = {};
+  for (const nums of normalized) {
+    for (let i = 0; i < nums.length; i += 1) {
+      for (let j = i + 1; j < nums.length; j += 1) {
+        const key = `${nums[i]}-${nums[j]}`;
+        pairLineHits[key] = (pairLineHits[key] ?? 0) + 1;
+      }
+    }
+    for (let i = 0; i < nums.length; i += 1) {
+      for (let j = i + 1; j < nums.length; j += 1) {
+        for (let k = j + 1; k < nums.length; k += 1) {
+          const key = `${nums[i]}-${nums[j]}-${nums[k]}`;
+          tripleLineHits[key] = (tripleLineHits[key] ?? 0) + 1;
+        }
+      }
+    }
+  }
+
+  for (const [key, lineCount] of Object.entries(pairLineHits)) {
+    if (lineCount >= 2) {
+      for (const n of key.split('-').map(Number)) bump(n, 2 * lineCount);
+    }
+  }
+  for (const [key, lineCount] of Object.entries(tripleLineHits)) {
+    if (lineCount >= 2) {
+      for (const n of key.split('-').map(Number)) bump(n, 3 * lineCount);
+    }
+  }
+
+  if (intent === 'review' && winningNumbers.length > 0) {
+    const winSet = new Set(winningNumbers);
+    for (const nums of normalized) {
+      const overlap = nums.filter((n) => winSet.has(n));
+      const weight = overlap.length ** 2;
+      for (const n of overlap) bump(n, weight);
+    }
+  }
+
+  for (const nums of normalized) {
+    for (const n of nums) bump(n, 1);
+  }
+
+  return Object.entries(scores)
+    .sort(([, a], [, b]) => b - a || Number(a) - Number(b))
+    .slice(0, limit)
+    .map(([n]) => Number(n));
+}
+
 function getIntentStrongCandidates(
   accumulated: PhotoAnalysisAccumulated | null,
   intent: SheetIntent
 ): number[] {
   const combo = getIntentComboPatterns(accumulated, intent);
   if (combo?.strong_candidates?.length) return combo.strong_candidates;
+
+  const sliceStrong = accumulated?.by_intent?.[intent]?.final_predictions?.strong_candidates;
+  if (sliceStrong?.length) return sliceStrong;
+
   if (intent === 'review') {
-    return accumulated?.final_predictions?.strong_candidates ?? [];
+    const votes: Record<number, number> = {};
+    for (const entry of accumulated?.entries_summary ?? []) {
+      if (entry.video_intent !== 'review') continue;
+      for (const n of entry.strong_candidates ?? []) {
+        if (Number.isInteger(n) && n >= 1 && n <= 45) {
+          votes[n] = (votes[n] ?? 0) + 1;
+        }
+      }
+    }
+    const ranked = Object.entries(votes)
+      .sort(([, a], [, b]) => b - a || Number(a) - Number(b))
+      .map(([n]) => Number(n));
+    if (ranked.length) return ranked.slice(0, 18);
   }
   return [];
+}
+
+function resolveStrongCandidates(
+  accumulated: PhotoAnalysisAccumulated | null,
+  intent: SheetIntent,
+  autoLines: number[][],
+  winningNumbers: number[]
+): { candidates: number[]; source: 'backend' | 'local' | 'none' } {
+  const backend = getIntentStrongCandidates(accumulated, intent);
+  if (backend.length > 0) return { candidates: backend, source: 'backend' };
+  const local = deriveLocalStrongCandidates(autoLines, winningNumbers, intent);
+  if (local.length > 0) return { candidates: local, source: 'local' };
+  return { candidates: [], source: 'none' };
 }
 
 function getIntentExcludedCandidates(
   accumulated: PhotoAnalysisAccumulated | null,
   intent: SheetIntent
 ): number[] {
+  const sliceExcluded = accumulated?.by_intent?.[intent]?.final_predictions?.excluded_candidates;
+  if (sliceExcluded?.length) return sliceExcluded;
   if (intent === 'review') {
     return accumulated?.final_predictions?.excluded_candidates ?? [];
   }
@@ -416,11 +532,11 @@ function buildBulkComparison(
   accumulated: PhotoAnalysisAccumulated | null,
   latestNumbers: number[],
   latestBonus: number | null,
-  intent: SheetIntent
+  intent: SheetIntent,
+  strongCandidates: number[]
 ): BulkComparisonResult {
   const latestSet = new Set(latestNumbers);
 
-  const strongCandidates = getIntentStrongCandidates(accumulated, intent);
   const excludedCandidates = getIntentExcludedCandidates(accumulated, intent);
   const comboPatterns = getIntentComboPatterns(accumulated, intent);
   const strongSet = new Set(strongCandidates);
@@ -580,7 +696,8 @@ function buildComparison(
   slipQueue: ManualSlipInput[],
   accumulated: PhotoAnalysisAccumulated | null,
   latestNumbers: number[],
-  latestBonus: number | null
+  latestBonus: number | null,
+  strongCandidates: number[]
 ): ComparisonResult {
   // 'auto' 분류는 사진 (단건) 제거 후 더 이상 발생하지 않음.
   // 분류 미지정 (legacy 로딩 / 신규 입력) = user 로 간주 → 비교 결과가 정상 동작.
@@ -621,7 +738,6 @@ function buildComparison(
       b.userOverlap.length + b.autoOverlap.length - (a.userOverlap.length + a.autoOverlap.length)
   );
 
-  const strongCandidates = accumulated?.final_predictions?.strong_candidates ?? [];
   const strongSet = new Set(strongCandidates);
   const vsStrong = {
     available: strongCandidates.length > 0,
@@ -779,6 +895,19 @@ export default function SemiAutoComparePanel({
   const winningNumbers = compareWinning ? (comparisonRoundData?.numbers ?? []) : [];
   const winningBonus = compareWinning ? (comparisonRoundData?.bonus ?? null) : null;
 
+  const intentSectionLabel = sheetIntent === 'review' ? '복기' : '이번회차';
+
+  const autoOnlyLines = useMemo(
+    () => collectAutoOnlyLines(currentSlipLines, slipQueue, bulkAutoTickets),
+    [currentSlipLines, slipQueue, bulkAutoTickets]
+  );
+
+  const strongCandidateResolution = useMemo(
+    () => resolveStrongCandidates(accumulated, sheetIntent, autoOnlyLines, winningNumbers),
+    [accumulated, sheetIntent, autoOnlyLines, winningNumbers]
+  );
+  const resolvedStrongCandidates = strongCandidateResolution.candidates;
+
   const winningSet = useMemo<Set<number> | null>(() => {
     if (!compareWinning || !winningNumbers.length) return null;
     return new Set(winningNumbers);
@@ -836,7 +965,7 @@ export default function SemiAutoComparePanel({
 
     // 2순위: 누적 자동 강한 후보 (있으면)
     const topFreq = numberFrequency.slice(0, 15).map((f) => f.number);
-    const strong = getIntentStrongCandidates(accumulated, sheetIntent);
+    const strong = resolvedStrongCandidates;
     const excluded = new Set(getCurrentRoundExcludedCandidates(accumulated));
 
     // 반자동 우선 + 자동 강한 후보 + 자동 빈도 순으로 풀 구성
@@ -1085,9 +1214,10 @@ export default function SemiAutoComparePanel({
         slipQueue,
         accumulated,
         winningNumbers,
-        winningBonus
+        winningBonus,
+        resolvedStrongCandidates
       ),
-    [picked, slipQueue, accumulated, winningNumbers, winningBonus]
+    [picked, slipQueue, accumulated, winningNumbers, winningBonus, resolvedStrongCandidates]
   );
 
   const bulkComparison = useMemo(
@@ -1099,10 +1229,11 @@ export default function SemiAutoComparePanel({
             accumulated,
             winningNumbers,
             winningBonus,
-            sheetIntent
+            sheetIntent,
+            resolvedStrongCandidates
           )
         : null,
-    [bulkTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent]
+    [bulkTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates]
   );
 
   /**
@@ -1137,10 +1268,11 @@ export default function SemiAutoComparePanel({
             accumulated,
             winningNumbers,
             winningBonus,
-            sheetIntent
+            sheetIntent,
+            resolvedStrongCandidates
           )
         : null,
-    [combinedTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent]
+    [combinedTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates]
   );
 
   /**
@@ -1317,7 +1449,7 @@ export default function SemiAutoComparePanel({
       }
     }
     // 강한 후보 (이번회차 자동 누적) — 매치 번호 중 강한 후보 개수가 통계 핵심.
-    const strongCandidates = getIntentStrongCandidates(accumulated, sheetIntent);
+    const strongCandidates = resolvedStrongCandidates;
     const strongSet = new Set(strongCandidates);
 
     // 카운터 정의:
@@ -1410,6 +1542,8 @@ export default function SemiAutoComparePanel({
     bulkTickets,
     winningSet,
     accumulated,
+    sheetIntent,
+    resolvedStrongCandidates,
   ]);
 
   /**
@@ -2351,10 +2485,10 @@ export default function SemiAutoComparePanel({
           {/* ── 누적 자동 강한 후보 교집합 분포 — 자동+반자동 통합 통계 ── */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'primary.main' }}>
             <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-              🔗 이번회차 자동 누적 강한 후보 교집합 (자동+반자동 {intersectionCmp.ticketCount}장 통합 분석)
+              🔗 {intentSectionLabel} 자동 누적 강한 후보 교집합 (자동+반자동 {intersectionCmp.ticketCount}장 통합 분석)
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              ※ <strong>분석 모집단 = 강한 후보 {getIntentStrongCandidates(accumulated, sheetIntent).length}개 안의 부분 조합만</strong>.
+              ※ <strong>분석 모집단 = 강한 후보 {resolvedStrongCandidates.length}개 안의 부분 조합만</strong>.
               각 티켓의 번호 중 강한 후보에 속한 것 (vsStrongMatch) 이 2개 이상일 때만 그 교집합 세트를 그룹화.
               아래 별도 패널인 '🔀 자동 ∩ 반자동' 은 <strong>1~45 전체 모집단</strong>을 보는 다른 분석 — 모집단이 달라 카운트도 다름.
             </Typography>
@@ -2389,9 +2523,14 @@ export default function SemiAutoComparePanel({
                 sx={{ fontWeight: 700 }}
               />
             </Stack>
-            {getIntentStrongCandidates(accumulated, sheetIntent).length === 0 && (
+            {strongCandidateResolution.source === 'none' && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                ※ 이번회차 자동 누적 데이터가 없습니다. 자동 용지를 분석하여 누적을 만들면 교집합 분석이 활성됩니다.
+                ※ {intentSectionLabel} 자동 누적 데이터가 없습니다. 자동 용지를 분석하여 누적을 만들면 교집합 분석이 활성화됩니다.
+              </Typography>
+            )}
+            {strongCandidateResolution.source === 'local' && (
+              <Typography variant="caption" color="warning.main" sx={{ mt: 0.5, display: 'block' }}>
+                ※ 서버 누적 없음 — 등록한 자동 줄 {autoOnlyLines.length}개에서 강한 후보 {resolvedStrongCandidates.length}개를 추정했습니다. [분석·저장] 시 정확도가 올라갑니다.
               </Typography>
             )}
 
@@ -2411,7 +2550,7 @@ export default function SemiAutoComparePanel({
                   sx={{ mb: 1 }}
                 >
                   <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                    📌 강한 후보({getIntentStrongCandidates(accumulated, sheetIntent).length}개) 중 어떤 쌍이 티켓에 자주 함께 나왔는지 — 강한 후보의 부분 조합만
+                    📌 강한 후보({resolvedStrongCandidates.length}개) 중 어떤 쌍이 티켓에 자주 함께 나왔는지 — 강한 후보의 부분 조합만
                   </Typography>
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                     <Chip
@@ -2674,7 +2813,7 @@ export default function SemiAutoComparePanel({
               {groupLineMatching.strongAvailable && (
                 <Box sx={{ mb: 1, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
                   <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.3 }}>
-                    🎯 이번회차 자동 누적 강한 후보 ({groupLineMatching.strongCandidateCount}개) 기반 통계 — 그룹별 매치 번호와의 일치 분포
+                    🎯 {intentSectionLabel} 자동 누적 강한 후보 ({groupLineMatching.strongCandidateCount}개) 기반 통계 — 그룹별 매치 번호와의 일치 분포
                   </Typography>
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                     {[0, 1, 2, 3, 4, 5, 6].map((k) => {
@@ -2803,7 +2942,7 @@ export default function SemiAutoComparePanel({
                                   })()}
                                   {groupLineMatching.strongAvailable && (() => {
                                     const sm = g.matchedNumbers.filter((n) =>
-                                      getIntentStrongCandidates(accumulated, sheetIntent).includes(n)
+                                      resolvedStrongCandidates.includes(n)
                                     ).length;
                                     return (
                                       <Chip

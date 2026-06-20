@@ -84,6 +84,33 @@ def test_current_round_slice_excludes_review_template(monkeypatch, tmp_path):
     assert not combo.get("reference_numbers")
 
 
+def test_review_slice_has_intent_specific_final_predictions(monkeypatch, tmp_path):
+    """복기 슬라이스가 전체 누적이 아닌 review 전용 final_predictions·strong_candidates 를 노출."""
+    monkeypatch.setattr("app.video_analysis.store.STORE_PATH", tmp_path / "store.json")
+    monkeypatch.setattr("app.datasets.current.CURRENT_DIR", tmp_path / "current")
+    monkeypatch.setattr("app.datasets.current.STATE_PATH", tmp_path / "current" / "state.json")
+    monkeypatch.setattr("app.datasets.current.PHOTO_PATH", tmp_path / "current" / "photo.json")
+    monkeypatch.setattr("app.datasets.current.DERIVED_PATH", tmp_path / "current" / "derived.json")
+    clear_store()
+
+    review_nums = [7, 12, 19, 23, 31, 40]
+    append_analysis("review-batch", _minimal_result("review-batch", "review", "1226", review_nums))
+
+    current_nums = [1, 2, 3, 4, 5, 6]
+    append_analysis(
+        "current-batch",
+        _minimal_result("current-batch", "current_round", "1227", current_nums),
+    )
+
+    acc = build_accumulated()
+    review_slice = acc["by_intent"]["review"]
+    assert review_slice["final_predictions"]["strong_candidates"]
+    assert 7 in review_slice["final_predictions"]["strong_candidates"]
+    assert 1 not in review_slice["final_predictions"]["strong_candidates"]
+    combo = review_slice["accumulated_combo_patterns"]
+    assert combo.get("strong_candidates") or review_slice["final_predictions"]["strong_candidates"]
+
+
 def test_analyze_current_round_does_not_use_review_reference(monkeypatch):
     """수기 이번회차 분석 시 review_reference_template 미주입."""
     sheets = [

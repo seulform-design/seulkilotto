@@ -754,6 +754,10 @@ export interface PhotoAnalysisIntentSlice {
   ticket_round?: string;
   total_analyses: number;
   accumulated_combo_patterns?: ComboDuplicatePatterns;
+  final_predictions?: {
+    strong_candidates: number[];
+    excluded_candidates: number[];
+  };
   saved_review_template?: SavedReviewTemplate | null;
   draw_template?: DrawReviewTemplate;
   pattern_ready?: boolean;

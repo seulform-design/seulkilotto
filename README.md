@@ -10,7 +10,25 @@
 | v1 Expo (레거시) | `frontend/` | 모바일/Expo 전용 — 통합 웹 앱으로 대체됨 |
 
 **v1 설계서:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)  
-**v2 실행:** [platform/README.md](platform/README.md)
+**v2 실행:** [platform/README.md](platform/README.md)  
+**공개 저장소:** [github.com/seulform-design/seulkilotto](https://github.com/seulform-design/seulkilotto)
+
+## 용지 분석 (5천원 자동 용지)
+
+통합 웹 앱 **용지 분석** 탭에서 5천원 자동번호 영수증을 분석합니다.
+
+| 항목 | 설명 |
+|------|------|
+| **5×6 형식** | A~E 게임 줄 × 줄당 6번호 (7×7 OMR 마킹 격자와 별개) |
+| **수기 입력 (권장)** | 1~45 번호 그리드에서 6개 탭 → **줄 저장** (A→E) → 용지 누적 → **분석·저장** |
+| **복기 / 이번회차** | 탭별로 줄·용지 누적, 다른 줄·다른 용지 간 2·3·4번호 겹침 통계 |
+| **사진 업로드 (선택)** | 영수증 OCR 또는 OMR 격자 인식 — 수기 입력이 기본 UX |
+
+```bash
+# 수기 분석 API
+POST /api/v1/photo-analysis/manual
+# body: { "sheet_intent": "review"|"current_round", "slips": [{ "lines": [{ "label": "A", "numbers": [...] }] }] }
+```
 
 ## 기술 스택
 

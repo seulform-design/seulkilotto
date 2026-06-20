@@ -428,6 +428,8 @@ interface SemiAutoComparePanelProps {
   onRemoveCurrentLine?: (idx: number) => void;
   /** 자동 대량 1장 단건 삭제 콜백. */
   onRemoveBulkAutoTicket?: (idx: number) => void;
+  /** 서버 누적·당첨번호 재조회 (재분석 버튼). */
+  onRefreshAccumulated?: () => Promise<void>;
 }
 
 type PickType = 'user' | 'auto';
@@ -810,6 +812,7 @@ export default function SemiAutoComparePanel({
   bulkAutoTickets = [],
   onRemoveCurrentLine,
   onRemoveBulkAutoTicket,
+  onRefreshAccumulated,
 }: SemiAutoComparePanelProps) {
   const compareWinning = sheetIntent === 'review';
 
@@ -918,11 +921,37 @@ export default function SemiAutoComparePanel({
   }, [compareWinning, winningNumbers]);
 
   const qc = useQueryClient();
-  const handleRefreshAll = () => {
-    qc.invalidateQueries({ queryKey: ['v1-latest-for-semi-auto'] });
-    qc.invalidateQueries({ queryKey: ['v1-meta-for-semi-auto'] });
-    qc.invalidateQueries({ queryKey: ['v1-round-for-semi-auto'] });
-  };
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
+  const [reanalyzeNotice, setReanalyzeNotice] = useState<string | null>(null);
+
+  const handleReanalyze = useCallback(async () => {
+    if (isReanalyzing) return;
+    setIsReanalyzing(true);
+    setReanalyzeNotice(null);
+    try {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['v1-latest-for-semi-auto'] }),
+        qc.invalidateQueries({ queryKey: ['v1-meta-for-semi-auto'] }),
+        qc.invalidateQueries({ queryKey: ['v1-round-for-semi-auto'] }),
+        qc.refetchQueries({ queryKey: ['v1-latest-for-semi-auto'] }),
+        qc.refetchQueries({ queryKey: ['v1-meta-for-semi-auto'] }),
+        compareRound != null
+          ? qc.refetchQueries({ queryKey: ['v1-round-for-semi-auto', compareRound] })
+          : Promise.resolve(),
+      ]);
+      if (onRefreshAccumulated) {
+        await onRefreshAccumulated();
+      }
+      setRecommendations([]);
+      setReanalyzeNotice('✅ 재분석 완료 — 당첨번호·서버 누적·통계를 갱신했습니다.');
+    } catch (e) {
+      setReanalyzeNotice(
+        `❌ 재분석 실패: ${e instanceof Error ? e.message : '서버 오류'}`
+      );
+    } finally {
+      setIsReanalyzing(false);
+    }
+  }, [compareRound, isReanalyzing, onRefreshAccumulated, qc]);
 
   // UI 토글 상태
   const [showAllTickets, setShowAllTickets] = useState(false);
@@ -1642,25 +1671,36 @@ export default function SemiAutoComparePanel({
             🔄 반자동 비교
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            반자동 용지의 6개 번호 입력 → 기존 데이터와 비교 (줄 저장으로 누적)
+            {compareWinning
+              ? '복기 — 당첨번호·누적 강한후보·교집합 통계 비교'
+              : '이번회차 — 줄간 겹침·강한 후보 분석 (당첨번호 미사용)'}
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
-          {picked.length > 0 && (
-            <Button size="small" onClick={reset}>
-              초기화
-            </Button>
+        <Button
+          type="button"
+          size="small"
+          variant="outlined"
+          disabled={isReanalyzing}
+          onClick={() => void handleReanalyze()}
+          sx={{ flexShrink: 0, minWidth: 88, zIndex: 2 }}
+        >
+          {isReanalyzing ? (
+            <><CircularProgress size={14} sx={{ mr: 0.5 }} />재분석…</>
+          ) : (
+            '↻ 재분석'
           )}
-          <Button
-            size="small"
-            variant="contained"
-            onClick={saveCurrentLine}
-            disabled={picked.length !== 6}
-          >
-            줄 저장
-          </Button>
-        </Stack>
+        </Button>
       </Stack>
+
+      {reanalyzeNotice && (
+        <Alert
+          severity={reanalyzeNotice.startsWith('❌') ? 'error' : 'success'}
+          sx={{ mb: 1.5 }}
+          onClose={() => setReanalyzeNotice(null)}
+        >
+          {reanalyzeNotice}
+        </Alert>
+      )}
 
       <Alert severity="warning" icon={false} sx={{ mb: 1.5, fontSize: 12 }}>
         🟡 본 비교는 패턴 관찰 도구입니다. 어떤 일치도 다음 회차의 1/8,145,060 확률을 변경하지 않습니다.
@@ -1672,8 +1712,25 @@ export default function SemiAutoComparePanel({
           <Typography variant="subtitle2" fontWeight={700}>
             {currentLabel}줄 · {picked.length}/6
           </Typography>
-          {picked.length > 0 && (
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            {picked.length > 0 && (
+              <Button type="button" size="small" onClick={reset}>
+                초기화
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="small"
+              variant="contained"
+              onClick={saveCurrentLine}
+              disabled={picked.length !== 6}
+            >
+              줄 저장
+            </Button>
+          </Stack>
+        </Stack>
+        {picked.length > 0 && (
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
               {picked
                 .slice()
                 .sort((a, b) => a - b)
@@ -1682,7 +1739,6 @@ export default function SemiAutoComparePanel({
                 ))}
             </Stack>
           )}
-        </Stack>
         <Box
           sx={{
             display: 'grid',
@@ -2105,52 +2161,71 @@ export default function SemiAutoComparePanel({
             <Typography variant="subtitle1" fontWeight={700}>
               📋 대량 비교 결과 ({activeComparison.ticketCount}장)
             </Typography>
-            <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" gap={0.5}>
-              <Button size="small" variant="outlined" onClick={handleRefreshAll}>
-                ↻ 재분석
+          </Stack>
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            alignItems={{ xs: 'stretch', sm: 'center' }}
+            spacing={1}
+            sx={{ mb: 1.5, position: 'relative', zIndex: 1 }}
+            useFlexGap
+          >
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              <Button
+                type="button"
+                size="small"
+                variant="outlined"
+                disabled={isReanalyzing}
+                onClick={() => void handleReanalyze()}
+                sx={{ minWidth: 88 }}
+              >
+                {isReanalyzing ? (
+                  <><CircularProgress size={14} sx={{ mr: 0.5 }} />재분석…</>
+                ) : (
+                  '↻ 재분석'
+                )}
               </Button>
-              {compareWinning ? (
-                <>
-                  <TextField
-                    size="small"
-                    label="비교 회차"
-                    type="number"
-                    value={effectiveRound ?? ''}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      if (Number.isInteger(v) && v > 0 && (!latestRound || v <= latestRound)) {
-                        setCompareRound(v);
-                      } else if (e.target.value === '') {
-                        setCompareRound(null);
-                      }
-                    }}
-                    inputProps={{ min: 1, max: latestRound ?? undefined, step: 1 }}
-                    sx={{ width: 130 }}
-                    helperText={
-                      compareRound != null
-                        ? '복기 기준'
-                        : latest.data
-                          ? `최신 ${latest.data.round}회`
-                          : ''
-                    }
-                  />
-                  {compareRound != null && (
-                    <Button size="small" onClick={() => setCompareRound(null)}>
-                      ↺ 최신
-                    </Button>
-                  )}
-                </>
-              ) : (
-                <Chip
-                  size="small"
-                  color="secondary"
-                  label={`이번회차 ${effectiveRound ?? '?'}회 (당첨번호 미사용)`}
-                />
-              )}
-              <Button size="small" color="error" variant="outlined" onClick={resetBulk}>
+              <Button type="button" size="small" color="error" variant="outlined" onClick={resetBulk}>
                 초기화
               </Button>
             </Stack>
+            {compareWinning ? (
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
+                <TextField
+                  size="small"
+                  label="비교 회차"
+                  type="number"
+                  value={effectiveRound ?? ''}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isInteger(v) && v > 0 && (!latestRound || v <= latestRound)) {
+                      setCompareRound(v);
+                    } else if (e.target.value === '') {
+                      setCompareRound(null);
+                    }
+                  }}
+                  inputProps={{ min: 1, max: latestRound ?? undefined, step: 1 }}
+                  sx={{ width: 130 }}
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
+                  {compareRound != null
+                    ? '복기 기준'
+                    : latest.data
+                      ? `최신 ${latest.data.round}회`
+                      : ''}
+                </Typography>
+                {compareRound != null && (
+                  <Button type="button" size="small" onClick={() => setCompareRound(null)}>
+                    ↺ 최신
+                  </Button>
+                )}
+              </Stack>
+            ) : (
+              <Chip
+                size="small"
+                color="secondary"
+                label={`이번회차 ${effectiveRound ?? '?'}회 (당첨번호 미사용)`}
+              />
+            )}
           </Stack>
 
           {/* 집계 메트릭 — 복기 탭에서만 당첨 적중률 */}

@@ -1358,6 +1358,7 @@ export default function PhotoAnalysisPage() {
             bulkAutoTickets: bulkAutoTickets.filter((_, i) => i !== idx),
           })
         }
+        onRefreshAccumulated={refreshAccumulated}
       />
 
       {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}

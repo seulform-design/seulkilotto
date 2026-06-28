@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+from . import pg_store
 from .dedup import compute_ticket_fingerprint, find_duplicate_entry
 from .overlap_patterns import accumulate_frequency_patterns, build_frequency_overlap_patterns
 from .position_template import build_sheet_template, merge_review_templates
@@ -371,7 +372,28 @@ def _ensure_db_ready() -> None:
     _maybe_migrate_legacy_store()
 
 
+def _normalize_historical(data: Dict[str, Any]) -> Dict[str, Any]:
+    data.setdefault("entries", [])
+    data.setdefault("archived_current_rounds", [])
+    data.setdefault("version", HISTORICAL_STORE_VERSION)
+    return data
+
+
+def _normalize_current(data: Dict[str, Any]) -> Dict[str, Any]:
+    data.setdefault("entries", [])
+    data.setdefault("derived_datasets", {})
+    data.setdefault("rule_snapshots", {})
+    data.setdefault("status", "open")
+    data.setdefault("frozen_at", None)
+    if "current_round" not in data:
+        data["current_round"] = _default_current_round_no()
+    data.setdefault("version", CURRENT_STORE_VERSION)
+    return data
+
+
 def _load_historical_raw() -> Dict[str, Any]:
+    if pg_store.enabled():
+        return _normalize_historical(pg_store.load("historical") or _empty_historical_raw())
     _ensure_db_ready()
     with _connect_db() as conn:
         return _read_historical_raw_db(conn)
@@ -383,6 +405,9 @@ def _save_historical_raw(data: Dict[str, Any]) -> None:
     payload.setdefault("archived_current_rounds", [])
     payload.setdefault("version", HISTORICAL_STORE_VERSION)
     payload["updated_at"] = _now_iso()
+    if pg_store.enabled():
+        pg_store.save("historical", payload)
+        return
     _ensure_db_ready()
     with _connect_db() as conn:
         _write_historical_raw_db(conn, payload)
@@ -390,6 +415,8 @@ def _save_historical_raw(data: Dict[str, Any]) -> None:
 
 
 def _load_current_raw() -> Dict[str, Any]:
+    if pg_store.enabled():
+        return _normalize_current(pg_store.load("current") or _empty_current_raw())
     _ensure_db_ready()
     with _connect_db() as conn:
         data = _read_current_raw_db(conn)
@@ -415,6 +442,9 @@ def _save_current_raw(data: Dict[str, Any]) -> None:
         payload["current_round"] = _default_current_round_no()
     payload.setdefault("version", CURRENT_STORE_VERSION)
     payload["updated_at"] = _now_iso()
+    if pg_store.enabled():
+        pg_store.save("current", payload)
+        return
     _ensure_db_ready()
     with _connect_db() as conn:
         _write_current_raw_db(conn, payload)

@@ -89,6 +89,8 @@ const SIGNAL_SOURCE_LABELS: Record<string, string> = {
 
 const HEAVY_COMPARISON_TICKET_LIMIT = 180;
 const HEAVY_LINE_PAIR_LIMIT = 8_000;
+/** 보류 상태에서 [상세 비교 보기] 강제 시 경량 비교에 사용할 상위 줄 수 캡. */
+const FORCE_DETAILED_TICKET_CAP = 200;
 
 function signalSourceLabel(source: string): string {
   return SIGNAL_SOURCE_LABELS[source] ?? source;
@@ -1060,6 +1062,12 @@ export default function SemiAutoComparePanel({
   /** 사용자가 명시적으로 [누적·저장] 누른 마지막 시각 (ISO). */
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(initial.lastSavedAt);
   const [compareRound, setCompareRound] = useState<number | null>(null);
+  /**
+   * 대량 입력이 많아 자동 보류된 상태에서 사용자가 [상세 비교 보기] 를 누르면
+   * 상위 일부(캡)만으로 경량 비교(상세 교집합/요약)를 강제 표시한다.
+   * 무거운 1:1 전수비교는 브라우저 보호를 위해 보류 유지.
+   */
+  const [forceDetailedComparison, setForceDetailedComparison] = useState(false);
 
   // 탭 전환 시 해당 탭 전용 localStorage 로드
   useEffect(() => {
@@ -1070,6 +1078,7 @@ export default function SemiAutoComparePanel({
     setSemiSlipQueue(st.semiSlipQueue);
     setLastSavedAt(st.lastSavedAt);
     setCompareRound(null);
+    setForceDetailedComparison(false);
   }, [sheetIntent]);
 
   // 영속 — picked / bulkTickets / semiCurrentLines / semiSlipQueue / lastSavedAt
@@ -1407,12 +1416,14 @@ export default function SemiAutoComparePanel({
       } else {
         const nowIso = new Date().toISOString();
         setLastSavedAt(nowIso);
-        // 저장 성공 시에만 초기화 — 중복/실패 시 사용자가 재조정할 수 있게 유지
+        // 저장 성공 시 '줄 저장' 누적(완성/부분 용지)만 비운다.
+        // 대량 입력(bulkTickets)은 유지 — §1 자동(bulkAutoTickets)과 동일하게,
+        // 저장 후에도 추가 세팅 목록·비교에 계속 표시돼 누적번호를 확인할 수 있다.
+        // (재저장 시 동일 용지는 백엔드 source_id 중복으로 걸러진다.)
         setSemiSlipQueue([]);
         setSemiCurrentLines([]);
-        setBulkTickets([]);
         setSaveNotice(
-          `✅ ${slips.length}장 (${totalLines}줄) 백엔드 저장 완료. 아래 통계가 업데이트됩니다.`
+          `✅ ${slips.length}장 (${totalLines}줄) 백엔드 저장 완료. 대량 입력은 아래 목록에 유지됩니다.`
         );
       }
       // 상위에서 accumulated 를 갱신할 수 있도록 query 무효화
@@ -1442,20 +1453,27 @@ export default function SemiAutoComparePanel({
     [picked, slipQueue, accumulated, sheetIntent, winningNumbers, winningBonus, resolvedStrongCandidates]
   );
 
+  // 경량 비교(상세 교집합/요약)는 보류 중이라도 [상세 비교 보기] 강제 시
+  // 상위 캡만큼만 계산해 표시. 무거운 1:1 전수비교는 별도(아래)에서 보류 유지.
+  const lightComparisonSuspended = suspendHeavyComparison && !forceDetailedComparison;
+
   const bulkComparison = useMemo(
-    () =>
-      !suspendHeavyComparison && bulkTickets.length > 0
-        ? buildBulkComparison(
-            bulkTickets,
-            slipQueue,
-            accumulated,
-            winningNumbers,
-            winningBonus,
-            sheetIntent,
-            resolvedStrongCandidates
-          )
-        : null,
-    [bulkTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates, suspendHeavyComparison]
+    () => {
+      if (lightComparisonSuspended || bulkTickets.length === 0) return null;
+      const cmpTickets = suspendHeavyComparison
+        ? bulkTickets.slice(0, FORCE_DETAILED_TICKET_CAP)
+        : bulkTickets;
+      return buildBulkComparison(
+        cmpTickets,
+        slipQueue,
+        accumulated,
+        winningNumbers,
+        winningBonus,
+        sheetIntent,
+        resolvedStrongCandidates
+      );
+    },
+    [bulkTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates, lightComparisonSuspended, suspendHeavyComparison]
   );
 
   /**
@@ -1482,19 +1500,22 @@ export default function SemiAutoComparePanel({
   }, [currentSlipLines, slipQueue, bulkAutoTickets, semiCurrentLines, semiSlipQueue, bulkTickets]);
 
   const combinedComparison = useMemo(
-    () =>
-      !suspendHeavyComparison && combinedTickets.length > 0
-        ? buildBulkComparison(
-            combinedTickets,
-            slipQueue,
-            accumulated,
-            winningNumbers,
-            winningBonus,
-            sheetIntent,
-            resolvedStrongCandidates
-          )
-        : null,
-    [combinedTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates, suspendHeavyComparison]
+    () => {
+      if (lightComparisonSuspended || combinedTickets.length === 0) return null;
+      const cmpTickets = suspendHeavyComparison
+        ? combinedTickets.slice(0, FORCE_DETAILED_TICKET_CAP)
+        : combinedTickets;
+      return buildBulkComparison(
+        cmpTickets,
+        slipQueue,
+        accumulated,
+        winningNumbers,
+        winningBonus,
+        sheetIntent,
+        resolvedStrongCandidates
+      );
+    },
+    [combinedTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates, lightComparisonSuspended, suspendHeavyComparison]
   );
 
   /**
@@ -2154,9 +2175,41 @@ export default function SemiAutoComparePanel({
       )}
 
       {suspendHeavyComparison && (
-        <Alert severity="info" sx={{ mb: 1.5 }}>
-          대량 입력이 많아 브라우저 보호를 위해 상세 교집합/1:1 전수비교 계산을 잠시 보류합니다.
-          저장은 정상 동작하며, 저장 후 필요한 범위만 다시 보거나 줄 수를 줄이면 세부 비교가 다시 표시됩니다.
+        <Alert
+          severity="info"
+          sx={{ mb: 1.5 }}
+          action={
+            !forceDetailedComparison ? (
+              <Button
+                color="info"
+                size="small"
+                variant="outlined"
+                onClick={() => setForceDetailedComparison(true)}
+              >
+                상세 비교 보기 (상위 {FORCE_DETAILED_TICKET_CAP}장)
+              </Button>
+            ) : (
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => setForceDetailedComparison(false)}
+              >
+                다시 보류
+              </Button>
+            )
+          }
+        >
+          {forceDetailedComparison ? (
+            <>
+              상위 {FORCE_DETAILED_TICKET_CAP}장만으로 <strong>상세 교집합·요약 비교</strong>를 표시 중입니다.
+              (무거운 1:1 전수비교는 브라우저 보호를 위해 보류 — 줄 수를 줄이면 전체가 표시됩니다.)
+            </>
+          ) : (
+            <>
+              대량 입력이 많아 브라우저 보호를 위해 상세 교집합/1:1 전수비교 계산을 잠시 보류합니다.
+              저장은 정상 동작하며, <strong>[상세 비교 보기]</strong> 로 상위 일부만 보거나 줄 수를 줄이면 세부 비교가 다시 표시됩니다.
+            </>
+          )}
         </Alert>
       )}
 

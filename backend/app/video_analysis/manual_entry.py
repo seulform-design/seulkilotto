@@ -76,6 +76,7 @@ def build_manual_slip_payload(
         source_image=source_label,
         sub_sheet_index=0,
         lines=game_lines,
+        full_numbers=True,  # 수기 입력은 정확 데이터 — 표시강도 필터(7번호 잘림) 미적용
     )
     payload["layout_mode"] = MANUAL_LAYOUT
     payload["source_layout"] = MANUAL_LAYOUT

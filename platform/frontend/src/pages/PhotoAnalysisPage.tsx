@@ -33,6 +33,7 @@ import SavedLinesPanel, {
   type SavedLine,
 } from '../components/SavedLinesPanel';
 import SemiAutoComparePanel from '../components/SemiAutoComparePanel';
+import { useConfirm } from '../components/useConfirm';
 import {
   v1Api,
   type ArchivedCurrentRoundSnapshot,
@@ -599,14 +600,29 @@ function ManualNumberGrid({
           return (
             <Box
               key={n}
+              component="button"
+              type="button"
+              role="checkbox"
+              aria-checked={selected}
+              aria-label={`${n}번${selected ? ' 선택됨' : ''}`}
               onClick={() => onToggle(n)}
               sx={{
+                p: 0,
+                border: 'none',
+                background: 'none',
+                font: 'inherit',
                 display: 'flex',
                 justifyContent: 'center',
                 cursor: 'pointer',
                 opacity: selected ? 1 : 0.55,
                 transform: selected ? 'scale(1.05)' : 'scale(1)',
                 transition: 'transform 0.12s ease, opacity 0.12s ease',
+                '&:focus-visible': {
+                  outline: '2px solid',
+                  outlineColor: 'primary.main',
+                  outlineOffset: 2,
+                  borderRadius: '50%',
+                },
               }}
             >
               <LottoBall number={n} size={36} dimmed={!selected} neutral />
@@ -771,6 +787,7 @@ function formatDuplicateLocation(loc: DuplicateLocation): string {
 }
 
 export default function PhotoAnalysisPage() {
+  const { confirm, ConfirmDialog } = useConfirm();
   const [activeTab, setActiveTab] = useState<SheetIntent>(loadPhotoAnalysisTab);
   const [manualByIntent, setManualByIntent] = useState<Record<SheetIntent, ManualDraft>>(
     loadManualByIntent
@@ -922,7 +939,7 @@ export default function PhotoAnalysisPage() {
     setNotice('입력 중인 용지를 초기화했습니다.');
   };
 
-  const saveCurrentLine = () => {
+  const saveCurrentLine = async () => {
     if (picked.length !== 6) {
       setError(`${currentLabel}줄: 번호 6개를 선택하세요 (현재 ${picked.length}개).`);
       return;
@@ -941,10 +958,13 @@ export default function PhotoAnalysisPage() {
     );
     if (duplicate) {
       const where = formatDuplicateLocation(duplicate);
-      const ok = window.confirm(
-        `이 6개 번호 조합 (${sortedPicked.join(', ')})은 이미 ${where}에 있습니다.\n` +
-          `그래도 ${currentLabel}줄로 추가할까요?`
-      );
+      const ok = await confirm({
+        title: '중복 번호 조합',
+        message:
+          `이 6개 번호 조합 (${sortedPicked.join(', ')})은 이미 ${where}에 있습니다.\n` +
+          `그래도 ${currentLabel}줄로 추가할까요?`,
+        confirmText: '추가',
+      });
       if (!ok) {
         setError(`중복으로 ${currentLabel}줄 저장 취소됨. 번호를 바꿔서 다시 시도하세요.`);
         return;
@@ -1039,14 +1059,17 @@ export default function PhotoAnalysisPage() {
     setNotice(`${removedLabel}줄 삭제 — 다음 입력은 ${GAME_LABELS[next.length] ?? 'A'}줄`);
   };
 
-  const editCurrentLine = (idx: number) => {
+  const editCurrentLine = async (idx: number) => {
     if (idx < 0 || idx >= currentSlipLines.length) return;
     const line = currentSlipLines[idx];
     if (picked.length > 0) {
-      const ok = window.confirm(
-        `편집 중인 번호 ${picked.length}개가 있습니다.\n` +
-          `${line.label}줄을 편집하려면 현재 선택은 사라집니다. 진행할까요?`
-      );
+      const ok = await confirm({
+        title: '편집 중인 번호 있음',
+        message:
+          `편집 중인 번호 ${picked.length}개가 있습니다.\n` +
+          `${line.label}줄을 편집하려면 현재 선택은 사라집니다. 진행할까요?`,
+        confirmText: '진행',
+      });
       if (!ok) return;
     }
     const next = currentSlipLines
@@ -1125,7 +1148,7 @@ export default function PhotoAnalysisPage() {
   };
 
   const deleteHistoryEntry = async (entryId: string) => {
-    if (!window.confirm('이 분석 기록을 삭제할까요?')) return;
+    if (!(await confirm({ message: '이 분석 기록을 삭제할까요?', destructive: true, confirmText: '삭제' }))) return;
     try {
       const res = await v1Api.deletePhotoAnalysisEntry(entryId);
       setAccumulated(res.accumulated);
@@ -1138,7 +1161,11 @@ export default function PhotoAnalysisPage() {
 
   const clearStore = async () => {
     const targetLabel = activeTab === 'review' ? '복기 탭' : '이번회차 탭';
-    if (!window.confirm(`${targetLabel}의 서버 분석 데이터와 자동 입력 누적만 삭제할까요? 다른 탭 데이터는 유지됩니다.`)) return;
+    if (!(await confirm({
+      message: `${targetLabel}의 서버 분석 데이터와 자동 입력 누적만 삭제할까요? 다른 탭 데이터는 유지됩니다.`,
+      destructive: true,
+      confirmText: '삭제',
+    }))) return;
     try {
       await v1Api.clearPhotoAnalysisStore(activeTab);
       setManualByIntent((prev) => ({
@@ -1258,7 +1285,7 @@ export default function PhotoAnalysisPage() {
       <Paper sx={{ p: 2 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
           <Typography variant="subtitle1" fontWeight={700}>
-            📋 구입번호 직접입력 <Typography component="span" variant="caption" color="text.secondary">(자동)</Typography>
+            📋 구입번호 직접입력 <Typography component="span" variant="caption" color="text.secondary">(자동 구매 용지)</Typography>
           </Typography>
           <Stack direction="row" spacing={1}>
             <Button type="button" size="small" onClick={(e) => { e.preventDefault(); e.stopPropagation(); resetPicked(); }}>
@@ -1606,6 +1633,7 @@ export default function PhotoAnalysisPage() {
         onConfirm={handleBulkInsert}
         linesPerSlip={GAME_LABELS.length}
       />
+      {ConfirmDialog}
     </Stack>
   );
 }

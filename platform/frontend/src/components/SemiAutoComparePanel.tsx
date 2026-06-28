@@ -7,7 +7,7 @@
  * 출력:
  *   - 사용자 픽 vs 자동 배정 4축 비교
  *     1. 최근 당첨 번호 (latest draw) 와의 일치
- *     2. 저장된 매뉴얼 슬립 (slipQueue) 와의 라인별 겹침
+ *     2. 저장된 자동 슬립 (slipQueue, §1 구입번호 직접입력) 와의 라인별 겹침
  *     3. 누적 강한 후보 (accumulated.final_predictions.strong_candidates) 와의 겹침
  *     4. 누적 배제 후보 (excluded_candidates) 와의 겹침 — 경고 지표
  *
@@ -41,6 +41,7 @@ import SavedLinesPanel, {
   type GameLabel,
   type SavedLine,
 } from './SavedLinesPanel';
+import { useConfirm } from './useConfirm';
 import {
   v1Api,
   type ComboDuplicateItem,
@@ -1030,6 +1031,7 @@ export default function SemiAutoComparePanel({
   onRemoveBulkAutoTicket,
   onRefreshAccumulated,
 }: SemiAutoComparePanelProps) {
+  const { confirm, ConfirmDialog } = useConfirm();
   const lineMatchingRef = useRef<HTMLDivElement | null>(null);
   const [lineMatchFilter, setLineMatchFilter] = useState<'all' | 2 | 3 | 4 | 5 | 6>('all');
   const [lineMatchNumberFilter, setLineMatchNumberFilter] = useState('');
@@ -1329,7 +1331,7 @@ export default function SemiAutoComparePanel({
    * 반자동 누적 전체 삭제 — 저장 줄(semi*) + 대량(bulkTickets) + 마지막
    * 저장 시각까지. picked (입력 중 그리드 선택) 는 누적이 아니므로 제외.
    */
-  const clearAllSaved = () => {
+  const clearAllSaved = async () => {
     const savedTotalLines =
       semiCurrentLines.length + semiSlipQueue.reduce((s, sl) => s + sl.lines.length, 0);
     const bulkCount = bulkTickets.length;
@@ -1338,9 +1340,12 @@ export default function SemiAutoComparePanel({
     if (semiSlipQueue.length > 0) parts.push(`저장 ${semiSlipQueue.length}장`);
     if (semiCurrentLines.length > 0) parts.push(`입력 중 ${semiCurrentLines.length}줄`);
     if (bulkCount > 0) parts.push(`대량 ${bulkCount}장`);
-    if (!window.confirm(`반자동 누적 (${parts.join(' + ')}) 을 모두 삭제할까요?`)) {
-      return;
-    }
+    const ok = await confirm({
+      message: `반자동 누적 (${parts.join(' + ')}) 을 모두 삭제할까요?`,
+      destructive: true,
+      confirmText: '전체 삭제',
+    });
+    if (!ok) return;
     setSemiCurrentLines([]);
     setSemiSlipQueue([]);
     setBulkTickets([]);
@@ -2059,14 +2064,29 @@ export default function SemiAutoComparePanel({
             return (
               <Box
                 key={n}
+                component="button"
+                type="button"
+                role="checkbox"
+                aria-checked={isPicked}
+                aria-label={`${n}번${isPicked ? ' 선택됨' : ''}`}
                 onClick={() => togglePick(n)}
                 sx={{
+                  p: 0,
+                  border: 'none',
+                  background: 'none',
+                  font: 'inherit',
                   display: 'flex',
                   justifyContent: 'center',
                   cursor: 'pointer',
                   opacity: isPicked ? 1 : 0.55,
                   transform: isPicked ? 'scale(1.05)' : 'scale(1)',
                   transition: 'transform 0.12s ease, opacity 0.12s ease',
+                  '&:focus-visible': {
+                    outline: '2px solid',
+                    outlineColor: 'primary.main',
+                    outlineOffset: 2,
+                    borderRadius: '50%',
+                  },
                 }}
               >
                 <LottoBall number={n} size={36} dimmed={!isPicked} neutral />
@@ -2355,7 +2375,7 @@ export default function SemiAutoComparePanel({
           {/* 2. vs 저장된 슬립 */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1 }}>
             <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-              💾 vs 저장된 매뉴얼 슬립 ({comparison.vsSavedSlips.slipCount}장)
+              💾 vs 저장된 자동 슬립 ({comparison.vsSavedSlips.slipCount}장)
             </Typography>
             {comparison.vsSavedSlips.overlaps.length === 0 ? (
               <Typography variant="caption" color="text.secondary">
@@ -3969,8 +3989,9 @@ export default function SemiAutoComparePanel({
         open={bulkOpen}
         onClose={() => setBulkOpen(false)}
         onConfirm={handleBulkInsert}
-        linesPerSlip={6}
+        linesPerSlip={GAME_LABELS.length}
       />
+      {ConfirmDialog}
     </Paper>
   );
 }

@@ -135,10 +135,15 @@ def _winning_combo_hits(
     sheet_sets: List[Set[int]] | None = None,
     *,
     sheet_details: List[Dict[str, Any]] | None = None,
-    include_bonus: bool = False,
+    include_bonus: bool = True,
     bonus: int | None = None,
 ) -> Dict[str, Any]:
-    """당첨번호 vs 게임 줄 — 2·3·4·5·6개 일치 + 줄간 당첨 조합."""
+    """당첨번호 vs 게임 줄 — 2·3·4·5·6개 일치 + 줄간 당첨 조합.
+
+    include_bonus=True(기본) 면 보너스 번호를 score_lines_vs_reference 로 전달해
+    5개 일치 줄의 2등(5+보너스)/3등(5개) 을 구분한다. 보너스는 등수 분기에만
+    쓰이고 일치(overlap) 개수에는 더해지지 않는다.
+    """
     from .line_overlap_patterns import analyze_line_overlap_patterns
 
     main = sorted(winning)

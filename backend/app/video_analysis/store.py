@@ -718,6 +718,37 @@ def _collect_deduped_sheet_sets(entries: List[Dict[str, Any]]) -> List[set[int]]
     return _dedupe_sheet_sets(all_sets)
 
 
+def _sheet_detail_content_key(detail: Dict[str, Any]) -> tuple:
+    """용지(줄 구성) 내용 키 — 줄별 정렬번호 튜플의 정렬 묶음."""
+    lines = detail.get("lines") or []
+    if lines:
+        line_keys = sorted(
+            tuple(sorted(int(n) for n in (ln.get("numbers") or []) if 1 <= int(n) <= 45))
+            for ln in lines
+        )
+        return tuple(line_keys)
+    nums = tuple(sorted(int(n) for n in (detail.get("numbers") or []) if 1 <= int(n) <= 45))
+    return (nums,)
+
+
+def _dedupe_sheet_details(details: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """엔트리 간 동일 용지(줄 구성) 1장만 — 교차줄 겹침 카운트 중복 방지.
+
+    extract_betting_lines 는 details 의 위치(sheet_index)로 line_id 를 만들기 때문에,
+    같은 용지가 여러 엔트리에 들어오면 서로 다른 line_id 로 두 번 집계된다.
+    누적 재계산 전에 내용 기준으로 무중복화한다 (_collect_deduped_sheet_sets 와 동일 의도).
+    """
+    seen: set[tuple] = set()
+    out: List[Dict[str, Any]] = []
+    for d in details:
+        key = _sheet_detail_content_key(d)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(d)
+    return out
+
+
 def _entry_sheet_details(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
     r = entry.get("result") or {}
     meta = r.get("meta") or {}
@@ -1309,6 +1340,7 @@ def _recompute_intent_combo(entries: List[Dict[str, Any]], intent: str) -> Dict[
         details: List[Dict[str, Any]] = []
         for entry in group:
             details.extend(_entry_sheet_details(entry))
+        details = _dedupe_sheet_details(details)
         sheets = _collect_deduped_sheet_sets(group)
         official = build_draw_review_template()
         out = _winning_combo_hits(
@@ -1323,6 +1355,7 @@ def _recompute_intent_combo(entries: List[Dict[str, Any]], intent: str) -> Dict[
     details = []
     for entry in group:
         details.extend(_entry_sheet_details(entry))
+    details = _dedupe_sheet_details(details)
     sheets = _collect_deduped_sheet_sets(group)
     review_ref: list[int] = []  # 복기 템플릿 미참조 — 이번회차 저장분 줄간 겹침만
     return analyze_current_round_sheet_combos(

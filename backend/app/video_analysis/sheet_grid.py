@@ -626,8 +626,14 @@ def build_sheet_payload(
     source_image: str = "",
     sub_sheet_index: int = 0,
     lines: List[Dict[str, Any]] | None = None,
+    full_numbers: bool = False,
 ) -> Dict[str, Any]:
-    """용지 1장 — A~E 게임 줄 + 표시 강도 필터."""
+    """용지 1장 — A~E 게임 줄 + 표시 강도 필터.
+
+    full_numbers=True 면 표시강도 필터를 건너뛰고 모든 번호를 보존한다.
+    OCR/사진은 노이즈 제거용 필터가 필요하지만, 수기 입력은 정확한 데이터라
+    필터링하면 한 용지(최대 30번호)가 7번호로 잘려 용지단위 분석이 오염된다.
+    """
     game_lines = list(lines or [])
     if game_lines:
         merged_counts, merged_positions = _merge_sheet_level(game_lines)
@@ -635,7 +641,7 @@ def build_sheet_payload(
         positions = merged_positions or positions
 
     mark_scores = {int(k): int(v) for k, v in counts.items() if 1 <= int(k) <= 45}
-    nums = filter_marked_numbers_for_combo(mark_scores)
+    nums = set(mark_scores) if full_numbers else filter_marked_numbers_for_combo(mark_scores)
     pos_out: Dict[int, Dict[str, int]] = {}
     for n in nums:
         p = positions.get(n) or positions.get(str(n))

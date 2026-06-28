@@ -10,11 +10,18 @@ from .sheet_grid import filter_marked_numbers_for_combo
 GAME_LINE_LABELS = ("A", "B", "C", "D", "E")
 PRIZE_TIER_LABELS = {
     6: "1등(6개 일치)",
-    5: "2·3등(5개 일치)",
+    5: "3등(5개 일치)",  # 5개+보너스면 2등 — score_lines_vs_reference 에서 보너스로 분기
     4: "4등(4개 일치)",
     3: "5등(3개 일치)",
     2: "2개 일치",
 }
+
+
+def _prize_tier_label(overlap: int, bonus_hit: bool) -> str:
+    """일치 개수 → 등수. 5개 일치는 보너스 여부로 2등/3등 구분."""
+    if overlap == 5:
+        return "2등(5개+보너스)" if bonus_hit else "3등(5개 일치)"
+    return PRIZE_TIER_LABELS.get(overlap, f"{overlap}개 일치")
 
 
 def _line_numbers(detail: Dict[str, Any], line: Dict[str, Any] | None = None) -> Set[int]:
@@ -210,7 +217,9 @@ def score_lines_vs_reference(
         overlap = len(matched)
         if overlap < 2:
             continue
-        bonus_hit = bool(bonus and int(bonus) in nums and int(bonus) in ref)
+        # 보너스 번호는 당첨 6개(ref)에 포함되지 않으므로 'in ref' 를 요구하면
+        # 항상 False 가 되어 2등이 절대 잡히지 않았다. 줄에 보너스 번호가 있으면 hit.
+        bonus_hit = bool(bonus and int(bonus) in nums)
         hits.append(
             {
                 "sheet_index": int(line.get("sheet_index", 0)),
@@ -220,7 +229,7 @@ def score_lines_vs_reference(
                 "line_numbers": sorted(nums),
                 "overlap_count": overlap,
                 "matching_numbers": matched,
-                "prize_tier": PRIZE_TIER_LABELS.get(overlap, f"{overlap}개 일치"),
+                "prize_tier": _prize_tier_label(overlap, bonus_hit),
                 "bonus_match": bonus_hit,
                 "source_image": line.get("source_image", ""),
             }

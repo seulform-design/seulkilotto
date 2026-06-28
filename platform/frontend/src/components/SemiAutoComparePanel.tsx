@@ -87,10 +87,16 @@ const SIGNAL_SOURCE_LABELS: Record<string, string> = {
   'accumulated-fallback': '누적 보조',
 };
 
-const HEAVY_COMPARISON_TICKET_LIMIT = 180;
-const HEAVY_LINE_PAIR_LIMIT = 8_000;
+// 보류(suspend) 임계값. 페어 매칭/요약 비교의 실제 계산 비용은 가벼워서
+// (수십만 페어도 수십 ms) 과거 값(180줄/8000페어)은 지나치게 낮아 243×40
+// 같은 정상 사용까지 1:1 비교를 0건으로 보류시켰다. 현실적인 상한으로 올리고,
+// 그래도 렌더가 폭증하지 않도록 그룹 카드 줄 목록은 별도 캡(아래)으로 제한한다.
+const HEAVY_COMPARISON_TICKET_LIMIT = 1_200;
+const HEAVY_LINE_PAIR_LIMIT = 200_000;
 /** 보류 상태에서 [상세 비교 보기] 강제 시 경량 비교에 사용할 상위 줄 수 캡. */
 const FORCE_DETAILED_TICKET_CAP = 200;
+/** 1:1 매칭 그룹 카드에서 한쪽(자동/반자동) 일치 줄을 최대 몇 개까지 렌더할지. */
+const GROUP_LINE_RENDER_CAP = 40;
 
 function signalSourceLabel(source: string): string {
   return SIGNAL_SOURCE_LABELS[source] ?? source;
@@ -3674,7 +3680,7 @@ export default function SemiAutoComparePanel({
                                     {winningSet && ' — 당첨번호만 컬러, 나머지 회색'}
                                   </Typography>
                                   <Stack spacing={0.2}>
-                                    {g.autoList.map((a) => (
+                                    {g.autoList.slice(0, GROUP_LINE_RENDER_CAP).map((a) => (
                                       <Stack
                                         key={`ga-${g.key}-${a.idx}`}
                                         direction="row"
@@ -3704,6 +3710,11 @@ export default function SemiAutoComparePanel({
                                         ))}
                                       </Stack>
                                     ))}
+                                    {g.autoList.length > GROUP_LINE_RENDER_CAP && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        …외 자동 {g.autoList.length - GROUP_LINE_RENDER_CAP}줄
+                                      </Typography>
+                                    )}
                                   </Stack>
                                 </Box>
                                 <Box sx={{ mt: 0.4, pl: 0.5 }}>
@@ -3712,7 +3723,7 @@ export default function SemiAutoComparePanel({
                                     {winningSet && ' — 당첨번호만 컬러, 나머지 회색'}
                                   </Typography>
                                   <Stack spacing={0.2}>
-                                    {g.semiList.map((s) => (
+                                    {g.semiList.slice(0, GROUP_LINE_RENDER_CAP).map((s) => (
                                       <Stack
                                         key={`gs-${g.key}-${s.idx}`}
                                         direction="row"
@@ -3742,6 +3753,11 @@ export default function SemiAutoComparePanel({
                                         ))}
                                       </Stack>
                                     ))}
+                                    {g.semiList.length > GROUP_LINE_RENDER_CAP && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        …외 반자동 {g.semiList.length - GROUP_LINE_RENDER_CAP}줄
+                                      </Typography>
+                                    )}
                                   </Stack>
                                 </Box>
                               </Box>

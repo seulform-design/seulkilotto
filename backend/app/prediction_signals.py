@@ -1,6 +1,7 @@
 """통합 예측 신호 — 추첨기·후속출현·클래식·용지(강한후보) 규칙 기반 점수."""
 from __future__ import annotations
 
+import time
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -9,10 +10,19 @@ from .database import load_history
 from .machine_analytics import build_round_recommendation, predict_next_round
 from .post_occurrence_engine import run_post_occurrence_analysis
 from .parallel_round_analysis import analyze_parallel_rounds
-from .video_analysis.store import build_accumulated
+from .video_analysis.store import build_accumulated, store_signature
 
 RULES_VERSION = "1.1"
 STRONG_LIMIT = 18
+
+# ── 결과 캐시 ────────────────────────────────────────────────────
+# 신호 계산은 추첨이력(회차) + 용지 저장소에만 의존하고 결정적이라,
+# (intent, seed, latest_round, 저장소 시그니처) 가 같으면 재사용한다.
+# 회차는 주 1회, 시그니처는 저장/삭제 시에만 바뀌므로 대부분 캐시 적중 →
+# 14~16초 전수 재계산이 반복/동시 호출에서 사라진다(타임아웃·에러 방지).
+_SIGNAL_CACHE: Dict[Tuple[Any, ...], Tuple[float, Dict[str, Any]]] = {}
+_SIGNAL_CACHE_MAX = 12
+_SIGNAL_CACHE_TTL_SEC = 900  # 15분 안전망 (시그니처가 무효화 못 잡는 경우 대비)
 
 # 출처별 가중치 (규칙 문서화 — 프론트와 동기화)
 SOURCE_WEIGHTS: Dict[str, float] = {
@@ -304,8 +314,16 @@ def build_prediction_signals(
     if df.empty:
         return {"error": "당첨 데이터가 없습니다."}
 
-    next_round, next_date, auto_machine = predict_next_round(df)
     latest_round = int(df["round"].max())
+
+    # 캐시 조회 — 같은 입력이면 즉시 반환 (반복·동시 호출 시 재계산 회피)
+    cache_key = (intent, seed, latest_round, store_signature())
+    now = time.monotonic()
+    cached = _SIGNAL_CACHE.get(cache_key)
+    if cached is not None and now - cached[0] < _SIGNAL_CACHE_TTL_SEC:
+        return cached[1]
+
+    next_round, next_date, auto_machine = predict_next_round(df)
     latest_row = df.sort_values("round").iloc[-1]
     latest_draw_date = str(latest_row["draw_date"])
     review_mode = intent == "review"
@@ -361,7 +379,7 @@ def build_prediction_signals(
     for item in ranked:
         by_grade[item["grade"]].append(item["number"])
 
-    return {
+    out = {
         "rules_version": RULES_VERSION,
         "target_round": latest_round if review_mode else next_round,
         "target_draw_date": latest_draw_date if review_mode else next_date,
@@ -387,3 +405,10 @@ def build_prediction_signals(
             "수학적 1등 확률(1/8,145,060)은 변하지 않습니다."
         ),
     }
+
+    # 캐시 저장 (크기 제한 — 가장 오래된 항목 제거)
+    _SIGNAL_CACHE[cache_key] = (now, out)
+    if len(_SIGNAL_CACHE) > _SIGNAL_CACHE_MAX:
+        oldest = min(_SIGNAL_CACHE, key=lambda k: _SIGNAL_CACHE[k][0])
+        _SIGNAL_CACHE.pop(oldest, None)
+    return out

@@ -458,6 +458,24 @@ def _archived_current_entries(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     return archived
 
 
+def store_signature() -> str:
+    """저장소 상태 경량 시그니처 — 저장/삭제 시 값이 바뀐다.
+
+    예측 신호 등 무거운 파생 계산의 캐시 무효화 키로 쓴다. updated_at +
+    엔트리 수만 보므로 전체 재계산보다 훨씬 싸고, 영속 타임스탬프 기반이라
+    워커 간에도 일관적이다.
+    """
+    try:
+        historical = _load_historical_raw()
+        current = _load_current_raw()
+        return (
+            f"{historical.get('updated_at', '')}|{len(historical.get('entries') or [])}|"
+            f"{current.get('updated_at', '')}|{len(current.get('entries') or [])}"
+        )
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _live_entries() -> List[Dict[str, Any]]:
     historical = _load_historical_raw()
     current = _load_current_raw()

@@ -410,13 +410,21 @@ def analyze_line_overlap_patterns(
     tiers = _tier_buckets(same_line)
 
     cross_report = build_cross_line_analysis_report(lines, min_repeat=2)
-    pairs = cross_report["pair_sets"]
-    triples = cross_report["triple_sets"]
 
     raw_cross = find_cross_line_combos(lines, sizes=(2, 3, 4), min_line_repeat=2)
     pair_min = _adaptive_cross_line_min(line_count, 2) if min_cross_line_repeat is None else min_cross_line_repeat
     triple_min = _adaptive_cross_line_min(line_count, 3) if min_cross_line_repeat is None else min_cross_line_repeat
     quad_min = _adaptive_cross_line_min(line_count, 4) if min_cross_line_repeat is None else min_cross_line_repeat
+
+    # pair_duplicates/triple_duplicates 는 combo_verification 의 criteria(적응형
+    # 줄수 기준)와 일치하도록 같은 임계로 거른다. 과거엔 항상 min_repeat=2 라
+    # 대량 업로드 시 노이즈가 범람하고, 표시되는 기준(예: 2번호 5줄+)과 실제
+    # 데이터(2줄+)가 어긋났다. (cross_report 자체는 '2회 이상' 패널용으로 보존)
+    def _repeat_of(item: Dict[str, Any]) -> int:
+        return int(item.get("line_count", item.get("appearance_count", 0)))
+
+    pairs = [p for p in cross_report["pair_sets"] if _repeat_of(p) >= pair_min]
+    triples = [t for t in cross_report["triple_sets"] if _repeat_of(t) >= triple_min]
 
     cross: List[Dict[str, Any]] = []
     for item in raw_cross:

@@ -3172,37 +3172,46 @@ export default function SemiAutoComparePanel({
               각 티켓의 번호 중 강한 후보에 속한 것 (vsStrongMatch) 이 2개 이상일 때만 그 교집합 세트를 그룹화.
               아래 별도 패널인 '🔀 자동 ∩ 반자동' 은 <strong>1~45 전체 모집단</strong>을 보는 다른 분석 — 모집단이 달라 카운트도 다름.
             </Typography>
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-              {[0, 1, 2, 3, 4, 5, 6].map((k) => {
-                const count = intersectionCmp.strongIntersectionDistribution[k] ?? 0;
-                const pct = intersectionCmp.ticketCount > 0
-                  ? (count / intersectionCmp.ticketCount) * 100
-                  : 0;
-                return (
+            {resolvedStrongCandidates.length > 0 ? (
+              <>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                  {[0, 1, 2, 3, 4, 5, 6].map((k) => {
+                    const count = intersectionCmp.strongIntersectionDistribution[k] ?? 0;
+                    const pct = intersectionCmp.ticketCount > 0
+                      ? (count / intersectionCmp.ticketCount) * 100
+                      : 0;
+                    return (
+                      <Chip
+                        key={k}
+                        size="small"
+                        label={`${k}개: ${count}장 (${pct.toFixed(1)}%)`}
+                        color={k >= 3 ? 'success' : k >= 2 ? 'warning' : 'default'}
+                        variant={k >= 2 ? 'filled' : 'outlined'}
+                      />
+                    );
+                  })}
+                </Stack>
+                <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
                   <Chip
-                    key={k}
                     size="small"
-                    label={`${k}개: ${count}장 (${pct.toFixed(1)}%)`}
-                    color={k >= 3 ? 'success' : k >= 2 ? 'warning' : 'default'}
-                    variant={k >= 2 ? 'filled' : 'outlined'}
+                    color="warning"
+                    label={`🟡 강한 후보와 2개 이상 겹친 티켓: ${intersectionCmp.twoPlusStrongCount}장 (${intersectionCmp.ticketCount > 0 ? (intersectionCmp.twoPlusStrongCount / intersectionCmp.ticketCount * 100).toFixed(2) : '0.00'}%)`}
+                    sx={{ fontWeight: 700 }}
                   />
-                );
-              })}
-            </Stack>
-            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-              <Chip
-                size="small"
-                color="warning"
-                label={`🟡 강한 후보와 2개 이상 겹친 티켓: ${intersectionCmp.twoPlusStrongCount}장 (${intersectionCmp.ticketCount > 0 ? (intersectionCmp.twoPlusStrongCount / intersectionCmp.ticketCount * 100).toFixed(2) : '0.00'}%)`}
-                sx={{ fontWeight: 700 }}
-              />
-              <Chip
-                size="small"
-                color="success"
-                label={`🟢 강한 후보와 3개 이상 겹친 티켓: ${intersectionCmp.threePlusStrongCount}장 (${intersectionCmp.ticketCount > 0 ? (intersectionCmp.threePlusStrongCount / intersectionCmp.ticketCount * 100).toFixed(2) : '0.00'}%)`}
-                sx={{ fontWeight: 700 }}
-              />
-            </Stack>
+                  <Chip
+                    size="small"
+                    color="success"
+                    label={`🟢 강한 후보와 3개 이상 겹친 티켓: ${intersectionCmp.threePlusStrongCount}장 (${intersectionCmp.ticketCount > 0 ? (intersectionCmp.threePlusStrongCount / intersectionCmp.ticketCount * 100).toFixed(2) : '0.00'}%)`}
+                    sx={{ fontWeight: 700 }}
+                  />
+                </Stack>
+              </>
+            ) : (
+              <Alert severity="info" sx={{ py: 0.5 }}>
+                {intentSectionLabel} 강한 후보가 아직 없습니다. 자동 용지를 [분석·저장]하거나 줄을 더 등록하면
+                교집합 분포가 표시됩니다. (강한 후보가 없으면 교집합 통계는 의미가 없어 숨깁니다.)
+              </Alert>
+            )}
             {strongCandidateSource === 'none' && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
                 ※ {intentSectionLabel} 자동 누적 데이터가 없습니다. 자동 용지를 분석하여 누적을 만들면 교집합 분석이 활성화됩니다.

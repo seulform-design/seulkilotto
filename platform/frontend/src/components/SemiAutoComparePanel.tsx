@@ -4054,6 +4054,53 @@ export default function SemiAutoComparePanel({
         )}
       </Paper>
 
+      {(() => {
+        const acc = predictionSignals?.signal_accuracy;
+        if (!acc?.available) return null;
+        const SRC_LABEL: Record<string, string> = {
+          machine: '추첨기',
+          classic: '클래식',
+          parallel: '평행회차',
+        };
+        return (
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main' }}>
+            <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+              🎯 신호원별 적중률 (최근 {acc.rounds}회차 백테스트)
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              각 신호의 상위 {acc.top_k}개 예측이 실제 당첨 6개를 평균 몇 개 맞췄는지(walk-forward).
+              무작위 기대치 <strong>{acc.random_baseline}</strong>개보다 낮으면 약한 신호 → 이번회차 가중치 보정 참고.
+            </Typography>
+            <Stack spacing={0.5}>
+              {Object.entries(acc.by_source).map(([src, v]) => {
+                if (!v.available) return null;
+                const weak = src === acc.weakest_source;
+                const strong = src === acc.strongest_source;
+                return (
+                  <Stack key={src} direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Chip size="small" label={SRC_LABEL[src] ?? src} variant="outlined" sx={{ minWidth: 76 }} />
+                    <Typography variant="caption">
+                      평균 {v.avg_hits.toFixed(2)}개 · 3개+ {v.rounds_3plus}/{v.rounds_tested}회
+                    </Typography>
+                    <Chip
+                      size="small"
+                      color={v.lift_vs_random > 0 ? 'success' : v.lift_vs_random < 0 ? 'error' : 'default'}
+                      label={`무작위 대비 ${v.lift_vs_random >= 0 ? '+' : ''}${v.lift_vs_random.toFixed(2)}`}
+                      sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                    />
+                    {weak && <Chip size="small" color="error" label="약한 신호 ↓보정" sx={{ height: 18, fontSize: 11, fontWeight: 700 }} />}
+                    {strong && <Chip size="small" color="success" label="강한 신호" sx={{ height: 18, fontSize: 11, fontWeight: 700 }} />}
+                  </Stack>
+                );
+              })}
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, fontStyle: 'italic' }}>
+              ※ {acc.note}
+            </Typography>
+          </Paper>
+        );
+      })()}
+
       <BulkLineInputDialog
         open={bulkOpen}
         onClose={() => setBulkOpen(false)}

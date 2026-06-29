@@ -1033,6 +1033,29 @@ export interface PredictionSignalsResponse {
     };
   };
   disclaimer: string;
+  /** 복기 탭 전용 — 신호원별 과거 적중률 백테스트. */
+  signal_accuracy?: PredictionSignalAccuracy;
+}
+
+export interface PredictionSignalAccuracySource {
+  available: boolean;
+  rounds_tested: number;
+  avg_hits: number;
+  lift_vs_random: number;
+  rounds_3plus: number;
+  per_round: { round: number; hits: number; predicted: number[] }[];
+}
+
+export interface PredictionSignalAccuracy {
+  available: boolean;
+  rounds: number;
+  top_k: number;
+  random_baseline: number;
+  by_source: Record<string, PredictionSignalAccuracySource>;
+  weakest_source: string | null;
+  strongest_source: string | null;
+  excluded_sources: string[];
+  note: string;
 }
 
 export interface ParallelRoundDecadeBucket {

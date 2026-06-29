@@ -294,6 +294,114 @@ def _apply_parallel_signals(
     }
 
 
+# ── 신호원별 적중률 백테스트 (복기 탭) ────────────────────────────
+# 각 통계 신호원이 과거 회차들을 얼마나 잘 맞췄는지 walk-forward 로 측정.
+# 회차 R 평가에는 R 직전까지의 데이터만 사용(미래 누수 방지). 후속출현(post)은
+# 회차마다 자체 λ 최적화(≈20s)가 들어가 N회차 반복이 비현실적이라 제외한다.
+_ACCURACY_CACHE: Dict[Tuple[Any, ...], Tuple[float, Dict[str, Any]]] = {}
+_ACCURACY_CACHE_TTL_SEC = 24 * 3600  # 회차는 주 1회 변경 → 길게 캐시
+_BACKTEST_SOURCES = ("machine", "classic", "parallel")
+_BACKTEST_TOP_K = 10
+_NUM_COLS = ("num1", "num2", "num3", "num4", "num5", "num6")
+
+
+def _round_winning_map(df) -> Dict[int, set]:
+    cols = [c for c in _NUM_COLS if c in df.columns]
+    out: Dict[int, set] = {}
+    for _, row in df.iterrows():
+        out[int(row["round"])] = {int(row[c]) for c in cols}
+    return out
+
+
+def _source_top_numbers(df_prior, source: str, target_round: int, top_k: int) -> List[int]:
+    scores: Dict[int, float] = defaultdict(float)
+    srcs: Dict[int, List[str]] = defaultdict(list)
+    try:
+        if source == "machine":
+            _, _, auto_machine = predict_next_round(df_prior)
+            _apply_machine_signals(scores, srcs, build_round_recommendation(df_prior, machine_id=auto_machine))
+        elif source == "classic":
+            _apply_classic_signals(scores, srcs, build_classic_recommendation(df_prior, method="blend"))
+        elif source == "parallel":
+            _apply_parallel_signals(scores, srcs, df_prior, target_round)
+    except Exception:  # noqa: BLE001
+        return []
+    ranked = sorted((n for n in scores if scores[n] > 0), key=lambda n: -scores[n])
+    return ranked[:top_k]
+
+
+def backtest_signal_accuracy(df, latest_round: int, *, rounds: int = 12, top_k: int = _BACKTEST_TOP_K) -> Dict[str, Any]:
+    cache_key = (latest_round, rounds, top_k)
+    now = time.monotonic()
+    cached = _ACCURACY_CACHE.get(cache_key)
+    if cached is not None and now - cached[0] < _ACCURACY_CACHE_TTL_SEC:
+        return cached[1]
+
+    win = _round_winning_map(df)
+    all_rounds = sorted(win.keys())
+    if not all_rounds:
+        return {"available": False, "by_source": {}, "rounds": 0}
+    # 충분한 prior 데이터(≥50회차)가 있는 최근 rounds 회차만 평가
+    floor_round = all_rounds[0] + 50
+    test_rounds = [r for r in all_rounds if r >= floor_round][-rounds:]
+    random_baseline = round(top_k * 6 / 45, 3)  # top_k개 중 기대 적중 수
+
+    per_source: Dict[str, Any] = {}
+    for src in _BACKTEST_SOURCES:
+        total_hits = 0
+        n = 0
+        rounds_3plus = 0
+        per_round: List[Dict[str, Any]] = []
+        for r in test_rounds:
+            prior = df[df["round"] < r]
+            if len(prior) < 50:
+                continue
+            top = _source_top_numbers(prior, src, r, top_k)
+            if not top:
+                continue
+            actual = win.get(r, set())
+            hits = len(set(top) & actual)
+            total_hits += hits
+            n += 1
+            if hits >= 3:
+                rounds_3plus += 1
+            per_round.append({"round": r, "hits": hits, "predicted": top})
+        avg_hits = round(total_hits / n, 3) if n else 0.0
+        per_source[src] = {
+            "available": n > 0,
+            "rounds_tested": n,
+            "avg_hits": avg_hits,
+            "lift_vs_random": round(avg_hits - random_baseline, 3),
+            "rounds_3plus": rounds_3plus,
+            "per_round": per_round,
+        }
+
+    avail = {k: v for k, v in per_source.items() if v["available"]}
+    weakest = min(avail, key=lambda k: avail[k]["avg_hits"]) if avail else None
+    strongest = max(avail, key=lambda k: avail[k]["avg_hits"]) if avail else None
+    result = {
+        "available": bool(avail),
+        "rounds": len(test_rounds),
+        "top_k": top_k,
+        "random_baseline": random_baseline,
+        "by_source": per_source,
+        "weakest_source": weakest,
+        "strongest_source": strongest,
+        "excluded_sources": ["post_occurrence"],
+        "note": (
+            "각 신호원이 과거 회차를 맞춘 정도(walk-forward). avg_hits 가 "
+            f"무작위 기대치({random_baseline})보다 낮으면 약한 신호 → 이번회차 "
+            "가중치를 낮추는 보정 참고. 후속출현은 회차마다 자체 최적화 비용이 "
+            "커 백테스트에서 제외."
+        ),
+    }
+    _ACCURACY_CACHE[cache_key] = (now, result)
+    if len(_ACCURACY_CACHE) > 8:
+        oldest = min(_ACCURACY_CACHE, key=lambda k: _ACCURACY_CACHE[k][0])
+        _ACCURACY_CACHE.pop(oldest, None)
+    return result
+
+
 def build_prediction_signals(
     *,
     intent: str = "current_round",
@@ -324,28 +432,22 @@ def build_prediction_signals(
         return cached[1]
 
     next_round, next_date, auto_machine = predict_next_round(df)
-    latest_row = df.sort_values("round").iloc[-1]
-    latest_draw_date = str(latest_row["draw_date"])
-    review_mode = intent == "review"
 
     scores: Dict[int, float] = defaultdict(float)
     sources: Dict[int, List[str]] = defaultdict(list)
     excluded: Dict[int, List[str]] = defaultdict(list)
     accumulated = build_accumulated()
     photo_src = _apply_photo_signals(scores, sources, excluded, intent, accumulated)
-    if review_mode:
-        machine_src = {"available": False, "reason": "review_mode"}
-        post_src = {"available": False, "reason": "review_mode"}
-        classic_src = {"available": False, "reason": "review_mode"}
-        parallel_src = {"available": False, "reason": "review_mode"}
-    else:
-        machine_payload = build_round_recommendation(df, machine_id=auto_machine, seed=seed)
-        post_payload = run_post_occurrence_analysis(df, trigger_round=latest_round)
-        classic_payload = build_classic_recommendation(df, method="blend", seed=seed)
-        machine_src = _apply_machine_signals(scores, sources, machine_payload)
-        post_src = _apply_post_signals(scores, sources, post_payload)
-        classic_src = _apply_classic_signals(scores, sources, classic_payload)
-        parallel_src = _apply_parallel_signals(scores, sources, df, next_round)
+    # 통계 4신호(추첨기·후속·클래식·평행)는 복기/이번회차 모두 최신 전체
+    # 데이터로 계산한다. 복기 탭은 이 통계예측 + 신호원별 적중률(백테스트)을
+    # 함께 보고 약한 신호를 이번회차 보정에 활용한다.
+    machine_payload = build_round_recommendation(df, machine_id=auto_machine, seed=seed)
+    post_payload = run_post_occurrence_analysis(df, trigger_round=latest_round)
+    classic_payload = build_classic_recommendation(df, method="blend", seed=seed)
+    machine_src = _apply_machine_signals(scores, sources, machine_payload)
+    post_src = _apply_post_signals(scores, sources, post_payload)
+    classic_src = _apply_classic_signals(scores, sources, classic_payload)
+    parallel_src = _apply_parallel_signals(scores, sources, df, next_round)
 
     ranked: List[Dict[str, Any]] = []
     for n in range(1, 46):
@@ -381,11 +483,11 @@ def build_prediction_signals(
 
     out = {
         "rules_version": RULES_VERSION,
-        "target_round": latest_round if review_mode else next_round,
-        "target_draw_date": latest_draw_date if review_mode else next_date,
+        "target_round": next_round,
+        "target_draw_date": next_date,
         "latest_round": latest_round,
         "intent": intent,
-        "machine_id": machine_src.get("machine_id") if not review_mode else None,
+        "machine_id": machine_src.get("machine_id"),
         "source_weights": SOURCE_WEIGHTS,
         "strong_candidates": strong_candidates,
         "excluded_candidates": excluded_candidates,
@@ -405,6 +507,10 @@ def build_prediction_signals(
             "수학적 1등 확률(1/8,145,060)은 변하지 않습니다."
         ),
     }
+
+    # 복기 탭: 신호원별 적중률 백테스트 동봉 (자체 캐시 → 사진 저장과 무관)
+    if intent == "review":
+        out["signal_accuracy"] = backtest_signal_accuracy(df, latest_round)
 
     # 캐시 저장 (크기 제한 — 가장 오래된 항목 제거)
     _SIGNAL_CACHE[cache_key] = (now, out)

@@ -65,10 +65,30 @@ def test_prediction_signals_uses_intent_photo_slice(monkeypatch, tmp_path):
     assert acc["by_intent"]["review"]["total_analyses"] == 1
 
 
-def test_prediction_signals_review_mode_disables_next_round_sources():
+def test_prediction_signals_review_mode_enables_signals_and_accuracy():
+    """복기 탭: 통계 신호를 최신 전체 데이터로 계산하고(다음 회차 대상),
+    신호원별 적중률 백테스트를 함께 제공한다."""
     out = build_prediction_signals(intent="review")
-    assert out["target_round"] == out["latest_round"]
+    # 복기도 다음 회차 통계예측을 보여준다 (과거엔 비활성이었음)
+    assert out["target_round"] == out["latest_round"] + 1
     assert out["sources"]["photo_sheet"]["intent"] == "review"
-    assert out["sources"]["machine"]["available"] is False
-    assert out["sources"]["classic"]["available"] is False
-    assert out["sources"]["parallel_round"]["available"] is False
+    assert out["sources"]["machine"]["available"] is True
+    assert out["sources"]["classic"]["available"] is True
+    assert out["sources"]["parallel_round"]["available"] is True
+
+    acc = out.get("signal_accuracy")
+    assert acc is not None
+    assert acc["available"] is True
+    by_source = acc["by_source"]
+    for src in ("machine", "classic", "parallel"):
+        assert src in by_source
+        assert by_source[src]["rounds_tested"] >= 1
+    # 약/강 신호원이 식별된다 (이번회차 가중치 보정 참고용)
+    assert acc["weakest_source"] in by_source
+    assert acc["strongest_source"] in by_source
+
+
+def test_prediction_signals_current_round_has_no_backtest():
+    """이번회차는 적중률 백테스트를 동봉하지 않는다 (복기 전용)."""
+    out = build_prediction_signals(intent="current_round")
+    assert "signal_accuracy" not in out

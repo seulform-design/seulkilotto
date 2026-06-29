@@ -51,13 +51,6 @@ def get_ac(s: ResearchService = Depends(svc)):
     return _wrap(s.ac_analysis())
 
 
-@router.get("/pair/{number}")
-def get_pair(number: int, s: ResearchService = Depends(svc)):
-    if not 1 <= number <= 45:
-        raise HTTPException(400, "number 1~45")
-    return _wrap(s.pair_detail(number))
-
-
 @router.get("/conditional/pair")
 def conditional_pair(
     a: int = Query(..., ge=1, le=45),
@@ -94,6 +87,16 @@ def triple_survival(
     s: ResearchService = Depends(svc),
 ):
     return _wrap(s.triple_survival(a, b, c))
+
+
+# 주의: 파라미터 라우트(/pair/{number})는 리터럴 라우트(/pair/survival) 보다
+# 뒤에 둬야 한다. 앞에 두면 "/pair/survival" 이 {number}="survival" 로 매칭돼
+# 422 가 났다(라우트 셰도잉).
+@router.get("/pair/{number}")
+def get_pair(number: int, s: ResearchService = Depends(svc)):
+    if not 1 <= number <= 45:
+        raise HTTPException(400, "number 1~45")
+    return _wrap(s.pair_detail(number))
 
 
 @router.get("/survival")

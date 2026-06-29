@@ -252,6 +252,14 @@ def toggle_vision_config(body: VisionConfigToggleRequest):
     }
 
 
+@router.get("/storage-status")
+def get_storage_status():
+    """용지분석 저장 백엔드 진단 — Postgres 영구저장 설정·연결 여부 확인."""
+    from app.video_analysis import pg_store
+
+    return to_jsonable(pg_store.status())
+
+
 @router.get("/accumulated")
 def get_accumulated():
     return to_jsonable(build_accumulated())

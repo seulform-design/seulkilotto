@@ -25,6 +25,37 @@ def enabled() -> bool:
     return url.startswith("postgres://") or url.startswith("postgresql")
 
 
+def status() -> Dict[str, Any]:
+    """저장 백엔드 진단 — Postgres 설정·연결 여부 확인용 (비밀번호 미노출)."""
+    if not enabled():
+        return {
+            "backend": "file",
+            "persistent": False,
+            "configured": False,
+            "detail": "PHOTO_STORE_DATABASE_URL 미설정 — 컨테이너 내부 저장(재배포 시 초기화).",
+        }
+    info: Dict[str, Any] = {"backend": "postgres", "configured": True}
+    try:
+        conn = _connect()
+        try:
+            _ensure_table(conn)
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT scope, char_length(payload::text) FROM {_TABLE}")
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+        info["persistent"] = True
+        info["connected"] = True
+        info["scopes"] = {str(r[0]): int(r[1]) for r in rows}
+        info["detail"] = "Postgres 연결 정상 — 데이터가 재배포에도 보존됩니다."
+    except Exception as exc:  # noqa: BLE001
+        info["persistent"] = False
+        info["connected"] = False
+        info["error"] = str(exc)[:200]
+        info["detail"] = "PHOTO_STORE_DATABASE_URL 설정됨 but 연결 실패 — URL/네트워크 확인 필요."
+    return info
+
+
 def _normalized_url() -> str:
     """psycopg2 가 받는 형식으로 정규화 (SQLAlchemy 방언 접미사 제거)."""
     url = _raw_url()

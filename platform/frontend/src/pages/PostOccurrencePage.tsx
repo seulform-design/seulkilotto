@@ -110,11 +110,13 @@ export default function PostOccurrencePage() {
   return (
     <Box>
       <Typography variant="h5" fontWeight={800} gutterBottom>
-        후속출현 AI 분석
+        후속출현 통계 분석
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         직전 회차 번호 조합이 과거에 등장했을 때, 그 다음 회차에서 실제로 가장 많이 출현한 번호를
-        데이터 기반으로 분석합니다. 임의 생성 없이 전 회차 통계만 사용합니다.
+        데이터 기반으로 집계합니다. 임의 생성 없이 전 회차 통계만 사용합니다.
+        아래 점수·등급·적중률은 <strong>과거 출현 빈도</strong>이며 다음 회차 당첨 확률
+        (1/8,145,060)을 바꾸지 않습니다.
       </Typography>
 
       <Stack direction="row" spacing={1} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap alignItems="center">
@@ -304,7 +306,7 @@ export default function PostOccurrencePage() {
                 { key: 'rank', label: '순위' },
                 { key: 'number', label: '번호' },
                 { key: 'score', label: '점수' },
-                { key: 'probability', label: '예측확률' },
+                { key: 'probability', label: '출현 가중치' },
                 { key: 'grade', label: '등급' },
               ]}
             />

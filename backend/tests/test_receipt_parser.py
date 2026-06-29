@@ -2,6 +2,11 @@ from pathlib import Path
 
 import pytest
 
+# easyocr/torch 가 없으면(예: CI 의 경량 설치) OCR 테스트 전체를 건너뛴다.
+# easyocr 는 앱에서 지연 임포트되어 본 기능엔 영향 없고, CI 러너에서 torch
+# 모델 로드가 메모리/네트워크로 불안정(프로세스 강제종료 → exit 2)했던 원인.
+pytest.importorskip("easyocr", reason="easyocr/torch 미설치 — OCR 테스트 생략")
+
 from app.video_analysis.line_overlap_patterns import extract_betting_lines
 from app.video_analysis.receipt_parser import (
     RECEIPT_LAYOUT,

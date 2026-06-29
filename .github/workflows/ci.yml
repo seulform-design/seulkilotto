@@ -14,7 +14,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install -r backend/requirements.txt pytest
+      # easyocr(→torch, ~800MB) 는 CI 러너에서 메모리/네트워크로 불안정하고
+      # 앱은 이를 지연 임포트하므로, 핵심 로직 테스트는 easyocr 없이 돌린다.
+      # OCR 테스트(test_receipt_parser)는 importorskip 으로 자동 생략된다.
+      - run: |
+          grep -ivE '^easyocr' backend/requirements.txt > /tmp/ci-req.txt
+          pip install -r /tmp/ci-req.txt pytest
       - run: python -m pytest backend/tests/ -q
         working-directory: .
 

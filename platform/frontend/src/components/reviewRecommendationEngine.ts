@@ -1,4 +1,21 @@
 import type { ComboDuplicatePatterns } from '../api/v1Api';
+import { acValue, maxConsecutiveRun, oddCount, sumTotal } from '../utils/comboMetrics';
+
+/**
+ * 통계적으로 1등 조합에서 거의 나오지 않는 패턴을 배제한다.
+ * 수학적 확률을 바꾸지는 않지만, 합 극단·전부 홀(짝)·4연속·등차수열류 등
+ * 역대 1등에 사실상 없는 조합을 추천에서 제외해 품질을 높인다.
+ */
+function passesBasicFilters(combo: number[]): boolean {
+  if (combo.length !== 6) return false;
+  const sum = sumTotal(combo);
+  if (sum < 90 || sum > 195) return false; // p5~p95 보수 구간
+  const oc = oddCount(combo);
+  if (oc === 0 || oc === 6) return false; // 0:6 / 6:0 차단
+  if (maxConsecutiveRun(combo) >= 4) return false; // 4연속 차단
+  if (acValue(combo) < 5) return false; // 등차수열류 차단
+  return true;
+}
 
 export interface IntersectionGroupInput {
   numbers: number[];
@@ -119,26 +136,9 @@ function buildNumberScores(ctx: RecommendationContext): Record<number, number> {
     }
   }
 
-  if (ctx.sheetIntent === 'review' && ctx.winningNumbers.length > 0) {
-    const winSet = new Set(ctx.winningNumbers);
-    const strongSet = new Set(ctx.strongCandidates);
-    for (const n of ctx.winningNumbers) {
-      if (strongSet.has(n) || (scores[n] ?? 0) > 4) {
-        bump(scores, n, 8);
-      } else {
-        bump(scores, n, 2);
-      }
-    }
-    for (const seed of ctx.seedTickets) {
-      const winOverlap = seed.ticket.filter((n) => winSet.has(n)).length;
-      if (winOverlap >= 3) {
-        for (const n of seed.ticket) {
-          if (winSet.has(n)) bump(scores, n, seed.weight * 0.4);
-        }
-      }
-    }
-  }
-
+  // 복기 모드라도 실제 당첨번호(winningNumbers)는 점수에 주입하지 않는다.
+  // (사후 편향 제거 — 그러면 추천이 곧 당첨번호가 되어 예측 정합성 평가가
+  //  무의미해진다.) 당첨 일치 개수는 scoreCombo 의 winMatch 로 '표시'만 한다.
   return scores;
 }
 
@@ -208,8 +208,9 @@ function scoreCombo(
     }
   }
 
+  // 복기 당첨 일치는 점수에 더하지 않는다(사후 편향 방지). winMatch 는 결과
+  // 카드에 '당첨 N개 일치'로 표시만 되어 예측 정합성을 정직하게 보여준다.
   if (ctx.sheetIntent === 'review' && winMatch >= 3) {
-    total += winMatch * 5;
     signals.push(`당첨${winMatch}`);
   }
 
@@ -252,6 +253,7 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
     const key = comboKey(combo);
     if (seen.has(key)) return;
     if (combo.filter((n) => excludedSet.has(n)).length >= 2) return;
+    if (!passesBasicFilters(combo)) return; // 통계적으로 1등에 거의 없는 조합 배제
     seen.add(key);
     candidates.push(combo);
   };
@@ -321,12 +323,24 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
     return chosen.sort((a, b) => a - b);
   };
 
-  for (let i = 0; i < 120; i += 1) {
+  for (let i = 0; i < 160; i += 1) {
     push(pickWeighted());
   }
 
-  // weightSum referenced to avoid lint unused in some builds
-  if (weightSum <= 0) push(pool.slice(0, 6));
+  // 폴백 — 기본 필터로 모두 걸러져 후보가 없으면, 필터를 무시하고서라도
+  // 점수 상위/무작위 조합을 채워 항상 최소 1세트는 생성한다(생성 실패 방지).
+  if (candidates.length === 0) {
+    const forcePush = (combo: number[]) => {
+      const key = comboKey(combo);
+      if (combo.length === 6 && !seen.has(key)) {
+        seen.add(key);
+        candidates.push(combo);
+      }
+    };
+    if (pool.length >= 6) forcePush(pool.slice(0, 6));
+    for (let i = 0; i < 40 && candidates.length < 5; i += 1) forcePush(pickWeighted());
+  }
+  void weightSum;
 
   return candidates;
 }

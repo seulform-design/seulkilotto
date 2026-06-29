@@ -139,7 +139,7 @@ export default function ParallelRoundPanel({
           {data && (
             <>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                {modeLabel} 기준 · {data.summary} · 대상 {data.target_round}회 · 반자동 고정 후보{' '}
+                {modeLabel} 기준 · {data.summary} · 대상 {data.target_round}회 · 평행 고정수 추천(상위 3){' '}
                 {data.semi_auto_fixed_hint.join(', ') || '—'}
               </Typography>
               <Stack

@@ -2947,7 +2947,11 @@ export default function SemiAutoComparePanel({
                 variant="contained"
                 color="success"
                 onClick={generateRecommendations}
-                disabled={combinedTickets.length === 0 && !accumulated}
+                disabled={
+                  combinedTickets.length === 0 &&
+                  !accumulated &&
+                  resolvedStrongCandidates.length === 0
+                }
               >
                 추천 5세트 생성
               </Button>
@@ -2964,9 +2968,12 @@ export default function SemiAutoComparePanel({
                 </>
               )}
               {combinedTickets.length === 0
-                ? ' ※ 자동·반자동 번호를 먼저 입력하세요.'
+                ? (resolvedStrongCandidates.length > 0
+                    ? ` ※ 입력 줄이 없어 복기 통계 신호(강한 후보 ${resolvedStrongCandidates.length}개)만으로 생성합니다.`
+                    : ' ※ 자동·반자동 번호를 입력하거나 [재분석]으로 통계 신호를 먼저 불러오세요.')
                 : ` 분석 대상 ${combinedTickets.length}줄.`}
-              {' '}정직성: 수학적 당첨 확률(1/8,145,060)은 동일하며, 복기 신호와의 정합성을 높입니다.
+              {' '}정직성: 수학적 당첨 확률(1/8,145,060)은 동일하며, 통계적으로 1등에 거의 없는
+              조합(합 극단·전부 홀짝·4연속 등)을 제외하고 복기 신호와의 정합성을 높입니다.
             </Typography>
             {recommendations.length > 0 && (
               <Stack spacing={0.75}>

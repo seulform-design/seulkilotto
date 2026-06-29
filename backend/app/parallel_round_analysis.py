@@ -76,7 +76,7 @@ def analyze_parallel_rounds(
     - 동일 끝2자리 회차 당첨번호 표
     - 구간별 평행강수 / 기대수
     - 끝수 빈도
-    - 반자동 고정 후보 (2~3개)
+    - 평행 고정수 추천 (parallel_strong 상위 3 — 사용자 반자동 입력 아님)
     """
     if df.empty:
         return {"error": "당첨 데이터가 없습니다."}
@@ -167,12 +167,11 @@ def analyze_parallel_rounds(
             {"number": n, "travel_score": round(score, 1), "appearances": appearances}
         )
 
+    # semi_auto_fixed(평행 고정수 추천)는 프론트에서 별도 표기하므로 summary 에는 미포함.
     parts = [
         f"{target}회 평행군(끝{suffix:02d}) {len(parallel_list)}회차",
         f"강수 {len(parallel_strong)}개",
     ]
-    if semi_auto_fixed:
-        parts.append(f"반자동 고정 후보 {semi_auto_fixed}")
 
     return {
         "target_round": target,

@@ -194,19 +194,29 @@ function scoreCombo(
       break;
     }
   }
-  for (const g of ctx.intersection.two) {
+  for (const g of ctx.intersection.fourPlus) {
     if (g.numbers.every((n) => comboSet.has(n))) {
-      total += Math.log2(g.ticketCount + 1) * 4;
-    }
-  }
-
-  for (const g of ctx.lineMatchGroups) {
-    if (g.matchCount >= 4 && g.matchedNumbers.every((n) => comboSet.has(n))) {
-      total += g.matchCount * g.cardWeight * 0.8;
-      signals.push(`자동∩반자동${g.matchCount}`);
+      total += Math.log2(g.ticketCount + 1) * 16;
+      signals.push(`교집합${g.size}`);
       break;
     }
   }
+  for (const g of ctx.intersection.two) {
+    if (g.numbers.every((n) => comboSet.has(n))) {
+      total += Math.log2(g.ticketCount + 1) * 4;
+      signals.push('교집합2');
+    }
+  }
+
+  // 자동↔반자동 1:1 매칭 정합 — 3개 이상 공통 줄겹침이 조합에 들어가면 가산.
+  let bestLineMatch = 0;
+  for (const g of ctx.lineMatchGroups) {
+    if (g.matchCount >= 3 && g.matchedNumbers.every((n) => comboSet.has(n))) {
+      total += g.matchCount * Math.log2(g.cardWeight + 2) * 2.2;
+      bestLineMatch = Math.max(bestLineMatch, g.matchCount);
+    }
+  }
+  if (bestLineMatch > 0) signals.push(`자동∩반자동${bestLineMatch}`);
 
   // 복기 당첨 일치는 점수에 더하지 않는다(사후 편향 방지). winMatch 는 결과
   // 카드에 '당첨 N개 일치'로 표시만 되어 예측 정합성을 정직하게 보여준다.
@@ -258,21 +268,59 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
     candidates.push(combo);
   };
 
-  // 1) 상위 점수 번호 그리디 슬라이딩 윈도우
+  // ── 합의(consensus) 풀 — 복기 종합 추천의 핵심 축 ──────────────────
+  // 자동∩반자동 교집합 + 자동↔반자동 1:1 매칭 번호를 신뢰도순으로 모은다.
+  // 자동·반자동이 '함께' 가리키는 번호일수록, 그리고 겹친 티켓·줄이 많을수록
+  // 가중이 높다. 추천 6번호의 코어를 여기서 우선 채워 데이터 기반으로 만든다.
+  const consensusScore: Record<number, number> = {};
+  const addCon = (nums: number[], w: number) => {
+    for (const n of nums) {
+      if (!excludedSet.has(n)) consensusScore[n] = (consensusScore[n] ?? 0) + w;
+    }
+  };
+  for (const g of ctx.intersection.fourPlus) addCon(g.numbers, 14 * g.size * Math.log2(g.ticketCount + 2));
+  for (const g of ctx.intersection.three) addCon(g.numbers, 9 * g.size * Math.log2(g.ticketCount + 2));
+  for (const g of ctx.intersection.two) addCon(g.numbers, 5 * Math.log2(g.ticketCount + 2));
+  for (const g of ctx.lineMatchGroups) addCon(g.matchedNumbers, g.matchCount * g.matchCount * Math.log2(g.cardWeight + 2));
+  const consensusPool = Object.entries(consensusScore)
+    .sort(([, a], [, b]) => b - a)
+    .map(([n]) => Number(n));
+
+  // 코어(교집합/매칭 번호) → 합의풀 → 일반풀 순서로 6번호 채우기
+  const fillConsensus = (base: number[]): number[] | null => {
+    const out = [...new Set(base.filter((n) => !excludedSet.has(n) && n >= 1 && n <= 45))];
+    for (const src of [consensusPool, pool]) {
+      for (const n of src) {
+        if (out.length >= 6) break;
+        if (!out.includes(n)) out.push(n);
+      }
+    }
+    return out.length >= 6 ? out.slice(0, 6).sort((a, b) => a - b) : null;
+  };
+
+  // C1) 합의 상위 6 — 가장 많은 자동·반자동이 동의한 번호 묶음
+  if (consensusPool.length >= 6) push(fillConsensus(consensusPool.slice(0, 6)));
+
+  // C2) 교집합 그룹 + 1:1 매칭(2개 이상 공통) 을 코어로 한 조합
+  const cores: number[][] = [
+    ...ctx.intersection.fourPlus.map((g) => g.numbers),
+    ...ctx.intersection.three.map((g) => g.numbers),
+    ...ctx.lineMatchGroups.filter((g) => g.matchCount >= 2).map((g) => g.matchedNumbers),
+    ...ctx.intersection.two.map((g) => g.numbers),
+  ];
+  for (const core of cores) push(fillConsensus(core));
+
+  // C3) 코어끼리 결합 (작은 코어 2개 → 더 강한 합의 조합)
+  const bigCores = cores.filter((c) => c.length >= 2).slice(0, 12);
+  for (let i = 0; i < bigCores.length; i += 1) {
+    for (let j = i + 1; j < bigCores.length; j += 1) {
+      push(fillConsensus([...bigCores[i], ...bigCores[j]]));
+    }
+  }
+
+  // 1) 상위 점수 번호 그리디 슬라이딩 윈도우 (합의가 부족할 때 보충)
   for (let start = 0; start <= Math.min(8, pool.length - 6); start += 1) {
     push(pool.slice(start, start + 6));
-  }
-
-  // 2) 교집합 세트 + 풀 보충
-  for (const g of [...ctx.intersection.fourPlus, ...ctx.intersection.three, ...ctx.intersection.two]) {
-    push(fillFromPool(g.numbers, pool, 6));
-  }
-
-  // 3) 자동∩반자동 고일치 매치 번호 + 보충
-  for (const g of ctx.lineMatchGroups) {
-    if (g.matchCount >= 3) {
-      push(fillFromPool(g.matchedNumbers, pool, 6));
-    }
   }
 
   // 4) 분석 상위 시드 티켓 및 변형

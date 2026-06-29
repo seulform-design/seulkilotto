@@ -2959,8 +2959,9 @@ export default function SemiAutoComparePanel({
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
               {compareWinning ? (
                 <>
-                  강한 후보·교집합·자동∩반자동 매칭·콤보 패턴·당첨 매치 상위 티켓을 종합 점수화해
-                  복기 탭 분석과 가장 잘 맞는 6번호 5세트를 생성합니다.
+                  <strong>자동∩반자동 교집합</strong>과 <strong>자동↔반자동 1:1 줄 매칭(공통 번호)</strong>을
+                  핵심 축으로, 강한 후보·콤보 패턴을 더해 6번호 5세트를 생성합니다.
+                  당첨 일치 개수는 점수에 넣지 않고 결과 카드에 표시만 합니다(예측 정합성 평가용).
                 </>
               ) : (
                 <>

@@ -1230,6 +1230,8 @@ export default function SemiAutoComparePanel({
   const [showAllTickets, setShowAllTickets] = useState(false);
   const [showBacktestTop, setShowBacktestTop] = useState(false);
   const [recommendations, setRecommendations] = useState<ScoredRecommendation[]>([]);
+  // [추천 5세트 생성] 클릭마다 증가 — 같은 데이터에서도 매번 다른 5세트 생성.
+  const regenNonceRef = useRef(0);
 
   const togglePick = (n: number) => {
     if (picked.includes(n)) {
@@ -1910,6 +1912,8 @@ export default function SemiAutoComparePanel({
       }
     }
 
+    const nonce = regenNonceRef.current;
+    regenNonceRef.current = nonce + 1; // 다음 클릭은 다른 세트
     const results = generateScoredRecommendations(
       {
         sheetIntent,
@@ -1934,6 +1938,7 @@ export default function SemiAutoComparePanel({
           score: r.score,
           sources: r.sources,
         })),
+        regenNonce: nonce,
       },
       5
     );

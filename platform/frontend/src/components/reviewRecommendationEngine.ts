@@ -59,6 +59,8 @@ export interface RecommendationContext {
   seedTickets: SeedTicketInput[];
   /** 서버 통합 예측 신호 (/api/v1/prediction/signals) */
   unifiedSignals?: UnifiedSignalInput[];
+  /** [추천 생성] 클릭마다 증가 — 같은 데이터에서도 매번 다른 5세트를 낸다. */
+  regenNonce?: number;
 }
 
 export interface ScoredRecommendation {
@@ -408,17 +410,29 @@ export function generateScoredRecommendations(
     .map((combo) => scoreCombo(combo, ctx, numberScores))
     .filter((s) => s.totalScore > -50)
     .sort((a, b) => b.totalScore - a.totalScore);
+  if (raw.length === 0) return [];
+
+  // 매 클릭 다른 5세트 — 상위는 결정적 고득점 후보라 그대로 top-N 을 뽑으면
+  // 항상 같은 5세트가 나온다. 상위 '품질 풀'(top ~24) 안에서 nonce 기준으로
+  // 시작점을 회전시켜, 품질은 유지하되 클릭마다 다른 조합을 보여준다.
+  // (nonce 0 = 최상위 5세트, 이후 클릭마다 대안 탐색)
+  const nonce = ctx.regenNonce ?? 0;
+  const poolSize = Math.min(raw.length, Math.max(count * 5, 24));
+  const qualityPool = raw.slice(0, poolSize);
+  const startBase = poolSize > count ? ((nonce % poolSize) * count) % poolSize : 0;
+  const rotated = [...qualityPool.slice(startBase), ...qualityPool.slice(0, startBase)];
 
   const picked: ScoredRecommendation[] = [];
-  for (const item of raw) {
+  for (const item of rotated) {
     if (picked.every((p) => diversityOk(p.combo, item.combo))) {
       picked.push(item);
     }
     if (picked.length >= count) break;
   }
 
+  // diversity 로 부족하면 회전 순서대로 채우고, 그래도 모자라면 raw 전체에서 채움.
   if (picked.length < count) {
-    for (const item of raw) {
+    for (const item of [...rotated, ...raw]) {
       if (!picked.some((p) => comboKey(p.combo) === comboKey(item.combo))) {
         picked.push(item);
       }

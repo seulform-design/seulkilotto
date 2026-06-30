@@ -91,6 +91,12 @@ export default function FavoritesPanel() {
           {notice}
         </Alert>
       )}
+      {favorites.persistError && (
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          저장 공간(localStorage)이 부족해 즐겨찾기가 영구 저장되지 않았습니다.
+          오래된 항목을 삭제한 뒤 다시 시도하세요. (새로고침 시 미저장분은 사라질 수 있습니다.)
+        </Alert>
+      )}
 
       {sorted.length === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>

@@ -1,8 +1,10 @@
 """용지 사진 분석 결과 누적 저장 (SQLite-backed)."""
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
+import threading
 import uuid
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -13,6 +15,21 @@ from . import pg_store
 from .dedup import compute_ticket_fingerprint, find_duplicate_entry
 from .overlap_patterns import accumulate_frequency_patterns, build_frequency_overlap_patterns
 from .position_template import build_sheet_template, merge_review_templates
+
+# 저장소 쓰기 직렬화 락 — 모든 변경(append/delete/clear/rollover 등)은
+# load→수정→save 를 통째로 수행하므로, 동시 요청이 겹치면 마지막 쓰기가
+# 다른 쓰기를 덮어써(lost update) 항목이 사라질 수 있다. 변경 함수를
+# 이 락으로 직렬화한다(단일 워커 기준). 읽기는 잠그지 않는다.
+_WRITE_LOCK = threading.RLock()
+
+
+def _synchronized(fn):
+    @functools.wraps(fn)
+    def _wrapper(*args, **kwargs):
+        with _WRITE_LOCK:
+            return fn(*args, **kwargs)
+
+    return _wrapper
 
 
 class DuplicateAnalysisError(Exception):
@@ -521,6 +538,7 @@ def check_stored_duplicate(
     return None
 
 
+@_synchronized
 def append_analysis(
     source_id: str,
     result: Dict[str, Any],
@@ -692,6 +710,7 @@ def _refresh_current_dataset(current_data: Dict[str, Any]) -> None:
     )
 
 
+@_synchronized
 def record_current_rule_engine_output(
     engine_name: str,
     *,
@@ -1086,6 +1105,7 @@ def _evaluate_current_dataset(current_data: Dict[str, Any], winning_numbers: Lis
     return evaluations
 
 
+@_synchronized
 def rollover_current_dataset(
     *,
     drawn_round: int,
@@ -1210,6 +1230,7 @@ def list_entries(limit: int = 100) -> List[Dict[str, Any]]:
     return list(reversed(_live_entries()[-limit:]))
 
 
+@_synchronized
 def clear_store() -> int:
     historical = _load_historical_raw()
     current = _load_current_raw()
@@ -1223,6 +1244,7 @@ def clear_store() -> int:
     return count
 
 
+@_synchronized
 def clear_store_intent(intent: str) -> int:
     """특정 intent 에 해당하는 저장소만 비운다."""
     if intent == "review":
@@ -1247,6 +1269,7 @@ def clear_store_intent(intent: str) -> int:
     raise ValueError("intent must be 'review' or 'current_round'")
 
 
+@_synchronized
 def delete_entry(entry_id: str) -> bool:
     historical = _load_historical_raw()
     entries = historical.get("entries") or []

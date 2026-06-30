@@ -5,6 +5,7 @@ import csv
 import datetime as dt
 import logging
 import random
+import threading
 import time
 from pathlib import Path
 
@@ -26,6 +27,10 @@ _last_source: str = "unknown"
 _cache_df: pd.DataFrame | None = None
 _cache_at: float = 0.0
 _cache_csv_mtime: float = 0.0
+# 엔진 lazy-init 과 히스토리 캐시(read-modify-write)를 보호한다. 동기 def
+# 엔드포인트는 스레드풀에서 동시에 돌고 스케줄러 스레드가 캐시를 무효화하므로
+# 락 없이는 check-then-act 경쟁(중복 엔진/캐시 손상)이 난다.
+_LOCK = threading.RLock()
 
 
 def get_last_data_source() -> str:
@@ -34,7 +39,11 @@ def get_last_data_source() -> str:
 
 def get_engine() -> Engine | None:
     global _engine
-    if _engine is None:
+    if _engine is not None:
+        return _engine
+    with _LOCK:
+        if _engine is not None:  # 다른 스레드가 먼저 초기화했을 수 있음
+            return _engine
         if not settings.DATABASE_URL.startswith("postgresql"):
             return None
         try:
@@ -61,9 +70,10 @@ def _csv_mtime() -> float:
 
 def invalidate_history_cache() -> None:
     global _cache_df, _cache_at, _cache_csv_mtime
-    _cache_df = None
-    _cache_at = 0.0
-    _cache_csv_mtime = 0.0
+    with _LOCK:
+        _cache_df = None
+        _cache_at = 0.0
+        _cache_csv_mtime = 0.0
 
 
 def _validate_row(row: dict) -> dict | None:
@@ -183,18 +193,19 @@ def load_history() -> pd.DataFrame:
     """캐시된 DataFrame 반환 (TTL + CSV mtime 기준 무효화)."""
     global _cache_df, _cache_at, _cache_csv_mtime
 
-    now = time.time()
-    mtime = _csv_mtime()
     ttl = settings.HISTORY_CACHE_TTL
-    if (
-        _cache_df is not None
-        and now - _cache_at < ttl
-        and mtime == _cache_csv_mtime
-    ):
-        return _cache_df
+    with _LOCK:
+        now = time.time()
+        mtime = _csv_mtime()
+        if (
+            _cache_df is not None
+            and now - _cache_at < ttl
+            and mtime == _cache_csv_mtime
+        ):
+            return _cache_df
 
-    df = _load_history_uncached()
-    _cache_df = df
-    _cache_at = now
-    _cache_csv_mtime = mtime
-    return df
+        df = _load_history_uncached()
+        _cache_df = df
+        _cache_at = now
+        _cache_csv_mtime = mtime
+        return df

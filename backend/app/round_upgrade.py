@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import io
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -16,6 +17,10 @@ from .video_analysis.store import get_current_dataset_state, rollover_current_da
 _CRAWL_MOD = None
 _API_LATEST_CACHE: tuple[float, int] | None = None
 _API_LATEST_TTL = 600  # 10분
+# 업그레이드(크롤→CSV 덮어쓰기)는 스케줄러 스레드와 수동 엔드포인트가 동시에
+# 호출할 수 있다. 동시 크롤이 같은 CSV 를 덮어쓰면 손상되므로 한 번에 하나만
+# 실행하도록 직렬화한다(이미 진행 중이면 즉시 반환).
+_UPGRADE_LOCK = threading.Lock()
 
 
 def _crawl_module():
@@ -80,7 +85,20 @@ def get_upgrade_status() -> Dict[str, Any]:
 
 
 def upgrade_rounds(force: bool = False) -> Dict[str, Any]:
-    """누락 회차를 크롤링해 CSV에 반영한다."""
+    """누락 회차를 크롤링해 CSV에 반영한다 (동시 실행 직렬화)."""
+    if not _UPGRADE_LOCK.acquire(blocking=False):
+        return {
+            "ok": False,
+            "in_progress": True,
+            "message": "이미 회차 업그레이드가 진행 중입니다. 잠시 후 다시 시도하세요.",
+        }
+    try:
+        return _upgrade_rounds_locked(force)
+    finally:
+        _UPGRADE_LOCK.release()
+
+
+def _upgrade_rounds_locked(force: bool = False) -> Dict[str, Any]:
     before = get_upgrade_status()
     latest_csv = int(before.get("latest_round") or 0)
     api_latest = before.get("api_latest_round")

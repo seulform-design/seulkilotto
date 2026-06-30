@@ -21,9 +21,8 @@ interface MetricChipsProps {
 /**
  * 조합 메트릭 칩 스트립 — 8개 통계 지표 일렬 노출.
  *
- * 본 컴포넌트는 추천 페이지들 사이의 시각적 일관성을 위해
- * GeneratorPage / RoundRecommendPage / ClassicRecommendPage / SmartPickPage 등
- * 모든 조합 출력 화면에서 공유된다.
+ * 본 컴포넌트는 조합을 출력하는 화면들 사이의 시각적 일관성을 위해
+ * 공유된다(예: RoundRecommendPage, ComposedAnalysisPage).
  *
  * 칩 7종:
  *   - 합 (sum band 색상)

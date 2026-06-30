@@ -57,10 +57,15 @@ def _build_cors_kwargs() -> dict:
         if p.strip()
     ]
     combined = "|".join(f"(?:{p})" for p in (*_DEFAULT_ORIGIN_PATTERNS, *extra_patterns))
+    # 브로드 정규식(*.trycloudflare/*.up.railway 등)은 공유 도메인이라
+    # allow_credentials=True 와 함께 쓰면 누구나 그 서브도메인을 띄워 자격증명
+    # 포함 cross-origin 접근을 얻을 수 있다(보안 구멍). 본 앱은 cross-origin
+    # 쿠키/자격증명을 쓰지 않으므로(인증은 X-Upgrade-Key 헤더, fetch 도 기본
+    # same-origin) credentials 를 끈다. 운영 프론트는 동일 출처라 CORS 미적용.
     return {
         "allow_origins": static_origins,  # 정적 허용 목록 (escape hatch)
         "allow_origin_regex": combined,   # 패턴 허용 (Quick Tunnel 등)
-        "allow_credentials": True,
+        "allow_credentials": False,
     }
 
 

@@ -273,24 +273,52 @@ export default function ComposedAnalysisPage() {
                   </Box>
                 }
               >
-                <Box
-                  sx={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: '50%',
-                    bgcolor: color,
-                    color: '#fff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: 'default',
-                    transition: 'transform 0.1s',
-                    '&:hover': { transform: 'scale(1.1)' },
-                  }}
-                >
-                  {n}
+                <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+                  <Box
+                    role="img"
+                    aria-label={`${n}번 — ${GRADE_LABELS[item.grade]} 등급(${item.grade})`}
+                    sx={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: '50%',
+                      bgcolor: color,
+                      color: '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'default',
+                      transition: 'transform 0.1s',
+                      '&:hover': { transform: 'scale(1.1)' },
+                    }}
+                  >
+                    {n}
+                  </Box>
+                  {/* 등급을 색상에만 의존하지 않도록 글자 배지(색맹/터치 보조). C(중립)는 생략 */}
+                  {item.grade !== 'C' && (
+                    <Box
+                      aria-hidden
+                      sx={{
+                        position: 'absolute',
+                        top: -3,
+                        right: -3,
+                        minWidth: 13,
+                        height: 13,
+                        px: '2px',
+                        borderRadius: '7px',
+                        bgcolor: '#000',
+                        color: '#fff',
+                        border: '1px solid rgba(255,255,255,0.7)',
+                        fontSize: 9,
+                        lineHeight: '11px',
+                        fontWeight: 800,
+                        textAlign: 'center',
+                      }}
+                    >
+                      {item.grade}
+                    </Box>
+                  )}
                 </Box>
               </Tooltip>
             );

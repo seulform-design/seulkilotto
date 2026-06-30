@@ -78,7 +78,21 @@ export async function fetchJson<T>(path: string, init: FetchJsonOptions = {}): P
     });
   }
 
-  return (await res.json()) as T;
+  // 2xx 라도 본문이 JSON 이 아닐 수 있다(프록시 HTML 로그인/점검 페이지, 빈 본문).
+  // res.json() 의 raw SyntaxError("Unexpected token <") 가 사용자에게 노출되지
+  // 않도록 ApiError 로 변환한다.
+  const text = await safeText(res);
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const looksHtml = text.trimStart().startsWith('<');
+    throw new ApiError(
+      looksHtml
+        ? '게이트웨이 연결이 일시적으로 끊겼습니다. 잠시 후 다시 시도해 주세요.'
+        : '서버 응답을 해석하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      { status: res.status, kind: looksHtml ? 'tunnel_disconnected' : 'http' }
+    );
+  }
 }
 
 async function safeText(res: Response): Promise<string> {

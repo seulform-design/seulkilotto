@@ -23,6 +23,10 @@ from app.repositories.draw_repository import DrawRepository
 from app.services.cache import cache_get, cache_set
 
 
+# walk-forward 백테스트 결과 캐시 (데이터 행 수 → 결과). 프로세스 전역 1건.
+_BACKTEST_CACHE: Dict[int, Dict] = {}
+
+
 class ResearchService:
     def __init__(self, db: Session):
         self.repo = DrawRepository(db)
@@ -258,7 +262,27 @@ class ResearchService:
         }
 
     def backtest(self) -> Dict:
-        return walk_forward_backtest(self._load_df())
+        # walk-forward 백테스트는 전 이력 대상이라 무겁다(>60s → 엣지 504).
+        # 결과는 데이터(행 수)가 같으면 동일하므로 행 수 기준으로 캐시한다.
+        # 첫 호출은 스레드풀에서 끝까지 계산되어 캐시를 채우므로(클라이언트가
+        # 504 로 끊겨도) 이후 호출은 즉시 응답한다. 회차 추가(주 1회) 시 무효화.
+        from app.config import settings
+
+        df = self._load_df()
+        key = len(df)
+        cached = _BACKTEST_CACHE.get(key)
+        if cached is not None:
+            return cached
+        # walk_forward 는 매 회차 PatternIndex 를 재빌드해 O(n^2) — 전체(1180회)
+        # 검증은 3분+ 라 엣지 504. 최근 ~120회차만 step=2 로 검증해 의미는
+        # 유지하면서 수십 초 내로 끝낸다(결과에 검증 구간 명시).
+        n = len(df)
+        train_min = max(int(settings.BACKTEST_TRAIN_MIN), n - 120)
+        result = walk_forward_backtest(df, train_min=train_min, step=2)
+        result["window"] = f"최근 {n - train_min}회차 (step=2)"
+        _BACKTEST_CACHE.clear()  # 이전 버전 제거(메모리 1건 유지)
+        _BACKTEST_CACHE[key] = result
+        return result
 
     def monte_carlo(self, n_sim: int = 100_000) -> Dict:
         from app.config import settings

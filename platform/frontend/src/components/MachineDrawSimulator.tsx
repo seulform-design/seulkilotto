@@ -52,8 +52,8 @@ const MAX_V = 8.5;
 const LIFT = 1.5; // 블레이드 퍼올림 세기(중심축 근처 상승)
 const CHURN = 1.35; // 회전 난류
 const CENTER_PULL = 0.008; // 중심축으로 모으는 힘
-const DISC_R = R * 0.58; // 4구멍 회전 디스크 반지름
-const DISC_DY = -R * 0.28; // 디스크 높이(중심 위쪽)
+const DISC_R = R * 0.5; // 4구멍 회전 디스크 반지름
+const DISC_DY = -R * 0.5; // 디스크 높이(상단 — 볼 무더기 위쪽)
 
 type BallState = 'mix' | 'rising' | 'racked';
 interface Ball {
@@ -141,14 +141,14 @@ export default function MachineDrawSimulator() {
           b.vy += GRAVITY;
           if (spin > 0.1) {
             const dx = b.x - CX;
-            // 중심축으로 모으기 → 샤프트 주위 컬럼 형성
+            // 중심축으로 모으기 → 샤프트 주위 세로 컬럼 형성
             b.vx += -dx * CENTER_PULL;
-            // 블레이드가 퍼올림: 중심축 근처일수록 강한 상승
+            // 블레이드가 퍼올림: 중심축 근처일수록 강한 상승(넓은 존)
             const ax = Math.abs(dx);
-            if (ax < 64) b.vy -= LIFT * (1 - ax / 64);
+            if (ax < 88) b.vy -= LIFT * (1 - ax / 88);
             // 회전 난류(블레이드 스윕)
             b.vx += (Math.random() - 0.5) * CHURN;
-            b.vy += (Math.random() - 0.5) * CHURN * 0.7;
+            b.vy += (Math.random() - 0.5) * CHURN * 0.8;
           }
           b.vx *= DAMP;
           b.vy *= DAMP;

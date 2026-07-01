@@ -49,8 +49,10 @@ function slotPos(i: number) {
 const GRAVITY = 0.34;
 const DAMP = 0.99;
 const MAX_V = 8.5;
-const PADDLE_R = R * 0.82; // 회전 패들 팔 길이(테두리 근처까지)
-const ARM_HALF = 13; // 팔 두께(반)
+const LIFT = 1.15; // 블레이드 퍼올림 세기(중심축 근처 상승)
+const CHURN = 1.0; // 회전 난류
+const CENTER_PULL = 0.009; // 중심축으로 모으는 힘
+const DISC_R = R * 0.6; // 수평 회전 디스크 반지름
 
 type BallState = 'mix' | 'rising' | 'racked';
 interface Ball {
@@ -128,33 +130,24 @@ export default function MachineDrawSimulator() {
     const step = () => {
       const balls = ballsRef.current;
       const spin = spinRef.current;
-      const omega = spin > 0.1 ? 0.12 : 0.015; // 패들 각속도
-      armRef.current += omega;
-      const arm = armRef.current;
+      armRef.current += spin > 0.1 ? 0.16 : 0.02; // 수직축 회전
 
-      // ── 물리 (회전 패들 중력 혼합 = Venus 텀블링) ──
-      // 회전 팔이 스치는 공을 팔의 표면 속도로 퍼올리고, 팔을 벗어나면 중력으로
-      // 쏟아진다. 바닥에 쌓인 공 무더기를 팔이 휘저어 텀블링/카스케이드.
+      // ── 물리 (수직축 회전 + 수평 디스크 = 동행복권 처닝) ──
+      // 중앙 샤프트가 회전하며 수평 블레이드가 공을 퍼올린다. 공은 샤프트 주위
+      // 세로 컬럼을 이루며 중심에서 솟구쳐 올라 바깥으로 쏟아진다(분수형 순환).
       for (const b of balls) {
         if (b.state === 'mix') {
           b.vy += GRAVITY;
           if (spin > 0.1) {
             const dx = b.x - CX;
-            const dy = b.y - CY;
-            for (let k = 0; k < 4; k += 1) {
-              const th = arm + (k * Math.PI) / 2;
-              const cs = Math.cos(th);
-              const sn = Math.sin(th);
-              const proj = dx * cs + dy * sn; // 팔 방향 성분
-              const perp = -dx * sn + dy * cs; // 팔 수직 거리
-              if (proj > 6 && proj < PADDLE_R && Math.abs(perp) < ARM_HALF) {
-                // 팔의 국소 표면 속도(반시계 접선)로 공을 퍼올림
-                const surfVx = -sn * omega * proj;
-                const surfVy = cs * omega * proj;
-                b.vx += (surfVx - b.vx) * 0.4;
-                b.vy += (surfVy - b.vy) * 0.4;
-              }
-            }
+            // 중심축으로 모으기 → 샤프트 주위 컬럼 형성
+            b.vx += -dx * CENTER_PULL;
+            // 블레이드가 퍼올림: 중심축 근처일수록 강한 상승
+            const ax = Math.abs(dx);
+            if (ax < 64) b.vy -= LIFT * (1 - ax / 64);
+            // 회전 난류(블레이드 스윕)
+            b.vx += (Math.random() - 0.5) * CHURN;
+            b.vy += (Math.random() - 0.5) * CHURN * 0.7;
           }
           b.vx *= DAMP;
           b.vy *= DAMP;
@@ -290,26 +283,27 @@ export default function MachineDrawSimulator() {
       // 5) 볼
       for (const b of balls) paintBall(ctx, b.x, b.y, b.n);
 
-      // 6b) 회전 패들 (십자 4팔, 테두리 근처까지) — 공을 퍼올려 섞고 추출
-      ctx.save();
-      ctx.translate(CX, CY);
-      ctx.rotate(arm);
-      ctx.strokeStyle = 'rgba(205,220,240,0.55)';
-      ctx.lineWidth = 2 * ARM_HALF;
-      ctx.lineCap = 'round';
-      for (let k = 0; k < 4; k += 1) {
-        ctx.rotate(Math.PI / 2);
-        ctx.beginPath();
-        ctx.moveTo(0, 6);
-        ctx.lineTo(0, -PADDLE_R);
-        ctx.stroke();
-      }
-      ctx.restore();
-      ctx.lineWidth = 1;
-      ctx.lineCap = 'butt';
+      // 6b) 수평 회전 디스크(블레이드) — 중앙 샤프트에 달려 공을 퍼올림
+      ctx.beginPath();
+      ctx.ellipse(CX, CY, DISC_R, 8, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(215,230,248,0.26)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(180,200,225,0.6)';
+      ctx.stroke();
+      // 회전 표시 마크(디스크 가장자리 점이 좌우 왕복 → 수직축 회전 원근)
+      const mk = Math.cos(armRef.current) * DISC_R;
+      ctx.beginPath();
+      ctx.ellipse(CX + mk, CY, 5, 4, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(150,170,195,0.9)';
+      ctx.fill();
+      // 두 번째 디스크(하단) — 층층 블레이드 느낌
+      ctx.beginPath();
+      ctx.ellipse(CX, CY + R * 0.42, DISC_R * 0.7, 6, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(180,200,225,0.45)';
+      ctx.stroke();
       // 회전축 허브
       ctx.beginPath();
-      ctx.arc(CX, CY, 9, 0, Math.PI * 2);
+      ctx.arc(CX, CY, 7, 0, Math.PI * 2);
       ctx.fillStyle = '#c9d3dd';
       ctx.fill();
       ctx.strokeStyle = '#8a95a2';
@@ -375,11 +369,11 @@ export default function MachineDrawSimulator() {
     spinRef.current = 0.5; // 패들 강하게 회전
     try {
       const seed = Math.floor(Math.random() * 1_000_000_000);
-      await sleep(2100);
+      await sleep(3200); // 첫 공 전 혼합(실측 ~10초를 UX상 압축)
       const data = await v1Api.getMachineDraw(machine, seed);
       const order = [...data.draw_order, data.bonus];
       for (let i = 0; i < order.length; i += 1) {
-        await sleep(1200);
+        await sleep(i === 6 ? 3600 : 3000); // 공마다 텀(실측 ~6초 → 3초로 압축), 보너스는 더 길게
         const b = ballsRef.current.find((x) => x.n === order[i] && x.state === 'mix');
         if (b) {
           const dst = slotPos(i);
@@ -423,8 +417,8 @@ export default function MachineDrawSimulator() {
         🎰 {machine}호기 추첨기 (실제 방송 방식)
       </Typography>
       <Typography variant="caption" sx={{ color: '#cbd5e1', display: 'block', mb: 1.5 }}>
-        실제 Venus 추첨기와 동일 — 투명 구 안 회전 패들이 45개 볼을 퍼올려 중력으로 쏟으며 섞고
-        (텀블링), 공을 하나씩 상단으로 배출 → 레일을 타고 결과 바로. 각 호기의 실제 데이터 특성 반영.
+        실제 동행복권 추첨기와 동일 — 중앙 수직축 회전 디스크가 45개 볼을 퍼올려 처닝, 공이
+        하나씩 상단으로 배출돼 레일을 타고 결과 바로 (실측 간격 반영). 각 호기의 실제 데이터 특성 반영.
       </Typography>
 
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>

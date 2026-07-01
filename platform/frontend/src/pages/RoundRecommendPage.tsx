@@ -19,7 +19,9 @@ import MetricChips from '../components/MetricChips';
 import { v1Api } from '../api/v1Api';
 
 const HONESTY_DISCLAIMER =
-  '본 추첨기 추천은 호기별 과거 통계 패턴에 기반합니다. 모든 6-튜플의 1등 당첨 확률은 동일하게 1/8,145,060 이며, 본 페이지의 어떤 옵션도 그 확률을 변경하지 않습니다. 추첨기 분류는 추첨일 기반 추정값입니다.';
+  '본 추첨기 추천은 호기별 과거 통계 패턴에 기반합니다. 모든 6-튜플의 1등 당첨 확률은 동일하게 1/8,145,060 이며, 본 페이지의 어떤 옵션도 그 확률을 변경하지 않습니다. 추첨기는 공정 관리되어 어느 호기든 다음 회차 예측력은 사실상 없습니다.';
+
+const MACHINE_COLORS: Record<number, string> = { 1: '#E8570D', 2: '#0D8A3E', 3: '#2952CC' };
 
 type MachineChoice = 'auto' | 1 | 2 | 3;
 
@@ -27,6 +29,10 @@ export default function RoundRecommendPage() {
   const [machine, setMachine] = useState<MachineChoice>('auto');
 
   const meta = useQuery({ queryKey: ['v1-meta'], queryFn: v1Api.getMeta });
+  const overview = useQuery({
+    queryKey: ['v1-machine-overview'],
+    queryFn: v1Api.getMachineOverview,
+  });
   const recommend = useQuery({
     queryKey: ['v1-recommend', machine],
     queryFn: () =>
@@ -34,6 +40,7 @@ export default function RoundRecommendPage() {
   });
 
   const data = recommend.data;
+  const ov = overview.data;
 
   return (
     <Box>
@@ -44,9 +51,69 @@ export default function RoundRecommendPage() {
         {meta.data?.current_round ?? '—'}회 추첨 기준 · 호기 패턴 5게임
         {meta.data ? ` (데이터 ${meta.data.row_count}건)` : ''}
       </Typography>
-      <Alert severity="info" sx={{ mb: 2 }}>
-        호기는 추첨일 기반 추정값입니다. 공식 발표와 다를 수 있으며 통계 참고용입니다.
+      <Alert severity="success" sx={{ mb: 2 }}>
+        호기는 <b>실측 데이터</b>입니다 — lottotapa {ov?.coverage.confirmed_count ?? 969}회
+        ({ov?.coverage.min_round ?? 262}~{ov?.coverage.max_round ?? 1230}) 당첨번호 100% 대조 검증.
+        1~261회는 기록 미확보로 월별순환 추정, 다음 회차는 1→2→3 순환 예측입니다.
       </Alert>
+
+      {ov && (
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+            🎰 추첨기(호기) 현황
+          </Typography>
+
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+            <Typography variant="body2" color="text.secondary">다음 {ov.next_round}회 예측</Typography>
+            <Chip
+              label={`${ov.next_machine}호기`}
+              sx={{ bgcolor: MACHINE_COLORS[ov.next_machine], color: '#fff', fontWeight: 800 }}
+            />
+            <Chip
+              size="small"
+              variant="outlined"
+              label={ov.next_source === 'confirmed' ? '실측 확정' : '순환 예측'}
+              color={ov.next_source === 'confirmed' ? 'success' : 'info'}
+            />
+            <Typography variant="caption" color="text.secondary">
+              (최신 {ov.latest_round}회 {ov.latest_machine}호기 · {ov.current_block_len}연속 →
+              순환상 다음 {ov.next_in_rotation}호기)
+            </Typography>
+          </Stack>
+
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+            최근 호기 순환 이력
+          </Typography>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+            {ov.recent_history.map((h) => (
+              <Chip
+                key={h.round}
+                size="small"
+                label={`${h.round}·${h.machine}호`}
+                title={h.confirmed ? '실측 확정' : '추정'}
+                sx={{
+                  bgcolor: MACHINE_COLORS[h.machine],
+                  color: '#fff',
+                  fontWeight: 700,
+                  opacity: h.confirmed ? 1 : 0.5,
+                }}
+              />
+            ))}
+          </Stack>
+
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {[1, 2, 3].map((m) => (
+              <Chip
+                key={m}
+                size="small"
+                variant="outlined"
+                label={`${m}호기 ${ov.per_machine[String(m)]?.count ?? 0}회 (최근 ${ov.per_machine[String(m)]?.last_round ?? '-'}회)`}
+                sx={{ borderColor: MACHINE_COLORS[m], color: MACHINE_COLORS[m], fontWeight: 700 }}
+              />
+            ))}
+          </Stack>
+        </Paper>
+      )}
 
       {data && (
         <Paper sx={{ p: 2, mb: 2, bgcolor: '#69C8F2', color: '#10202A' }}>

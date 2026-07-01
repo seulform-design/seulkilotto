@@ -51,6 +51,67 @@ def predict_next_round(df: pd.DataFrame) -> Tuple[int, str, int]:
     return next_round, next_date.isoformat(), next_machine
 
 
+def machine_overview(df: pd.DataFrame, recent: int = 16) -> Dict:
+    """추첨기(호기) 현황 — 실제 기록 커버리지, 최근 순환 이력, 다음 회차 예측,
+    호기별 사용 통계. '완벽 재연' UI 의 데이터 소스."""
+    from .machine_registry import CONFIRMED, ROTATION_ORDER, coverage, resolve
+
+    dfm = attach_machine_column(df).sort_values("round")
+    latest_round = int(dfm["round"].max())
+    next_round, next_date, _ = predict_next_round(df)
+    next_machine, next_source = resolve(next_round, pd.to_datetime(next_date).date())
+
+    # 최근 이력 (회차 내림차순)
+    tail = dfm.tail(recent).iloc[::-1]
+    recent_hist = [
+        {
+            "round": int(r["round"]),
+            "machine": int(r["machine_id"]),
+            "source": str(r.get("machine_source", "estimated")),
+            "confirmed": int(r["round"]) in CONFIRMED,
+        }
+        for _, r in tail.iterrows()
+    ]
+
+    # 현재(최신) 블록 길이 — 최신 회차부터 같은 호기 연속 개수
+    latest_machine = int(dfm.iloc[-1]["machine_id"])
+    block_len = 0
+    for _, r in dfm.iloc[::-1].iterrows():
+        if int(r["machine_id"]) == latest_machine:
+            block_len += 1
+        else:
+            break
+    nxt_in_rotation = ROTATION_ORDER[(ROTATION_ORDER.index(latest_machine) + 1) % 3]
+
+    # 호기별 사용 통계 (확정 기록 기준)
+    per_machine: Dict[int, Dict[str, int]] = {}
+    for m in (1, 2, 3):
+        rounds_m = [rd for rd, mm in CONFIRMED.items() if mm == m]
+        per_machine[m] = {
+            "count": len(rounds_m),
+            "last_round": max(rounds_m) if rounds_m else 0,
+        }
+
+    return {
+        "coverage": coverage(),
+        "latest_round": latest_round,
+        "latest_machine": latest_machine,
+        "current_block_len": block_len,
+        "next_round": next_round,
+        "next_draw_date": next_date,
+        "next_machine": next_machine,
+        "next_source": next_source,
+        "next_in_rotation": nxt_in_rotation,
+        "rotation_order": list(ROTATION_ORDER),
+        "recent_history": recent_hist,
+        "per_machine": {str(k): v for k, v in per_machine.items()},
+        "note": (
+            "호기는 lottotapa 969회(262~1230) 실측 + 당첨번호 100% 대조 검증. "
+            "1~261회는 기록 미확보로 월별순환 추정. 다음 회차는 1→2→3 순환 예측(추첨 후 확정)."
+        ),
+    }
+
+
 def _absence_gaps(sub: pd.DataFrame) -> List[Tuple[int, int]]:
     """호기(부분집합) 내 각 번호의 '몇 회차 동안 미출현'. gap_utils 단일 소스.
     미출현 많은 순 → 번호 순으로 정렬해 반환."""

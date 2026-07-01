@@ -10,7 +10,7 @@ from ..classic_methods import METHOD_IDS, build_classic_recommendation
 from ..data_meta import effective_current_round
 from ..database import load_history
 from ..json_utils import to_jsonable
-from ..machine_analytics import build_round_recommendation
+from ..machine_analytics import build_round_recommendation, machine_overview
 from ..video_analysis.store import record_current_rule_engine_output
 
 router = APIRouter(prefix="/api/v1/recommend", tags=["recommend"])
@@ -54,7 +54,9 @@ class RoundRecommendResponse(BaseModel):
     next_round: int = Field(..., description="추천 대상 다음 회차")
     next_draw_date: str
     machine_id: int = Field(..., description="분석에 사용한 호기 1~3")
-    auto_machine_id: int = Field(..., description="날짜 기준 자동 예측 호기")
+    auto_machine_id: int = Field(..., description="자동 예측 호기(실측/순환)")
+    machine_source: Optional[str] = Field(default=None, description="confirmed | estimated")
+    machine_data_coverage: Optional[dict] = None
     latest_round: int
     stats: MachineStatsSummary
     combinations: List[RoundCombo]
@@ -101,6 +103,15 @@ def recommend_next_round(
             detail=f"{payload['machine_id']}호기 데이터가 없습니다. 다른 호기를 선택하세요.",
         )
     return payload
+
+
+@router.get("/machine-overview")
+def machine_overview_endpoint():
+    """추첨기 호기 현황 — 실측 커버리지, 최근 순환 이력, 다음 회차 예측, 호기별 통계."""
+    df = load_history()
+    if df.empty:
+        raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
+    return to_jsonable(machine_overview(df))
 
 
 class ClassicRecommendResponse(BaseModel):

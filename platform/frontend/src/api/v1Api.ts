@@ -201,11 +201,36 @@ export interface UpgradeResult {
   v2_sync?: { ok: boolean; new_rounds?: number; error?: string };
 }
 
+export interface MachineHistoryEntry {
+  round: number;
+  machine: number;
+  source: 'confirmed' | 'estimated';
+  confirmed: boolean;
+}
+
+export interface MachineOverview {
+  coverage: { confirmed_count: number; min_round: number; max_round: number };
+  latest_round: number;
+  latest_machine: number;
+  current_block_len: number;
+  next_round: number;
+  next_draw_date: string;
+  next_machine: number;
+  next_source: 'confirmed' | 'estimated';
+  next_in_rotation: number;
+  rotation_order: number[];
+  recent_history: MachineHistoryEntry[];
+  per_machine: Record<string, { count: number; last_round: number }>;
+  note: string;
+}
+
 export interface RoundRecommendResponse {
   next_round: number;
   next_draw_date: string;
   machine_id: number;
   auto_machine_id: number;
+  machine_source?: 'confirmed' | 'estimated' | null;
+  machine_data_coverage?: { confirmed_count: number; min_round: number; max_round: number } | null;
   latest_round: number;
   stats: {
     draw_count: number;
@@ -379,6 +404,9 @@ export const v1Api = {
       `/api/v1/recommend/round${qs ? `?${qs}` : ''}`
     );
   },
+
+  getMachineOverview: () =>
+    fetchJson<MachineOverview>('/api/v1/recommend/machine-overview'),
 
   getClassicRecommend: (method: ClassicMethod = 'blend') =>
     fetchJson<ClassicRecommendResponse>(

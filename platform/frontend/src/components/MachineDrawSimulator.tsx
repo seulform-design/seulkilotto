@@ -26,21 +26,22 @@ const MACHINE_ACCENT: Record<number, string> = {
   3: '#2952CC',
 };
 
-// ── 캔버스 / 물리 상수 ──────────────────────────────────────────────
+// ── 캔버스 / 레이아웃 상수 (실제 방송 추첨기 배치) ──────────────────
 const W = 340;
-const H = 440;
+const H = 480;
 const CX = 170;
-const CY = 300;
-const R = 125; // 챔버 반지름
+const CY = 240; // 유리 구 중심
+const R = 112; // 유리 구 반지름
+const CAP_Y = CY - R; // 구 상단 배출구 y
+const RAIL_Y = 46; // 상단 레일(추첨된 볼 정렬)
+const SLOT_X0 = 32;
+const SLOT_GAP = (W - 2 * SLOT_X0) / 6;
+const BAR_Y = 442; // 하단 결과 바 중심
 const BR = 12; // 볼 반지름
-const RACK_Y = 30;
-const RACK_X0 = 30;
-const RACK_GAP = (W - 2 * RACK_X0) / 6;
-const TUBE_TOP = 66;
 
 const GRAVITY = 0.28;
 const DAMP = 0.992;
-const MAX_V = 7;
+const MAX_V = 7.5;
 
 type BallState = 'mix' | 'rising' | 'racked';
 interface Ball {
@@ -50,6 +51,7 @@ interface Ball {
   vx: number;
   vy: number;
   state: BallState;
+  slot: number; // 추첨 순번(-1=미추첨)
   path: { x: number; y: number }[];
   wp: number;
 }
@@ -57,8 +59,8 @@ interface Ball {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
-function slotPos(i: number) {
-  return { x: RACK_X0 + i * RACK_GAP, y: RACK_Y };
+function slotX(i: number) {
+  return SLOT_X0 + i * SLOT_GAP;
 }
 
 function initBalls(): Ball[] {
@@ -73,11 +75,28 @@ function initBalls(): Ball[] {
       vx: rand(-2, 2),
       vy: rand(-2, 2),
       state: 'mix',
+      slot: -1,
       path: [],
       wp: 0,
     });
   }
   return balls;
+}
+
+function drawBall(ctx: CanvasRenderingContext2D, x: number, y: number, n: number, r = BR) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = ballColor(n);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x - r * 0.32, y - r * 0.32, r * 0.34, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.fill();
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = `bold ${Math.round(r * 0.92)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(n), x, y + 0.5);
 }
 
 export default function MachineDrawSimulator() {
@@ -88,13 +107,12 @@ export default function MachineDrawSimulator() {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ballsRef = useRef<Ball[]>(initBalls());
-  const airRef = useRef(0.06); // 공기 세기 — 평소엔 낮아 볼이 바닥에 가라앉음
+  const airRef = useRef(0.06);
   const rafRef = useRef<number>(0);
   const busyRef = useRef(false);
   const accentRef = useRef(MACHINE_ACCENT[3]);
   accentRef.current = MACHINE_ACCENT[machine];
 
-  // ── 물리 + 렌더 루프 ──────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -105,13 +123,12 @@ export default function MachineDrawSimulator() {
       const balls = ballsRef.current;
       const air = airRef.current;
 
-      // 물리 (섞이는 볼만)
+      // ── 물리 ──
       for (const b of balls) {
         if (b.state === 'mix') {
           b.vy += GRAVITY;
-          // 공기 송풍: 위로 밀어올리고 좌우 난류
-          b.vy -= Math.random() * air;
-          b.vx += (Math.random() - 0.5) * air * 1.6;
+          b.vy -= Math.random() * air; // 공기 송풍(위로)
+          b.vx += (Math.random() - 0.5) * air * 1.6; // 좌우 난류
           b.vx *= DAMP;
           b.vy *= DAMP;
           const sp = Math.hypot(b.vx, b.vy);
@@ -121,7 +138,6 @@ export default function MachineDrawSimulator() {
           }
           b.x += b.vx;
           b.y += b.vy;
-          // 원형 벽 충돌
           const dx = b.x - CX;
           const dy = b.y - CY;
           const d = Math.hypot(dx, dy);
@@ -141,7 +157,7 @@ export default function MachineDrawSimulator() {
             const dx = t.x - b.x;
             const dy = t.y - b.y;
             const d = Math.hypot(dx, dy) || 1;
-            const spd = 5.2;
+            const spd = 5.4;
             b.x += (dx / d) * Math.min(spd, d);
             b.y += (dy / d) * Math.min(spd, d);
             if (d < 3) {
@@ -154,7 +170,7 @@ export default function MachineDrawSimulator() {
         }
       }
 
-      // 볼-볼 충돌 (섞이는 볼끼리)
+      // ── 볼-볼 충돌 (구 안에서) ──
       for (let i = 0; i < balls.length; i += 1) {
         const a = balls[i];
         if (a.state !== 'mix') continue;
@@ -168,11 +184,11 @@ export default function MachineDrawSimulator() {
           if (d > 0 && d < min) {
             const nx = dx / d;
             const ny = dy / d;
-            const overlap = (min - d) / 2;
-            a.x -= nx * overlap;
-            a.y -= ny * overlap;
-            c.x += nx * overlap;
-            c.y += ny * overlap;
+            const ov = (min - d) / 2;
+            a.x -= nx * ov;
+            a.y -= ny * ov;
+            c.x += nx * ov;
+            c.y += ny * ov;
             const va = a.vx * nx + a.vy * ny;
             const vc = c.vx * nx + c.vy * ny;
             const diff = vc - va;
@@ -188,59 +204,88 @@ export default function MachineDrawSimulator() {
       const accent = accentRef.current;
       ctx.clearRect(0, 0, W, H);
 
-      // 거치대(rack)
-      for (let i = 0; i < 7; i += 1) {
-        const p = slotPos(i);
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, BR + 2, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.06)';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-        ctx.stroke();
-        if (i === 6) {
-          ctx.fillStyle = 'rgba(255,255,255,0.4)';
-          ctx.font = 'bold 12px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText('+', p.x - BR - 10, p.y + 4);
-        }
-      }
-
-      // 관(tube)
-      ctx.fillStyle = 'rgba(255,255,255,0.05)';
-      ctx.fillRect(CX - BR - 3, TUBE_TOP, (BR + 3) * 2, CY - R - TUBE_TOP + 6);
+      // 하단 결과 바 (제○회 스타일)
+      const barGrad = ctx.createLinearGradient(0, BAR_Y - 22, 0, BAR_Y + 22);
+      barGrad.addColorStop(0, '#0f2038');
+      barGrad.addColorStop(1, '#0a1526');
+      ctx.fillStyle = barGrad;
+      roundRect(ctx, 8, BAR_Y - 24, W - 16, 48, 12);
+      ctx.fill();
       ctx.strokeStyle = `${accent}66`;
-      ctx.strokeRect(CX - BR - 3, TUBE_TOP, (BR + 3) * 2, CY - R - TUBE_TOP + 6);
+      ctx.stroke();
+      for (let i = 0; i < 7; i += 1) {
+        const x = slotX(i);
+        const isBonus = i === 6;
+        const filled = balls.find((b) => b.slot === i && b.state === 'racked');
+        ctx.beginPath();
+        ctx.arc(x, BAR_Y, BR + 2, 0, Math.PI * 2);
+        if (filled) {
+          ctx.fillStyle = ballColor(filled.n);
+          ctx.fill();
+          ctx.fillStyle = '#1a1a1a';
+          ctx.font = 'bold 13px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(filled.n), x, BAR_Y + 0.5);
+        } else {
+          ctx.fillStyle = isBonus ? 'rgba(80,140,255,0.25)' : 'rgba(255,255,255,0.12)';
+          ctx.fill();
+        }
+        ctx.strokeStyle = isBonus ? '#4f8cff' : 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = isBonus ? 2 : 1;
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+      // 보너스 '+' 표시
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('+', slotX(6) - BR - 8, BAR_Y + 5);
 
-      // 챔버(유리)
-      const grad = ctx.createRadialGradient(CX - 40, CY - 50, 20, CX, CY, R);
-      grad.addColorStop(0, 'rgba(255,255,255,0.16)');
-      grad.addColorStop(1, 'rgba(20,30,48,0.55)');
+      // 상단 레일 가이드
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.beginPath();
+      ctx.moveTo(SLOT_X0 - 4, RAIL_Y + BR + 5);
+      ctx.lineTo(W - SLOT_X0 + 4, RAIL_Y + BR + 5);
+      ctx.stroke();
+
+      // 구 상단 금속 캡 + 배출관
+      ctx.fillStyle = '#c9d3dd';
+      roundRect(ctx, CX - 20, CAP_Y - 20, 40, 26, 6);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fillRect(CX - BR - 2, RAIL_Y, (BR + 2) * 2, CAP_Y - RAIL_Y);
+      ctx.strokeStyle = `${accent}44`;
+      ctx.strokeRect(CX - BR - 2, RAIL_Y, (BR + 2) * 2, CAP_Y - RAIL_Y);
+
+      // 유리 구 본체
+      const g = ctx.createRadialGradient(CX - 42, CY - 48, 16, CX, CY, R);
+      g.addColorStop(0, 'rgba(255,255,255,0.22)');
+      g.addColorStop(0.7, 'rgba(120,150,190,0.14)');
+      g.addColorStop(1, 'rgba(15,25,45,0.5)');
       ctx.beginPath();
       ctx.arc(CX, CY, R, 0, Math.PI * 2);
-      ctx.fillStyle = grad;
+      ctx.fillStyle = g;
       ctx.fill();
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = accent;
+
+      // 볼 (구 안 + 상승 중 + 레일)
+      for (const b of balls) drawBall(ctx, b.x, b.y, b.n);
+
+      // 유리 테두리(금속 링) + 하이라이트
+      ctx.beginPath();
+      ctx.arc(CX, CY, R, 0, Math.PI * 2);
+      ctx.lineWidth = 5;
+      const rim = ctx.createLinearGradient(CX - R, CY - R, CX + R, CY + R);
+      rim.addColorStop(0, '#eef3f8');
+      rim.addColorStop(0.5, accent);
+      rim.addColorStop(1, '#8894a4');
+      ctx.strokeStyle = rim;
       ctx.stroke();
       ctx.lineWidth = 1;
-
-      // 볼
-      for (const b of balls) {
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, BR, 0, Math.PI * 2);
-        ctx.fillStyle = ballColor(b.n);
-        ctx.fill();
-        // 하이라이트
-        ctx.beginPath();
-        ctx.arc(b.x - 4, b.y - 4, BR * 0.35, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.45)';
-        ctx.fill();
-        ctx.fillStyle = '#1a1a1a';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(String(b.n), b.x, b.y + 0.5);
-      }
+      ctx.beginPath();
+      ctx.ellipse(CX - 40, CY - 52, 34, 20, -0.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.16)';
+      ctx.fill();
 
       rafRef.current = requestAnimationFrame(step);
     };
@@ -249,31 +294,29 @@ export default function MachineDrawSimulator() {
     return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  // ── 추첨 실행 ────────────────────────────────────────────────────
   const draw = async () => {
     if (busyRef.current) return;
     busyRef.current = true;
     setDrawing(true);
     setResult(null);
     setError(null);
-    // 볼 리셋 (모두 챔버로)
     ballsRef.current = initBalls();
-    airRef.current = 0.85; // 송풍 강화
+    airRef.current = 0.92; // 송풍 강화
     try {
       const seed = Math.floor(Math.random() * 1_000_000_000);
-      await sleep(1800); // 공기 혼합 연출
+      await sleep(1900); // 공기 혼합 연출
       const data = await v1Api.getMachineDraw(machine, seed);
       const order = [...data.draw_order, data.bonus];
       for (let i = 0; i < order.length; i += 1) {
-        await sleep(1250);
+        await sleep(1200);
         const b = ballsRef.current.find((x) => x.n === order[i] && x.state === 'mix');
         if (b) {
-          const slot = slotPos(i);
           b.state = 'rising';
+          b.slot = i;
           b.path = [
-            { x: CX, y: CY - R + BR }, // 챔버 상단 출구
-            { x: CX, y: TUBE_TOP + 10 }, // 관 상단
-            { x: slot.x, y: slot.y }, // 거치대
+            { x: CX, y: CAP_Y - 6 }, // 구 상단 배출구
+            { x: CX, y: RAIL_Y }, // 관 상단
+            { x: slotX(i), y: RAIL_Y }, // 상단 레일 슬롯
           ];
           b.wp = 0;
         }
@@ -302,10 +345,11 @@ export default function MachineDrawSimulator() {
       }}
     >
       <Typography variant="subtitle1" fontWeight={800} sx={{ color: '#fff', mb: 0.5 }}>
-        🎰 {machine}호기 추첨기 (실제 공기순환식)
+        🎰 {machine}호기 추첨기 (실제 방송 방식)
       </Typography>
       <Typography variant="caption" sx={{ color: '#cbd5e1', display: 'block', mb: 1.5 }}>
-        실제 방송 추첨기 방식 — 45개 볼을 공기로 섞어 하나씩 추첨. 각 호기의 실제 데이터 특성(번호 출현 성향)을 반영합니다.
+        실제 로또 추첨기와 동일 — 유리 구 안 45개 볼을 공기로 섞어 상단으로 하나씩 추첨.
+        각 호기의 실제 데이터 특성(번호 출현 성향)을 반영합니다.
       </Typography>
 
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
@@ -317,6 +361,7 @@ export default function MachineDrawSimulator() {
             if (v && !drawing) {
               setMachine(v);
               setResult(null);
+              ballsRef.current = initBalls();
             }
           }}
         >
@@ -406,4 +451,21 @@ export default function MachineDrawSimulator() {
       )}
     </Box>
   );
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }

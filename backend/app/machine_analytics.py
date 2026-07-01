@@ -17,44 +17,29 @@ VALID_ODD = {2, 3, 4}
 NUM_GAMES = 5
 MAX_GENERATION_ATTEMPTS = 5000
 
-QUARTER_TO_MACHINE: Dict[Tuple[int, int], int] = {
-    (2023, 1): 2, (2023, 2): 3, (2023, 3): 1, (2023, 4): 2,
-    (2024, 1): 3, (2024, 2): 1, (2024, 3): 2, (2024, 4): 3,
-    (2025, 1): 1, (2025, 2): 2, (2025, 3): 3, (2025, 4): 1,
-    (2026, 1): 2, (2026, 2): 3, (2026, 3): 1, (2026, 4): 2,
-}
-MONTH_TO_MACHINE: Dict[Tuple[int, int], int] = {
-    **{(2024, m): {1: 3, 2: 3, 3: 1, 4: 1, 5: 2, 6: 2, 7: 2, 8: 3, 9: 3, 10: 3, 11: 2, 12: 2}[m] for m in range(1, 13)},
-    **{(2025, m): {1: 1, 2: 1, 3: 2, 4: 2, 5: 2, 6: 3, 7: 3, 8: 3, 9: 1, 10: 1, 11: 2, 12: 2}[m] for m in range(1, 13)},
-    **{(2026, m): {1: 2, 2: 2, 3: 3, 4: 3, 5: 3, 6: 1, 7: 1, 8: 1, 9: 2, 10: 2, 11: 3, 12: 3}[m] for m in range(1, 13)},
-}
-CYCLE_ANCHOR = (2002, 1, 1)
-
-
-def _quarter(d: date) -> int:
-    return (d.month - 1) // 3 + 1
-
-
 def machine_from_date(d: date) -> int:
-    qk = (d.year, _quarter(d))
-    if qk in QUARTER_TO_MACHINE:
-        return QUARTER_TO_MACHINE[qk]
-    mk = (d.year, d.month)
-    if mk in MONTH_TO_MACHINE:
-        return MONTH_TO_MACHINE[mk]
-    ay, aq, am = CYCLE_ANCHOR
-    offset = (d.year - ay) * 4 + (_quarter(d) - aq)
-    return ((am - 1 + offset) % 3) + 1
+    """날짜만으로 호기 추정(월별 순환). 회차를 아는 경우 machine_registry.resolve
+    를 직접 쓰는 편이 정확하다(확정 기록 우선)."""
+    from .machine_registry import monthly_rotation
+
+    return monthly_rotation(d)
 
 
 def attach_machine_column(df: pd.DataFrame) -> pd.DataFrame:
+    """각 회차에 실제 호기를 부여. 확정 기록(카페) 우선, 없으면 월별 순환 추정."""
+    from .machine_registry import resolve
+
     out = df.copy()
     dates = pd.to_datetime(out["draw_date"], errors="coerce").dt.date
-    out["machine_id"] = [machine_from_date(d) if d else 1 for d in dates]
+    rounds = out["round"].astype(int).tolist()
+    out["machine_id"] = [resolve(r, d)[0] for r, d in zip(rounds, dates)]
+    out["machine_source"] = [resolve(r, d)[1] for r, d in zip(rounds, dates)]
     return out
 
 
 def predict_next_round(df: pd.DataFrame) -> Tuple[int, str, int]:
+    from .machine_registry import resolve
+
     latest = df.sort_values("round").iloc[-1]
     latest_round = int(latest["round"])
     latest_date = pd.to_datetime(latest["draw_date"]).date()
@@ -62,7 +47,7 @@ def predict_next_round(df: pd.DataFrame) -> Tuple[int, str, int]:
     next_round = effective_current_round(latest_round)
     weeks_ahead = max(1, next_round - latest_round)
     next_date = latest_date + timedelta(days=7 * weeks_ahead)
-    next_machine = machine_from_date(next_date)
+    next_machine = resolve(next_round, next_date)[0]
     return next_round, next_date.isoformat(), next_machine
 
 
@@ -240,6 +225,8 @@ def build_round_recommendation(
     machine_id: Optional[int] = None,
     seed: Optional[int] = None,
 ) -> Dict:
+    from .machine_registry import coverage, resolve
+
     df = attach_machine_column(df)
     next_round, next_date, auto_machine = predict_next_round(df)
     target = machine_id if machine_id in (1, 2, 3) else auto_machine
@@ -252,11 +239,17 @@ def build_round_recommendation(
     if stats.get("draw_count", 0) > 0 and not combos:
         warning = "조건을 만족하는 조합 생성에 실패했습니다. 필터를 완화해 재시도하세요."
 
+    # 다음 회차 호기의 출처(확정/추정) — 실제 기록 기반 여부를 프론트에 노출.
+    next_source = resolve(next_round, None)[1]
+    machine_cov = coverage()
+
     return {
         "next_round": next_round,
         "next_draw_date": next_date,
         "machine_id": target,
         "auto_machine_id": auto_machine,
+        "machine_source": next_source,
+        "machine_data_coverage": machine_cov,
         "latest_round": int(df["round"].max()),
         "stats": public_stats,
         "combinations": combos,

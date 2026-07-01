@@ -36,21 +36,10 @@ def _flat_counts(df: pd.DataFrame) -> Dict[int, int]:
 
 
 def _gap_map(df: pd.DataFrame) -> Dict[int, int]:
-    """각 번호의 현재 미출현 회차 수(최신 회차 기준)."""
-    ordered = df.sort_values("round")
-    rounds = ordered["round"].astype(int).tolist()
-    last: Dict[int, int] = {}
-    for idx, (_, row) in enumerate(ordered.iterrows()):
-        for c in NUMBER_COLUMNS:
-            last[int(row[c])] = idx
-    n = len(rounds)
-    gaps: Dict[int, int] = {}
-    for num in ALL_NUMBERS:
-        if num not in last:
-            gaps[num] = n
-        else:
-            gaps[num] = (n - 1) - last[num]
-    return gaps
+    """각 번호의 현재 미출현 회차 수. gap_utils 단일 소스로 통일."""
+    from .gap_utils import last_seen_gaps
+
+    return last_seen_gaps(df)
 
 
 def wilson_lower_bound(successes: int, trials: int, z: float = Z_WILSON) -> float:

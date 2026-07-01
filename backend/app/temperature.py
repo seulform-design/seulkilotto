@@ -96,21 +96,12 @@ def _total_counts(df: pd.DataFrame) -> np.ndarray:
 
 
 def _compute_gaps(df: pd.DataFrame, latest_round: int) -> np.ndarray:
-    """각 번호 1~45 의 마지막 출현 이후 경과 회차. 미출현은 latest_round."""
-    gaps = np.full(45, latest_round, dtype=int)
-    sentinel = latest_round  # 아직 발견 안 된 표시
-    sorted_df = df.sort_values("round", ascending=False)
-    for _, row in sorted_df.iterrows():
-        rnd = int(row["round"])
-        elapsed = latest_round - rnd
-        for col in database.NUMBER_COLUMNS:
-            n = int(row[col])
-            if 1 <= n <= 45 and gaps[n - 1] == sentinel:
-                gaps[n - 1] = elapsed
-        # 모든 번호가 갱신되었으면 조기 종료 (성능)
-        if not (gaps == sentinel).any():
-            break
-    return gaps
+    """각 번호 1~45 의 마지막 출현 이후 경과 회차. gap_utils 단일 소스.
+    회차가 연속이면 (latest_round - last_round) 와 동일하다."""
+    from .gap_utils import last_seen_gaps
+
+    gaps = last_seen_gaps(df)
+    return np.array([gaps[n] for n in range(1, 46)], dtype=int)
 
 
 def _composite_score(

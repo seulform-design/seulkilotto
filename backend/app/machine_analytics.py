@@ -67,26 +67,12 @@ def predict_next_round(df: pd.DataFrame) -> Tuple[int, str, int]:
 
 
 def _absence_gaps(sub: pd.DataFrame) -> List[Tuple[int, int]]:
-    """호기 내 각 번호의 '몇 회차 동안 미출현' (실제 추첨 횟수 기준)."""
-    ordered_rounds = sorted(sub["round"].astype(int).unique().tolist())
-    round_index = {r: i for i, r in enumerate(ordered_rounds)}
-    last_idx: Dict[int, int] = {}
-    draw_count = len(ordered_rounds)
+    """호기(부분집합) 내 각 번호의 '몇 회차 동안 미출현'. gap_utils 단일 소스.
+    미출현 많은 순 → 번호 순으로 정렬해 반환."""
+    from .gap_utils import last_seen_gaps
 
-    for _, row in sub.iterrows():
-        r = int(row["round"])
-        idx = round_index[r]
-        for c in NUMBER_COLUMNS:
-            n = int(row[c])
-            last_idx[n] = idx
-
-    absence: List[Tuple[int, int]] = []
-    for n in ALL_NUMBERS:
-        if n not in last_idx:
-            gap = draw_count
-        else:
-            gap = (draw_count - 1) - last_idx[n]
-        absence.append((n, gap))
+    gaps = last_seen_gaps(sub)
+    absence = [(n, gaps[n]) for n in ALL_NUMBERS]
     absence.sort(key=lambda x: (-x[1], x[0]))
     return absence
 

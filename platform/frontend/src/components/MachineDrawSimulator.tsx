@@ -46,10 +46,11 @@ function slotPos(i: number) {
   return { x: i < 6 ? MAIN_X0 + i * MAIN_GAP : BONUS_X, y: BAR_Y };
 }
 
-const GRAVITY = 0.32;
-const DAMP = 0.985;
-const MAX_V = 9.5;
-const WHEEL_R = 46; // 중앙 추출 바퀴 반지름
+const GRAVITY = 0.34;
+const DAMP = 0.99;
+const MAX_V = 8.5;
+const PADDLE_R = R * 0.82; // 회전 패들 팔 길이(테두리 근처까지)
+const ARM_HALF = 13; // 팔 두께(반)
 
 type BallState = 'mix' | 'rising' | 'racked';
 interface Ball {
@@ -127,23 +128,32 @@ export default function MachineDrawSimulator() {
     const step = () => {
       const balls = ballsRef.current;
       const spin = spinRef.current;
-      armRef.current += spin > 0.1 ? 0.22 : 0.02; // 추출 바퀴 회전
+      const omega = spin > 0.1 ? 0.12 : 0.015; // 패들 각속도
+      armRef.current += omega;
+      const arm = armRef.current;
 
-      // ── 물리 (회전 바퀴가 공을 쳐올리는 튀김/agitation) ──
+      // ── 물리 (회전 패들 중력 혼합 = Venus 텀블링) ──
+      // 회전 팔이 스치는 공을 팔의 표면 속도로 퍼올리고, 팔을 벗어나면 중력으로
+      // 쏟아진다. 바닥에 쌓인 공 무더기를 팔이 휘저어 텀블링/카스케이드.
       for (const b of balls) {
         if (b.state === 'mix') {
           b.vy += GRAVITY;
-          if (spin > 0.05) {
+          if (spin > 0.1) {
             const dx = b.x - CX;
             const dy = b.y - CY;
-            const dc = Math.hypot(dx, dy);
-            // 중앙 바퀴 근처일수록 강하게 튐(팝콘처럼 무작위 쳐올림)
-            const near = dc < WHEEL_R + 30 ? 1 : 0.45;
-            if (Math.random() < 0.13 * near) {
-              const ang = Math.random() * Math.PI * 2;
-              const k = spin * 14 * near;
-              b.vx += Math.cos(ang) * k;
-              b.vy += Math.sin(ang) * k - spin * 6; // 위로 편향(튀어오름)
+            for (let k = 0; k < 4; k += 1) {
+              const th = arm + (k * Math.PI) / 2;
+              const cs = Math.cos(th);
+              const sn = Math.sin(th);
+              const proj = dx * cs + dy * sn; // 팔 방향 성분
+              const perp = -dx * sn + dy * cs; // 팔 수직 거리
+              if (proj > 6 && proj < PADDLE_R && Math.abs(perp) < ARM_HALF) {
+                // 팔의 국소 표면 속도(반시계 접선)로 공을 퍼올림
+                const surfVx = -sn * omega * proj;
+                const surfVy = cs * omega * proj;
+                b.vx += (surfVx - b.vx) * 0.4;
+                b.vy += (surfVy - b.vy) * 0.4;
+              }
             }
           }
           b.vx *= DAMP;
@@ -165,8 +175,8 @@ export default function MachineDrawSimulator() {
             b.x = CX + nx * lim;
             b.y = CY + ny * lim;
             const dot = b.vx * nx + b.vy * ny;
-            b.vx = (b.vx - 2 * dot * nx) * 0.86;
-            b.vy = (b.vy - 2 * dot * ny) * 0.86;
+            b.vx = (b.vx - 2 * dot * nx) * 0.6;
+            b.vy = (b.vy - 2 * dot * ny) * 0.6;
           }
         } else if (b.state === 'rising') {
           const t = b.path[b.wp];
@@ -280,27 +290,26 @@ export default function MachineDrawSimulator() {
       // 5) 볼
       for (const b of balls) paintBall(ctx, b.x, b.y, b.n);
 
-      // 6b) 공 추출 회전 바퀴 (별/톱니 모양) — 테두리 슬롯이 공을 하나씩 걸어 올림
+      // 6b) 회전 패들 (십자 4팔, 테두리 근처까지) — 공을 퍼올려 섞고 추출
       ctx.save();
       ctx.translate(CX, CY);
-      ctx.rotate(armRef.current);
-      const teeth = 6;
-      ctx.beginPath();
-      for (let t = 0; t < teeth; t += 1) {
-        const a0 = (Math.PI * 2 * t) / teeth;
-        const a1 = a0 + Math.PI / teeth;
-        ctx.lineTo(Math.cos(a0) * WHEEL_R, Math.sin(a0) * WHEEL_R); // 바깥 뾰족
-        ctx.lineTo(Math.cos(a1) * (WHEEL_R * 0.62), Math.sin(a1) * (WHEEL_R * 0.62)); // 안쪽 홈
+      ctx.rotate(arm);
+      ctx.strokeStyle = 'rgba(205,220,240,0.55)';
+      ctx.lineWidth = 2 * ARM_HALF;
+      ctx.lineCap = 'round';
+      for (let k = 0; k < 4; k += 1) {
+        ctx.rotate(Math.PI / 2);
+        ctx.beginPath();
+        ctx.moveTo(0, 6);
+        ctx.lineTo(0, -PADDLE_R);
+        ctx.stroke();
       }
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(225,235,246,0.5)';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(150,168,190,0.8)';
-      ctx.stroke();
       ctx.restore();
-      // 바퀴 축 허브
+      ctx.lineWidth = 1;
+      ctx.lineCap = 'butt';
+      // 회전축 허브
       ctx.beginPath();
-      ctx.arc(CX, CY, 8, 0, Math.PI * 2);
+      ctx.arc(CX, CY, 9, 0, Math.PI * 2);
       ctx.fillStyle = '#c9d3dd';
       ctx.fill();
       ctx.strokeStyle = '#8a95a2';
@@ -414,8 +423,8 @@ export default function MachineDrawSimulator() {
         🎰 {machine}호기 추첨기 (실제 방송 방식)
       </Typography>
       <Typography variant="caption" sx={{ color: '#cbd5e1', display: 'block', mb: 1.5 }}>
-        실제 로또 추첨기와 동일 — 투명 구 안 45개 볼이 튀며 섞이고, 중앙 회전 추출 바퀴가 공을
-        하나씩 걸어 상단으로 배출 → 레일을 타고 결과 바로 이동. 각 호기의 실제 데이터 특성을 반영합니다.
+        실제 Venus 추첨기와 동일 — 투명 구 안 회전 패들이 45개 볼을 퍼올려 중력으로 쏟으며 섞고
+        (텀블링), 공을 하나씩 상단으로 배출 → 레일을 타고 결과 바로. 각 호기의 실제 데이터 특성 반영.
       </Typography>
 
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>

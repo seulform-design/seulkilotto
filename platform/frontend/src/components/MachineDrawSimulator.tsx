@@ -49,10 +49,11 @@ function slotPos(i: number) {
 const GRAVITY = 0.34;
 const DAMP = 0.99;
 const MAX_V = 8.5;
-const LIFT = 1.15; // 블레이드 퍼올림 세기(중심축 근처 상승)
-const CHURN = 1.0; // 회전 난류
-const CENTER_PULL = 0.009; // 중심축으로 모으는 힘
-const DISC_R = R * 0.6; // 수평 회전 디스크 반지름
+const LIFT = 1.5; // 블레이드 퍼올림 세기(중심축 근처 상승)
+const CHURN = 1.35; // 회전 난류
+const CENTER_PULL = 0.008; // 중심축으로 모으는 힘
+const DISC_R = R * 0.58; // 4구멍 회전 디스크 반지름
+const DISC_DY = -R * 0.28; // 디스크 높이(중심 위쪽)
 
 type BallState = 'mix' | 'rising' | 'racked';
 interface Ball {
@@ -224,13 +225,15 @@ export default function MachineDrawSimulator() {
       const accent = accentRef.current;
       ctx.clearRect(0, 0, W, H);
 
-      // 1) 외부 하강 레일 (상단 캡 → 오른쪽 → 아래로)
+      const discY = CY + DISC_DY;
+
+      // 1) 외부 하강 레일 (디스크 우측 배출구 → 구 밖 오른쪽 → 하단 결과바)
       ctx.strokeStyle = 'rgba(180,200,220,0.5)';
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(CX + 14, CAP_Y - 6);
-      ctx.quadraticCurveTo(RAIL_X + 26, CY - R * 0.4, RAIL_X, CY + 20);
-      ctx.quadraticCurveTo(RAIL_X - 4, BAR_Y - 40, MAIN_X0 + 5 * MAIN_GAP, BAR_Y - 22);
+      ctx.moveTo(CX + DISC_R + 4, discY + 4);
+      ctx.quadraticCurveTo(RAIL_X + 30, CY, RAIL_X, CY + R * 0.55);
+      ctx.quadraticCurveTo(RAIL_X - 6, BAR_Y - 42, MAIN_X0 + 5 * MAIN_GAP, BAR_Y - 22);
       ctx.stroke();
       ctx.lineWidth = 1;
 
@@ -274,36 +277,57 @@ export default function MachineDrawSimulator() {
       ctx.fillStyle = g;
       ctx.fill();
 
-      // 4) 중앙 수직축 + 상단 배출관 (공이 위로 빠지는 통로)
-      ctx.fillStyle = 'rgba(200,215,235,0.18)';
-      ctx.fillRect(CX - 4, CAP_Y + 4, 8, R * 2 - 8); // 수직 축
-      ctx.fillStyle = 'rgba(220,230,242,0.12)';
-      ctx.fillRect(CX - TUBE_W / 2, CAP_Y + 4, TUBE_W, R * 0.55);
+      // 4) 중앙 수직축 (디스크를 지지·회전시키는 축)
+      ctx.fillStyle = 'rgba(200,215,235,0.2)';
+      ctx.fillRect(CX - 3, CAP_Y + 4, 6, discY - (CAP_Y + 4) + 4);
 
       // 5) 볼
       for (const b of balls) paintBall(ctx, b.x, b.y, b.n);
 
-      // 6b) 수평 회전 디스크(블레이드) — 중앙 샤프트에 달려 공을 퍼올림
+      // 6b) 4구멍 회전 디스크 (십자 분할) — 공이 구멍에 걸려 회전하다 배출구로
+      const rot = armRef.current;
+      ctx.save();
+      ctx.translate(CX, discY);
+      // 디스크 외곽(원근: 납작한 타원)
       ctx.beginPath();
-      ctx.ellipse(CX, CY, DISC_R, 8, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(215,230,248,0.26)';
+      ctx.ellipse(0, 0, DISC_R, DISC_R * 0.34, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(210,226,246,0.28)';
       ctx.fill();
-      ctx.strokeStyle = 'rgba(180,200,225,0.6)';
+      ctx.strokeStyle = 'rgba(180,200,228,0.75)';
+      ctx.lineWidth = 2;
       ctx.stroke();
-      // 회전 표시 마크(디스크 가장자리 점이 좌우 왕복 → 수직축 회전 원근)
-      const mk = Math.cos(armRef.current) * DISC_R;
+      // 십자 4팔 (회전) — 4구멍 경계
+      for (let k = 0; k < 4; k += 1) {
+        const a = rot + (k * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a) * DISC_R, Math.sin(a) * DISC_R * 0.34);
+        ctx.strokeStyle = 'rgba(165,188,216,0.9)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+      // 4구멍 (각 사분면 어두운 타원)
+      for (let k = 0; k < 4; k += 1) {
+        const a = rot + Math.PI / 4 + (k * Math.PI) / 2;
+        const hx = Math.cos(a) * DISC_R * 0.6;
+        const hy = Math.sin(a) * DISC_R * 0.34 * 0.6;
+        ctx.beginPath();
+        ctx.ellipse(hx, hy, 8, 4.5, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(18,28,44,0.42)';
+        ctx.fill();
+      }
+      ctx.restore();
+      ctx.lineWidth = 1;
+      // 하향 배출구 (디스크 우측) — 공이 여기로 넘어가 아래로 낙하
       ctx.beginPath();
-      ctx.ellipse(CX + mk, CY, 5, 4, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(150,170,195,0.9)';
+      ctx.arc(CX + DISC_R + 4, discY + 4, 7, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(30,42,60,0.55)';
       ctx.fill();
-      // 두 번째 디스크(하단) — 층층 블레이드 느낌
-      ctx.beginPath();
-      ctx.ellipse(CX, CY + R * 0.42, DISC_R * 0.7, 6, 0, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(180,200,225,0.45)';
+      ctx.strokeStyle = `${accent}aa`;
       ctx.stroke();
-      // 회전축 허브
+      // 중앙 허브
       ctx.beginPath();
-      ctx.arc(CX, CY, 7, 0, Math.PI * 2);
+      ctx.arc(CX, discY, 6, 0, Math.PI * 2);
       ctx.fillStyle = '#c9d3dd';
       ctx.fill();
       ctx.strokeStyle = '#8a95a2';
@@ -380,11 +404,12 @@ export default function MachineDrawSimulator() {
           b.state = 'rising';
           b.slot = i;
           // 중앙 배출관 하단 흡입 → 위로 → 상단 캡 배출 → 오른쪽 레일 → 결과 슬롯
+          const dY = CY + DISC_DY;
           b.path = [
-            { x: CX, y: CY }, // 회전 바퀴에 걸림
-            { x: CX, y: CAP_Y - 8 }, // 중앙 축 타고 상단 배출
-            { x: RAIL_X, y: CY + 20 }, // 오른쪽 레일
-            { x: RAIL_X, y: BAR_Y - 40 },
+            { x: CX - DISC_R * 0.55, y: dY }, // 디스크 왼쪽 구멍에 걸림
+            { x: CX, y: dY - 3 }, // 회전으로 이동(중앙 지나)
+            { x: CX + DISC_R + 4, y: dY + 4 }, // 하향 배출구(디스크 우측)
+            { x: RAIL_X, y: CY + R * 0.55 }, // 레일 진입(아래로 낙하)
             { x: dst.x, y: dst.y }, // 결과 슬롯
           ];
           b.wp = 0;
@@ -417,8 +442,8 @@ export default function MachineDrawSimulator() {
         🎰 {machine}호기 추첨기 (실제 방송 방식)
       </Typography>
       <Typography variant="caption" sx={{ color: '#cbd5e1', display: 'block', mb: 1.5 }}>
-        실제 동행복권 추첨기와 동일 — 중앙 수직축 회전 디스크가 45개 볼을 퍼올려 처닝, 공이
-        하나씩 상단으로 배출돼 레일을 타고 결과 바로 (실측 간격 반영). 각 호기의 실제 데이터 특성 반영.
+        실제 동행복권 추첨기와 동일 — 볼이 처닝되다 4구멍 회전 디스크의 구멍에 걸려, 디스크가
+        돌며 하향 배출구로 넘겨 아래 레일로 배출(실측 간격 반영). 각 호기의 실제 데이터 특성 반영.
       </Typography>
 
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>

@@ -47,14 +47,14 @@ function slotPos(i: number) {
 }
 
 const GRAVITY = 0.34;
-const DAMP = 0.99;
-const MAX_V = 8.5;
-const LIFT = 0.6; // 블레이드 퍼올림 세기(중심 분수 — 과하면 볼이 상단에 뭉침)
-const CHURN = 0.9; // 회전 난류
+const DAMP = 0.985;
+const MAX_V = 9;
+const LIFT = 0.62; // 블레이드 퍼올림 세기(중심 분수 — 과하면 볼이 상단에 뭉침)
+const CHURN = 1.3; // 회전 난류(실제처럼 활발히 튐)
 const CENTER_PULL = 0.006; // 중심축으로 모으는 힘
 const LIFT_ZONE = 42; // 퍼올림 존(중심축 근처만 — 좁게)
-const DISC_R = R * 0.5; // 4구멍 회전 디스크 반지름
-const DISC_DY = -R * 0.5; // 디스크 높이(상단 — 볼 무더기 위쪽)
+const DISC_R = R * 0.42; // 4구멍 추출 디스크 반지름
+const DISC_DY = -R * 0.72; // 디스크 높이(구 상단 — 공 도는 영역 바깥/위)
 
 type BallState = 'mix' | 'rising' | 'racked';
 interface Ball {
@@ -179,7 +179,7 @@ export default function MachineDrawSimulator() {
             const dx = t.x - b.x;
             const dy = t.y - b.y;
             const d = Math.hypot(dx, dy) || 1;
-            const spd = 5;
+            const spd = 3.4; // 배출 이동 속도(실제처럼 또박또박 내려감)
             b.x += (dx / d) * Math.min(spd, d);
             b.y += (dy / d) * Math.min(spd, d);
             if (d < 3) {
@@ -394,11 +394,11 @@ export default function MachineDrawSimulator() {
     spinRef.current = 0.5; // 패들 강하게 회전
     try {
       const seed = Math.floor(Math.random() * 1_000_000_000);
-      await sleep(3200); // 첫 공 전 혼합(실측 ~10초를 UX상 압축)
+      await sleep(3800); // 첫 공 전 혼합(실측 ~16초를 UX상 압축)
       const data = await v1Api.getMachineDraw(machine, seed);
       const order = [...data.draw_order, data.bonus];
       for (let i = 0; i < order.length; i += 1) {
-        await sleep(i === 6 ? 3600 : 3000); // 공마다 텀(실측 ~6초 → 3초로 압축), 보너스는 더 길게
+        await sleep(i === 6 ? 4600 : 4000); // 공마다 텀(실측 ~6초 반영), 보너스는 더 길게
         const b = ballsRef.current.find((x) => x.n === order[i] && x.state === 'mix');
         if (b) {
           const dst = slotPos(i);

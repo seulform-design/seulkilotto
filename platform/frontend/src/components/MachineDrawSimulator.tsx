@@ -49,10 +49,11 @@ function slotPos(i: number) {
 const GRAVITY = 0.34;
 const DAMP = 0.985;
 const MAX_V = 9;
-const LIFT = 0.62; // 블레이드 퍼올림 세기(중심 분수 — 과하면 볼이 상단에 뭉침)
-const CHURN = 1.3; // 회전 난류(실제처럼 활발히 튐)
-const CENTER_PULL = 0.006; // 중심축으로 모으는 힘
-const LIFT_ZONE = 42; // 퍼올림 존(중심축 근처만 — 좁게)
+const LIFT = 1.05; // 중앙 컬럼 퍼올림
+const CHURN = 1.0; // 회전 난류
+const CENTER_PULL = 0.028; // 중심축으로 모으는 힘(세로 컬럼 형성)
+const LIFT_ZONE = 28; // 퍼올림 존(중심축 근처 — 좁은 컬럼)
+const SPILL = 0.55; // 상단 도달 시 바깥 분출(cascade → 분수형 순환)
 const DISC_R = R * 0.42; // 4구멍 추출 디스크 반지름
 const DISC_DY = -R * 0.72; // 디스크 높이(구 상단 — 공 도는 영역 바깥/위)
 
@@ -142,14 +143,16 @@ export default function MachineDrawSimulator() {
           b.vy += GRAVITY;
           if (spin > 0.1) {
             const dx = b.x - CX;
-            // 중심축으로 모으기 → 샤프트 주위 세로 컬럼 형성
+            // 중심축으로 모으기 → 세로 컬럼 형성
             b.vx += -dx * CENTER_PULL;
-            // 블레이드가 퍼올림: 중심축 근처일수록 강한 상승(넓은 존)
+            // 중앙 컬럼에서 퍼올림
             const ax = Math.abs(dx);
             if (ax < LIFT_ZONE) b.vy -= LIFT * (1 - ax / LIFT_ZONE);
-            // 회전 난류(블레이드 스윕)
+            // 상단 도달 시 바깥으로 분출(cascade) → 분수형 순환
+            if (b.y < CY - R * 0.35) b.vx += (dx >= 0 ? 1 : -1) * SPILL;
+            // 회전 난류
             b.vx += (Math.random() - 0.5) * CHURN;
-            b.vy += (Math.random() - 0.5) * CHURN * 0.6;
+            b.vy += (Math.random() - 0.5) * CHURN * 0.5;
           }
           b.vx *= DAMP;
           b.vy *= DAMP;

@@ -1,17 +1,24 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Box,
   Button,
   Chip,
-  CircularProgress,
   Stack,
   ToggleButton,
   ToggleButtonGroup,
   Typography,
 } from '@mui/material';
-import LottoBall from './LottoBall';
 import { v1Api, type MachineDrawResult } from '../api/v1Api';
+
+/** 로또 공식 볼 색상 (구간별). */
+function ballColor(n: number): string {
+  if (n <= 10) return '#FBC400';
+  if (n <= 20) return '#69C8F2';
+  if (n <= 30) return '#FF7272';
+  if (n <= 40) return '#AAAAAA';
+  return '#B0D840';
+}
 
 const MACHINE_ACCENT: Record<number, string> = {
   1: '#E8570D',
@@ -19,43 +26,408 @@ const MACHINE_ACCENT: Record<number, string> = {
   3: '#2952CC',
 };
 
-// 실제 동행복권/MBC 생방송 추첨 방송 — 추첨기 구간(약 5분40초)부터 시작.
-const DRAW_VIDEO_ID = 'id2a3I1VBvk';
-const DRAW_START = 344;
+// ── 레이아웃 (실제 동행복권 추첨기 배치) ────────────────────────────
+const W = 360;
+const H = 520;
+const CX = 150; // 구 중심 x (오른쪽 레일 공간 확보로 좌측 배치)
+const CY = 205; // 구 중심 y
+const R = 120; // 구 반지름
+const CAP_Y = CY - R; // 상단 캡/배출구
+const TUBE_W = 22; // 중앙 배출관 폭
+const RAIL_X = CX + R + 4; // 외부 하강 레일 x
+const BAR_Y = 484; // 하단 결과 바
+const BR = 11;
+
+// 결과 바 슬롯 위치 (제○회 라벨 + 흰 6 + 분리된 파란 보너스)
+const MAIN_X0 = 96;
+const MAIN_GAP = 33;
+const BONUS_X = 322;
+function slotPos(i: number) {
+  return { x: i < 6 ? MAIN_X0 + i * MAIN_GAP : BONUS_X, y: BAR_Y };
+}
+
+const GRAVITY = 0.34;
+const DAMP = 0.99;
+const MAX_V = 8.5;
+const LIFT = 0.6; // 블레이드 퍼올림 세기(중심 분수 — 과하면 볼이 상단에 뭉침)
+const CHURN = 0.9; // 회전 난류
+const CENTER_PULL = 0.006; // 중심축으로 모으는 힘
+const LIFT_ZONE = 42; // 퍼올림 존(중심축 근처만 — 좁게)
+const DISC_R = R * 0.5; // 4구멍 회전 디스크 반지름
+const DISC_DY = -R * 0.5; // 디스크 높이(상단 — 볼 무더기 위쪽)
+
+type BallState = 'mix' | 'rising' | 'racked';
+interface Ball {
+  n: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  state: BallState;
+  slot: number;
+  path: { x: number; y: number }[];
+  wp: number;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const rand = (a: number, b: number) => a + Math.random() * (b - a);
+
+function initBalls(): Ball[] {
+  const balls: Ball[] = [];
+  for (let n = 1; n <= 45; n += 1) {
+    const ang = Math.random() * Math.PI * 2;
+    const rr = Math.random() * (R - BR - 4);
+    balls.push({
+      n,
+      x: CX + Math.cos(ang) * rr,
+      y: CY + Math.sin(ang) * rr * 0.7,
+      vx: rand(-2, 2),
+      vy: rand(-2, 2),
+      state: 'mix',
+      slot: -1,
+      path: [],
+      wp: 0,
+    });
+  }
+  return balls;
+}
+
+function paintBall(ctx: CanvasRenderingContext2D, x: number, y: number, n: number, r = BR) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = ballColor(n);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x - r * 0.32, y - r * 0.32, r * 0.33, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fill();
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = `bold ${Math.round(r * 0.95)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(n), x, y + 0.5);
+}
 
 export default function MachineDrawSimulator() {
   const [machine, setMachine] = useState<1 | 2 | 3>(3);
-  const [result, setResult] = useState<MachineDrawResult | null>(null);
-  const [revealed, setRevealed] = useState<number[]>([]);
   const [drawing, setDrawing] = useState(false);
+  const [result, setResult] = useState<MachineDrawResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const accent = MACHINE_ACCENT[machine];
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const ballsRef = useRef<Ball[]>(initBalls());
+  const spinRef = useRef(0.03); // 회전 패들 세기 — 평소 낮음, 추첨 시 강함
+  const armRef = useRef(0); // 회전 패들 각도
+  const rafRef = useRef<number>(0);
+  const busyRef = useRef(false);
+  const accentRef = useRef(MACHINE_ACCENT[3]);
+  accentRef.current = MACHINE_ACCENT[machine];
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const step = () => {
+      const balls = ballsRef.current;
+      const spin = spinRef.current;
+      armRef.current += spin > 0.1 ? 0.16 : 0.02; // 수직축 회전
+
+      // ── 물리 (수직축 회전 + 수평 디스크 = 동행복권 처닝) ──
+      // 중앙 샤프트가 회전하며 수평 블레이드가 공을 퍼올린다. 공은 샤프트 주위
+      // 세로 컬럼을 이루며 중심에서 솟구쳐 올라 바깥으로 쏟아진다(분수형 순환).
+      for (const b of balls) {
+        if (b.state === 'mix') {
+          b.vy += GRAVITY;
+          if (spin > 0.1) {
+            const dx = b.x - CX;
+            // 중심축으로 모으기 → 샤프트 주위 세로 컬럼 형성
+            b.vx += -dx * CENTER_PULL;
+            // 블레이드가 퍼올림: 중심축 근처일수록 강한 상승(넓은 존)
+            const ax = Math.abs(dx);
+            if (ax < LIFT_ZONE) b.vy -= LIFT * (1 - ax / LIFT_ZONE);
+            // 회전 난류(블레이드 스윕)
+            b.vx += (Math.random() - 0.5) * CHURN;
+            b.vy += (Math.random() - 0.5) * CHURN * 0.6;
+          }
+          b.vx *= DAMP;
+          b.vy *= DAMP;
+          const sp = Math.hypot(b.vx, b.vy);
+          if (sp > MAX_V) {
+            b.vx = (b.vx / sp) * MAX_V;
+            b.vy = (b.vy / sp) * MAX_V;
+          }
+          b.x += b.vx;
+          b.y += b.vy;
+          const dx = b.x - CX;
+          const dy = b.y - CY;
+          const d = Math.hypot(dx, dy);
+          const lim = R - BR;
+          if (d > lim) {
+            const nx = dx / d;
+            const ny = dy / d;
+            b.x = CX + nx * lim;
+            b.y = CY + ny * lim;
+            const dot = b.vx * nx + b.vy * ny;
+            b.vx = (b.vx - 2 * dot * nx) * 0.6;
+            b.vy = (b.vy - 2 * dot * ny) * 0.6;
+          }
+        } else if (b.state === 'rising') {
+          const t = b.path[b.wp];
+          if (t) {
+            const dx = t.x - b.x;
+            const dy = t.y - b.y;
+            const d = Math.hypot(dx, dy) || 1;
+            const spd = 5;
+            b.x += (dx / d) * Math.min(spd, d);
+            b.y += (dy / d) * Math.min(spd, d);
+            if (d < 3) {
+              b.wp += 1;
+              if (b.wp >= b.path.length) b.state = 'racked';
+            }
+          } else {
+            b.state = 'racked';
+          }
+        }
+      }
+
+      // ── 볼-볼 충돌 (구 안) ──
+      for (let i = 0; i < balls.length; i += 1) {
+        const a = balls[i];
+        if (a.state !== 'mix') continue;
+        for (let j = i + 1; j < balls.length; j += 1) {
+          const c = balls[j];
+          if (c.state !== 'mix') continue;
+          const dx = c.x - a.x;
+          const dy = c.y - a.y;
+          const d = Math.hypot(dx, dy);
+          const min = BR * 2;
+          if (d > 0 && d < min) {
+            const nx = dx / d;
+            const ny = dy / d;
+            const ov = (min - d) / 2;
+            a.x -= nx * ov;
+            a.y -= ny * ov;
+            c.x += nx * ov;
+            c.y += ny * ov;
+            const va = a.vx * nx + a.vy * ny;
+            const vc = c.vx * nx + c.vy * ny;
+            const diff = vc - va;
+            a.vx += diff * nx;
+            a.vy += diff * ny;
+            c.vx -= diff * nx;
+            c.vy -= diff * ny;
+          }
+        }
+      }
+
+      // ── 렌더 ──
+      const accent = accentRef.current;
+      ctx.clearRect(0, 0, W, H);
+
+      const discY = CY + DISC_DY;
+
+      // 1) 외부 하강 레일 (디스크 우측 배출구 → 구 밖 오른쪽 → 하단 결과바)
+      ctx.strokeStyle = 'rgba(180,200,220,0.5)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(CX + DISC_R + 4, discY + 4);
+      ctx.quadraticCurveTo(RAIL_X + 30, CY, RAIL_X, CY + R * 0.55);
+      ctx.quadraticCurveTo(RAIL_X - 6, BAR_Y - 42, MAIN_X0 + 5 * MAIN_GAP, BAR_Y - 22);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+
+      // 2) 하단 결과 바
+      const barGrad = ctx.createLinearGradient(0, BAR_Y - 24, 0, BAR_Y + 24);
+      barGrad.addColorStop(0, '#10233d');
+      barGrad.addColorStop(1, '#0a1424');
+      ctx.fillStyle = barGrad;
+      roundRect(ctx, 8, BAR_Y - 26, W - 16, 52, 26);
+      ctx.fill();
+      ctx.strokeStyle = `${accent}66`;
+      ctx.stroke();
+      ctx.fillStyle = '#e8eef5';
+      ctx.font = 'bold 15px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('제 SIM', 48, BAR_Y);
+      for (let i = 0; i < 7; i += 1) {
+        const p = slotPos(i);
+        const isBonus = i === 6;
+        const filled = balls.find((b) => b.slot === i && b.state === 'racked');
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, BR + 3, 0, Math.PI * 2);
+        if (filled) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          paintBall(ctx, p.x, p.y, filled.n, BR + 1);
+        } else {
+          ctx.fillStyle = isBonus ? 'rgba(80,140,255,0.9)' : 'rgba(255,255,255,0.92)';
+          ctx.fill();
+        }
+      }
+
+      // 3) 유리 구 본체 (맑은 투명)
+      const g = ctx.createRadialGradient(CX - 44, CY - 50, 18, CX, CY, R);
+      g.addColorStop(0, 'rgba(255,255,255,0.30)');
+      g.addColorStop(0.6, 'rgba(210,225,240,0.12)');
+      g.addColorStop(1, 'rgba(160,180,205,0.10)');
+      ctx.beginPath();
+      ctx.arc(CX, CY, R, 0, Math.PI * 2);
+      ctx.fillStyle = g;
+      ctx.fill();
+
+      // 4) 중앙 수직축 (디스크를 지지·회전시키는 축)
+      ctx.fillStyle = 'rgba(200,215,235,0.2)';
+      ctx.fillRect(CX - 3, CAP_Y + 4, 6, discY - (CAP_Y + 4) + 4);
+
+      // 5) 볼
+      for (const b of balls) paintBall(ctx, b.x, b.y, b.n);
+
+      // 6b) 4구멍 회전 디스크 (십자 분할) — 공이 구멍에 걸려 회전하다 배출구로
+      const rot = armRef.current;
+      ctx.save();
+      ctx.translate(CX, discY);
+      // 디스크 외곽(원근: 납작한 타원)
+      ctx.beginPath();
+      ctx.ellipse(0, 0, DISC_R, DISC_R * 0.34, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(210,226,246,0.28)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(180,200,228,0.75)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // 십자 4팔 (회전) — 4구멍 경계
+      for (let k = 0; k < 4; k += 1) {
+        const a = rot + (k * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a) * DISC_R, Math.sin(a) * DISC_R * 0.34);
+        ctx.strokeStyle = 'rgba(165,188,216,0.9)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+      // 4구멍 (각 사분면 어두운 타원)
+      for (let k = 0; k < 4; k += 1) {
+        const a = rot + Math.PI / 4 + (k * Math.PI) / 2;
+        const hx = Math.cos(a) * DISC_R * 0.6;
+        const hy = Math.sin(a) * DISC_R * 0.34 * 0.6;
+        ctx.beginPath();
+        ctx.ellipse(hx, hy, 8, 4.5, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(18,28,44,0.42)';
+        ctx.fill();
+      }
+      ctx.restore();
+      ctx.lineWidth = 1;
+      // 하향 배출구 (디스크 우측) — 공이 여기로 넘어가 아래로 낙하
+      ctx.beginPath();
+      ctx.arc(CX + DISC_R + 4, discY + 4, 7, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(30,42,60,0.55)';
+      ctx.fill();
+      ctx.strokeStyle = `${accent}aa`;
+      ctx.stroke();
+      // 중앙 허브
+      ctx.beginPath();
+      ctx.arc(CX, discY, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#c9d3dd';
+      ctx.fill();
+      ctx.strokeStyle = '#8a95a2';
+      ctx.stroke();
+
+      // 6) 구 테두리(금속 링)
+      ctx.beginPath();
+      ctx.arc(CX, CY, R, 0, Math.PI * 2);
+      ctx.lineWidth = 4;
+      const rim = ctx.createLinearGradient(CX - R, CY - R, CX + R, CY + R);
+      rim.addColorStop(0, '#f2f6fa');
+      rim.addColorStop(0.5, '#aeb8c4');
+      rim.addColorStop(1, '#7f8b99');
+      ctx.strokeStyle = rim;
+      ctx.stroke();
+      ctx.lineWidth = 1;
+
+      // 7) 고정 볼트 (테두리 8방향)
+      for (let k = 0; k < 8; k += 1) {
+        const a = (Math.PI / 4) * k - Math.PI / 8;
+        const bx = CX + Math.cos(a) * R;
+        const by = CY + Math.sin(a) * R;
+        ctx.beginPath();
+        ctx.arc(bx, by, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#cfd8e2';
+        ctx.fill();
+        ctx.strokeStyle = '#8a95a2';
+        ctx.stroke();
+      }
+
+      // 8) 상단 흰색 캡 돔 + 배출구
+      ctx.beginPath();
+      ctx.ellipse(CX, CAP_Y - 2, 26, 18, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#e9eef4';
+      ctx.fill();
+      ctx.strokeStyle = '#9aa6b3';
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(CX, CAP_Y - 6, 5, 0, Math.PI * 2);
+      ctx.fillStyle = accent;
+      ctx.fill();
+
+      // 9) 유리 하이라이트
+      ctx.beginPath();
+      ctx.ellipse(CX - 44, CY - 54, 32, 18, -0.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.20)';
+      ctx.fill();
+
+      rafRef.current = requestAnimationFrame(step);
+    };
+
+    rafRef.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []);
 
   const draw = async () => {
-    if (drawing) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setDrawing(true);
     setResult(null);
-    setRevealed([]);
     setError(null);
+    ballsRef.current = initBalls();
+    spinRef.current = 0.5; // 패들 강하게 회전
     try {
       const seed = Math.floor(Math.random() * 1_000_000_000);
+      await sleep(3200); // 첫 공 전 혼합(실측 ~10초를 UX상 압축)
       const data = await v1Api.getMachineDraw(machine, seed);
       const order = [...data.draw_order, data.bonus];
-      // 실제 방송처럼 텀을 두고 하나씩 공개
       for (let i = 0; i < order.length; i += 1) {
-        await sleep(i === 0 ? 700 : 1500);
-        setRevealed((prev) => [...prev, order[i]]);
+        await sleep(i === 6 ? 3600 : 3000); // 공마다 텀(실측 ~6초 → 3초로 압축), 보너스는 더 길게
+        const b = ballsRef.current.find((x) => x.n === order[i] && x.state === 'mix');
+        if (b) {
+          const dst = slotPos(i);
+          b.state = 'rising';
+          b.slot = i;
+          // 중앙 배출관 하단 흡입 → 위로 → 상단 캡 배출 → 오른쪽 레일 → 결과 슬롯
+          const dY = CY + DISC_DY;
+          b.path = [
+            { x: CX - DISC_R * 0.55, y: dY }, // 디스크 왼쪽 구멍에 걸림
+            { x: CX, y: dY - 3 }, // 회전으로 이동(중앙 지나)
+            { x: CX + DISC_R + 4, y: dY + 4 }, // 하향 배출구(디스크 우측)
+            { x: RAIL_X, y: CY + R * 0.55 }, // 레일 진입(아래로 낙하)
+            { x: dst.x, y: dst.y }, // 결과 슬롯
+          ];
+          b.wp = 0;
+        }
       }
+      await sleep(1000);
       setResult(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : '추첨 실패');
     } finally {
+      spinRef.current = 0.03;
       setDrawing(false);
+      busyRef.current = false;
     }
   };
+
+  const accent = MACHINE_ACCENT[machine];
 
   return (
     <Box
@@ -68,42 +440,14 @@ export default function MachineDrawSimulator() {
       }}
     >
       <Typography variant="subtitle1" fontWeight={800} sx={{ color: '#fff', mb: 0.5 }}>
-        🎰 실제 추첨기 (동행복권 생방송)
+        🎰 {machine}호기 추첨기 (실제 방송 방식)
       </Typography>
       <Typography variant="caption" sx={{ color: '#cbd5e1', display: 'block', mb: 1.5 }}>
-        아래는 실제 동행복권 로또 추첨 방송(진짜 추첨기)입니다. 그 아래에서 1/2/3호기의 실제 데이터
-        특성을 반영한 추첨을 돌려볼 수 있습니다.
+        실제 동행복권 추첨기와 동일 — 볼이 처닝되다 4구멍 회전 디스크의 구멍에 걸려, 디스크가
+        돌며 하향 배출구로 넘겨 아래 레일로 배출(실측 간격 반영). 각 호기의 실제 데이터 특성 반영.
       </Typography>
 
-      {/* 실제 추첨 방송 영상 (16:9) */}
-      <Box
-        sx={{
-          position: 'relative',
-          pt: '56.25%',
-          borderRadius: 2,
-          overflow: 'hidden',
-          border: `1px solid ${accent}55`,
-          mb: 0.5,
-        }}
-      >
-        <iframe
-          title="실제 동행복권 로또 추첨 방송"
-          src={`https://www.youtube.com/embed/${DRAW_VIDEO_ID}?start=${DRAW_START}&rel=0&modestbranding=1`}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
-          allow="accelerometer; encrypted-media; picture-in-picture"
-          allowFullScreen
-        />
-      </Box>
-      <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mb: 2, fontStyle: 'italic' }}>
-        ※ 영상은 실제 방송(제1221회) 원본으로 진짜 추첨기 작동 모습입니다. 아래 호기별 추첨은 그와 별개로
-        각 호기의 과거 데이터 특성을 반영합니다.
-      </Typography>
-
-      {/* 호기별 추첨 */}
-      <Typography variant="subtitle2" fontWeight={800} sx={{ color: '#fff', mb: 1 }}>
-        호기별 특성 추첨
-      </Typography>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
         <ToggleButtonGroup
           exclusive
           size="small"
@@ -112,7 +456,7 @@ export default function MachineDrawSimulator() {
             if (v && !drawing) {
               setMachine(v);
               setResult(null);
-              setRevealed([]);
+              ballsRef.current = initBalls();
             }
           }}
         >
@@ -134,45 +478,31 @@ export default function MachineDrawSimulator() {
             </ToggleButton>
           ))}
         </ToggleButtonGroup>
+      </Stack>
+
+      <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+        <canvas
+          ref={canvasRef}
+          width={W}
+          height={H}
+          style={{ maxWidth: '100%', touchAction: 'none' }}
+        />
+      </Box>
+
+      <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1 }}>
         <Button
           variant="contained"
           onClick={draw}
           disabled={drawing}
-          sx={{ bgcolor: accent, fontWeight: 800, '&:hover': { bgcolor: accent, filter: 'brightness(1.1)' } }}
+          sx={{
+            bgcolor: accent,
+            fontWeight: 800,
+            px: 4,
+            '&:hover': { bgcolor: accent, filter: 'brightness(1.1)' },
+          }}
         >
-          {drawing ? <CircularProgress size={22} color="inherit" /> : `${machine}호기 추첨`}
+          {drawing ? '추첨 중…' : `${machine}호기 추첨 시작`}
         </Button>
-      </Stack>
-
-      {/* 추첨된 볼 (텀 두고 공개) */}
-      <Box
-        sx={{
-          minHeight: 52,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 0.75,
-          flexWrap: 'wrap',
-          mb: 1,
-        }}
-      >
-        {revealed.length === 0 && !drawing && (
-          <Typography variant="body2" sx={{ color: '#94a3b8' }}>
-            {machine}호기 추첨 버튼을 눌러보세요
-          </Typography>
-        )}
-        {revealed.map((n, i) => (
-          <Stack key={i} direction="row" alignItems="center" spacing={0.75}>
-            {i === 6 && (
-              <Typography sx={{ color: '#fff', fontWeight: 800, fontSize: 20, mx: 0.25 }}>+</Typography>
-            )}
-            <LottoBall number={n} size={40} />
-          </Stack>
-        ))}
-        {drawing && revealed.length < 7 && (
-          <Typography variant="body2" sx={{ color: accent, fontWeight: 700, ml: 0.5 }}>
-            추첨 중…
-          </Typography>
-        )}
       </Box>
 
       {error && (
@@ -182,7 +512,7 @@ export default function MachineDrawSimulator() {
       )}
 
       {result && !drawing && (
-        <Box sx={{ mt: 1 }}>
+        <Box sx={{ mt: 1.5 }}>
           <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
             <Chip
               size="small"
@@ -216,4 +546,21 @@ export default function MachineDrawSimulator() {
       )}
     </Box>
   );
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }

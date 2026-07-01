@@ -68,6 +68,7 @@ type SheetIntent = 'review' | 'current_round';
 const SIGNAL_SOURCE_LABELS: Record<string, string> = {
   'machine-hot': '추첨기 고빈도',
   'machine-synergy': '추첨기 궁합',
+  'machine-reversion': '추첨기 회귀',
   'post-S': '후속출현 S',
   'post-A': '후속출현 A',
   'post-top20': '후속출현 Top20',

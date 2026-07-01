@@ -224,6 +224,22 @@ export interface MachineOverview {
   note: string;
 }
 
+export interface MachineDrawResult {
+  machine_id: number;
+  draw_count: number;
+  draw_order: number[];
+  bonus: number;
+  numbers: number[];
+  sum_total: number;
+  odd_count: number;
+  even_count: number;
+  signature_numbers: number[];
+  avg_sum: number;
+  avg_odd: number;
+  seed: number | null;
+  disclaimer: string;
+}
+
 export interface RoundRecommendResponse {
   next_round: number;
   next_draw_date: string;
@@ -407,6 +423,12 @@ export const v1Api = {
 
   getMachineOverview: () =>
     fetchJson<MachineOverview>('/api/v1/recommend/machine-overview'),
+
+  getMachineDraw: (machine: 1 | 2 | 3, seed?: number) => {
+    const q = new URLSearchParams({ machine: String(machine) });
+    if (seed != null) q.set('seed', String(seed));
+    return fetchJson<MachineDrawResult>(`/api/v1/recommend/machine-draw?${q.toString()}`);
+  },
 
   getClassicRecommend: (method: ClassicMethod = 'blend') =>
     fetchJson<ClassicRecommendResponse>(

@@ -51,6 +51,97 @@ def predict_next_round(df: pd.DataFrame) -> Tuple[int, str, int]:
     return next_round, next_date.isoformat(), next_machine
 
 
+def _machine_ball_weights(sub: pd.DataFrame) -> Dict[int, float]:
+    """해당 호기 실제 추첨 이력의 번호별 출현 빈도 → 볼 가중치(라플라스 스무딩).
+    이 호기가 과거에 자주 뽑은 번호일수록 볼이 더 잘 나오도록 '성향'을 부여한다."""
+    counts: Dict[int, int] = {n: 0 for n in ALL_NUMBERS}
+    for _, row in sub.iterrows():
+        for c in NUMBER_COLUMNS:
+            v = int(row[c])
+            if 1 <= v <= 45:
+                counts[v] += 1
+        b = int(row["bonus"]) if "bonus" in row and not pd.isna(row["bonus"]) else 0
+        if 1 <= b <= 45:
+            counts[b] += 1
+    # 스무딩: 모든 번호에 기회. 표본 없으면 균등.
+    return {n: counts[n] + 1.0 for n in ALL_NUMBERS}
+
+
+def _weighted_draw_without_replacement(
+    weights: Dict[int, float], k: int, rng: random.Random
+) -> List[int]:
+    pool = dict(weights)
+    out: List[int] = []
+    for _ in range(min(k, len(pool))):
+        total = sum(pool.values())
+        r = rng.uniform(0, total)
+        acc = 0.0
+        pick = next(iter(pool))
+        for n, w in pool.items():
+            acc += w
+            if r <= acc:
+                pick = n
+                break
+        out.append(pick)
+        del pool[pick]
+    return out
+
+
+def simulate_machine_draw(
+    df: pd.DataFrame, machine_id: int, seed: Optional[int] = None
+) -> Dict:
+    """호기별 '볼 추첨기' 시뮬레이터 — 해당 호기의 실제 데이터 특징(번호 출현
+    성향)을 반영해 볼 7개(당첨 6 + 보너스 1)를 추첨 순서대로 뽑는다.
+
+    정직: 실제 로또는 균등확률(각 6-튜플 1/8,145,060)이며, 본 시뮬은 그 호기의
+    '과거 성향'을 재현한 연출일 뿐 실제 확률을 바꾸지 않는다.
+    """
+    if machine_id not in (1, 2, 3):
+        machine_id = 1
+    dfm = attach_machine_column(df)
+    sub = dfm[dfm["machine_id"] == machine_id]
+    draw_count = int(len(sub))
+
+    weights = _machine_ball_weights(sub)
+    rng = random.Random(seed)
+    order = _weighted_draw_without_replacement(weights, 7, rng)
+    main_order = order[:6]
+    bonus = order[6] if len(order) > 6 else 0
+    main_sorted = sorted(main_order)
+
+    # 특징 프로필 — 이 호기가 상대적으로 자주 뽑는 '시그니처' 번호
+    total_w = sum(weights.values()) or 1.0
+    expected = total_w / 45.0
+    signature = sorted(
+        ALL_NUMBERS, key=lambda n: (-(weights[n] - expected), n)
+    )[:6]
+    sums = []
+    odds = []
+    for _, row in sub.iterrows():
+        nums = [int(row[c]) for c in NUMBER_COLUMNS]
+        sums.append(sum(nums))
+        odds.append(sum(1 for n in nums if n % 2 == 1))
+
+    return {
+        "machine_id": machine_id,
+        "draw_count": draw_count,
+        "draw_order": main_order,      # 추첨 순서(연출용)
+        "bonus": bonus,
+        "numbers": main_sorted,        # 정렬된 당첨 6
+        "sum_total": sum(main_sorted),
+        "odd_count": sum(1 for n in main_sorted if n % 2 == 1),
+        "even_count": sum(1 for n in main_sorted if n % 2 == 0),
+        "signature_numbers": signature,
+        "avg_sum": round(sum(sums) / len(sums), 1) if sums else 0.0,
+        "avg_odd": round(sum(odds) / len(odds), 2) if odds else 0.0,
+        "seed": seed,
+        "disclaimer": (
+            f"{machine_id}호기의 실제 추첨 {draw_count}회 데이터 성향을 반영한 "
+            "시뮬레이션입니다. 실제 당첨 확률(1/8,145,060)은 변하지 않습니다."
+        ),
+    }
+
+
 def machine_overview(df: pd.DataFrame, recent: int = 16) -> Dict:
     """추첨기(호기) 현황 — 실제 기록 커버리지, 최근 순환 이력, 다음 회차 예측,
     호기별 사용 통계. '완벽 재연' UI 의 데이터 소스."""

@@ -10,7 +10,11 @@ from ..classic_methods import METHOD_IDS, build_classic_recommendation
 from ..data_meta import effective_current_round
 from ..database import load_history
 from ..json_utils import to_jsonable
-from ..machine_analytics import build_round_recommendation, machine_overview
+from ..machine_analytics import (
+    build_round_recommendation,
+    machine_overview,
+    simulate_machine_draw,
+)
 from ..video_analysis.store import record_current_rule_engine_output
 
 router = APIRouter(prefix="/api/v1/recommend", tags=["recommend"])
@@ -103,6 +107,18 @@ def recommend_next_round(
             detail=f"{payload['machine_id']}호기 데이터가 없습니다. 다른 호기를 선택하세요.",
         )
     return payload
+
+
+@router.get("/machine-draw")
+def machine_draw_endpoint(
+    machine: int = Query(..., ge=1, le=3, description="추첨할 호기 1~3"),
+    seed: Optional[int] = Query(default=None, description="난수 시드(재현용)"),
+):
+    """호기별 볼 추첨기 시뮬레이터 — 해당 호기 실제 데이터 성향으로 볼 7개 추첨."""
+    df = load_history()
+    if df.empty:
+        raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
+    return to_jsonable(simulate_machine_draw(df, machine, seed=seed))
 
 
 @router.get("/machine-overview")

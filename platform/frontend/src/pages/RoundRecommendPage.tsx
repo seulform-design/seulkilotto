@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import ComboActions from '../components/ComboActions';
 import LottoBall from '../components/LottoBall';
 import MetricChips from '../components/MetricChips';
+import MachineDrawSimulator from '../components/MachineDrawSimulator';
 import { v1Api } from '../api/v1Api';
 
 const HONESTY_DISCLAIMER =
@@ -56,6 +57,8 @@ export default function RoundRecommendPage() {
         ({ov?.coverage.min_round ?? 262}~{ov?.coverage.max_round ?? 1230}) 당첨번호 100% 대조 검증.
         1~261회는 기록 미확보로 월별순환 추정, 다음 회차는 1→2→3 순환 예측입니다.
       </Alert>
+
+      <MachineDrawSimulator />
 
       {ov && (
         <Paper sx={{ p: 2, mb: 2 }}>

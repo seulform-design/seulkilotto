@@ -42,6 +42,9 @@ SOURCE_WEIGHTS: Dict[str, float] = {
     "parallel-strong": 9.0,
     "parallel-expected": 5.0,
     "parallel-fixed": 11.0,
+    # 구간별 미출현(보너스포함) — 수기 '주초관심수' 방식 역산 이식.
+    # 8회차 검증: 당첨 커버 3.50/6 (무작위 3.07) — 실효 신호원.
+    "decade-gap": 8.5,
 }
 
 
@@ -91,6 +94,8 @@ def _category_set(source_ids: List[str]) -> int:
             cats.add("photo")
         elif sid.startswith("parallel"):
             cats.add("parallel")
+        elif sid.startswith("decade"):
+            cats.add("decade")
     return len(cats)
 
 
@@ -294,13 +299,57 @@ def _apply_parallel_signals(
     }
 
 
+# ── 구간별 미출현(보너스포함) 신호 — 수기 '주초관심수' 역산 이식 ──────
+# 수기 분석가의 '주초관심수' 표를 9회차 역산한 결과: 각 10단위 구간(1~10,
+# 11~20, 21~30, 31~40, 41~45)에서 '보너스 포함 미출현 간격'이 큰 번호를
+# 상위로 뽑고 구간을 고루 대표시키는 방식. 8회차 검증에서 당첨 6개 중 평균
+# 3.50개 커버(무작위 3.07). 여기서는 구간별 상위 K를 순위감쇠 가점한다.
+_DECADE_BANDS: Tuple[Tuple[int, int, int], ...] = (
+    (1, 10, 5),    # (구간 시작, 끝, 뽑을 개수)
+    (11, 20, 5),
+    (21, 30, 5),
+    (31, 40, 5),
+    (41, 45, 3),
+)
+
+
+def _apply_decade_gap_signals(
+    scores: Dict[int, float],
+    sources: Dict[int, List[str]],
+    df,
+) -> Dict[str, Any]:
+    from .gap_utils import last_seen_gaps
+
+    gaps = last_seen_gaps(df, include_bonus=True)
+    base = SOURCE_WEIGHTS["decade-gap"]
+    table: Dict[str, List[Dict[str, int]]] = {}
+    for lo, hi, k in _DECADE_BANDS:
+        band = sorted(range(lo, hi + 1), key=lambda n: (-gaps[n], n))[:k]
+        table[f"{lo}-{hi}"] = [{"number": n, "gap": gaps[n]} for n in band]
+        for rank, n in enumerate(band):
+            _bump(scores, sources, n, _rank_decay(rank, base), "decade-gap")
+
+    pool = [item["number"] for band in table.values() for item in band]
+    return {
+        "available": True,
+        "include_bonus": True,
+        "pool": pool,
+        "pool_size": len(pool),
+        "table": table,
+        "summary": (
+            "구간별 미출현(보너스포함) 상위 — 각 10단위 구간에서 오래 안 나온 "
+            "번호를 고루 뽑는 수기 '주초관심수' 방식(역산 이식)."
+        ),
+    }
+
+
 # ── 신호원별 적중률 백테스트 (복기 탭) ────────────────────────────
 # 각 통계 신호원이 과거 회차들을 얼마나 잘 맞췄는지 walk-forward 로 측정.
 # 회차 R 평가에는 R 직전까지의 데이터만 사용(미래 누수 방지). 후속출현(post)은
 # 회차마다 자체 λ 최적화(≈20s)가 들어가 N회차 반복이 비현실적이라 제외한다.
 _ACCURACY_CACHE: Dict[Tuple[Any, ...], Tuple[float, Dict[str, Any]]] = {}
 _ACCURACY_CACHE_TTL_SEC = 24 * 3600  # 회차는 주 1회 변경 → 길게 캐시
-_BACKTEST_SOURCES = ("machine", "classic", "parallel")
+_BACKTEST_SOURCES = ("machine", "classic", "parallel", "decade")
 _BACKTEST_TOP_K = 10
 _NUM_COLS = ("num1", "num2", "num3", "num4", "num5", "num6")
 
@@ -324,6 +373,8 @@ def _source_top_numbers(df_prior, source: str, target_round: int, top_k: int) ->
             _apply_classic_signals(scores, srcs, build_classic_recommendation(df_prior, method="blend"))
         elif source == "parallel":
             _apply_parallel_signals(scores, srcs, df_prior, target_round)
+        elif source == "decade":
+            _apply_decade_gap_signals(scores, srcs, df_prior)
     except Exception:  # noqa: BLE001
         return []
     ranked = sorted((n for n in scores if scores[n] > 0), key=lambda n: -scores[n])
@@ -448,6 +499,7 @@ def build_prediction_signals(
     post_src = _apply_post_signals(scores, sources, post_payload)
     classic_src = _apply_classic_signals(scores, sources, classic_payload)
     parallel_src = _apply_parallel_signals(scores, sources, df, next_round)
+    decade_src = _apply_decade_gap_signals(scores, sources, df)
 
     ranked: List[Dict[str, Any]] = []
     for n in range(1, 46):
@@ -501,6 +553,7 @@ def build_prediction_signals(
             "classic": classic_src,
             "photo_sheet": photo_src,
             "parallel_round": parallel_src,
+            "decade_gap": decade_src,
         },
         "disclaimer": (
             "강한 후보는 5개 독립 통계 신호의 가중 합산입니다. "

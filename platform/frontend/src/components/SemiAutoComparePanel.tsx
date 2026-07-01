@@ -83,6 +83,7 @@ const SIGNAL_SOURCE_LABELS: Record<string, string> = {
   'parallel-strong': '평행 강수',
   'parallel-expected': '평행 기대수',
   'parallel-fixed': '평행 고정후보',
+  'decade-gap': '구간미출현',
   'local-derived': '로컬 추정',
   'accumulated-fallback': '누적 보조',
 };
@@ -4023,6 +4024,16 @@ export default function SemiAutoComparePanel({
                   predictionSignals.sources.parallel_round?.available
                     ? `평행 ${predictionSignals.sources.parallel_round.suffix_label ?? '✓'}`
                     : '평행 —'
+                }
+                variant="outlined"
+              />
+              <Chip
+                size="small"
+                color={predictionSignals.sources.decade_gap?.available ? 'success' : 'default'}
+                label={
+                  predictionSignals.sources.decade_gap?.available
+                    ? `구간미출현 ✓ ${predictionSignals.sources.decade_gap.pool_size ?? 0}수`
+                    : '구간미출현 —'
                 }
                 variant="outlined"
               />

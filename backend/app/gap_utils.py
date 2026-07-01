@@ -19,13 +19,21 @@ from .database import NUMBER_COLUMNS
 ALL_NUMBERS = list(range(1, 46))
 
 
-def last_seen_gaps(df: pd.DataFrame) -> Dict[int, int]:
-    """{번호: 미출현 추첨 수}. 미출현 번호는 전체 추첨 수."""
+def last_seen_gaps(df: pd.DataFrame, *, include_bonus: bool = False) -> Dict[int, int]:
+    """{번호: 미출현 추첨 수}. 미출현 번호는 전체 추첨 수.
+
+    include_bonus=True 이면 보너스 번호 출현도 '출현'으로 간주한다(수기 분석가
+    '주초관심수' 표는 보너스 포함 미출현으로 검증됨 — 82% 정합). 기본 False 는
+    기존 호출부(classic/machine/temperature) 동작을 그대로 보존한다.
+    """
+    cols = list(NUMBER_COLUMNS)
+    if include_bonus and "bonus" in df.columns:
+        cols = cols + ["bonus"]
     ordered = df.sort_values("round")
     last_idx: Dict[int, int] = {}
     idx = -1
     for idx, (_, row) in enumerate(ordered.iterrows()):
-        for c in NUMBER_COLUMNS:
+        for c in cols:
             v = int(row[c])
             if 1 <= v <= 45:
                 last_idx[v] = idx

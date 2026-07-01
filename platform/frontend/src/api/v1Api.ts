@@ -1031,6 +1031,14 @@ export interface PredictionSignalsResponse {
       ending_digits?: { digit: number; count: number }[];
       summary?: string;
     };
+    decade_gap?: {
+      available: boolean;
+      include_bonus?: boolean;
+      pool?: number[];
+      pool_size?: number;
+      table?: Record<string, { number: number; gap: number }[]>;
+      summary?: string;
+    };
   };
   disclaimer: string;
   /** 복기 탭 전용 — 신호원별 과거 적중률 백테스트. */

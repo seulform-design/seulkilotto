@@ -70,6 +70,8 @@ def _machine_ball_weights(sub: pd.DataFrame) -> Dict[int, float]:
 def _weighted_draw_without_replacement(
     weights: Dict[int, float], k: int, rng: random.Random
 ) -> List[int]:
+    """가중치 기반 비복원 추출 — 실제 로또 볼처럼 하나씩 뽑되, 그 호기가 과거
+    자주 낸 번호일수록 뽑힐 확률이 높은 '호기 특성'을 반영한다."""
     pool = dict(weights)
     out: List[int] = []
     for _ in range(min(k, len(pool))):
@@ -102,6 +104,9 @@ def simulate_machine_draw(
     sub = dfm[dfm["machine_id"] == machine_id]
     draw_count = int(len(sub))
 
+    # 각 호기의 실제 추첨 데이터 특성(번호 출현 성향)을 반영해 볼 7개를 하나씩
+    # 뽑는다. 실제 방송처럼 볼을 순서대로 추첨하되, 그 호기가 과거 자주 낸
+    # 번호일수록 확률이 높다(라플라스 스무딩으로 모든 번호에 기회).
     weights = _machine_ball_weights(sub)
     rng = random.Random(seed)
     order = _weighted_draw_without_replacement(weights, 7, rng)
@@ -109,7 +114,7 @@ def simulate_machine_draw(
     bonus = order[6] if len(order) > 6 else 0
     main_sorted = sorted(main_order)
 
-    # 특징 프로필 — 이 호기가 상대적으로 자주 뽑는 '시그니처' 번호
+    # 이 호기가 상대적으로 자주 나오는 '시그니처' 번호 (특성)
     total_w = sum(weights.values()) or 1.0
     expected = total_w / 45.0
     signature = sorted(
@@ -136,8 +141,8 @@ def simulate_machine_draw(
         "avg_odd": round(sum(odds) / len(odds), 2) if odds else 0.0,
         "seed": seed,
         "disclaimer": (
-            f"{machine_id}호기의 실제 추첨 {draw_count}회 데이터 성향을 반영한 "
-            "시뮬레이션입니다. 실제 당첨 확률(1/8,145,060)은 변하지 않습니다."
+            f"{machine_id}호기의 실제 추첨 {draw_count}회 데이터 특성(번호 출현 성향)을 "
+            "반영한 시뮬레이터입니다. 실제 로또 1등 확률(1/8,145,060)은 변하지 않습니다."
         ),
     }
 

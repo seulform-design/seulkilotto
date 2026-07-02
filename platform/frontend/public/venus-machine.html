@@ -58,13 +58,15 @@
   const M = window.Matter || null;
 
   // ═══ 머신 설정 (machine1/2/3.json 상당) — 공통 MachineEngine 소비 ═══
+  // 기계 크기·구조는 3대 모두 '동일'(같은 모델). 호기 차이는 물리·타이밍에만.
+  const DRUM_R = 166, BALL_R = 12;   // 전 호기 공통 크기
   const MACHINE_CONFIGS = {
-    1: { name:'1호기', accent:'#E8570D', drumR:150, ballR:12, gravity:1.05, restitution:0.93, friction:0.0004, frictionAir:0.0034, density:0.0012,
-      jet:0.092, jetW:0.20, turb:0.006, spin:1.25, discSpeed:0.055, totalSec:[18,22], mixRatio:0.40 },
-    2: { name:'2호기', accent:'#0D8A3E', drumR:162, ballR:12, gravity:1.10, restitution:0.88, friction:0.0008, frictionAir:0.0042, density:0.0012,
-      jet:0.066, jetW:0.24, turb:0.005, spin:0.85, discSpeed:0.042, totalSec:[20,24], mixRatio:0.44 },
-    3: { name:'3호기', accent:'#2952CC', drumR:172, ballR:12, gravity:1.00, restitution:0.94, friction:0.0004, frictionAir:0.0030, density:0.0012,
-      jet:0.100, jetW:0.22, turb:0.007, spin:1.05, discSpeed:0.050, totalSec:[22,26], mixRatio:0.46 },
+    1: { name:'1호기', accent:'#E8570D', drumR:DRUM_R, ballR:BALL_R, gravity:1.05, restitution:0.93, friction:0.0004, frictionAir:0.0034, density:0.0012,
+      jet:0.085, jetW:0.22, turb:0.006, spin:1.25, discSpeed:0.055, totalSec:[18,22], mixRatio:0.40 },
+    2: { name:'2호기', accent:'#0D8A3E', drumR:DRUM_R, ballR:BALL_R, gravity:1.10, restitution:0.88, friction:0.0008, frictionAir:0.0042, density:0.0012,
+      jet:0.078, jetW:0.24, turb:0.005, spin:0.85, discSpeed:0.042, totalSec:[20,24], mixRatio:0.44 },
+    3: { name:'3호기', accent:'#2952CC', drumR:DRUM_R, ballR:BALL_R, gravity:1.00, restitution:0.94, friction:0.0004, frictionAir:0.0030, density:0.0012,
+      jet:0.088, jetW:0.22, turb:0.007, spin:1.05, discSpeed:0.050, totalSec:[22,26], mixRatio:0.46 },
   };
   const TOTAL_DRAW = 7;
 
@@ -196,63 +198,79 @@
   function render(eng){ const c=eng.cfg,cx=eng.cx,cy=eng.cy,r=eng.r,gy=cy+r; ctx.clearRect(0,0,LW,LH);
     const ex=eng.exitPt(), wc=eng.wheelC(), wr=eng.wR();
 
-    // 그림자
-    ctx.save(); ctx.filter='blur(6px)'; ctx.beginPath(); ctx.ellipse(cx, gy+128, r*0.8, 14, 0, 0, Math.PI*2); ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fill(); ctx.restore();
-    const baseTop=gy+118;
-    // 베이스(아크릴)
-    ctx.fillStyle='rgba(200,214,232,0.18)'; ctx.beginPath(); ctx.moveTo(cx-70,baseTop); ctx.lineTo(cx+70,baseTop); ctx.lineTo(cx+84,baseTop+40); ctx.lineTo(cx-84,baseTop+40); ctx.closePath(); ctx.fill(); ctx.strokeStyle='rgba(210,225,242,0.3)'; ctx.stroke();
-    // 하단 반원 톱니 기어 + 피벗암 (구동)
-    ctx.strokeStyle='rgba(190,205,224,0.55)'; ctx.lineWidth=8; ctx.beginPath(); ctx.arc(cx,gy+40,66,Math.PI*0.15,Math.PI*0.85); ctx.stroke();
-    ctx.lineWidth=2; ctx.strokeStyle='rgba(210,225,242,0.5)'; for(let t=0;t<14;t++){ const a=Math.PI*0.15+(Math.PI*0.7)*(t/13); ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*62,gy+40+Math.sin(a)*62); ctx.lineTo(cx+Math.cos(a)*72,gy+40+Math.sin(a)*72); ctx.stroke(); }
-    ctx.strokeStyle='rgba(190,205,224,0.5)'; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(cx-42,gy+98); ctx.lineTo(cx,gy+40); ctx.lineTo(cx+42,gy+98); ctx.stroke(); ctx.lineWidth=1;
-    // 배출 슈트/레일 (로터 배출위치 → 우측 하강 → 홀더)
+    // ══ 사진 기준 구조 (뒤 → 앞) ══
+    const postX=cx+r+8, postTop=cy-r*0.5;
+    const postG=ctx.createLinearGradient(postX-20,0,postX+20,0);
+    postG.addColorStop(0,'#7f8b9a'); postG.addColorStop(0.42,'#c8d1dc'); postG.addColorStop(0.6,'#b0bac8'); postG.addColorStop(1,'#5f6976');
+    // ① 바닥 그림자
+    ctx.save(); ctx.filter='blur(6px)'; ctx.beginPath(); ctx.ellipse(cx, LH-38, r*0.66, 12, 0, 0, Math.PI*2); ctx.fillStyle='rgba(0,0,0,0.36)'; ctx.fill(); ctx.restore();
+    // ② 우측 지지 기둥 (구 뒤 — 사진의 두꺼운 회색 포스트)
+    ctx.fillStyle=postG; roundRectPath(postX-19, postTop, 38, (LH-42)-postTop, 18); ctx.fill();
+    // ③ 하단: 목 → 아크릴 베이스 → 삼각 트러스 → 반원 톱니 레일
+    const baseTop=gy+92;
+    ctx.fillStyle='rgba(196,210,228,0.16)'; ctx.strokeStyle='rgba(210,225,242,0.28)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(cx-28,gy-4); ctx.lineTo(cx+28,gy-4); ctx.lineTo(cx+62,baseTop); ctx.lineTo(cx-62,baseTop); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle='rgba(188,203,224,0.5)'; ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(cx-38,baseTop); ctx.lineTo(cx,gy+26); ctx.lineTo(cx+38,baseTop); ctx.stroke();
+    ctx.strokeStyle='rgba(190,205,224,0.5)'; ctx.lineWidth=7; ctx.beginPath(); ctx.arc(cx,gy+30,52,Math.PI*0.18,Math.PI*0.82); ctx.stroke();
+    ctx.lineWidth=2; ctx.strokeStyle='rgba(210,225,242,0.45)'; for(let t=0;t<=12;t++){ const a=Math.PI*0.18+(Math.PI*0.64)*(t/12); ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*48,gy+30+Math.sin(a)*48); ctx.lineTo(cx+Math.cos(a)*58,gy+30+Math.sin(a)*58); ctx.stroke(); }
+    ctx.lineWidth=1;
+    // ④ 배출 슈트/레일 (로터 배출 → 우측 하강 → 홀더)
     const disch={ x:wc.x+Math.cos(70*Math.PI/180)*wr, y:wc.y+Math.sin(70*Math.PI/180)*wr };
-    ctx.strokeStyle='rgba(190,212,240,0.24)'; ctx.lineWidth=c.ballR*2+8; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(disch.x+4, disch.y+28);
-    ctx.quadraticCurveTo(cx+r+32, cy-r*0.1, cx+r+16, cy+r*0.35);
-    ctx.quadraticCurveTo(cx+r+8, cy+r*0.9, (cx+r+16+HOLDER_X0+6*HOLDER_GAP)/2, HOLDER_Y-30);
+    ctx.strokeStyle='rgba(190,212,240,0.22)'; ctx.lineWidth=c.ballR*2+8; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(disch.x+4, disch.y+24);
+    ctx.quadraticCurveTo(cx+r+30, cy-r*0.1, cx+r+14, cy+r*0.35);
+    ctx.quadraticCurveTo(cx+r+6, cy+r*0.9, (cx+r+14+HOLDER_X0+6*HOLDER_GAP)/2, HOLDER_Y-30);
     ctx.quadraticCurveTo(HOLDER_X0+6*HOLDER_GAP, HOLDER_Y-14, HOLDER_X0+4, HOLDER_Y-4);
     ctx.stroke(); ctx.lineCap='butt';
-    // 홀더
+    // ⑤ 홀더 (7슬롯 + 보너스)
     for(let i=0;i<TOTAL_DRAW;i++){ const p=holderPos(i),bonus=(i===TOTAL_DRAW-1);
       ctx.beginPath(); ctx.arc(p.x,p.y,c.ballR+4,0,Math.PI*2); ctx.fillStyle=bonus?'rgba(80,140,255,0.14)':'rgba(255,255,255,0.07)'; ctx.fill();
       ctx.lineWidth=bonus?2:1; ctx.strokeStyle=bonus?'rgba(90,150,255,0.8)':'rgba(255,255,255,0.28)'; ctx.stroke(); }
     const pb=holderPos(TOTAL_DRAW-1); ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='bold 17px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('+', pb.x-HOLDER_GAP/2, pb.y);
-    // 외부 보호 프레임(큰 링) + 스트럿
-    ctx.beginPath(); ctx.arc(cx,cy,r+22,0,Math.PI*2); ctx.lineWidth=7;
+    // ⑥ 외곽 프레임 링 (구에 밀착)
+    ctx.beginPath(); ctx.arc(cx,cy,r+13,0,Math.PI*2); ctx.lineWidth=8;
     const of=ctx.createLinearGradient(cx-r,cy-r,cx+r,cy+r); of.addColorStop(0,'#eef2f7'); of.addColorStop(0.5,'#9aa6b4'); of.addColorStop(1,'#6b7580'); ctx.strokeStyle=of; ctx.stroke(); ctx.lineWidth=1;
-    ctx.strokeStyle='rgba(200,210,222,0.5)'; ctx.lineWidth=5;
-    for(const ang of [Math.PI*0.75, Math.PI*0.25]){ const sx=cx+Math.cos(ang)*(r+22), sy=cy+Math.sin(ang)*(r+22); ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(cx+(sx-cx)*0.4, baseTop); ctx.stroke(); }
+    // ⑦ 좌우 포트(3·9시) — 링에 밀착
+    for(const sgn of [-1,1]){ const gx=cx+sgn*(r+9);
+      ctx.fillStyle='rgba(198,211,230,0.9)'; ctx.strokeStyle='#7f8a98'; ctx.lineWidth=1.5;
+      roundRectPath(sgn>0?gx:gx-16, cy-11, 16, 22, 3); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='rgba(20,30,45,0.42)'; ctx.beginPath(); ctx.ellipse(gx+sgn*8, cy, 3, 7, 0, 0, Math.PI*2); ctx.fill(); }
     ctx.lineWidth=1;
-    // 좌우 포트(3·9시)
-    for(const sgn of [-1,1]){ ctx.save(); ctx.translate(cx+sgn*(r+22), cy); ctx.fillStyle='rgba(205,218,236,0.7)'; ctx.strokeStyle='#8a95a2'; ctx.beginPath(); ctx.rect(sgn>0?0:-22,-11,22,22); ctx.fill(); ctx.stroke(); ctx.restore(); }
-    // 드럼 유리
+    // ⑧ 유리 구
     const gg=ctx.createRadialGradient(cx-r*0.34,cy-r*0.42,r*0.1,cx,cy,r);
-    gg.addColorStop(0,'rgba(255,255,255,0.16)'); gg.addColorStop(0.86,'rgba(30,42,66,0.05)'); gg.addColorStop(1,'rgba(90,110,140,0.14)');
+    gg.addColorStop(0,'rgba(255,255,255,0.16)'); gg.addColorStop(0.86,'rgba(30,42,66,0.05)'); gg.addColorStop(1,'rgba(90,110,140,0.16)');
     ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=gg; ctx.fill();
-    // 내부 칸막이(중앙 축 + 수평 선반, 반투명)
-    ctx.strokeStyle='rgba(200,215,235,0.16)'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(cx,cy-r*0.7); ctx.lineTo(cx,cy+r*0.5); ctx.stroke();
-    for(const yy of [-0.25,0.15]){ const yv=cy+r*yy, hw=Math.sqrt(Math.max(0,r*r-(yv-cy)*(yv-cy)))*0.82; ctx.beginPath(); ctx.moveTo(cx-hw,yv); ctx.lineTo(cx+hw,yv); ctx.stroke(); }
-    // 드럼 안 공 (다면체)
+    // ⑨ 내부 칸막이 (구 안쪽으로 클립)
+    ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.clip();
+    ctx.strokeStyle='rgba(200,215,235,0.14)'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(cx,cy-r*0.72); ctx.lineTo(cx,cy+r*0.5); ctx.stroke();
+    for(const yy of [-0.25,0.15]){ const yv=cy+r*yy, hw=Math.sqrt(Math.max(0,r*r-(yv-cy)*(yv-cy)))*0.84; ctx.beginPath(); ctx.moveTo(cx-hw,yv); ctx.lineTo(cx+hw,yv); ctx.stroke(); }
+    ctx.restore();
+    // ⑩ 상단 구동 암 (로터 → 우측 기둥, 유리 위 가림)
+    ctx.strokeStyle=postG; ctx.lineWidth=28; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(cx+wr*0.4, wc.y+2); ctx.quadraticCurveTo(cx+r*0.55, cy-r-2, postX, cy-r*0.28); ctx.stroke();
+    ctx.lineCap='butt'; ctx.lineWidth=1;
+    // ⑪ 드럼 안 공(다면체) — 구 경계로 클립(이탈 방지)
+    ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r-1,0,Math.PI*2); ctx.clip();
     for(const b of eng.balls){ const p=eng.ballPose(b); drawBall(p.x,p.y,b.n,c.ballR,p.angle); }
-    // 드럼 림
+    ctx.restore();
+    // ⑫ 림
     ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.lineWidth=4; ctx.strokeStyle='#aeb8c6'; ctx.stroke(); ctx.lineWidth=1;
-    // 구 상단 진입구 + 작은 회전 로터(밀착)
-    ctx.beginPath(); ctx.ellipse(cx, cy-r+2, 9, 5, 0, 0, Math.PI*2); ctx.fillStyle='rgba(20,30,45,0.5)'; ctx.fill();
+    // ⑬ 상단 진입구 + 회전 로터(밀착, 3구 배출홀)
+    ctx.beginPath(); ctx.ellipse(cx, cy-r+3, 9, 5, 0, 0, Math.PI*2); ctx.fillStyle='rgba(20,30,45,0.5)'; ctx.fill();
     ctx.save(); ctx.translate(wc.x, wc.y);
-    ctx.beginPath(); ctx.arc(0,0,wr+7,0,Math.PI*2); ctx.fillStyle='rgba(228,234,242,0.62)'; ctx.fill(); ctx.strokeStyle='#8a95a2'; ctx.lineWidth=2; ctx.stroke();
-    for(let k=0;k<4;k++){ const a=eng.wheel+k*Math.PI/2, bx=Math.cos(a)*wr, by=Math.sin(a)*wr;
-      ctx.strokeStyle='rgba(150,165,185,0.9)'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(bx,by); ctx.stroke();
-      ctx.beginPath(); ctx.arc(bx,by,7,0,Math.PI*2); ctx.fillStyle='rgba(20,30,45,0.5)'; ctx.fill(); ctx.strokeStyle='#c9d3dd'; ctx.lineWidth=2; ctx.stroke(); }
-    ctx.beginPath(); ctx.arc(0,0,5,0,Math.PI*2); ctx.fillStyle='#c9d3dd'; ctx.fill(); ctx.restore(); ctx.lineWidth=1;
-    // 유리 하이라이트
+    const rg=ctx.createRadialGradient(-wr*0.3,-wr*0.3,wr*0.2,0,0,wr+7); rg.addColorStop(0,'#eef2f7'); rg.addColorStop(1,'#98a4b2');
+    ctx.beginPath(); ctx.arc(0,0,wr+7,0,Math.PI*2); ctx.fillStyle=rg; ctx.fill(); ctx.strokeStyle='#7f8a98'; ctx.lineWidth=2; ctx.stroke();
+    for(let k=0;k<3;k++){ const a=eng.wheel+k*2*Math.PI/3, bx=Math.cos(a)*wr*0.6, by=Math.sin(a)*wr*0.6;
+      ctx.beginPath(); ctx.arc(bx,by,wr*0.28,0,Math.PI*2); ctx.fillStyle='rgba(30,42,62,0.55)'; ctx.fill(); ctx.strokeStyle='#c9d3dd'; ctx.lineWidth=1.5; ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(0,0,wr*0.22,0,Math.PI*2); ctx.fillStyle='#aeb8c6'; ctx.fill(); ctx.restore(); ctx.lineWidth=1;
+    // ⑭ 유리 하이라이트
     ctx.beginPath(); ctx.ellipse(cx-r*0.4, cy-r*0.5, r*0.26, r*0.12, -0.5, 0, Math.PI*2); ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fill();
 
     // 레일/홀더 위 공
     for(const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
 
     // 버전 표시
-    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('사진구조 v7 · '+c.name, LW-8, LH-6);
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('사진구조 v8 · '+c.name, LW-8, LH-6);
 
     // 디버그
     if(DEBUG){ ctx.fillStyle='rgba(0,0,0,0.55)'; roundRectPath(8,8,152,92,8); ctx.fill();

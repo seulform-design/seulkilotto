@@ -59,33 +59,35 @@
 
   // ═══ 머신 설정 (machine1/2/3.json 상당) — 공통 MachineEngine 소비 ═══
   const MACHINE_CONFIGS = {
-    1: { name:'1호기', accent:'#E8570D', drumR:148, ballR:12, gravity:1.05, restitution:0.93, friction:0.0004, frictionAir:0.0034, density:0.0012,
+    1: { name:'1호기', accent:'#E8570D', drumR:150, ballR:12, gravity:1.05, restitution:0.93, friction:0.0004, frictionAir:0.0034, density:0.0012,
       jet:0.092, jetW:0.20, turb:0.006, spin:1.25, discSpeed:0.055, totalSec:[18,22], mixRatio:0.40 },
-    2: { name:'2호기', accent:'#0D8A3E', drumR:160, ballR:12, gravity:1.10, restitution:0.88, friction:0.0008, frictionAir:0.0042, density:0.0012,
+    2: { name:'2호기', accent:'#0D8A3E', drumR:162, ballR:12, gravity:1.10, restitution:0.88, friction:0.0008, frictionAir:0.0042, density:0.0012,
       jet:0.066, jetW:0.24, turb:0.005, spin:0.85, discSpeed:0.042, totalSec:[20,24], mixRatio:0.44 },
-    3: { name:'3호기', accent:'#2952CC', drumR:170, ballR:12, gravity:1.00, restitution:0.94, friction:0.0004, frictionAir:0.0030, density:0.0012,
+    3: { name:'3호기', accent:'#2952CC', drumR:172, ballR:12, gravity:1.00, restitution:0.94, friction:0.0004, frictionAir:0.0030, density:0.0012,
       jet:0.100, jetW:0.22, turb:0.007, spin:1.05, discSpeed:0.050, totalSec:[22,26], mixRatio:0.46 },
   };
   const TOTAL_DRAW = 7;
 
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
-  const LW = 480, LH = 664;
+  const LW = 480, LH = 684;
   let DPR = Math.max(1, window.devicePixelRatio || 1);
   function setupCanvas() { DPR = Math.max(1, window.devicePixelRatio || 1);
     cv.width = Math.round(LW*DPR); cv.height = Math.round(LH*DPR);
     cv.style.width = LW+'px'; cv.style.height = LH+'px'; ctx.setTransform(DPR,0,0,DPR,0,0); }
   setupCanvas(); window.addEventListener('resize', setupCanvas);
 
-  const DRUM_CX = 212, DRUM_CY = 258;    // 구를 낮춰 위에 4구 회전 휠 공간 확보
+  const DRUM_CX = 232, DRUM_CY = 268;    // 구를 낮춰 위에 4구 회전 휠 공간 확보
   const EXIT_W = 28;                      // 상단 배출구 폭
-  const HOLDER_Y = 632, HOLDER_X0 = 40, HOLDER_GAP = 62;
+  const HOLDER_Y = 654, HOLDER_X0 = 40, HOLDER_GAP = 62;
   function holderPos(i){ return { x: HOLDER_X0 + i*HOLDER_GAP, y: HOLDER_Y }; }
 
-  function ballColor(n){ return n<=10?'#FBC02D':n<=20?'#1976D2':n<=30?'#D32F2F':n<=40?'#757575':'#388E3C'; }
+  function ballColor(n){ return n<=10?'#FBC02D':n<=20?'#1976D2':n<=30?'#D32F2F':n<=40?'#5a5a5a':'#388E3C'; }
   function textColor(n){ return n<=10?'#2a2a2a':'#ffffff'; }
   function lighten(hex, amt){ const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
     r=Math.round(r+(255-r)*amt); g=Math.round(g+(255-g)*amt); b=Math.round(b+(255-b)*amt); return 'rgb('+r+','+g+','+b+')'; }
+  function shade(hex,f){ const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255; const a=f>=0?f:0,d=f<0?-f:0;
+    r=Math.round(r+(255-r)*a-r*d); g=Math.round(g+(255-g)*a-g*d); b=Math.round(b+(255-b)*a-b*d); return 'rgb('+Math.max(0,r)+','+Math.max(0,g)+','+Math.max(0,b)+')'; }
 
   // ═══ MachineEngine — 공통 엔진(BlowerSystem/AirField/Outlet/Extraction/Rail) ═══
   class MachineEngine {
@@ -96,8 +98,8 @@
         M.Events.on(this.engine,'collisionStart',(e)=>{ this.collisions+=e.pairs.length; }); }
       this.spawnBalls(); }
     exitPt(){ return { x:this.cx, y:this.cy-this.r }; }                 // 구 상단(휠 진입 직전)
-    wheelC(){ return { x:this.cx, y:this.cy-this.r-this.wR()+6 }; }      // 구 위 4구 회전 휠 중심
-    wR(){ return this.r*0.24; }
+    wheelC(){ return { x:this.cx, y:this.cy-this.r+this.wR()*0.35 }; }    // 구 상단 밀착
+    wR(){ return this.r*0.19; }                                          // 구 지름 ~1/5
     clear(){ if(this.usePhysics&&this.world) M.Composite.clear(this.world,false); this.balls=[]; this.railBalls=[]; }
 
     spawnBalls(){ const c=this.cfg; this.clear();
@@ -178,11 +180,15 @@
   }
 
   // ═══ 렌더 ═══
-  function drawBall(x,y,n,r,angle){ const g=ctx.createRadialGradient(x-r*0.34,y-r*0.34,r*0.12,x,y,r);
-    g.addColorStop(0,'#ffffff'); g.addColorStop(0.18,lighten(ballColor(n),0.35)); g.addColorStop(1,ballColor(n));
-    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
-    ctx.save(); ctx.translate(x,y); ctx.rotate(angle); ctx.fillStyle=textColor(n);
-    ctx.font='bold '+Math.round(r*1.05)+'px "Malgun Gothic", sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  // 다면체(faceted) 로또 공 — 실제 사진처럼 각진 표면
+  function drawBall(x,y,n,r,angle){ const base=ballColor(n); ctx.save(); ctx.translate(x,y); ctx.rotate(angle);
+    const N=8;
+    for(let i=0;i<N;i++){ const a0=i/N*Math.PI*2, a1=(i+1)/N*Math.PI*2, mid=(a0+a1)/2; const l=0.30*Math.cos(mid+2.3);
+      ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,r,a0,a1); ctx.closePath(); ctx.fillStyle=shade(base,l); ctx.fill(); }
+    ctx.beginPath(); for(let i=0;i<N;i++){ const a=i/N*Math.PI*2; ctx[i?'lineTo':'moveTo'](Math.cos(a)*r*0.52, Math.sin(a)*r*0.52); } ctx.closePath();
+    ctx.strokeStyle='rgba(0,0,0,0.18)'; ctx.lineWidth=1; ctx.stroke();
+    for(let i=0;i<N;i++){ const a=i/N*Math.PI*2; ctx.beginPath(); ctx.moveTo(Math.cos(a)*r*0.52, Math.sin(a)*r*0.52); ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r); ctx.strokeStyle='rgba(0,0,0,0.10)'; ctx.stroke(); }
+    ctx.fillStyle=textColor(n); ctx.font='bold '+Math.round(r*0.92)+'px "Malgun Gothic", sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(String(n),0,0.5); ctx.restore(); }
   function roundRectPath(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
   function perfNow(){ return (typeof performance!=='undefined')?performance.now():Date.now(); }
@@ -191,57 +197,54 @@
     const ex=eng.exitPt(), wc=eng.wheelC(), wr=eng.wR();
 
     // 그림자
-    ctx.save(); ctx.filter='blur(6px)'; ctx.beginPath(); ctx.ellipse(cx, gy+96, r*0.85, 14, 0, 0, Math.PI*2); ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fill(); ctx.restore();
-    // 베이스
-    const baseTop=gy+72; const bg=ctx.createLinearGradient(0,baseTop,0,baseTop+56); bg.addColorStop(0,'#4a5568'); bg.addColorStop(1,'#2a3242');
-    ctx.fillStyle=bg; roundRectPath(cx-58,baseTop,116,52,9); ctx.fill(); ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.stroke();
-    // 하단 송풍기(블로워) 하우징
-    const blH=ctx.createLinearGradient(0,gy+6,0,gy+72); blH.addColorStop(0,'#d7dee7'); blH.addColorStop(1,'#8b95a4');
-    ctx.fillStyle=blH; ctx.beginPath(); ctx.moveTo(cx-34,gy+4); ctx.lineTo(cx+34,gy+4); ctx.lineTo(cx+46,gy+72); ctx.lineTo(cx-46,gy+72); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle='rgba(60,72,90,0.5)'; ctx.stroke();
-    if(eng.blowing){ ctx.fillStyle=c.accent; for(let k=-1;k<=1;k++){ const bx=cx+k*13; ctx.globalAlpha=0.4+0.4*Math.abs(Math.sin(perfNow()/120+k)); ctx.beginPath(); ctx.moveTo(bx,gy+28); ctx.lineTo(bx-5,gy+44); ctx.lineTo(bx+5,gy+44); ctx.closePath(); ctx.fill(); } ctx.globalAlpha=1; }
-
-    // 외부 하강 레일 (휠 바닥 → 우측 → 하단 홀더)
-    ctx.strokeStyle='rgba(190,212,240,0.26)'; ctx.lineWidth=c.ballR*2+8; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(wc.x, wc.y+wr);
-    ctx.quadraticCurveTo(cx+r+30, cy-r*0.3, cx+r+14, cy+r*0.2);
-    ctx.quadraticCurveTo(cx+r+8, cy+r*0.8, (cx+r+14+HOLDER_X0+6*HOLDER_GAP)/2, HOLDER_Y-30);
+    ctx.save(); ctx.filter='blur(6px)'; ctx.beginPath(); ctx.ellipse(cx, gy+128, r*0.8, 14, 0, 0, Math.PI*2); ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fill(); ctx.restore();
+    const baseTop=gy+118;
+    // 베이스(아크릴)
+    ctx.fillStyle='rgba(200,214,232,0.18)'; ctx.beginPath(); ctx.moveTo(cx-70,baseTop); ctx.lineTo(cx+70,baseTop); ctx.lineTo(cx+84,baseTop+40); ctx.lineTo(cx-84,baseTop+40); ctx.closePath(); ctx.fill(); ctx.strokeStyle='rgba(210,225,242,0.3)'; ctx.stroke();
+    // 하단 반원 톱니 기어 + 피벗암 (구동)
+    ctx.strokeStyle='rgba(190,205,224,0.55)'; ctx.lineWidth=8; ctx.beginPath(); ctx.arc(cx,gy+40,66,Math.PI*0.15,Math.PI*0.85); ctx.stroke();
+    ctx.lineWidth=2; ctx.strokeStyle='rgba(210,225,242,0.5)'; for(let t=0;t<14;t++){ const a=Math.PI*0.15+(Math.PI*0.7)*(t/13); ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*62,gy+40+Math.sin(a)*62); ctx.lineTo(cx+Math.cos(a)*72,gy+40+Math.sin(a)*72); ctx.stroke(); }
+    ctx.strokeStyle='rgba(190,205,224,0.5)'; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(cx-42,gy+98); ctx.lineTo(cx,gy+40); ctx.lineTo(cx+42,gy+98); ctx.stroke(); ctx.lineWidth=1;
+    // 배출 슈트/레일 (로터 배출위치 → 우측 하강 → 홀더)
+    const disch={ x:wc.x+Math.cos(70*Math.PI/180)*wr, y:wc.y+Math.sin(70*Math.PI/180)*wr };
+    ctx.strokeStyle='rgba(190,212,240,0.24)'; ctx.lineWidth=c.ballR*2+8; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(disch.x+4, disch.y+28);
+    ctx.quadraticCurveTo(cx+r+32, cy-r*0.1, cx+r+16, cy+r*0.35);
+    ctx.quadraticCurveTo(cx+r+8, cy+r*0.9, (cx+r+16+HOLDER_X0+6*HOLDER_GAP)/2, HOLDER_Y-30);
     ctx.quadraticCurveTo(HOLDER_X0+6*HOLDER_GAP, HOLDER_Y-14, HOLDER_X0+4, HOLDER_Y-4);
-    ctx.stroke(); ctx.strokeStyle='rgba(220,235,252,0.10)'; ctx.lineWidth=c.ballR*2; ctx.stroke(); ctx.lineCap='butt';
-
+    ctx.stroke(); ctx.lineCap='butt';
     // 홀더
     for(let i=0;i<TOTAL_DRAW;i++){ const p=holderPos(i),bonus=(i===TOTAL_DRAW-1);
       ctx.beginPath(); ctx.arc(p.x,p.y,c.ballR+4,0,Math.PI*2); ctx.fillStyle=bonus?'rgba(80,140,255,0.14)':'rgba(255,255,255,0.07)'; ctx.fill();
       ctx.lineWidth=bonus?2:1; ctx.strokeStyle=bonus?'rgba(90,150,255,0.8)':'rgba(255,255,255,0.28)'; ctx.stroke(); }
     const pb=holderPos(TOTAL_DRAW-1); ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='bold 17px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('+', pb.x-HOLDER_GAP/2, pb.y);
-
-    // 외부 보호 프레임 + 지지 스트럿
-    ctx.beginPath(); ctx.arc(cx,cy,r+12,0,Math.PI*2); ctx.lineWidth=6;
-    const of=ctx.createLinearGradient(cx-r,cy-r,cx+r,cy+r); of.addColorStop(0,'#e9eef4'); of.addColorStop(0.5,'#9aa6b4'); of.addColorStop(1,'#69737f');
-    ctx.strokeStyle=of; ctx.stroke(); ctx.lineWidth=1;
+    // 외부 보호 프레임(큰 링) + 스트럿
+    ctx.beginPath(); ctx.arc(cx,cy,r+22,0,Math.PI*2); ctx.lineWidth=7;
+    const of=ctx.createLinearGradient(cx-r,cy-r,cx+r,cy+r); of.addColorStop(0,'#eef2f7'); of.addColorStop(0.5,'#9aa6b4'); of.addColorStop(1,'#6b7580'); ctx.strokeStyle=of; ctx.stroke(); ctx.lineWidth=1;
     ctx.strokeStyle='rgba(200,210,222,0.5)'; ctx.lineWidth=5;
-    for(const ang of [Math.PI*0.74, Math.PI*0.26]){ const sx=cx+Math.cos(ang)*(r+12), sy=cy+Math.sin(ang)*(r+12); ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(cx+(sx-cx)*0.5, baseTop); ctx.stroke(); }
+    for(const ang of [Math.PI*0.75, Math.PI*0.25]){ const sx=cx+Math.cos(ang)*(r+22), sy=cy+Math.sin(ang)*(r+22); ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(cx+(sx-cx)*0.4, baseTop); ctx.stroke(); }
     ctx.lineWidth=1;
-
+    // 좌우 포트(3·9시)
+    for(const sgn of [-1,1]){ ctx.save(); ctx.translate(cx+sgn*(r+22), cy); ctx.fillStyle='rgba(205,218,236,0.7)'; ctx.strokeStyle='#8a95a2'; ctx.beginPath(); ctx.rect(sgn>0?0:-22,-11,22,22); ctx.fill(); ctx.stroke(); ctx.restore(); }
     // 드럼 유리
     const gg=ctx.createRadialGradient(cx-r*0.34,cy-r*0.42,r*0.1,cx,cy,r);
-    gg.addColorStop(0,'rgba(255,255,255,0.16)'); gg.addColorStop(0.5,'rgba(150,175,210,0.06)'); gg.addColorStop(0.86,'rgba(30,42,66,0.05)'); gg.addColorStop(1,'rgba(90,110,140,0.14)');
+    gg.addColorStop(0,'rgba(255,255,255,0.16)'); gg.addColorStop(0.86,'rgba(30,42,66,0.05)'); gg.addColorStop(1,'rgba(90,110,140,0.14)');
     ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=gg; ctx.fill();
-
-    // 드럼 안 공 (air-mix: 내부엔 공만 — 회전 블레이드/살 없음)
+    // 내부 칸막이(중앙 축 + 수평 선반, 반투명)
+    ctx.strokeStyle='rgba(200,215,235,0.16)'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(cx,cy-r*0.7); ctx.lineTo(cx,cy+r*0.5); ctx.stroke();
+    for(const yy of [-0.25,0.15]){ const yv=cy+r*yy, hw=Math.sqrt(Math.max(0,r*r-(yv-cy)*(yv-cy)))*0.82; ctx.beginPath(); ctx.moveTo(cx-hw,yv); ctx.lineTo(cx+hw,yv); ctx.stroke(); }
+    // 드럼 안 공 (다면체)
     for(const b of eng.balls){ const p=eng.ballPose(b); drawBall(p.x,p.y,b.n,c.ballR,p.angle); }
-
-    // 드럼 내부 림
-    ctx.beginPath(); ctx.arc(cx,cy,r-1,0,Math.PI*2); ctx.lineWidth=3; ctx.strokeStyle='rgba(210,225,242,0.32)'; ctx.stroke(); ctx.lineWidth=1;
-
-    // 구 위 4구 회전 휠(물레방아) — 빈 배출구 상단 진입 → 회전 → 바닥 낙하
+    // 드럼 림
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.lineWidth=4; ctx.strokeStyle='#aeb8c6'; ctx.stroke(); ctx.lineWidth=1;
+    // 구 상단 진입구 + 작은 회전 로터(밀착)
+    ctx.beginPath(); ctx.ellipse(cx, cy-r+2, 9, 5, 0, 0, Math.PI*2); ctx.fillStyle='rgba(20,30,45,0.5)'; ctx.fill();
     ctx.save(); ctx.translate(wc.x, wc.y);
-    ctx.beginPath(); ctx.arc(0,0,wr+9,0,Math.PI*2); ctx.fillStyle='rgba(225,232,240,0.42)'; ctx.fill(); ctx.strokeStyle='#9aa6b3'; ctx.lineWidth=2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,0,wr+7,0,Math.PI*2); ctx.fillStyle='rgba(228,234,242,0.62)'; ctx.fill(); ctx.strokeStyle='#8a95a2'; ctx.lineWidth=2; ctx.stroke();
     for(let k=0;k<4;k++){ const a=eng.wheel+k*Math.PI/2, bx=Math.cos(a)*wr, by=Math.sin(a)*wr;
       ctx.strokeStyle='rgba(150,165,185,0.9)'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(bx,by); ctx.stroke();
-      ctx.beginPath(); ctx.arc(bx,by,9,0,Math.PI*2); ctx.fillStyle='rgba(20,30,45,0.5)'; ctx.fill(); ctx.strokeStyle='#c9d3dd'; ctx.lineWidth=2; ctx.stroke(); }
-    ctx.beginPath(); ctx.arc(0,0,6,0,Math.PI*2); ctx.fillStyle='#c9d3dd'; ctx.fill(); ctx.restore(); ctx.lineWidth=1;
-
+      ctx.beginPath(); ctx.arc(bx,by,7,0,Math.PI*2); ctx.fillStyle='rgba(20,30,45,0.5)'; ctx.fill(); ctx.strokeStyle='#c9d3dd'; ctx.lineWidth=2; ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(0,0,5,0,Math.PI*2); ctx.fillStyle='#c9d3dd'; ctx.fill(); ctx.restore(); ctx.lineWidth=1;
     // 유리 하이라이트
     ctx.beginPath(); ctx.ellipse(cx-r*0.4, cy-r*0.5, r*0.26, r*0.12, -0.5, 0, Math.PI*2); ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fill();
 
@@ -249,7 +252,7 @@
     for(const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
 
     // 버전 표시
-    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('4구휠 v6 · '+c.name, LW-8, LH-6);
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('사진구조 v7 · '+c.name, LW-8, LH-6);
 
     // 디버그
     if(DEBUG){ ctx.fillStyle='rgba(0,0,0,0.55)'; roundRectPath(8,8,152,92,8); ctx.fill();

@@ -49,11 +49,12 @@ function slotPos(i: number) {
 const GRAVITY = 0.34;
 const DAMP = 0.985;
 const MAX_V = 9;
-const LIFT = 1.05; // 중앙 컬럼 퍼올림
+const LIFT = 0.45; // 중앙 컬럼 퍼올림(과하면 볼이 구 전체를 채워 디스크를 덮음)
 const CHURN = 1.0; // 회전 난류
-const CENTER_PULL = 0.028; // 중심축으로 모으는 힘(세로 컬럼 형성)
-const LIFT_ZONE = 28; // 퍼올림 존(중심축 근처 — 좁은 컬럼)
-const SPILL = 0.55; // 상단 도달 시 바깥 분출(cascade → 분수형 순환)
+const CENTER_PULL = 0.024; // 중심축으로 모으는 힘(세로 컬럼 형성)
+const LIFT_ZONE = 32; // 퍼올림 존(중심축 근처)
+const SPILL = 0.45; // 상단 도달 시 바깥 분출(cascade → 분수형 순환)
+const CEIL = CY - R * 0.42; // 볼 천장 — 상단(디스크 영역)을 비워 디스크가 볼 위로 드러남
 const DISC_R = R * 0.42; // 4구멍 추출 디스크 반지름
 const DISC_DY = -R * 0.72; // 디스크 높이(구 상단 — 공 도는 영역 바깥/위)
 
@@ -175,6 +176,11 @@ export default function MachineDrawSimulator() {
             const dot = b.vx * nx + b.vy * ny;
             b.vx = (b.vx - 2 * dot * nx) * 0.6;
             b.vy = (b.vy - 2 * dot * ny) * 0.6;
+          }
+          // 볼 천장 — 상단(디스크 영역)을 비워 볼이 디스크를 덮지 않게
+          if (b.y < CEIL) {
+            b.y = CEIL;
+            if (b.vy < 0) b.vy *= -0.3;
           }
         } else if (b.state === 'rising') {
           const t = b.path[b.wp];

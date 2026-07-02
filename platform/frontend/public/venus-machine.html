@@ -3,492 +3,558 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Venus VIII 로또 추첨기 시뮬레이터</title>
+<title>동행복권 로또 추첨기 (1·2·3호기) — Matter.js 물리 시뮬레이터</title>
 <style>
   :root { color-scheme: dark; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
-    width: 100%; height: 100%;
-    background: radial-gradient(circle at 50% 30%, #1a2233 0%, #111622 70%);
+    width: 100%; min-height: 100%;
+    background: radial-gradient(circle at 50% 25%, #1a2233 0%, #111622 72%);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', sans-serif;
-    display: flex; align-items: center; justify-content: center;
-    overflow: hidden;
+    display: flex; align-items: flex-start; justify-content: center;
+    overflow: hidden; color: #e8eef5;
   }
-  #wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 12px; }
+  #wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px; }
   canvas { display: block; border-radius: 16px; }
-  #controls { display: flex; gap: 10px; }
-  button {
-    font-family: inherit; font-weight: 700; font-size: 14px;
-    color: #e8eef5; background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.16); border-radius: 10px;
-    padding: 11px 20px; cursor: pointer; letter-spacing: 0.3px;
-    transition: background .15s, transform .05s, border-color .15s;
+  #machineSel { display: flex; gap: 8px; }
+  .mbtn {
+    font-weight: 800; font-size: 14px; color: #cbd5e1;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 10px; padding: 9px 18px; cursor: pointer; transition: all .15s;
+  }
+  .mbtn.active { color: #fff; }
+  .mbtn.m1.active { background: #E8570D; border-color: #E8570D; }
+  .mbtn.m2.active { background: #0D8A3E; border-color: #0D8A3E; }
+  .mbtn.m3.active { background: #2952CC; border-color: #2952CC; }
+  #controls { display: flex; gap: 10px; align-items: center; }
+  button.ctrl {
+    font-family: inherit; font-weight: 700; font-size: 14px; color: #e8eef5;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 10px; padding: 11px 22px; cursor: pointer; transition: all .12s;
     -webkit-tap-highlight-color: transparent;
   }
-  button:hover { background: rgba(255,255,255,0.12); }
-  button:active { transform: translateY(1px); }
-  button:disabled { opacity: 0.4; cursor: default; }
-  #btnMix.on { background: #1976D2; border-color: #1976D2; }
-  #btnDraw { background: #D32F2F; border-color: #D32F2F; }
-  #btnDraw:hover { background: #e14b4b; }
-  #status { color: #8b95a5; font-size: 12.5px; height: 16px; letter-spacing: .2px; }
+  button.ctrl:hover { background: rgba(255,255,255,0.12); }
+  button.ctrl:active { transform: translateY(1px); }
+  button.ctrl:disabled { opacity: 0.4; cursor: default; }
+  #btnStart { background: #D32F2F; border-color: #D32F2F; }
+  #btnStart:hover:not(:disabled) { background: #e14b4b; }
+  #sndBtn { font-size: 18px; padding: 10px 12px; }
+  #status {
+    color: #cfe0f2; font-size: 13.5px; font-weight: 700; height: 18px;
+    letter-spacing: .2px; text-align: center;
+  }
+  #timer { color: #7c8798; font-size: 11.5px; height: 14px; }
 </style>
 </head>
 <body>
 <div id="wrap">
-  <canvas id="cv"></canvas>
-  <div id="controls">
-    <button id="btnMix">혼합 시작</button>
-    <button id="btnDraw" disabled>번호 추출</button>
-    <button id="btnReset">초기화</button>
+  <div id="machineSel">
+    <button class="mbtn m1" data-m="1">1호기</button>
+    <button class="mbtn m2" data-m="2">2호기</button>
+    <button class="mbtn m3 active" data-m="3">3호기</button>
   </div>
-  <div id="status">혼합 시작을 눌러 추첨기를 가동하세요</div>
+  <canvas id="cv"></canvas>
+  <div id="status">추첨기를 선택하고 [추첨 시작]을 누르세요</div>
+  <div id="timer"></div>
+  <div id="controls">
+    <button class="ctrl" id="btnStart">추첨 시작</button>
+    <button class="ctrl" id="btnReset">초기화</button>
+    <button class="ctrl" id="sndBtn" title="사운드">🔊</button>
+  </div>
 </div>
 
+<!-- 물리엔진: Matter.js (2D Rigid Body) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
 <script>
 'use strict';
 (function () {
-  // ─────────────────────────────────────────────────────────────
-  // 캔버스 / DPR 스케일링
-  // ─────────────────────────────────────────────────────────────
+  const hasMatter = typeof window.Matter !== 'undefined';
+  const M = window.Matter || null;
+
+  // ═══════════════════════════════════════════════════════════════
+  //  머신 설정 (machine1/2/3.json 상당 — 각 호기 물리·타이밍·구조 분리)
+  //  · 유지보수: 이 객체 값만 바꾸면 각 호기 특성이 달라짐
+  //  · 공통 MachineEngine 이 config 를 받아 동작(코드 중복 제거)
+  // ═══════════════════════════════════════════════════════════════
+  const MACHINE_CONFIGS = {
+    1: {
+      name: '1호기', accent: '#E8570D',
+      drumR: 150,          // 공간이 조금 좁다
+      ballR: 13,
+      gravity: 0.95,
+      restitution: 0.92,   // 충돌이 많고 빠르게 튕김
+      friction: 0.0005, frictionAir: 0.0018, density: 0.0012,
+      blowerUp: 0.030, blowerSide: 0.017,          // 송풍기 강함
+      turbX: 0.014, turbY: 0.012, blowerZone: 0.5, blowerProb: 0.75,
+      spin: 1.15,          // 회전 빠름
+      totalSec: [18, 22], mixRatio: 0.42,
+    },
+    2: {
+      name: '2호기', accent: '#0D8A3E',
+      drumR: 162,          // 약간 크다
+      ballR: 13,
+      gravity: 1.0,
+      restitution: 0.88,   // 부드러운 회전
+      friction: 0.0009, frictionAir: 0.0026, density: 0.0012,
+      blowerUp: 0.026, blowerSide: 0.014,          // 송풍 중간
+      turbX: 0.011, turbY: 0.009, blowerZone: 0.5, blowerProb: 0.62,
+      spin: 0.85,          // 크고 부드럽게 돔
+      totalSec: [20, 24], mixRatio: 0.45,
+    },
+    3: {
+      name: '3호기', accent: '#2952CC',
+      drumR: 176,          // 가장 크다
+      ballR: 13,
+      gravity: 0.9,
+      restitution: 0.94,   // 높게 튄다
+      friction: 0.0004, frictionAir: 0.0015, density: 0.0012,
+      blowerUp: 0.042, blowerSide: 0.021,          // 송풍 가장 강함
+      turbX: 0.017, turbY: 0.015, blowerZone: 0.55, blowerProb: 0.8,
+      spin: 1.0,
+      totalSec: [22, 26], mixRatio: 0.46,
+    },
+  };
+
+  const TOTAL_DRAW = 7;              // 당첨 6 + 보너스 1
+
+  // ═══════════════════════════════════════════════════════════════
+  //  캔버스 / DPR 스케일링
+  // ═══════════════════════════════════════════════════════════════
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
-  const LW = 480, LH = 700;           // 논리 좌표계
+  const LW = 480, LH = 640;
   let DPR = Math.max(1, window.devicePixelRatio || 1);
   function setupCanvas() {
     DPR = Math.max(1, window.devicePixelRatio || 1);
-    cv.width = Math.round(LW * DPR);
-    cv.height = Math.round(LH * DPR);
-    cv.style.width = LW + 'px';
-    cv.style.height = LH + 'px';
+    cv.width = Math.round(LW * DPR); cv.height = Math.round(LH * DPR);
+    cv.style.width = LW + 'px'; cv.style.height = LH + 'px';
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   }
   setupCanvas();
   window.addEventListener('resize', setupCanvas);
 
-  // ─────────────────────────────────────────────────────────────
-  // 기하 구조 (드럼 · 하단 게이트 · 레일 · 홀더)
-  // ─────────────────────────────────────────────────────────────
-  const DRUM = { cx: 240, cy: 210, r: 158 };
-  const BALL_R = 14;                              // 드럼 반경의 약 1/11
-  const GATE = { x: DRUM.cx, y: DRUM.cy + DRUM.r, w: 40, open: false };
-  const HOLDER_Y = 648;
-  const HOLDER_X0 = 46;
-  const HOLDER_GAP = 62;                          // 7칸: 46 … 418
-  const TOTAL_DRAW = 7;                           // 당첨 6 + 보너스 1
+  // 드럼 배치 (호기별 반경만 달라짐)
+  const DRUM_CX = 240, DRUM_CY = 224;
+  const GATE_W = 42;
+  const HOLDER_Y = 604, HOLDER_X0 = 44, HOLDER_GAP = 63;
+  function holderPos(i) { return { x: HOLDER_X0 + i * HOLDER_GAP, y: HOLDER_Y }; }
 
-  function holderPos(i) {
-    return { x: HOLDER_X0 + i * HOLDER_GAP, y: HOLDER_Y };
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // 색상 (한국 동행복권 공식 규칙)
-  // ─────────────────────────────────────────────────────────────
+  // 색상 (한국 동행복권 공식)
   function ballColor(n) {
-    if (n <= 10) return '#FBC02D';   // 노랑
-    if (n <= 20) return '#1976D2';   // 파랑
-    if (n <= 30) return '#D32F2F';   // 빨강
-    if (n <= 40) return '#757575';   // 그레이
-    return '#388E3C';                // 녹색
+    if (n <= 10) return '#FBC02D';
+    if (n <= 20) return '#1976D2';
+    if (n <= 30) return '#D32F2F';
+    if (n <= 40) return '#757575';
+    return '#388E3C';
   }
-  function textColor(n) {
-    // 파랑/빨강/그레이/녹색은 흰 숫자, 노랑은 진한 숫자
-    return (n <= 10) ? '#2a2a2a' : '#ffffff';
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // 물리 파라미터
-  // ─────────────────────────────────────────────────────────────
-  const GRAVITY = 0.30;
-  const RESTITUTION = 0.88;     // 볼-볼 반발(탄성)
-  const WALL_REST = 0.85;       // 벽 반발
-  const MAX_SPEED = 16;
-  const AIR_UP = 4.2;           // 하단 에어젯 상방(노즐)
-  const AIR_SIDE = 3.0;         // 에어젯 좌우
-  const TURB_X = 3.5;           // 전역 난류 X
-  const TURB_Y = 3.0;           // 전역 난류 Y
-  const AIR_ZONE = 0.45;        // 노즐 영향 구간(하단 비율)
-  const AIR_PROB = 0.6;         // 노즐 분사 확률
-
-  // ─────────────────────────────────────────────────────────────
-  // 볼
-  // ─────────────────────────────────────────────────────────────
-  // state: 'drum' | 'dropping' | 'held'
-  class Ball {
-    constructor(n) {
-      this.n = n;
-      this.r = BALL_R;
-      this.x = 0; this.y = 0;
-      this.vx = 0; this.vy = 0;
-      this.angle = Math.random() * Math.PI * 2;
-      this.av = 0;
-      this.state = 'drum';
-      this.color = ballColor(n);
-      this.tcolor = textColor(n);
-      this.slot = -1;
-      // 낙하/레일 애니메이션용
-      this.p0 = null; this.p1 = null; this.p2 = null; this.t = 0; this.dur = 1;
-    }
-  }
-
-  let balls = [];
-  let drawn = [];            // 추출 순서
-  let mixing = false;
-  let drawRequest = false;   // 게이트 개방 요청(다음 1개 추출)
-  let statusEl = document.getElementById('status');
-
-  // ─────────────────────────────────────────────────────────────
-  // 초기화 — 45개 공을 드럼 하단에 정렬 대기
-  // ─────────────────────────────────────────────────────────────
-  function reset() {
-    balls = [];
-    drawn = [];
-    mixing = false;
-    drawRequest = false;
-    GATE.open = false;
-    const perRow = 9;
-    let idx = 0;
-    for (let n = 1; n <= 45; n++) {
-      const b = new Ball(n);
-      const row = Math.floor(idx / perRow);
-      const col = idx % perRow;
-      const spanW = (perRow - 1) * (BALL_R * 2 + 1);
-      b.x = DRUM.cx - spanW / 2 + col * (BALL_R * 2 + 1);
-      b.y = DRUM.cy + DRUM.r - BALL_R - 6 - row * (BALL_R * 2 + 1);
-      b.vx = (Math.random() - 0.5) * 0.5;
-      b.vy = 0;
-      balls.push(b);
-      idx++;
-    }
-    btnMix.classList.remove('on');
-    btnMix.textContent = '혼합 시작';
-    btnDraw.disabled = true;
-    setStatus('혼합 시작을 눌러 추첨기를 가동하세요');
-  }
-
-  function setStatus(t) { statusEl.textContent = t; }
-
-  // ─────────────────────────────────────────────────────────────
-  // 물리 스텝
-  // ─────────────────────────────────────────────────────────────
-  function stepDrumBall(b) {
-    b.vy += GRAVITY;
-
-    if (mixing) {
-      // 하단 중앙 에어젯(노즐): 하단 부근만 간헐적으로 강하게 쳐올림
-      const bottom = DRUM.cy + DRUM.r;
-      const near = Math.max(0, 1 - (bottom - b.y) / (DRUM.r * AIR_ZONE));
-      if (near > 0 && Math.random() < AIR_PROB) {
-        b.vy -= Math.random() * AIR_UP * near;
-        b.vx += (Math.random() - 0.5) * AIR_SIDE;
-      }
-      // 전역 난류 — 드럼 전체로 사방 튕김
-      b.vx += (Math.random() - 0.5) * TURB_X;
-      b.vy += (Math.random() - 0.5) * TURB_Y;
-    }
-
-    // 속도 제한
-    const sp = Math.hypot(b.vx, b.vy);
-    if (sp > MAX_SPEED) { b.vx = b.vx / sp * MAX_SPEED; b.vy = b.vy / sp * MAX_SPEED; }
-
-    b.x += b.vx;
-    b.y += b.vy;
-    b.angle += b.av;
-    b.av *= 0.985;
-
-    // 드럼 벽(원) 충돌 — 단, 하단 게이트가 열려있고 볼이 게이트 통과 지점이면 추출
-    const dx = b.x - DRUM.cx, dy = b.y - DRUM.cy;
-    const d = Math.hypot(dx, dy);
-    const lim = DRUM.r - b.r;
-    if (d > lim) {
-      const passGate = GATE.open && drawRequest &&
-        dy > 0 && Math.abs(b.x - GATE.x) < GATE.w / 2;
-      if (passGate) {
-        beginExtract(b);
-        return;
-      }
-      const nx = dx / d, ny = dy / d;
-      b.x = DRUM.cx + nx * lim;
-      b.y = DRUM.cy + ny * lim;
-      const dot = b.vx * nx + b.vy * ny;
-      b.vx = (b.vx - 2 * dot * nx) * WALL_REST;
-      b.vy = (b.vy - 2 * dot * ny) * WALL_REST;
-      // 접선 성분 → 각속도(회전) 부여
-      b.av += (b.vx * ny - b.vy * nx) * 0.012;
-    }
-  }
-
-  // 볼-볼 탄성 충돌 + 위치 보정(중첩 방지)
-  function resolveCollisions() {
-    const drumBalls = balls.filter(b => b.state === 'drum');
-    for (let i = 0; i < drumBalls.length; i++) {
-      const a = drumBalls[i];
-      for (let j = i + 1; j < drumBalls.length; j++) {
-        const c = drumBalls[j];
-        let dx = c.x - a.x, dy = c.y - a.y;
-        let d = Math.hypot(dx, dy);
-        const min = a.r + c.r;
-        if (d === 0) { d = 0.01; dx = 0.01; }
-        if (d < min) {
-          const nx = dx / d, ny = dy / d;
-          // 위치 보정: 겹침의 절반씩 밀어냄
-          const overlap = (min - d);
-          a.x -= nx * overlap / 2; a.y -= ny * overlap / 2;
-          c.x += nx * overlap / 2; c.y += ny * overlap / 2;
-          // 상대 속도의 법선 성분
-          const rvx = c.vx - a.vx, rvy = c.vy - a.vy;
-          const vn = rvx * nx + rvy * ny;
-          if (vn < 0) {
-            const imp = -(1 + RESTITUTION) * vn / 2; // 동일 질량
-            a.vx -= imp * nx; a.vy -= imp * ny;
-            c.vx += imp * nx; c.vy += imp * ny;
-            // 회전 전달
-            const tang = -rvx * ny + rvy * nx;
-            a.av -= tang * 0.004; c.av += tang * 0.004;
-          }
-        }
-      }
-    }
-  }
-
-  // 추출 시작 — 게이트 아래로 낙하 후 레일 타고 홀더로
-  function beginExtract(b) {
-    b.state = 'dropping';
-    b.slot = drawn.length;
-    drawn.push(b);
-    GATE.open = false;
-    drawRequest = false;
-    const target = holderPos(b.slot);
-    // 베지어: 게이트 → (드럼 아래 곡선) → 홀더 슬롯
-    b.p0 = { x: GATE.x, y: DRUM.cy + DRUM.r + b.r };
-    b.p1 = { x: (GATE.x + target.x) / 2, y: DRUM.cy + DRUM.r + 90 };
-    b.p2 = { x: target.x, y: target.y };
-    b.t = 0;
-    b.dur = 46 + Math.abs(b.slot - 3) * 4; // 프레임 수(감속 연출)
-    b.av = 0.14;                            // 구르는 회전
-    if (drawn.length >= TOTAL_DRAW) {
-      btnDraw.disabled = true;
-      setStatus('추첨 완료 — 당첨 6 + 보너스 1');
-    } else {
-      setStatus(`${drawn.length}개 추출 · 남은 ${TOTAL_DRAW - drawn.length}`);
-    }
-  }
-
-  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
-  function bezier(p0, p1, p2, t) {
-    const u = 1 - t;
-    return {
-      x: u * u * p0.x + 2 * u * t * p1.x + t * t * p2.x,
-      y: u * u * p0.y + 2 * u * t * p1.y + t * t * p2.y,
-    };
-  }
-
-  function stepDroppingBall(b) {
-    b.t += 1 / b.dur;
-    if (b.t >= 1) {
-      b.t = 1; b.state = 'held';
-      const target = holderPos(b.slot);
-      b.x = target.x; b.y = target.y; b.av = 0;
-      return;
-    }
-    const e = easeOutCubic(b.t);
-    const p = bezier(b.p0, b.p1, b.p2, e);
-    b.x = p.x; b.y = p.y;
-    b.angle += b.av * (1 - e * 0.7); // 굴러가며 감속
-  }
-
-  function physics() {
-    for (const b of balls) {
-      if (b.state === 'drum') stepDrumBall(b);
-      else if (b.state === 'dropping') stepDroppingBall(b);
-    }
-    resolveCollisions();
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // 렌더
-  // ─────────────────────────────────────────────────────────────
-  function drawRail() {
-    // 게이트 아래 → 홀더로 흐르는 투명 아크릴 가이드(대략적인 포장)
-    ctx.save();
-    ctx.strokeStyle = 'rgba(180,205,235,0.28)';
-    ctx.lineWidth = BALL_R * 2 + 8;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(GATE.x, DRUM.cy + DRUM.r + 6);
-    ctx.quadraticCurveTo(GATE.x, DRUM.cy + DRUM.r + 96, (GATE.x + HOLDER_X0) / 2 + 40, HOLDER_Y - 28);
-    ctx.quadraticCurveTo(HOLDER_X0 + 10, HOLDER_Y - 30, HOLDER_X0 + 6 * HOLDER_GAP + 20, HOLDER_Y - 6);
-    ctx.stroke();
-    // 내부 밝은 심
-    ctx.strokeStyle = 'rgba(210,228,246,0.12)';
-    ctx.lineWidth = BALL_R * 2;
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  function drawHolder() {
-    for (let i = 0; i < TOTAL_DRAW; i++) {
-      const p = holderPos(i);
-      const isBonus = (i === TOTAL_DRAW - 1);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, BALL_R + 4, 0, Math.PI * 2);
-      ctx.fillStyle = isBonus ? 'rgba(80,140,255,0.14)' : 'rgba(255,255,255,0.07)';
-      ctx.fill();
-      ctx.lineWidth = isBonus ? 2 : 1;
-      ctx.strokeStyle = isBonus ? 'rgba(90,150,255,0.8)' : 'rgba(255,255,255,0.28)';
-      ctx.stroke();
-    }
-    // 보너스 구분자 '+'
-    const pb = holderPos(TOTAL_DRAW - 1);
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.font = 'bold 20px sans-serif';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('+', pb.x - HOLDER_GAP / 2, pb.y);
-  }
-
-  function drawDrum() {
-    const { cx, cy, r } = DRUM;
-    // 유리구 본체 (글래스모피즘)
-    const g = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.1, cx, cy, r);
-    g.addColorStop(0, 'rgba(255,255,255,0.16)');
-    g.addColorStop(0.55, 'rgba(150,170,200,0.06)');
-    g.addColorStop(1, 'rgba(20,30,50,0.10)');
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = g;
-    ctx.fill();
-  }
-
-  function drawDrumFrame() {
-    const { cx, cy, r } = DRUM;
-    // 메탈/실버 프레임 (드럼 위로)
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.lineWidth = 5;
-    const rim = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
-    rim.addColorStop(0, '#f4f7fb');
-    rim.addColorStop(0.5, '#aeb8c6');
-    rim.addColorStop(1, '#7e8a99');
-    ctx.strokeStyle = rim;
-    ctx.stroke();
-    ctx.lineWidth = 1;
-
-    // 상단 고정 마운트(중심축 상부) — 회전판 없음, 단순 지지
-    ctx.beginPath();
-    ctx.ellipse(cx, cy - r - 4, 20, 9, 0, 0, Math.PI * 2);
-    ctx.fillStyle = '#cbd4de'; ctx.fill();
-    ctx.strokeStyle = '#8a95a2'; ctx.stroke();
-
-    // 하단 게이트 밸브
-    const gy = cy + r;
-    ctx.save();
-    ctx.strokeStyle = GATE.open ? '#5aa0ff' : '#9aa6b3';
-    ctx.lineWidth = 3;
-    // 좌/우 게이트 도어 (열리면 벌어짐)
-    const spread = GATE.open ? 12 : 2;
-    ctx.beginPath();
-    ctx.moveTo(cx - GATE.w / 2, gy - 2);
-    ctx.lineTo(cx - GATE.w / 2 - spread, gy + 14);
-    ctx.moveTo(cx + GATE.w / 2, gy - 2);
-    ctx.lineTo(cx + GATE.w / 2 + spread, gy + 14);
-    ctx.stroke();
-    ctx.restore();
-
-    // 유리 하이라이트
-    ctx.beginPath();
-    ctx.ellipse(cx - r * 0.42, cy - r * 0.5, r * 0.26, r * 0.14, -0.5, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.14)';
-    ctx.fill();
-
-    // 중심 고정 핀(축)
-    ctx.beginPath();
-    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(200,212,224,0.5)';
-    ctx.fill();
-  }
-
-  function drawBall(b) {
-    const r = b.r;
-    // 3D 라디얼 그라디언트
-    const g = ctx.createRadialGradient(b.x - r * 0.34, b.y - r * 0.34, r * 0.12, b.x, b.y, r);
-    g.addColorStop(0, '#ffffff');
-    g.addColorStop(0.18, lighten(b.color, 0.35));
-    g.addColorStop(1, b.color);
-    ctx.beginPath();
-    ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = g;
-    ctx.fill();
-    // 숫자(공과 함께 회전)
-    ctx.save();
-    ctx.translate(b.x, b.y);
-    ctx.rotate(b.angle);
-    ctx.fillStyle = b.tcolor;
-    ctx.font = 'bold ' + Math.round(r * 1.05) + 'px "Malgun Gothic", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(b.n), 0, 0.5);
-    ctx.restore();
-  }
-
+  function textColor(n) { return (n <= 10) ? '#2a2a2a' : '#ffffff'; }
   function lighten(hex, amt) {
     const n = parseInt(hex.slice(1), 16);
     let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-    r = Math.round(r + (255 - r) * amt);
-    g = Math.round(g + (255 - g) * amt);
-    b = Math.round(b + (255 - b) * amt);
+    r = Math.round(r + (255 - r) * amt); g = Math.round(g + (255 - g) * amt); b = Math.round(b + (255 - b) * amt);
     return 'rgb(' + r + ',' + g + ',' + b + ')';
   }
 
-  function render() {
-    ctx.clearRect(0, 0, LW, LH);
-    drawRail();
-    drawHolder();
-    drawDrum();                                  // 유리 본체(볼 뒤)
-    for (const b of balls) if (b.state === 'drum') drawBall(b);   // 드럼 안 볼
-    drawDrumFrame();                             // 프레임/하이라이트(볼 위 유리감)
-    for (const b of balls) if (b.state !== 'drum') drawBall(b);   // 배출/홀더 볼
+  // ═══════════════════════════════════════════════════════════════
+  //  공통 물리 엔진 (MachineEngine) — config 만 다르게 적용
+  // ═══════════════════════════════════════════════════════════════
+  class MachineEngine {
+    constructor(cfg) {
+      this.cfg = cfg;
+      this.cx = DRUM_CX; this.cy = DRUM_CY; this.r = cfg.drumR;
+      this.blowing = false;
+      this.gateOpen = false;
+      this.balls = [];        // { body|fallback, n, angle, av }
+      this.railBalls = [];    // 추출되어 레일/홀더로 이동 중인 공
+      this.usePhysics = hasMatter;
+      if (this.usePhysics) {
+        this.engine = M.Engine.create({ enableSleeping: false });
+        this.engine.gravity.y = cfg.gravity;
+        this.world = this.engine.world;
+      }
+      this.spawnBalls();
+    }
+
+    // ⑭ 매 추첨마다 45개 공을 겹치지 않게 하단에 배치
+    spawnBalls() {
+      const c = this.cfg;
+      this.clear();
+      const per = Math.max(6, Math.floor((this.r * 1.5) / (c.ballR * 2 + 2)));
+      let idx = 0;
+      for (let n = 1; n <= 45; n++) {
+        const row = Math.floor(idx / per), col = idx % per;
+        const span = (per - 1) * (c.ballR * 2 + 2);
+        const x = this.cx - span / 2 + col * (c.ballR * 2 + 2) + (Math.random() - 0.5);
+        const y = this.cy + this.r - c.ballR - 6 - row * (c.ballR * 2 + 2);
+        if (this.usePhysics) {
+          const body = M.Bodies.circle(x, y, c.ballR, {
+            restitution: c.restitution, friction: c.friction,
+            frictionAir: c.frictionAir, density: c.density, frictionStatic: 0,
+          });
+          M.Composite.add(this.world, body);
+          this.balls.push({ body, n });
+        } else {
+          // 폴백(엔진 로드 실패 시): 간이 물리
+          this.balls.push({ fb: true, n, x, y, vx: 0, vy: 0, angle: 0, av: 0 });
+        }
+        idx++;
+      }
+    }
+
+    clear() {
+      if (this.usePhysics && this.world) M.Composite.clear(this.world, false);
+      this.balls = []; this.railBalls = [];
+    }
+
+    // 물리 1스텝 (송풍기 힘 → Matter 업데이트 → 원형 벽 → 배출 → 레일)
+    step() {
+      const c = this.cfg;
+      if (this.usePhysics) {
+        // ③ 송풍기: 하단 노즐 상방 + 전역 난류 (Air Force Vector)
+        if (this.blowing) {
+          for (const b of this.balls) {
+            const p = b.body.position, m = b.body.mass;
+            const dfb = (this.cy + this.r) - p.y;
+            const near = Math.max(0, 1 - dfb / (this.r * c.blowerZone));
+            if (near > 0 && Math.random() < c.blowerProb) {
+              M.Body.applyForce(b.body, p, { x: (Math.random() - 0.5) * c.blowerSide * m, y: -Math.random() * c.blowerUp * near * m });
+            }
+            M.Body.applyForce(b.body, p, { x: (Math.random() - 0.5) * c.turbX * m, y: (Math.random() - 0.5) * c.turbY * m });
+          }
+        }
+        // ⑧⑩ 배출: 게이트 열림 시 하단 중앙으로 흡입 (물리 결과로 첫 도달 공 선택)
+        if (this.gateOpen) {
+          const gx = this.cx, gy = this.cy + this.r;
+          for (const b of this.balls) {
+            const p = b.body.position, m = b.body.mass;
+            if (p.y > this.cy) {
+              M.Body.applyForce(b.body, p, { x: (gx - p.x) * 0.00012 * m, y: (gy - p.y) * 0.00006 * m });
+            }
+          }
+        }
+        M.Engine.update(this.engine, 1000 / 60);
+        // ⑥ 원형 벽 반사(반발계수)
+        for (const b of this.balls) {
+          const p = b.body.position;
+          const dx = p.x - this.cx, dy = p.y - this.cy, d = Math.hypot(dx, dy), lim = this.r - c.ballR;
+          if (d > lim) {
+            const nx = dx / d, ny = dy / d;
+            M.Body.setPosition(b.body, { x: this.cx + nx * lim, y: this.cy + ny * lim });
+            const v = b.body.velocity, dot = v.x * nx + v.y * ny;
+            M.Body.setVelocity(b.body, { x: (v.x - 2 * dot * nx) * c.restitution, y: (v.y - 2 * dot * ny) * c.restitution });
+            // ⑤ 접선 성분 → 각속도
+            M.Body.setAngularVelocity(b.body, b.body.angularVelocity + (v.x * ny - v.y * nx) * 0.0009 * c.spin);
+          }
+        }
+        // 배출 판정: 게이트 개방 중 하단 중앙 도달한 첫 공
+        if (this.gateOpen) {
+          const gy = this.cy + this.r;
+          for (let i = 0; i < this.balls.length; i++) {
+            const b = this.balls[i], p = b.body.position;
+            if (p.y > gy - c.ballR * 1.4 && Math.abs(p.x - this.cx) < GATE_W / 2) {
+              this.extract(i);
+              break;
+            }
+          }
+        }
+      } else {
+        this.stepFallback();
+      }
+      // 레일 이동 갱신
+      this.updateRail();
+    }
+
+    // ⑧⑨ 추출 → 레일 → 홀더
+    extract(i) {
+      const b = this.balls[i];
+      this.balls.splice(i, 1);
+      if (this.usePhysics) M.Composite.remove(this.world, b.body);
+      this.gateOpen = false;
+      if (this.onExtract) this.onExtract(b.n);
+      const slot = this.railBalls.length + (this._held || 0);
+      const target = holderPos(slot);
+      const rb = {
+        n: b.n, x: this.cx, y: this.cy + this.r + this.cfg.ballR,
+        angle: this.usePhysics ? b.body.angle : (b.angle || 0), av: 0.16,
+        p0: { x: this.cx, y: this.cy + this.r + this.cfg.ballR },
+        p1: { x: (this.cx + target.x) / 2, y: this.cy + this.r + 78 },
+        p2: target, t: 0, dur: 48, held: false,
+      };
+      this.railBalls.push(rb);
+    }
+
+    updateRail() {
+      for (const rb of this.railBalls) {
+        if (rb.held) continue;
+        rb.t += 1 / rb.dur;
+        if (rb.t >= 1) { rb.t = 1; rb.held = true; rb.x = rb.p2.x; rb.y = rb.p2.y; rb.av = 0; continue; }
+        const e = 1 - Math.pow(1 - rb.t, 3);
+        const u = 1 - e;
+        rb.x = u * u * rb.p0.x + 2 * u * e * rb.p1.x + e * e * rb.p2.x;
+        rb.y = u * u * rb.p0.y + 2 * u * e * rb.p1.y + e * e * rb.p2.y;
+        rb.angle += rb.av * (1 - e * 0.7);
+      }
+    }
+
+    // 폴백 물리(엔진 미로드 시) — 간이 강체
+    stepFallback() {
+      const c = this.cfg;
+      for (const b of this.balls) {
+        b.vy += c.gravity * 0.34;
+        if (this.blowing) {
+          const dfb = (this.cy + this.r) - b.y, near = Math.max(0, 1 - dfb / (this.r * c.blowerZone));
+          if (near > 0 && Math.random() < c.blowerProb) { b.vy -= Math.random() * 4.5 * near; b.vx += (Math.random() - 0.5) * 3.2; }
+          b.vx += (Math.random() - 0.5) * 3.4; b.vy += (Math.random() - 0.5) * 3.0;
+        }
+        const sp = Math.hypot(b.vx, b.vy); if (sp > 17) { b.vx = b.vx / sp * 17; b.vy = b.vy / sp * 17; }
+        b.x += b.vx; b.y += b.vy; b.angle += b.av; b.av *= 0.985;
+        const dx = b.x - this.cx, dy = b.y - this.cy, d = Math.hypot(dx, dy), lim = this.r - c.ballR;
+        if (d > lim) { const nx = dx / d, ny = dy / d; b.x = this.cx + nx * lim; b.y = this.cy + ny * lim; const dot = b.vx * nx + b.vy * ny; b.vx = (b.vx - 2 * dot * nx) * c.restitution; b.vy = (b.vy - 2 * dot * ny) * c.restitution; b.av += (b.vx * ny - b.vy * nx) * 0.012; }
+      }
+      // 간이 볼-볼 충돌
+      for (let i = 0; i < this.balls.length; i++) for (let j = i + 1; j < this.balls.length; j++) {
+        const a = this.balls[i], cc = this.balls[j]; let dx = cc.x - a.x, dy = cc.y - a.y, d = Math.hypot(dx, dy), mn = c.ballR * 2;
+        if (d === 0) { d = 0.01; dx = 0.01; }
+        if (d < mn) { const nx = dx / d, ny = dy / d, ov = mn - d; a.x -= nx * ov / 2; a.y -= ny * ov / 2; cc.x += nx * ov / 2; cc.y += ny * ov / 2; const rvx = cc.vx - a.vx, rvy = cc.vy - a.vy, vn = rvx * nx + rvy * ny; if (vn < 0) { const imp = -(1 + c.restitution) * vn / 2; a.vx -= imp * nx; a.vy -= imp * ny; cc.vx += imp * nx; cc.vy += imp * ny; } }
+      }
+      if (this.gateOpen) {
+        const gy = this.cy + this.r;
+        for (let i = 0; i < this.balls.length; i++) { const b = this.balls[i]; b.vx += (this.cx - b.x) * 0.02; if (b.y > gy - c.ballR * 1.4 && Math.abs(b.x - this.cx) < GATE_W / 2) { this.extract(i); break; } }
+      }
+    }
+
+    ballPose(b) {
+      if (this.usePhysics) return { x: b.body.position.x, y: b.body.position.y, angle: b.body.angle };
+      return { x: b.x, y: b.y, angle: b.angle };
+    }
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // 루프 (고정 타임스텝, requestAnimationFrame)
-  // ─────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════
+  //  렌더링 (드럼 · 게이트 · 레일 · 홀더 · 공)
+  // ═══════════════════════════════════════════════════════════════
+  function drawBall(x, y, n, r, angle) {
+    const g = ctx.createRadialGradient(x - r * 0.34, y - r * 0.34, r * 0.12, x, y, r);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.18, lighten(ballColor(n), 0.35));
+    g.addColorStop(1, ballColor(n));
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+    ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
+    ctx.fillStyle = textColor(n); ctx.font = 'bold ' + Math.round(r * 1.05) + 'px "Malgun Gothic", sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(n), 0, 0.5);
+    ctx.restore();
+  }
+
+  function render(eng) {
+    const c = eng.cfg, cx = eng.cx, cy = eng.cy, r = eng.r;
+    ctx.clearRect(0, 0, LW, LH);
+
+    // 레일 (게이트 → 홀더)
+    ctx.strokeStyle = 'rgba(180,205,235,0.26)'; ctx.lineWidth = c.ballR * 2 + 8; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + r + 4);
+    ctx.quadraticCurveTo(cx, cy + r + 78, (cx + HOLDER_X0) / 2 + 30, HOLDER_Y - 26);
+    ctx.quadraticCurveTo(HOLDER_X0 + 6, HOLDER_Y - 26, HOLDER_X0 + 6 * HOLDER_GAP + 20, HOLDER_Y - 4);
+    ctx.stroke(); ctx.lineCap = 'butt';
+
+    // 홀더 슬롯
+    for (let i = 0; i < TOTAL_DRAW; i++) {
+      const p = holderPos(i), bonus = (i === TOTAL_DRAW - 1);
+      ctx.beginPath(); ctx.arc(p.x, p.y, c.ballR + 4, 0, Math.PI * 2);
+      ctx.fillStyle = bonus ? 'rgba(80,140,255,0.14)' : 'rgba(255,255,255,0.07)'; ctx.fill();
+      ctx.lineWidth = bonus ? 2 : 1; ctx.strokeStyle = bonus ? 'rgba(90,150,255,0.8)' : 'rgba(255,255,255,0.28)'; ctx.stroke();
+    }
+    const pb = holderPos(TOTAL_DRAW - 1);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('+', pb.x - HOLDER_GAP / 2, pb.y);
+
+    // 드럼 유리 본체
+    const gg = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.1, cx, cy, r);
+    gg.addColorStop(0, 'rgba(255,255,255,0.15)'); gg.addColorStop(0.55, 'rgba(150,170,200,0.06)'); gg.addColorStop(1, 'rgba(20,30,50,0.10)');
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = gg; ctx.fill();
+
+    // 드럼 안 공
+    for (const b of eng.balls) { const p = eng.ballPose(b); drawBall(p.x, p.y, b.n, c.ballR, p.angle); }
+
+    // 드럼 프레임(메탈)
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.lineWidth = 5;
+    const rim = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+    rim.addColorStop(0, '#f4f7fb'); rim.addColorStop(0.5, '#aeb8c6'); rim.addColorStop(1, '#7e8a99');
+    ctx.strokeStyle = rim; ctx.stroke(); ctx.lineWidth = 1;
+
+    // 하단 게이트(밸브)
+    const gy = cy + r, spread = eng.gateOpen ? 12 : 2;
+    ctx.strokeStyle = eng.gateOpen ? '#5aa0ff' : '#9aa6b3'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx - GATE_W / 2, gy - 2); ctx.lineTo(cx - GATE_W / 2 - spread, gy + 14);
+    ctx.moveTo(cx + GATE_W / 2, gy - 2); ctx.lineTo(cx + GATE_W / 2 + spread, gy + 14);
+    ctx.stroke(); ctx.lineWidth = 1;
+
+    // 하단 송풍기 노즐 표시
+    if (eng.blowing) {
+      ctx.fillStyle = c.accent + '33';
+      for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(cx + k * 12, gy - 6); ctx.lineTo(cx + k * 12 - 4, gy + 10); ctx.lineTo(cx + k * 12 + 4, gy + 10); ctx.closePath(); ctx.fill(); }
+    }
+
+    // 유리 하이라이트
+    ctx.beginPath(); ctx.ellipse(cx - r * 0.42, cy - r * 0.5, r * 0.26, r * 0.13, -0.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.13)'; ctx.fill();
+
+    // 레일/홀더 위 공
+    for (const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  사운드 (WebAudio — 송풍기 험 · 배출 딩)
+  // ═══════════════════════════════════════════════════════════════
+  const Sound = {
+    ac: null, blowerGain: null, on: true,
+    ensure() {
+      if (this.ac) return;
+      try {
+        this.ac = new (window.AudioContext || window.webkitAudioContext)();
+        // 송풍기: 화이트노이즈 → 로우패스 → 게인
+        const buf = this.ac.createBuffer(1, this.ac.sampleRate * 2, this.ac.sampleRate);
+        const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+        const src = this.ac.createBufferSource(); src.buffer = buf; src.loop = true;
+        const lp = this.ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 380;
+        this.blowerGain = this.ac.createGain(); this.blowerGain.gain.value = 0;
+        src.connect(lp); lp.connect(this.blowerGain); this.blowerGain.connect(this.ac.destination); src.start();
+      } catch (e) { this.ac = null; }
+    },
+    blower(v) { if (this.ac && this.blowerGain) this.blowerGain.gain.setTargetAtTime(this.on ? v : 0, this.ac.currentTime, 0.15); },
+    ding() {
+      if (!this.ac || !this.on) return;
+      const o = this.ac.createOscillator(), g = this.ac.createGain();
+      o.type = 'triangle'; o.frequency.value = 620;
+      g.gain.setValueAtTime(0.0001, this.ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.25, this.ac.currentTime + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, this.ac.currentTime + 0.35);
+      o.connect(g); g.connect(this.ac.destination); o.start(); o.stop(this.ac.currentTime + 0.36);
+    },
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  //  추첨 시퀀스 (⑰ 3초대기→송풍→혼합→추첨→보너스→종료) · 실제 시간
+  // ═══════════════════════════════════════════════════════════════
+  let engine = new MachineEngine(MACHINE_CONFIGS[3]);
+  let currentM = 3;
+  let phase = 'idle';       // idle | wait | mixing | drawing | done
+  let phaseT = 0;           // 프레임 카운트
+  let drawCount = 0;        // 추출된 개수
+  let plan = null;          // 타이밍 계획
+  const statusEl = document.getElementById('status');
+  const timerEl = document.getElementById('timer');
+  const btnStart = document.getElementById('btnStart');
+
+  engine.onExtract = (n) => { Sound.ding(); };
+
+  function setStatus(t) { statusEl.textContent = t; }
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  function startDraw() {
+    if (phase !== 'idle' && phase !== 'done') return;
+    engine.spawnBalls();
+    drawCount = 0;
+    const c = engine.cfg;
+    const total = rand(c.totalSec[0], c.totalSec[1]);
+    const mixSec = total * c.mixRatio;
+    const drawSpan = total - 3 - mixSec;              // 추출 구간
+    const gap = Math.max(1.0, drawSpan / TOTAL_DRAW);
+    plan = { total, waitF: Math.round(3 * 60), mixF: Math.round(mixSec * 60), gapF: Math.round(gap * 60), startTime: performance.now() };
+    phase = 'wait'; phaseT = 0;
+    engine.blowing = false; engine.gateOpen = false;
+    btnStart.disabled = true;
+    Sound.ensure();
+    setStatus('추첨 준비 — 3초 대기…');
+  }
+
+  function reset() {
+    phase = 'idle'; phaseT = 0; drawCount = 0;
+    engine.spawnBalls(); engine.blowing = false; engine.gateOpen = false;
+    Sound.blower(0);
+    btnStart.disabled = false;
+    setStatus('추첨기를 선택하고 [추첨 시작]을 누르세요');
+    timerEl.textContent = '';
+  }
+
+  function selectMachine(m) {
+    if (phase !== 'idle' && phase !== 'done') return;
+    currentM = m;
+    engine = new MachineEngine(MACHINE_CONFIGS[m]);
+    engine.onExtract = () => Sound.ding();
+    document.querySelectorAll('.mbtn').forEach(el => el.classList.toggle('active', +el.dataset.m === m));
+    reset();
+  }
+
+  // 시퀀스 진행 (매 프레임)
+  function tickSequence() {
+    if (phase === 'idle' || phase === 'done') return;
+    phaseT++;
+    const c = engine.cfg;
+    if (phase === 'wait') {
+      const left = Math.ceil((plan.waitF - phaseT) / 60);
+      setStatus('추첨 준비 — ' + Math.max(0, left) + '초');
+      if (phaseT >= plan.waitF) { phase = 'mixing'; phaseT = 0; engine.blowing = true; Sound.blower(0.16); setStatus('송풍기 가동 — 혼합 중…'); }
+    } else if (phase === 'mixing') {
+      setStatus('송풍기 가동 — 혼합 중…');
+      if (phaseT >= plan.mixF) { phase = 'drawing'; phaseT = 0; engine.gateOpen = true; setStatus('1번째 공 추첨 중…'); }
+    } else if (phase === 'drawing') {
+      // onExtract 로 drawCount 증가 감지
+      const held = engine.railBalls.length;
+      if (held > drawCount) {
+        drawCount = held;
+        if (drawCount >= TOTAL_DRAW) {
+          phase = 'done'; engine.blowing = false; engine.gateOpen = false; Sound.blower(0);
+          const nums = engine.railBalls.map(b => b.n);
+          setStatus('추첨 종료 — ' + nums.slice(0, 6).join(', ') + ' + ' + nums[6]);
+          btnStart.disabled = false;
+          notifyParent(nums);
+        } else {
+          engine.gateOpen = false; phaseT = 0;
+        }
+      }
+      if (phase === 'drawing') {
+        if (drawCount < TOTAL_DRAW && !engine.gateOpen && phaseT >= plan.gapF) {
+          engine.gateOpen = true;
+          const label = drawCount === TOTAL_DRAW - 1 ? '보너스 볼 추첨 중…' : (drawCount + 1) + '번째 공 추첨 중…';
+          setStatus(label);
+        }
+      }
+    }
+    if (plan) {
+      const el = ((performance.now() - plan.startTime) / 1000).toFixed(1);
+      timerEl.textContent = '경과 ' + el + 's / 예상 ' + plan.total.toFixed(0) + 's · ' + c.name;
+    }
+  }
+
+  function notifyParent(nums) {
+    try { window.parent && window.parent.postMessage({ type: 'venus-draw', machine: currentM, numbers: nums }, '*'); } catch (e) {}
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  메인 루프 (⑬ 고정 60fps 물리 + 렌더)
+  // ═══════════════════════════════════════════════════════════════
   let acc = 0, last = 0;
   const STEP = 1000 / 60;
   function loop(ts) {
     if (!last) last = ts;
-    acc += Math.min(100, ts - last);
-    last = ts;
-    let iters = 0;
-    while (acc >= STEP && iters < 5) { physics(); acc -= STEP; iters++; }
-    render();
+    acc += Math.min(80, ts - last); last = ts;
+    let it = 0;
+    while (acc >= STEP && it < 4) { engine.step(); tickSequence(); acc -= STEP; it++; }
+    render(engine);
     requestAnimationFrame(loop);
   }
 
-  // ─────────────────────────────────────────────────────────────
   // UI
-  // ─────────────────────────────────────────────────────────────
-  const btnMix = document.getElementById('btnMix');
-  const btnDraw = document.getElementById('btnDraw');
-  const btnReset = document.getElementById('btnReset');
-
-  btnMix.addEventListener('click', () => {
-    mixing = !mixing;
-    btnMix.classList.toggle('on', mixing);
-    btnMix.textContent = mixing ? '혼합 정지' : '혼합 시작';
-    btnDraw.disabled = !(mixing && drawn.length < TOTAL_DRAW);
-    setStatus(mixing ? '드럼 교반 중… 번호 추출을 누르세요' : '혼합 정지');
+  document.querySelectorAll('.mbtn').forEach(el => el.addEventListener('click', () => selectMachine(+el.dataset.m)));
+  btnStart.addEventListener('click', startDraw);
+  document.getElementById('btnReset').addEventListener('click', reset);
+  document.getElementById('sndBtn').addEventListener('click', function () {
+    Sound.ensure(); Sound.on = !Sound.on; this.textContent = Sound.on ? '🔊' : '🔇';
+    if (!Sound.on) Sound.blower(0); else if (engine.blowing) Sound.blower(0.16);
   });
 
-  btnDraw.addEventListener('click', () => {
-    if (!mixing || drawn.length >= TOTAL_DRAW || drawRequest) return;
-    drawRequest = true;
-    GATE.open = true;                 // 게이트 개방 — 하단 도달 첫 공이 낙하
-    setStatus('하단 게이트 개방 — 낙하 대기…');
-  });
-
-  btnReset.addEventListener('click', reset);
-
-  reset();
+  if (!hasMatter) setStatus('물리엔진 로드 실패 — 폴백 물리로 동작합니다');
   requestAnimationFrame(loop);
 })();
 </script>

@@ -66,11 +66,11 @@ export default function MachineDrawSimulator() {
         🎰 로또 추첨기 (Editec Venus VIII 재현)
       </Typography>
       <Typography variant="caption" sx={{ color: '#cbd5e1', display: 'block', mb: 1.5 }}>
-        실제 동행복권 추첨기와 동일한 물리 — 45개 볼이 공기압으로 드럼을 사방으로 튕기며 섞이고,
-        하단 게이트가 열리면 공이 낙하해 레일을 타고 추출됩니다. (혼합 시작 → 번호 추출)
+        Matter.js 물리엔진 기반 — 1·2·3호기 각각 드럼 크기·송풍세기·추첨시간이 다릅니다. 45개 볼이
+        공기압으로 사방으로 튕기며 섞이고, 하단 게이트로 낙하해 레일로 추출됩니다(번호는 물리 결과로 결정).
       </Typography>
 
-      {/* 물리 추첨기 (단일 HTML, 하단 배출식) */}
+      {/* Matter.js 물리 추첨기 (1/2/3호기, 하단 배출식) */}
       <Box
         sx={{
           borderRadius: 2,
@@ -81,9 +81,9 @@ export default function MachineDrawSimulator() {
         }}
       >
         <iframe
-          title="Venus VIII 로또 추첨기"
+          title="동행복권 로또 추첨기 (1/2/3호기)"
           src="/venus-machine.html"
-          style={{ display: 'block', width: '100%', height: 780, border: 0 }}
+          style={{ display: 'block', width: '100%', height: 820, border: 0 }}
           scrolling="no"
         />
       </Box>

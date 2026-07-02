@@ -143,9 +143,9 @@
     // ⑧ 배출: 상단 배출구 → 디스크 우측 → 외부 레일 하강 → 홀더
     extract(i){ const b=this.balls[i]; this.balls.splice(i,1);
       if(this.usePhysics) M.Composite.remove(this.world,b.body); this.gateOpen=false;
-      const slot=this.railBalls.length, tgt=holderPos(slot), ex=this.exitPt(), dR=this.discR();
+      const slot=this.railBalls.length, tgt=holderPos(slot), ex=this.exitPt();
       this.railBalls.push({ n:b.n, x:ex.x, y:ex.y, angle:this.usePhysics?b.body.angle:(b.angle||0), av:0.16,
-        path:[ {x:ex.x, y:ex.y-4}, {x:this.cx+dR*0.9, y:this.cy-this.r*0.34}, {x:this.cx+this.r+14, y:this.cy-this.r*0.15},
+        path:[ {x:ex.x, y:ex.y-6}, {x:this.cx+this.r+14, y:this.cy-this.r*0.15},
                {x:this.cx+this.r+14, y:this.cy+this.r*0.55}, {x:(this.cx+this.r+14+tgt.x)/2, y:HOLDER_Y-40}, tgt ],
         wp:0, spd:4.4, held:false });
       if(this.onExtract) this.onExtract(b.n); }
@@ -186,7 +186,7 @@
   function perfNow(){ return (typeof performance!=='undefined')?performance.now():Date.now(); }
 
   function render(eng){ const c=eng.cfg,cx=eng.cx,cy=eng.cy,r=eng.r,gy=cy+r; ctx.clearRect(0,0,LW,LH);
-    const ex=eng.exitPt(), dc=eng.discPt(), dR=eng.discR();
+    const ex=eng.exitPt();
 
     // 그림자
     ctx.save(); ctx.filter='blur(6px)'; ctx.beginPath(); ctx.ellipse(cx, gy+96, r*0.85, 14, 0, 0, Math.PI*2); ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fill(); ctx.restore();
@@ -201,7 +201,7 @@
 
     // 외부 하강 레일 (상단 배출구 → 우측 → 하단 홀더)
     ctx.strokeStyle='rgba(190,212,240,0.26)'; ctx.lineWidth=c.ballR*2+8; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(cx+dR*0.9, cy-r*0.34);
+    ctx.beginPath(); ctx.moveTo(ex.x+8, ex.y+2);
     ctx.quadraticCurveTo(cx+r+30, cy-r*0.3, cx+r+14, cy+r*0.2);
     ctx.quadraticCurveTo(cx+r+8, cy+r*0.8, (cx+r+14+HOLDER_X0+6*HOLDER_GAP)/2, HOLDER_Y-30);
     ctx.quadraticCurveTo(HOLDER_X0+6*HOLDER_GAP, HOLDER_Y-14, HOLDER_X0+4, HOLDER_Y-4);
@@ -226,15 +226,8 @@
     gg.addColorStop(0,'rgba(255,255,255,0.16)'); gg.addColorStop(0.5,'rgba(150,175,210,0.06)'); gg.addColorStop(0.86,'rgba(30,42,66,0.05)'); gg.addColorStop(1,'rgba(90,110,140,0.14)');
     ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=gg; ctx.fill();
 
-    // 드럼 안 공
+    // 드럼 안 공 (air-mix: 내부엔 공만 존재 — 회전 블레이드/축 없음)
     for(const b of eng.balls){ const p=eng.ballPose(b); drawBall(p.x,p.y,b.n,c.ballR,p.angle); }
-
-    // 상단 4구멍 회전 디스크 (배출 게이팅)
-    ctx.save(); ctx.translate(dc.x, dc.y);
-    ctx.beginPath(); ctx.ellipse(0,0,dR,dR*0.30,0,0,Math.PI*2); ctx.fillStyle='rgba(210,226,246,0.20)'; ctx.fill(); ctx.strokeStyle='rgba(185,205,230,0.68)'; ctx.lineWidth=2; ctx.stroke();
-    for(let k=0;k<4;k++){ const a=eng.disc+k*Math.PI/2; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Math.cos(a)*dR, Math.sin(a)*dR*0.30); ctx.strokeStyle='rgba(170,192,220,0.85)'; ctx.lineWidth=2; ctx.stroke(); }
-    for(let k=0;k<4;k++){ const a=eng.disc+Math.PI/4+k*Math.PI/2; ctx.beginPath(); ctx.ellipse(Math.cos(a)*dR*0.6, Math.sin(a)*dR*0.30*0.6, 8, 4.5, 0, 0, Math.PI*2); ctx.fillStyle='rgba(15,25,40,0.5)'; ctx.fill(); }
-    ctx.restore(); ctx.lineWidth=1;
 
     // 드럼 내부 림
     ctx.beginPath(); ctx.arc(cx,cy,r-1,0,Math.PI*2); ctx.lineWidth=3; ctx.strokeStyle='rgba(210,225,242,0.32)'; ctx.stroke(); ctx.lineWidth=1;
@@ -251,7 +244,7 @@
     for(const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
 
     // 버전 표시
-    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('상단배출v3 · '+c.name, LW-8, LH-6);
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('airmix v4 · '+c.name, LW-8, LH-6);
 
     // 디버그
     if(DEBUG){ ctx.fillStyle='rgba(0,0,0,0.55)'; roundRectPath(8,8,152,92,8); ctx.fill();

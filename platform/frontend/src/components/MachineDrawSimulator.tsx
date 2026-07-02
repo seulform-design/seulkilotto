@@ -49,14 +49,14 @@ function slotPos(i: number) {
 const GRAVITY = 0.34;
 const DAMP = 0.985;
 const MAX_V = 9;
-const LIFT = 0.45; // 중앙 컬럼 퍼올림(과하면 볼이 구 전체를 채워 디스크를 덮음)
+const LIFT = 0.5; // 중앙 컬럼 퍼올림(과하면 볼이 구 전체를 채워 디스크를 덮음)
 const CHURN = 1.0; // 회전 난류
-const CENTER_PULL = 0.024; // 중심축으로 모으는 힘(세로 컬럼 형성)
-const LIFT_ZONE = 32; // 퍼올림 존(중심축 근처)
-const SPILL = 0.45; // 상단 도달 시 바깥 분출(cascade → 분수형 순환)
-const CEIL = CY - R * 0.42; // 볼 천장 — 상단(디스크 영역)을 비워 디스크가 볼 위로 드러남
-const DISC_R = R * 0.42; // 4구멍 추출 디스크 반지름
-const DISC_DY = -R * 0.72; // 디스크 높이(구 상단 — 공 도는 영역 바깥/위)
+const CENTER_PULL = 0.02; // 중심축으로 모으는 힘(세로 컬럼 형성)
+const LIFT_ZONE = 34; // 퍼올림 존(중심축 근처)
+const SPILL = 0.4; // 상단 도달 시 바깥 분출(cascade → 분수형 순환)
+const CEIL = CY - R * 0.38; // 볼 천장 — 디스크 아래로 볼을 가둠(상단 비움)
+const DISC_R = R * 0.82; // 구를 감싸는 큰 회전 디스크(구 폭 가로지름)
+const DISC_DY = -R * 0.5; // 디스크 높이(상단 — 볼은 그 아래에서 섞임)
 
 type BallState = 'mix' | 'rising' | 'racked';
 interface Ball {

@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Venus VIII 로또 추첨기 시뮬레이터</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: radial-gradient(circle at 50% 30%, #1a2233 0%, #111622 70%);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  #wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 12px; }
+  canvas { display: block; border-radius: 16px; }
+  #controls { display: flex; gap: 10px; }
+  button {
+    font-family: inherit; font-weight: 700; font-size: 14px;
+    color: #e8eef5; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.16); border-radius: 10px;
+    padding: 11px 20px; cursor: pointer; letter-spacing: 0.3px;
+    transition: background .15s, transform .05s, border-color .15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:hover { background: rgba(255,255,255,0.12); }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  #btnMix.on { background: #1976D2; border-color: #1976D2; }
+  #btnDraw { background: #D32F2F; border-color: #D32F2F; }
+  #btnDraw:hover { background: #e14b4b; }
+  #status { color: #8b95a5; font-size: 12.5px; height: 16px; letter-spacing: .2px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div id="controls">
+    <button id="btnMix">혼합 시작</button>
+    <button id="btnDraw" disabled>번호 추출</button>
+    <button id="btnReset">초기화</button>
+  </div>
+  <div id="status">혼합 시작을 눌러 추첨기를 가동하세요</div>
+</div>
+
+<script>
+'use strict';
+(function () {
+  // ─────────────────────────────────────────────────────────────
+  // 캔버스 / DPR 스케일링
+  // ─────────────────────────────────────────────────────────────
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const LW = 480, LH = 700;           // 논리 좌표계
+  let DPR = Math.max(1, window.devicePixelRatio || 1);
+  function setupCanvas() {
+    DPR = Math.max(1, window.devicePixelRatio || 1);
+    cv.width = Math.round(LW * DPR);
+    cv.height = Math.round(LH * DPR);
+    cv.style.width = LW + 'px';
+    cv.style.height = LH + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  setupCanvas();
+  window.addEventListener('resize', setupCanvas);
+
+  // ─────────────────────────────────────────────────────────────
+  // 기하 구조 (드럼 · 하단 게이트 · 레일 · 홀더)
+  // ─────────────────────────────────────────────────────────────
+  const DRUM = { cx: 240, cy: 210, r: 158 };
+  const BALL_R = 14;                              // 드럼 반경의 약 1/11
+  const GATE = { x: DRUM.cx, y: DRUM.cy + DRUM.r, w: 40, open: false };
+  const HOLDER_Y = 648;
+  const HOLDER_X0 = 46;
+  const HOLDER_GAP = 62;                          // 7칸: 46 … 418
+  const TOTAL_DRAW = 7;                           // 당첨 6 + 보너스 1
+
+  function holderPos(i) {
+    return { x: HOLDER_X0 + i * HOLDER_GAP, y: HOLDER_Y };
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 색상 (한국 동행복권 공식 규칙)
+  // ─────────────────────────────────────────────────────────────
+  function ballColor(n) {
+    if (n <= 10) return '#FBC02D';   // 노랑
+    if (n <= 20) return '#1976D2';   // 파랑
+    if (n <= 30) return '#D32F2F';   // 빨강
+    if (n <= 40) return '#757575';   // 그레이
+    return '#388E3C';                // 녹색
+  }
+  function textColor(n) {
+    // 파랑/빨강/그레이/녹색은 흰 숫자, 노랑은 진한 숫자
+    return (n <= 10) ? '#2a2a2a' : '#ffffff';
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 물리 파라미터
+  // ─────────────────────────────────────────────────────────────
+  const GRAVITY = 0.30;
+  const RESTITUTION = 0.88;     // 볼-볼 반발(탄성)
+  const WALL_REST = 0.85;       // 벽 반발
+  const MAX_SPEED = 16;
+  const AIR_UP = 4.2;           // 하단 에어젯 상방(노즐)
+  const AIR_SIDE = 3.0;         // 에어젯 좌우
+  const TURB_X = 3.5;           // 전역 난류 X
+  const TURB_Y = 3.0;           // 전역 난류 Y
+  const AIR_ZONE = 0.45;        // 노즐 영향 구간(하단 비율)
+  const AIR_PROB = 0.6;         // 노즐 분사 확률
+
+  // ─────────────────────────────────────────────────────────────
+  // 볼
+  // ─────────────────────────────────────────────────────────────
+  // state: 'drum' | 'dropping' | 'held'
+  class Ball {
+    constructor(n) {
+      this.n = n;
+      this.r = BALL_R;
+      this.x = 0; this.y = 0;
+      this.vx = 0; this.vy = 0;
+      this.angle = Math.random() * Math.PI * 2;
+      this.av = 0;
+      this.state = 'drum';
+      this.color = ballColor(n);
+      this.tcolor = textColor(n);
+      this.slot = -1;
+      // 낙하/레일 애니메이션용
+      this.p0 = null; this.p1 = null; this.p2 = null; this.t = 0; this.dur = 1;
+    }
+  }
+
+  let balls = [];
+  let drawn = [];            // 추출 순서
+  let mixing = false;
+  let drawRequest = false;   // 게이트 개방 요청(다음 1개 추출)
+  let statusEl = document.getElementById('status');
+
+  // ─────────────────────────────────────────────────────────────
+  // 초기화 — 45개 공을 드럼 하단에 정렬 대기
+  // ─────────────────────────────────────────────────────────────
+  function reset() {
+    balls = [];
+    drawn = [];
+    mixing = false;
+    drawRequest = false;
+    GATE.open = false;
+    const perRow = 9;
+    let idx = 0;
+    for (let n = 1; n <= 45; n++) {
+      const b = new Ball(n);
+      const row = Math.floor(idx / perRow);
+      const col = idx % perRow;
+      const spanW = (perRow - 1) * (BALL_R * 2 + 1);
+      b.x = DRUM.cx - spanW / 2 + col * (BALL_R * 2 + 1);
+      b.y = DRUM.cy + DRUM.r - BALL_R - 6 - row * (BALL_R * 2 + 1);
+      b.vx = (Math.random() - 0.5) * 0.5;
+      b.vy = 0;
+      balls.push(b);
+      idx++;
+    }
+    btnMix.classList.remove('on');
+    btnMix.textContent = '혼합 시작';
+    btnDraw.disabled = true;
+    setStatus('혼합 시작을 눌러 추첨기를 가동하세요');
+  }
+
+  function setStatus(t) { statusEl.textContent = t; }
+
+  // ─────────────────────────────────────────────────────────────
+  // 물리 스텝
+  // ─────────────────────────────────────────────────────────────
+  function stepDrumBall(b) {
+    b.vy += GRAVITY;
+
+    if (mixing) {
+      // 하단 중앙 에어젯(노즐): 하단 부근만 간헐적으로 강하게 쳐올림
+      const bottom = DRUM.cy + DRUM.r;
+      const near = Math.max(0, 1 - (bottom - b.y) / (DRUM.r * AIR_ZONE));
+      if (near > 0 && Math.random() < AIR_PROB) {
+        b.vy -= Math.random() * AIR_UP * near;
+        b.vx += (Math.random() - 0.5) * AIR_SIDE;
+      }
+      // 전역 난류 — 드럼 전체로 사방 튕김
+      b.vx += (Math.random() - 0.5) * TURB_X;
+      b.vy += (Math.random() - 0.5) * TURB_Y;
+    }
+
+    // 속도 제한
+    const sp = Math.hypot(b.vx, b.vy);
+    if (sp > MAX_SPEED) { b.vx = b.vx / sp * MAX_SPEED; b.vy = b.vy / sp * MAX_SPEED; }
+
+    b.x += b.vx;
+    b.y += b.vy;
+    b.angle += b.av;
+    b.av *= 0.985;
+
+    // 드럼 벽(원) 충돌 — 단, 하단 게이트가 열려있고 볼이 게이트 통과 지점이면 추출
+    const dx = b.x - DRUM.cx, dy = b.y - DRUM.cy;
+    const d = Math.hypot(dx, dy);
+    const lim = DRUM.r - b.r;
+    if (d > lim) {
+      const passGate = GATE.open && drawRequest &&
+        dy > 0 && Math.abs(b.x - GATE.x) < GATE.w / 2;
+      if (passGate) {
+        beginExtract(b);
+        return;
+      }
+      const nx = dx / d, ny = dy / d;
+      b.x = DRUM.cx + nx * lim;
+      b.y = DRUM.cy + ny * lim;
+      const dot = b.vx * nx + b.vy * ny;
+      b.vx = (b.vx - 2 * dot * nx) * WALL_REST;
+      b.vy = (b.vy - 2 * dot * ny) * WALL_REST;
+      // 접선 성분 → 각속도(회전) 부여
+      b.av += (b.vx * ny - b.vy * nx) * 0.012;
+    }
+  }
+
+  // 볼-볼 탄성 충돌 + 위치 보정(중첩 방지)
+  function resolveCollisions() {
+    const drumBalls = balls.filter(b => b.state === 'drum');
+    for (let i = 0; i < drumBalls.length; i++) {
+      const a = drumBalls[i];
+      for (let j = i + 1; j < drumBalls.length; j++) {
+        const c = drumBalls[j];
+        let dx = c.x - a.x, dy = c.y - a.y;
+        let d = Math.hypot(dx, dy);
+        const min = a.r + c.r;
+        if (d === 0) { d = 0.01; dx = 0.01; }
+        if (d < min) {
+          const nx = dx / d, ny = dy / d;
+          // 위치 보정: 겹침의 절반씩 밀어냄
+          const overlap = (min - d);
+          a.x -= nx * overlap / 2; a.y -= ny * overlap / 2;
+          c.x += nx * overlap / 2; c.y += ny * overlap / 2;
+          // 상대 속도의 법선 성분
+          const rvx = c.vx - a.vx, rvy = c.vy - a.vy;
+          const vn = rvx * nx + rvy * ny;
+          if (vn < 0) {
+            const imp = -(1 + RESTITUTION) * vn / 2; // 동일 질량
+            a.vx -= imp * nx; a.vy -= imp * ny;
+            c.vx += imp * nx; c.vy += imp * ny;
+            // 회전 전달
+            const tang = -rvx * ny + rvy * nx;
+            a.av -= tang * 0.004; c.av += tang * 0.004;
+          }
+        }
+      }
+    }
+  }
+
+  // 추출 시작 — 게이트 아래로 낙하 후 레일 타고 홀더로
+  function beginExtract(b) {
+    b.state = 'dropping';
+    b.slot = drawn.length;
+    drawn.push(b);
+    GATE.open = false;
+    drawRequest = false;
+    const target = holderPos(b.slot);
+    // 베지어: 게이트 → (드럼 아래 곡선) → 홀더 슬롯
+    b.p0 = { x: GATE.x, y: DRUM.cy + DRUM.r + b.r };
+    b.p1 = { x: (GATE.x + target.x) / 2, y: DRUM.cy + DRUM.r + 90 };
+    b.p2 = { x: target.x, y: target.y };
+    b.t = 0;
+    b.dur = 46 + Math.abs(b.slot - 3) * 4; // 프레임 수(감속 연출)
+    b.av = 0.14;                            // 구르는 회전
+    if (drawn.length >= TOTAL_DRAW) {
+      btnDraw.disabled = true;
+      setStatus('추첨 완료 — 당첨 6 + 보너스 1');
+    } else {
+      setStatus(`${drawn.length}개 추출 · 남은 ${TOTAL_DRAW - drawn.length}`);
+    }
+  }
+
+  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+  function bezier(p0, p1, p2, t) {
+    const u = 1 - t;
+    return {
+      x: u * u * p0.x + 2 * u * t * p1.x + t * t * p2.x,
+      y: u * u * p0.y + 2 * u * t * p1.y + t * t * p2.y,
+    };
+  }
+
+  function stepDroppingBall(b) {
+    b.t += 1 / b.dur;
+    if (b.t >= 1) {
+      b.t = 1; b.state = 'held';
+      const target = holderPos(b.slot);
+      b.x = target.x; b.y = target.y; b.av = 0;
+      return;
+    }
+    const e = easeOutCubic(b.t);
+    const p = bezier(b.p0, b.p1, b.p2, e);
+    b.x = p.x; b.y = p.y;
+    b.angle += b.av * (1 - e * 0.7); // 굴러가며 감속
+  }
+
+  function physics() {
+    for (const b of balls) {
+      if (b.state === 'drum') stepDrumBall(b);
+      else if (b.state === 'dropping') stepDroppingBall(b);
+    }
+    resolveCollisions();
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 렌더
+  // ─────────────────────────────────────────────────────────────
+  function drawRail() {
+    // 게이트 아래 → 홀더로 흐르는 투명 아크릴 가이드(대략적인 포장)
+    ctx.save();
+    ctx.strokeStyle = 'rgba(180,205,235,0.28)';
+    ctx.lineWidth = BALL_R * 2 + 8;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(GATE.x, DRUM.cy + DRUM.r + 6);
+    ctx.quadraticCurveTo(GATE.x, DRUM.cy + DRUM.r + 96, (GATE.x + HOLDER_X0) / 2 + 40, HOLDER_Y - 28);
+    ctx.quadraticCurveTo(HOLDER_X0 + 10, HOLDER_Y - 30, HOLDER_X0 + 6 * HOLDER_GAP + 20, HOLDER_Y - 6);
+    ctx.stroke();
+    // 내부 밝은 심
+    ctx.strokeStyle = 'rgba(210,228,246,0.12)';
+    ctx.lineWidth = BALL_R * 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawHolder() {
+    for (let i = 0; i < TOTAL_DRAW; i++) {
+      const p = holderPos(i);
+      const isBonus = (i === TOTAL_DRAW - 1);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, BALL_R + 4, 0, Math.PI * 2);
+      ctx.fillStyle = isBonus ? 'rgba(80,140,255,0.14)' : 'rgba(255,255,255,0.07)';
+      ctx.fill();
+      ctx.lineWidth = isBonus ? 2 : 1;
+      ctx.strokeStyle = isBonus ? 'rgba(90,150,255,0.8)' : 'rgba(255,255,255,0.28)';
+      ctx.stroke();
+    }
+    // 보너스 구분자 '+'
+    const pb = holderPos(TOTAL_DRAW - 1);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('+', pb.x - HOLDER_GAP / 2, pb.y);
+  }
+
+  function drawDrum() {
+    const { cx, cy, r } = DRUM;
+    // 유리구 본체 (글래스모피즘)
+    const g = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.1, cx, cy, r);
+    g.addColorStop(0, 'rgba(255,255,255,0.16)');
+    g.addColorStop(0.55, 'rgba(150,170,200,0.06)');
+    g.addColorStop(1, 'rgba(20,30,50,0.10)');
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+  }
+
+  function drawDrumFrame() {
+    const { cx, cy, r } = DRUM;
+    // 메탈/실버 프레임 (드럼 위로)
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.lineWidth = 5;
+    const rim = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+    rim.addColorStop(0, '#f4f7fb');
+    rim.addColorStop(0.5, '#aeb8c6');
+    rim.addColorStop(1, '#7e8a99');
+    ctx.strokeStyle = rim;
+    ctx.stroke();
+    ctx.lineWidth = 1;
+
+    // 상단 고정 마운트(중심축 상부) — 회전판 없음, 단순 지지
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - r - 4, 20, 9, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#cbd4de'; ctx.fill();
+    ctx.strokeStyle = '#8a95a2'; ctx.stroke();
+
+    // 하단 게이트 밸브
+    const gy = cy + r;
+    ctx.save();
+    ctx.strokeStyle = GATE.open ? '#5aa0ff' : '#9aa6b3';
+    ctx.lineWidth = 3;
+    // 좌/우 게이트 도어 (열리면 벌어짐)
+    const spread = GATE.open ? 12 : 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - GATE.w / 2, gy - 2);
+    ctx.lineTo(cx - GATE.w / 2 - spread, gy + 14);
+    ctx.moveTo(cx + GATE.w / 2, gy - 2);
+    ctx.lineTo(cx + GATE.w / 2 + spread, gy + 14);
+    ctx.stroke();
+    ctx.restore();
+
+    // 유리 하이라이트
+    ctx.beginPath();
+    ctx.ellipse(cx - r * 0.42, cy - r * 0.5, r * 0.26, r * 0.14, -0.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    ctx.fill();
+
+    // 중심 고정 핀(축)
+    ctx.beginPath();
+    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(200,212,224,0.5)';
+    ctx.fill();
+  }
+
+  function drawBall(b) {
+    const r = b.r;
+    // 3D 라디얼 그라디언트
+    const g = ctx.createRadialGradient(b.x - r * 0.34, b.y - r * 0.34, r * 0.12, b.x, b.y, r);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.18, lighten(b.color, 0.35));
+    g.addColorStop(1, b.color);
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+    // 숫자(공과 함께 회전)
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(b.angle);
+    ctx.fillStyle = b.tcolor;
+    ctx.font = 'bold ' + Math.round(r * 1.05) + 'px "Malgun Gothic", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(b.n), 0, 0.5);
+    ctx.restore();
+  }
+
+  function lighten(hex, amt) {
+    const n = parseInt(hex.slice(1), 16);
+    let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    r = Math.round(r + (255 - r) * amt);
+    g = Math.round(g + (255 - g) * amt);
+    b = Math.round(b + (255 - b) * amt);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, LW, LH);
+    drawRail();
+    drawHolder();
+    drawDrum();                                  // 유리 본체(볼 뒤)
+    for (const b of balls) if (b.state === 'drum') drawBall(b);   // 드럼 안 볼
+    drawDrumFrame();                             // 프레임/하이라이트(볼 위 유리감)
+    for (const b of balls) if (b.state !== 'drum') drawBall(b);   // 배출/홀더 볼
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 루프 (고정 타임스텝, requestAnimationFrame)
+  // ─────────────────────────────────────────────────────────────
+  let acc = 0, last = 0;
+  const STEP = 1000 / 60;
+  function loop(ts) {
+    if (!last) last = ts;
+    acc += Math.min(100, ts - last);
+    last = ts;
+    let iters = 0;
+    while (acc >= STEP && iters < 5) { physics(); acc -= STEP; iters++; }
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // UI
+  // ─────────────────────────────────────────────────────────────
+  const btnMix = document.getElementById('btnMix');
+  const btnDraw = document.getElementById('btnDraw');
+  const btnReset = document.getElementById('btnReset');
+
+  btnMix.addEventListener('click', () => {
+    mixing = !mixing;
+    btnMix.classList.toggle('on', mixing);
+    btnMix.textContent = mixing ? '혼합 정지' : '혼합 시작';
+    btnDraw.disabled = !(mixing && drawn.length < TOTAL_DRAW);
+    setStatus(mixing ? '드럼 교반 중… 번호 추출을 누르세요' : '혼합 정지');
+  });
+
+  btnDraw.addEventListener('click', () => {
+    if (!mixing || drawn.length >= TOTAL_DRAW || drawRequest) return;
+    drawRequest = true;
+    GATE.open = true;                 // 게이트 개방 — 하단 도달 첫 공이 낙하
+    setStatus('하단 게이트 개방 — 낙하 대기…');
+  });
+
+  btnReset.addEventListener('click', reset);
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

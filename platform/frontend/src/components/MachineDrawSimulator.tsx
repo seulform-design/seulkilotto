@@ -66,11 +66,11 @@ export default function MachineDrawSimulator() {
         🎰 로또 추첨기 (Editec Venus VIII 재현)
       </Typography>
       <Typography variant="caption" sx={{ color: '#cbd5e1', display: 'block', mb: 1.5 }}>
-        Matter.js 물리엔진 기반 — 1·2·3호기 각각 드럼 크기·송풍세기·추첨시간이 다릅니다. 45개 볼이
-        공기압으로 사방으로 튕기며 섞이고, 하단 게이트로 낙하해 레일로 추출됩니다(번호는 물리 결과로 결정).
+        Matter.js 물리엔진 기반 — 1·2·3호기 각각 드럼 크기·송풍세기·추첨시간이 다릅니다. 하단 송풍기로
+        45개 볼이 위로 솟구쳐 순환하고, 상단 4구멍 회전 디스크로 빨려 올라가 레일을 타고 추출됩니다(번호는 물리 결과로 결정).
       </Typography>
 
-      {/* Matter.js 물리 추첨기 (1/2/3호기, 하단 배출식) */}
+      {/* Matter.js 물리 추첨기 (1/2/3호기, 상단 배출식) */}
       <Box
         sx={{
           borderRadius: 2,

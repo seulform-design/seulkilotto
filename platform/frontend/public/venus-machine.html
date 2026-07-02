@@ -7,13 +7,10 @@
 <style>
   :root { color-scheme: dark; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body {
-    width: 100%; min-height: 100%;
-    background: radial-gradient(circle at 50% 22%, #1b2438 0%, #0f1420 74%);
+  html, body { width: 100%; min-height: 100%; background: radial-gradient(circle at 50% 20%, #1b2438 0%, #0f1420 74%);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', sans-serif;
-    display: flex; align-items: flex-start; justify-content: center; overflow: hidden; color: #e8eef5;
-  }
-  #wrap { display: flex; flex-direction: column; align-items: center; gap: 11px; padding: 12px; }
+    display: flex; align-items: flex-start; justify-content: center; overflow: hidden; color: #e8eef5; }
+  #wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px; }
   canvas { display: block; border-radius: 16px; }
   #machineSel { display: flex; gap: 8px; }
   .mbtn { font-weight: 800; font-size: 14px; color: #cbd5e1; background: rgba(255,255,255,0.05);
@@ -60,423 +57,248 @@
   const hasMatter = typeof window.Matter !== 'undefined';
   const M = window.Matter || null;
 
-  // ═══════════════════════════════════════════════════════════════
-  //  머신 설정 (machine1/2/3.json 상당) — 공통 MachineEngine 이 소비
-  //  실제 영상 기반: 드럼크기·송풍(제트)세기·반발·마찰·회전·추첨시간이 상이
-  // ═══════════════════════════════════════════════════════════════
+  // ═══ 머신 설정 (machine1/2/3.json 상당) — 공통 MachineEngine 소비 ═══
   const MACHINE_CONFIGS = {
-    1: { name:'1호기', accent:'#E8570D',
-      drumR:164, ballR:12, gravity:1.05, restitution:0.93, friction:0.0004, frictionAir:0.0034, density:0.0012,
-      jet:0.088, jetW:0.20, turb:0.006, spin:1.25,        // 좁고 강한 송풍·빠른 회전
-      totalSec:[18,22], mixRatio:0.40 },
-    2: { name:'2호기', accent:'#0D8A3E',
-      drumR:178, ballR:12, gravity:1.10, restitution:0.88, friction:0.0008, frictionAir:0.0042, density:0.0012,
-      jet:0.062, jetW:0.25, turb:0.005, spin:0.85,        // 넓고 부드러운 순환
-      totalSec:[20,24], mixRatio:0.44 },
-    3: { name:'3호기', accent:'#2952CC',
-      drumR:190, ballR:12, gravity:1.00, restitution:0.94, friction:0.0004, frictionAir:0.0030, density:0.0012,
-      jet:0.098, jetW:0.22, turb:0.007, spin:1.05,        // 가장 크고 높이 튐
-      totalSec:[22,26], mixRatio:0.46 },
+    1: { name:'1호기', accent:'#E8570D', drumR:152, ballR:12, gravity:1.05, restitution:0.93, friction:0.0004, frictionAir:0.0034, density:0.0012,
+      jet:0.092, jetW:0.20, turb:0.006, spin:1.25, discSpeed:0.055, totalSec:[18,22], mixRatio:0.40 },
+    2: { name:'2호기', accent:'#0D8A3E', drumR:164, ballR:12, gravity:1.10, restitution:0.88, friction:0.0008, frictionAir:0.0042, density:0.0012,
+      jet:0.066, jetW:0.24, turb:0.005, spin:0.85, discSpeed:0.042, totalSec:[20,24], mixRatio:0.44 },
+    3: { name:'3호기', accent:'#2952CC', drumR:174, ballR:12, gravity:1.00, restitution:0.94, friction:0.0004, frictionAir:0.0030, density:0.0012,
+      jet:0.100, jetW:0.22, turb:0.007, spin:1.05, discSpeed:0.050, totalSec:[22,26], mixRatio:0.46 },
   };
   const TOTAL_DRAW = 7;
 
-  // ═══════════════════════════════════════════════════════════════
-  //  캔버스 / DPR
-  // ═══════════════════════════════════════════════════════════════
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
-  const LW = 480, LH = 640;
+  const LW = 480, LH = 672;
   let DPR = Math.max(1, window.devicePixelRatio || 1);
-  function setupCanvas() {
-    DPR = Math.max(1, window.devicePixelRatio || 1);
-    cv.width = Math.round(LW * DPR); cv.height = Math.round(LH * DPR);
-    cv.style.width = LW + 'px'; cv.style.height = LH + 'px';
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  }
+  function setupCanvas() { DPR = Math.max(1, window.devicePixelRatio || 1);
+    cv.width = Math.round(LW*DPR); cv.height = Math.round(LH*DPR);
+    cv.style.width = LW+'px'; cv.style.height = LH+'px'; ctx.setTransform(DPR,0,0,DPR,0,0); }
   setupCanvas(); window.addEventListener('resize', setupCanvas);
 
-  const DRUM_CX = 240, DRUM_CY = 208;   // 드럼 중심(반경만 호기별로 다름 → 큰 구·짧은 레일)
-  const GATE_W = 40;
-  const HOLDER_Y = 594, HOLDER_X0 = 44, HOLDER_GAP = 63;
-  function holderPos(i) { return { x: HOLDER_X0 + i * HOLDER_GAP, y: HOLDER_Y }; }
+  const DRUM_CX = 216, DRUM_CY = 210;    // 드럼(반경만 호기별). 좌측 배치로 우측 레일 공간
+  const EXIT_W = 28;                      // 상단 배출구 폭
+  const HOLDER_Y = 648, HOLDER_X0 = 40, HOLDER_GAP = 62;
+  function holderPos(i){ return { x: HOLDER_X0 + i*HOLDER_GAP, y: HOLDER_Y }; }
 
-  function ballColor(n) { return n<=10?'#FBC02D':n<=20?'#1976D2':n<=30?'#D32F2F':n<=40?'#757575':'#388E3C'; }
-  function textColor(n) { return n<=10 ? '#2a2a2a' : '#ffffff'; }
-  function lighten(hex, amt) {
-    const n = parseInt(hex.slice(1), 16); let r=(n>>16)&255, g=(n>>8)&255, b=n&255;
-    r=Math.round(r+(255-r)*amt); g=Math.round(g+(255-g)*amt); b=Math.round(b+(255-b)*amt);
-    return 'rgb('+r+','+g+','+b+')';
-  }
+  function ballColor(n){ return n<=10?'#FBC02D':n<=20?'#1976D2':n<=30?'#D32F2F':n<=40?'#757575':'#388E3C'; }
+  function textColor(n){ return n<=10?'#2a2a2a':'#ffffff'; }
+  function lighten(hex, amt){ const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+    r=Math.round(r+(255-r)*amt); g=Math.round(g+(255-g)*amt); b=Math.round(b+(255-b)*amt); return 'rgb('+r+','+g+','+b+')'; }
 
-  // ═══════════════════════════════════════════════════════════════
-  //  MachineEngine — 공통 엔진(BlowerSystem/AirField/Collision/Outlet/
-  //  Extraction/Rail 을 메서드로 모듈화). config 만 다르게 적용.
-  // ═══════════════════════════════════════════════════════════════
+  // ═══ MachineEngine — 공통 엔진(BlowerSystem/AirField/Outlet/Extraction/Rail) ═══
   class MachineEngine {
-    constructor(cfg) {
-      this.cfg = cfg; this.cx = DRUM_CX; this.cy = DRUM_CY; this.r = cfg.drumR;
-      this.blowing = false; this.gateOpen = false;
-      this.balls = []; this.railBalls = [];
-      this.collisions = 0; this.usePhysics = hasMatter;
-      if (this.usePhysics) {
-        this.engine = M.Engine.create({ enableSleeping: false });
-        this.engine.gravity.y = cfg.gravity;
-        this.world = this.engine.world;
-        M.Events.on(this.engine, 'collisionStart', (e) => { this.collisions += e.pairs.length; });
-      }
-      this.spawnBalls();
-    }
-    clear() { if (this.usePhysics && this.world) M.Composite.clear(this.world, false); this.balls = []; this.railBalls = []; }
+    constructor(cfg){ this.cfg=cfg; this.cx=DRUM_CX; this.cy=DRUM_CY; this.r=cfg.drumR;
+      this.blowing=false; this.gateOpen=false; this.balls=[]; this.railBalls=[]; this.collisions=0;
+      this.disc=0; this.usePhysics=hasMatter;
+      if(this.usePhysics){ this.engine=M.Engine.create({enableSleeping:false}); this.engine.gravity.y=cfg.gravity; this.world=this.engine.world;
+        M.Events.on(this.engine,'collisionStart',(e)=>{ this.collisions+=e.pairs.length; }); }
+      this.spawnBalls(); }
+    exitPt(){ return { x:this.cx, y:this.cy-this.r }; }         // 상단 배출구
+    discPt(){ return { x:this.cx, y:this.cy-this.r*0.34 }; }    // 상단 회전 디스크 중심
+    discR(){ return this.r*0.52; }
+    clear(){ if(this.usePhysics&&this.world) M.Composite.clear(this.world,false); this.balls=[]; this.railBalls=[]; }
 
-    // ⑭ 매 추첨 랜덤 비겹침 배치 + 공마다 미세 물성 오차
-    spawnBalls() {
-      const c = this.cfg; this.clear();
-      const per = Math.max(6, Math.floor((this.r * 1.5) / (c.ballR * 2 + 2)));
-      let idx = 0;
-      for (let n = 1; n <= 45; n++) {
-        const row = Math.floor(idx / per), col = idx % per;
-        const span = (per - 1) * (c.ballR * 2 + 2);
-        const x = this.cx - span/2 + col*(c.ballR*2+2) + (Math.random()-0.5)*2;
-        const y = this.cy + this.r - c.ballR - 6 - row*(c.ballR*2+2);
-        const restJ = c.restitution + (Math.random()-0.5)*0.03;     // 미세 오차
-        const densJ = c.density * (1 + (Math.random()-0.5)*0.08);
-        if (this.usePhysics) {
-          const body = M.Bodies.circle(x, y, c.ballR, { restitution: restJ, friction: c.friction, frictionAir: c.frictionAir, density: densJ, frictionStatic: 0 });
-          M.Composite.add(this.world, body); this.balls.push({ body, n });
-        } else {
-          this.balls.push({ fb:true, n, x, y, vx:0, vy:0, angle:0, av:0, rest:restJ });
-        }
-        idx++;
-      }
-    }
+    spawnBalls(){ const c=this.cfg; this.clear();
+      const per=Math.max(6,Math.floor((this.r*1.5)/(c.ballR*2+2))); let idx=0;
+      for(let n=1;n<=45;n++){ const row=Math.floor(idx/per),col=idx%per,span=(per-1)*(c.ballR*2+2);
+        const x=this.cx-span/2+col*(c.ballR*2+2)+(Math.random()-0.5)*2, y=this.cy+this.r-c.ballR-6-row*(c.ballR*2+2);
+        const restJ=c.restitution+(Math.random()-0.5)*0.03, densJ=c.density*(1+(Math.random()-0.5)*0.08);
+        if(this.usePhysics){ const body=M.Bodies.circle(x,y,c.ballR,{restitution:restJ,friction:c.friction,frictionAir:c.frictionAir,density:densJ,frictionStatic:0});
+          M.Composite.add(this.world,body); this.balls.push({body,n}); }
+        else this.balls.push({fb:true,n,x,y,vx:0,vy:0,angle:0,av:0,rest:restJ});
+        idx++; } }
 
-    // ③ BlowerSystem + AirField: 하단 중앙 집중 제트 → 공이 폭발적 상승·순환
-    applyAirField(b) {
-      const c = this.cfg, p = b.body.position, m = b.body.mass, r = this.r;
-      const inCol = Math.abs(p.x - this.cx) < r * c.jetW;
-      if (inCol && p.y > this.cy - r * 0.2) {
-        const low = (p.y - (this.cy - r * 0.1)) / r;   // 아래로 갈수록 강함
-        M.Body.applyForce(b.body, p, { x: (this.cx - p.x) * 0.00005 * m, y: -c.jet * Math.max(0.2, low) * m });
-      }
-      // 약한 전역 난류(불규칙성)
-      M.Body.applyForce(b.body, p, { x: (Math.random()-0.5)*c.turb*m, y: (Math.random()-0.5)*c.turb*0.5*m });
-    }
+    // ③ 하단 중앙 집중 에어제트 → 공 폭발적 상승·순환
+    applyAirField(b){ const c=this.cfg,p=b.body.position,m=b.body.mass,r=this.r;
+      if(Math.abs(p.x-this.cx)<r*c.jetW && p.y>this.cy-r*0.2){ const low=(p.y-(this.cy-r*0.1))/r;
+        M.Body.applyForce(b.body,p,{x:(this.cx-p.x)*0.00005*m, y:-c.jet*Math.max(0.2,low)*m}); }
+      M.Body.applyForce(b.body,p,{x:(Math.random()-0.5)*c.turb*m, y:(Math.random()-0.5)*c.turb*0.5*m}); }
 
-    // ⑦ ExtractionSystem: 게이트 근처 점진 흡입(약→강)
-    applySuction(b) {
-      const p = b.body.position, m = b.body.mass;
-      if (p.y < this.cy) return;
-      const gx = this.cx, gy = this.cy + this.r;
-      const dgx = gx - p.x, dgy = gy - p.y, dg = Math.hypot(dgx, dgy) || 1;
-      const strength = Math.min(0.9, 0.6 + 40 / (dg + 6)) * 0.00016;   // 가까울수록 강
-      M.Body.applyForce(b.body, p, { x: dgx/dg*strength*m, y: dgy/dg*strength*m });
-    }
+    // ⑦⑧ 상단 배출: 배출구로 위로 빨아올림(점진 흡입)
+    applyLift(b){ const p=b.body.position,m=b.body.mass,ex=this.exitPt();
+      if(p.y>this.cy+this.r*0.4) return;                 // 상부의 공만 대상
+      const dx=ex.x-p.x, dy=ex.y-p.y, d=Math.hypot(dx,dy)||1;
+      const s=Math.min(0.9,0.5+40/(d+6))*0.00019;         // 가까울수록 강
+      M.Body.applyForce(b.body,p,{x:dx/d*s*m, y:dy/d*s*m}); }
 
-    step() {
-      const c = this.cfg;
-      if (this.usePhysics) {
-        if (this.blowing) for (const b of this.balls) this.applyAirField(b);
-        if (this.gateOpen) for (const b of this.balls) this.applySuction(b);
-        M.Engine.update(this.engine, 1000 / 60);
-        // ⑥ 원형 벽 강한 반발
-        for (const b of this.balls) {
-          const p = b.body.position, dx = p.x-this.cx, dy = p.y-this.cy, d = Math.hypot(dx,dy), lim = this.r - c.ballR;
-          if (d > lim) {
-            const nx = dx/d, ny = dy/d;
-            M.Body.setPosition(b.body, { x:this.cx+nx*lim, y:this.cy+ny*lim });
-            const v = b.body.velocity, dot = v.x*nx + v.y*ny;
-            M.Body.setVelocity(b.body, { x:(v.x-2*dot*nx)*c.restitution, y:(v.y-2*dot*ny)*c.restitution });
-            M.Body.setAngularVelocity(b.body, b.body.angularVelocity + (v.x*ny - v.y*nx) * 0.0013 * c.spin);
-          }
-        }
-        // ⑩ OutletDetector: 게이트 개방 중 하단 중앙 도달 첫 공
-        if (this.gateOpen) {
-          const gy = this.cy + this.r;
-          for (let i = 0; i < this.balls.length; i++) {
-            const p = this.balls[i].body.position;
-            if (p.y > gy - c.ballR*1.5 && Math.abs(p.x - this.cx) < GATE_W/2) { this.extract(i); break; }
-          }
-        }
-      } else { this.stepFallback(); }
-      this.updateRail();
-    }
+    step(){ const c=this.cfg;
+      if(this.blowing) this.disc+=c.discSpeed; else this.disc+=0.008;
+      if(this.usePhysics){
+        if(this.blowing) for(const b of this.balls) this.applyAirField(b);
+        if(this.gateOpen) for(const b of this.balls) this.applyLift(b);
+        M.Engine.update(this.engine,1000/60);
+        for(const b of this.balls){ const p=b.body.position,dx=p.x-this.cx,dy=p.y-this.cy,d=Math.hypot(dx,dy),lim=this.r-c.ballR;
+          if(d>lim){ const nx=dx/d,ny=dy/d; M.Body.setPosition(b.body,{x:this.cx+nx*lim,y:this.cy+ny*lim});
+            const v=b.body.velocity,dot=v.x*nx+v.y*ny; M.Body.setVelocity(b.body,{x:(v.x-2*dot*nx)*c.restitution,y:(v.y-2*dot*ny)*c.restitution});
+            M.Body.setAngularVelocity(b.body,b.body.angularVelocity+(v.x*ny-v.y*nx)*0.0013*c.spin); } }
+        // ⑩ 배출 판정: 상단 배출구 도달 첫 공
+        if(this.gateOpen){ const ex=this.exitPt();
+          for(let i=0;i<this.balls.length;i++){ const p=this.balls[i].body.position;
+            if(p.y<ex.y+c.ballR*2.4 && Math.abs(p.x-this.cx)<EXIT_W/2+3){ this.extract(i); break; } } }
+      } else this.stepFallback();
+      this.updateRail(); }
 
-    extract(i) {
-      const b = this.balls[i]; this.balls.splice(i, 1);
-      if (this.usePhysics) M.Composite.remove(this.world, b.body);
-      this.gateOpen = false;
-      const slot = this.railBalls.length;
-      const target = holderPos(slot);
-      const startY = this.cy + this.r + this.cfg.ballR;
-      this.railBalls.push({ n:b.n, x:this.cx, y:startY,
-        angle: this.usePhysics ? b.body.angle : (b.angle||0), av: 0.18,
-        p0:{x:this.cx,y:startY}, p1:{x:(this.cx+target.x)/2, y:this.cy+this.r+70}, p2:target,
-        t:0, dur:52, held:false });
-      if (this.onExtract) this.onExtract(b.n);
-    }
+    // ⑧ 배출: 상단 배출구 → 디스크 우측 → 외부 레일 하강 → 홀더
+    extract(i){ const b=this.balls[i]; this.balls.splice(i,1);
+      if(this.usePhysics) M.Composite.remove(this.world,b.body); this.gateOpen=false;
+      const slot=this.railBalls.length, tgt=holderPos(slot), ex=this.exitPt(), dR=this.discR();
+      this.railBalls.push({ n:b.n, x:ex.x, y:ex.y, angle:this.usePhysics?b.body.angle:(b.angle||0), av:0.16,
+        path:[ {x:ex.x, y:ex.y-4}, {x:this.cx+dR*0.9, y:this.cy-this.r*0.34}, {x:this.cx+this.r+14, y:this.cy-this.r*0.15},
+               {x:this.cx+this.r+14, y:this.cy+this.r*0.55}, {x:(this.cx+this.r+14+tgt.x)/2, y:HOLDER_Y-40}, tgt ],
+        wp:0, spd:4.4, held:false });
+      if(this.onExtract) this.onExtract(b.n); }
 
-    // ⑨ RailSystem: 굴러가며 감속(ease-out) + 회전 감쇠
-    updateRail() {
-      for (const rb of this.railBalls) {
-        if (rb.held) continue;
-        rb.t += 1 / rb.dur;
-        if (rb.t >= 1) { rb.t = 1; rb.held = true; rb.x = rb.p2.x; rb.y = rb.p2.y; rb.av = 0; continue; }
-        const e = 1 - Math.pow(1 - rb.t, 3), u = 1 - e;
-        rb.x = u*u*rb.p0.x + 2*u*e*rb.p1.x + e*e*rb.p2.x;
-        rb.y = u*u*rb.p0.y + 2*u*e*rb.p1.y + e*e*rb.p2.y;
-        rb.angle += rb.av * (1 - e * 0.7);
-      }
-    }
+    // ⑨ 레일: 웨이포인트 따라 굴러가며 감속
+    updateRail(){ for(const rb of this.railBalls){ if(rb.held) continue;
+      const t=rb.path[rb.wp]; if(!t){ rb.held=true; continue; }
+      const dx=t.x-rb.x, dy=t.y-rb.y, d=Math.hypot(dx,dy)||1;
+      const spd=(rb.wp>=rb.path.length-2)?rb.spd*0.6:rb.spd;    // 홀더 근처 감속
+      rb.x+=dx/d*Math.min(spd,d); rb.y+=dy/d*Math.min(spd,d); rb.angle+=rb.av;
+      if(d<3){ rb.wp++; if(rb.wp>=rb.path.length){ rb.held=true; rb.av=0; const tt=rb.path[rb.path.length-1]; rb.x=tt.x; rb.y=tt.y; } } } }
 
-    stepFallback() {
-      const c = this.cfg;
-      for (const b of this.balls) {
-        b.vy += c.gravity * 0.34;
-        if (this.blowing) {
-          const inCol = Math.abs(b.x-this.cx) < this.r*c.jetW;
-          if (inCol && b.y > this.cy - this.r*0.2) { const low=(b.y-(this.cy-this.r*0.1))/this.r; b.vy -= c.jet*40*Math.max(0.2,low); b.vx += (this.cx-b.x)*0.02; }
-          b.vx += (Math.random()-0.5)*c.turb*40; b.vy += (Math.random()-0.5)*c.turb*20;
-        }
+    stepFallback(){ const c=this.cfg;
+      for(const b of this.balls){ b.vy+=c.gravity*0.34;
+        if(this.blowing){ const inCol=Math.abs(b.x-this.cx)<this.r*c.jetW;
+          if(inCol&&b.y>this.cy-this.r*0.2){ const low=(b.y-(this.cy-this.r*0.1))/this.r; b.vy-=c.jet*40*Math.max(0.2,low); b.vx+=(this.cx-b.x)*0.02; }
+          b.vx+=(Math.random()-0.5)*c.turb*40; b.vy+=(Math.random()-0.5)*c.turb*20; }
+        if(this.gateOpen&&b.y<this.cy+this.r*0.4){ const ex=this.exitPt(),dx=ex.x-b.x,dy=ex.y-b.y,d=Math.hypot(dx,dy)||1,s=Math.min(0.9,0.5+40/(d+6))*0.7; b.vx+=dx/d*s; b.vy+=dy/d*s; }
         const sp=Math.hypot(b.vx,b.vy); if(sp>18){b.vx=b.vx/sp*18;b.vy=b.vy/sp*18;}
         b.x+=b.vx; b.y+=b.vy; b.angle+=b.av; b.av*=0.985;
         const dx=b.x-this.cx,dy=b.y-this.cy,d=Math.hypot(dx,dy),lim=this.r-c.ballR;
-        if(d>lim){const nx=dx/d,ny=dy/d;b.x=this.cx+nx*lim;b.y=this.cy+ny*lim;const dot=b.vx*nx+b.vy*ny;b.vx=(b.vx-2*dot*nx)*c.restitution;b.vy=(b.vy-2*dot*ny)*c.restitution;b.av+=(b.vx*ny-b.vy*nx)*0.013*c.spin;}
-      }
+        if(d>lim){const nx=dx/d,ny=dy/d;b.x=this.cx+nx*lim;b.y=this.cy+ny*lim;const dot=b.vx*nx+b.vy*ny;b.vx=(b.vx-2*dot*nx)*c.restitution;b.vy=(b.vy-2*dot*ny)*c.restitution;b.av+=(b.vx*ny-b.vy*nx)*0.013*c.spin;} }
       for(let i=0;i<this.balls.length;i++)for(let j=i+1;j<this.balls.length;j++){const a=this.balls[i],cc=this.balls[j];let dx=cc.x-a.x,dy=cc.y-a.y,d=Math.hypot(dx,dy),mn=c.ballR*2;if(d===0){d=.01;dx=.01}if(d<mn){const nx=dx/d,ny=dy/d,ov=mn-d;a.x-=nx*ov/2;a.y-=ny*ov/2;cc.x+=nx*ov/2;cc.y+=ny*ov/2;const rvx=cc.vx-a.vx,rvy=cc.vy-a.vy,vn=rvx*nx+rvy*ny;if(vn<0){const imp=-(1+c.restitution)*vn/2;a.vx-=imp*nx;a.vy-=imp*ny;cc.vx+=imp*nx;cc.vy+=imp*ny;this.collisions++;}}}
-      if(this.gateOpen){const gy=this.cy+this.r;for(let i=0;i<this.balls.length;i++){const b=this.balls[i];if(b.y<this.cy)continue;const dgx=this.cx-b.x,dgy=gy-b.y,dg=Math.hypot(dgx,dgy)||1;const s=Math.min(0.9,0.6+40/(dg+6))*0.6;b.vx+=dgx/dg*s;b.vy+=dgy/dg*s;if(b.y>gy-c.ballR*1.5&&Math.abs(b.x-this.cx)<GATE_W/2){this.extract(i);break;}}}
-    }
+      if(this.gateOpen){const ex=this.exitPt();for(let i=0;i<this.balls.length;i++){const b=this.balls[i];if(b.y<ex.y+c.ballR*2.4&&Math.abs(b.x-this.cx)<EXIT_W/2+3){this.extract(i);break;}}} }
 
-    ballPose(b) { return this.usePhysics ? { x:b.body.position.x, y:b.body.position.y, angle:b.body.angle } : { x:b.x, y:b.y, angle:b.angle }; }
-    avgSpeed() { let s=0,n=0; for(const b of this.balls){ const v=this.usePhysics?b.body.velocity:{x:b.vx,y:b.vy}; s+=Math.hypot(v.x,v.y); n++; } return n?s/n:0; }
+    ballPose(b){ return this.usePhysics?{x:b.body.position.x,y:b.body.position.y,angle:b.body.angle}:{x:b.x,y:b.y,angle:b.angle}; }
+    avgSpeed(){ let s=0,n=0; for(const b of this.balls){const v=this.usePhysics?b.body.velocity:{x:b.vx,y:b.vy};s+=Math.hypot(v.x,v.y);n++;} return n?s/n:0; }
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  //  렌더 — 실제 기계 구조(외부프레임·송풍하우징·베이스·레일·유리)
-  // ═══════════════════════════════════════════════════════════════
-  function drawBall(x, y, n, r, angle) {
-    const g = ctx.createRadialGradient(x - r*0.34, y - r*0.34, r*0.12, x, y, r);
-    g.addColorStop(0, '#ffffff'); g.addColorStop(0.18, lighten(ballColor(n), 0.35)); g.addColorStop(1, ballColor(n));
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fillStyle = g; ctx.fill();
-    ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
-    ctx.fillStyle = textColor(n); ctx.font = 'bold ' + Math.round(r*1.05) + 'px "Malgun Gothic", sans-serif';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(n), 0, 0.5); ctx.restore();
-  }
-
-  function roundRectPath(x, y, w, h, r) {
-    ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
-    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
-  }
-
-  function render(eng) {
-    const c = eng.cfg, cx = eng.cx, cy = eng.cy, r = eng.r, gy = cy + r;
-    ctx.clearRect(0, 0, LW, LH);
-
-    // 1) 바닥 그림자
-    ctx.save(); ctx.filter = 'blur(6px)';
-    ctx.beginPath(); ctx.ellipse(cx, 616, r*0.9, 16, 0, 0, Math.PI*2);
-    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill(); ctx.restore();
-
-    // 2) 베이스 / 지지대 (아크릴+메탈)
-    const baseTop = gy + 96;
-    const baseGrad = ctx.createLinearGradient(0, baseTop, 0, baseTop+70);
-    baseGrad.addColorStop(0, '#4a5568'); baseGrad.addColorStop(1, '#2a3242');
-    ctx.fillStyle = baseGrad; roundRectPath(cx-66, baseTop, 132, 66, 10); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.stroke();
-
-    // 3) 하단 송풍기(블로워) 하우징 + 노즐
-    const blH = ctx.createLinearGradient(0, gy+8, 0, gy+96);
-    blH.addColorStop(0, '#d7dee7'); blH.addColorStop(1, '#8b95a4');
-    ctx.fillStyle = blH; ctx.beginPath();
-    ctx.moveTo(cx-38, gy+6); ctx.lineTo(cx+38, gy+6); ctx.lineTo(cx+52, gy+96); ctx.lineTo(cx-52, gy+96); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = 'rgba(60,72,90,0.5)'; ctx.stroke();
-    // 송풍 표시(가동 중 상승 화살표)
-    if (eng.blowing) {
-      ctx.fillStyle = c.accent;
-      for (let k=-1;k<=1;k++){ const bx=cx+k*15; ctx.globalAlpha=0.4+0.4*Math.abs(Math.sin(perfNow()/120+k)); ctx.beginPath(); ctx.moveTo(bx,gy+40);ctx.lineTo(bx-6,gy+58);ctx.lineTo(bx+6,gy+58);ctx.closePath(); ctx.fill(); }
-      ctx.globalAlpha=1;
-    }
-
-    // 4) 추출 레일 (짧고 두꺼운 투명 아크릴)
-    ctx.strokeStyle = 'rgba(190,212,240,0.30)'; ctx.lineWidth = c.ballR*2 + 10; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(cx, gy+10);
-    ctx.quadraticCurveTo(cx-4, gy+64, (cx+HOLDER_X0)/2, HOLDER_Y-24);
-    ctx.quadraticCurveTo(HOLDER_X0+4, HOLDER_Y-24, HOLDER_X0 + 6*HOLDER_GAP + 18, HOLDER_Y-4);
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(220,235,252,0.10)'; ctx.lineWidth = c.ballR*2; ctx.stroke(); ctx.lineCap='butt';
-
-    // 5) 홀더(적재 트레이)
-    for (let i=0;i<TOTAL_DRAW;i++){ const p=holderPos(i), bonus=(i===TOTAL_DRAW-1);
-      ctx.beginPath(); ctx.arc(p.x,p.y,c.ballR+4,0,Math.PI*2);
-      ctx.fillStyle = bonus?'rgba(80,140,255,0.14)':'rgba(255,255,255,0.07)'; ctx.fill();
-      ctx.lineWidth = bonus?2:1; ctx.strokeStyle = bonus?'rgba(90,150,255,0.8)':'rgba(255,255,255,0.28)'; ctx.stroke(); }
-    const pb=holderPos(TOTAL_DRAW-1); ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='bold 18px sans-serif';
-    ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('+', pb.x-HOLDER_GAP/2, pb.y);
-
-    // 6) 외부 보호 원형 프레임 + 지지 스트럿
-    ctx.beginPath(); ctx.arc(cx, cy, r+13, 0, Math.PI*2); ctx.lineWidth = 6;
-    const oframe = ctx.createLinearGradient(cx-r, cy-r, cx+r, cy+r);
-    oframe.addColorStop(0,'#e9eef4'); oframe.addColorStop(0.5,'#9aa6b4'); oframe.addColorStop(1,'#69737f');
-    ctx.strokeStyle = oframe; ctx.stroke(); ctx.lineWidth = 1;
-    // 지지 스트럿(좌우 하단)
-    ctx.strokeStyle = 'rgba(200,210,222,0.5)'; ctx.lineWidth = 5;
-    for (const ang of [Math.PI*0.72, Math.PI*0.28]) {
-      const sx=cx+Math.cos(ang)*(r+13), sy=cy+Math.sin(ang)*(r+13);
-      ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(cx + (sx-cx)*0.5, baseTop); ctx.stroke();
-    }
-    ctx.lineWidth = 1;
-
-    // 7) 드럼 유리 본체(투명 굴절감)
-    const gg = ctx.createRadialGradient(cx-r*0.34, cy-r*0.42, r*0.1, cx, cy, r);
-    gg.addColorStop(0,'rgba(255,255,255,0.17)'); gg.addColorStop(0.5,'rgba(150,175,210,0.06)'); gg.addColorStop(0.86,'rgba(30,42,66,0.05)'); gg.addColorStop(1,'rgba(90,110,140,0.14)');
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fillStyle = gg; ctx.fill();
-
-    // 8) 드럼 안 공
-    for (const b of eng.balls) { const p = eng.ballPose(b); drawBall(p.x, p.y, b.n, c.ballR, p.angle); }
-
-    // 9) 드럼 내부 림(유리 두께감)
-    ctx.beginPath(); ctx.arc(cx, cy, r-1, 0, Math.PI*2); ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(210,225,242,0.35)'; ctx.stroke(); ctx.lineWidth = 1;
-
-    // 10) 하단 게이트(배출구) 밸브
-    const spread = eng.gateOpen ? 13 : 2;
-    ctx.strokeStyle = eng.gateOpen ? '#5aa0ff' : '#9aa6b3'; ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(cx-GATE_W/2, gy-2); ctx.lineTo(cx-GATE_W/2-spread, gy+16);
-    ctx.moveTo(cx+GATE_W/2, gy-2); ctx.lineTo(cx+GATE_W/2+spread, gy+16);
-    ctx.stroke(); ctx.lineWidth = 1;
-
-    // 11) 상단 송풍기/모터 하우징
-    const hy = cy - r - 4;
-    ctx.fillStyle = '#cbd4de'; roundRectPath(cx-26, hy-20, 52, 26, 7); ctx.fill();
-    ctx.strokeStyle = '#8a95a2'; ctx.stroke();
-    ctx.beginPath(); ctx.arc(cx, hy-7, 5, 0, Math.PI*2); ctx.fillStyle = c.accent; ctx.fill();
-
-    // 12) 유리 하이라이트/반사광
-    ctx.beginPath(); ctx.ellipse(cx-r*0.4, cy-r*0.52, r*0.28, r*0.13, -0.5, 0, Math.PI*2);
-    ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.fill();
-    ctx.beginPath(); ctx.ellipse(cx+r*0.5, cy+r*0.2, r*0.08, r*0.34, -0.35, 0, Math.PI*2);
-    ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fill();
-
-    // 13) 레일/홀더 위 공
-    for (const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
-
-    // 버전 표시(배포 확인용)
-    ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.font = '10px monospace';
-    ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-    ctx.fillText('구조v2 · ' + c.name, LW - 8, LH - 6);
-
-    // 14) 디버그 오버레이
-    if (DEBUG) {
-      ctx.fillStyle = 'rgba(0,0,0,0.55)'; roundRectPath(8, 8, 150, 92, 8); ctx.fill();
-      ctx.fillStyle = '#7CFFB2'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      const lines = [
-        'FPS: ' + fps.toFixed(0),
-        '공 평균속도: ' + eng.avgSpeed().toFixed(2),
-        '충돌/초: ' + collisionsPerSec,
-        '송풍: ' + (eng.blowing ? 'ON('+c.jet+')' : 'OFF'),
-        '드럼R: ' + r + '  볼: ' + eng.balls.length,
-        '단계: ' + phase,
-      ];
-      lines.forEach((t, i) => ctx.fillText(t, 16, 16 + i*13));
-    }
-  }
+  // ═══ 렌더 ═══
+  function drawBall(x,y,n,r,angle){ const g=ctx.createRadialGradient(x-r*0.34,y-r*0.34,r*0.12,x,y,r);
+    g.addColorStop(0,'#ffffff'); g.addColorStop(0.18,lighten(ballColor(n),0.35)); g.addColorStop(1,ballColor(n));
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
+    ctx.save(); ctx.translate(x,y); ctx.rotate(angle); ctx.fillStyle=textColor(n);
+    ctx.font='bold '+Math.round(r*1.05)+'px "Malgun Gothic", sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(String(n),0,0.5); ctx.restore(); }
+  function roundRectPath(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
   function perfNow(){ return (typeof performance!=='undefined')?performance.now():Date.now(); }
 
-  // ═══════════════════════════════════════════════════════════════
-  //  SoundSystem
-  // ═══════════════════════════════════════════════════════════════
-  const Sound = {
-    ac:null, blowerGain:null, on:true,
-    ensure(){ if(this.ac) return;
-      try { this.ac = new (window.AudioContext||window.webkitAudioContext)();
-        const buf=this.ac.createBuffer(1,this.ac.sampleRate*2,this.ac.sampleRate); const d=buf.getChannelData(0);
-        for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
-        const src=this.ac.createBufferSource(); src.buffer=buf; src.loop=true;
-        const lp=this.ac.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=360;
-        this.blowerGain=this.ac.createGain(); this.blowerGain.gain.value=0;
-        src.connect(lp); lp.connect(this.blowerGain); this.blowerGain.connect(this.ac.destination); src.start();
-      } catch(e){ this.ac=null; } },
-    blower(v){ if(this.ac&&this.blowerGain) this.blowerGain.gain.setTargetAtTime(this.on?v:0, this.ac.currentTime, 0.15); },
-    ding(){ if(!this.ac||!this.on) return; const o=this.ac.createOscillator(), g=this.ac.createGain();
-      o.type='triangle'; o.frequency.value=640; g.gain.setValueAtTime(0.0001,this.ac.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.25,this.ac.currentTime+0.01); g.gain.exponentialRampToValueAtTime(0.0001,this.ac.currentTime+0.35);
-      o.connect(g); g.connect(this.ac.destination); o.start(); o.stop(this.ac.currentTime+0.36); },
-  };
+  function render(eng){ const c=eng.cfg,cx=eng.cx,cy=eng.cy,r=eng.r,gy=cy+r; ctx.clearRect(0,0,LW,LH);
+    const ex=eng.exitPt(), dc=eng.discPt(), dR=eng.discR();
 
-  // ═══════════════════════════════════════════════════════════════
-  //  추첨 시퀀스
-  // ═══════════════════════════════════════════════════════════════
-  let engine = new MachineEngine(MACHINE_CONFIGS[3]);
-  let currentM = 3, phase = 'idle', phaseT = 0, drawCount = 0, plan = null;
-  let DEBUG = false;
-  const statusEl = document.getElementById('status'), timerEl = document.getElementById('timer'), btnStart = document.getElementById('btnStart');
-  engine.onExtract = () => Sound.ding();
-  function setStatus(t){ statusEl.textContent = t; }
-  function rand(a,b){ return a + Math.random()*(b-a); }
+    // 그림자
+    ctx.save(); ctx.filter='blur(6px)'; ctx.beginPath(); ctx.ellipse(cx, gy+96, r*0.85, 14, 0, 0, Math.PI*2); ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fill(); ctx.restore();
+    // 베이스
+    const baseTop=gy+72; const bg=ctx.createLinearGradient(0,baseTop,0,baseTop+56); bg.addColorStop(0,'#4a5568'); bg.addColorStop(1,'#2a3242');
+    ctx.fillStyle=bg; roundRectPath(cx-58,baseTop,116,52,9); ctx.fill(); ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.stroke();
+    // 하단 송풍기(블로워) 하우징
+    const blH=ctx.createLinearGradient(0,gy+6,0,gy+72); blH.addColorStop(0,'#d7dee7'); blH.addColorStop(1,'#8b95a4');
+    ctx.fillStyle=blH; ctx.beginPath(); ctx.moveTo(cx-34,gy+4); ctx.lineTo(cx+34,gy+4); ctx.lineTo(cx+46,gy+72); ctx.lineTo(cx-46,gy+72); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='rgba(60,72,90,0.5)'; ctx.stroke();
+    if(eng.blowing){ ctx.fillStyle=c.accent; for(let k=-1;k<=1;k++){ const bx=cx+k*13; ctx.globalAlpha=0.4+0.4*Math.abs(Math.sin(perfNow()/120+k)); ctx.beginPath(); ctx.moveTo(bx,gy+28); ctx.lineTo(bx-5,gy+44); ctx.lineTo(bx+5,gy+44); ctx.closePath(); ctx.fill(); } ctx.globalAlpha=1; }
 
-  function startDraw() {
-    if (phase !== 'idle' && phase !== 'done') return;
-    engine.spawnBalls(); drawCount = 0; const c = engine.cfg;
-    const total = rand(c.totalSec[0], c.totalSec[1]);
-    const mixSec = total * c.mixRatio, drawSpan = total - 3 - mixSec, gap = Math.max(1.0, drawSpan / TOTAL_DRAW);
-    plan = { total, waitF:Math.round(3*60), mixF:Math.round(mixSec*60), gapF:Math.round(gap*60), startTime:perfNow() };
-    phase = 'wait'; phaseT = 0; engine.blowing = false; engine.gateOpen = false;
-    btnStart.disabled = true; Sound.ensure(); setStatus('추첨 준비 — 3초 대기…');
-  }
-  function reset() {
-    phase='idle'; phaseT=0; drawCount=0; engine.spawnBalls(); engine.blowing=false; engine.gateOpen=false;
-    Sound.blower(0); btnStart.disabled=false; setStatus('추첨기를 선택하고 [추첨 시작]을 누르세요'); timerEl.textContent='';
-  }
-  function selectMachine(m) {
-    if (phase!=='idle' && phase!=='done') return;
-    currentM=m; engine=new MachineEngine(MACHINE_CONFIGS[m]); engine.onExtract=()=>Sound.ding();
-    document.querySelectorAll('.mbtn').forEach(el=>el.classList.toggle('active', +el.dataset.m===m)); reset();
-  }
-  function tickSequence() {
-    if (phase==='idle' || phase==='done') return;
-    phaseT++; const c = engine.cfg;
-    if (phase==='wait') {
-      setStatus('추첨 준비 — ' + Math.max(0, Math.ceil((plan.waitF-phaseT)/60)) + '초');
-      if (phaseT>=plan.waitF){ phase='mixing'; phaseT=0; engine.blowing=true; Sound.blower(0.17); setStatus('송풍기 가동 — 공 상승·혼합 중…'); }
-    } else if (phase==='mixing') {
-      setStatus('송풍기 가동 — 공 상승·혼합 중…');
-      if (phaseT>=plan.mixF){ phase='drawing'; phaseT=0; engine.gateOpen=true; setStatus('1번째 공 추첨 중…'); }
-    } else if (phase==='drawing') {
-      const held = engine.railBalls.length;
-      if (held>drawCount) {
-        drawCount = held;
-        if (drawCount>=TOTAL_DRAW) {
-          phase='done'; engine.blowing=false; engine.gateOpen=false; Sound.blower(0);
-          const nums = engine.railBalls.map(b=>b.n);
-          setStatus('추첨 종료 — ' + nums.slice(0,6).join(', ') + ' + ' + nums[6]);
-          btnStart.disabled=false; notifyParent(nums);
-        } else { engine.gateOpen=false; phaseT=0; }
-      }
-      if (phase==='drawing' && drawCount<TOTAL_DRAW && !engine.gateOpen && phaseT>=plan.gapF) {
-        engine.gateOpen=true;
-        setStatus(drawCount===TOTAL_DRAW-1 ? '보너스 볼 추첨 중…' : (drawCount+1)+'번째 공 추첨 중…');
-      }
-    }
-    if (plan) timerEl.textContent = '경과 '+((perfNow()-plan.startTime)/1000).toFixed(1)+'s / 예상 '+plan.total.toFixed(0)+'s · '+c.name;
-  }
-  function notifyParent(nums){ try{ window.parent && window.parent.postMessage({type:'venus-draw', machine:currentM, numbers:nums}, '*'); }catch(e){} }
+    // 외부 하강 레일 (상단 배출구 → 우측 → 하단 홀더)
+    ctx.strokeStyle='rgba(190,212,240,0.26)'; ctx.lineWidth=c.ballR*2+8; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(cx+dR*0.9, cy-r*0.34);
+    ctx.quadraticCurveTo(cx+r+30, cy-r*0.3, cx+r+14, cy+r*0.2);
+    ctx.quadraticCurveTo(cx+r+8, cy+r*0.8, (cx+r+14+HOLDER_X0+6*HOLDER_GAP)/2, HOLDER_Y-30);
+    ctx.quadraticCurveTo(HOLDER_X0+6*HOLDER_GAP, HOLDER_Y-14, HOLDER_X0+4, HOLDER_Y-4);
+    ctx.stroke(); ctx.strokeStyle='rgba(220,235,252,0.10)'; ctx.lineWidth=c.ballR*2; ctx.stroke(); ctx.lineCap='butt';
 
-  // ═══════════════════════════════════════════════════════════════
-  //  메인 루프 (60fps 고정 물리 + FPS/충돌 계측)
-  // ═══════════════════════════════════════════════════════════════
-  let acc=0, last=0, fps=60, fpsAcc=0, fpsN=0, collisionsPerSec=0, colWindow=0, colTimer=0;
-  const STEP = 1000/60;
-  function loop(ts) {
-    if (!last) last = ts;
-    const dt = Math.min(80, ts-last); last = ts;
-    if (dt>0){ const inst=1000/dt; fpsAcc+=inst; fpsN++; if(fpsN>=15){ fps=fpsAcc/fpsN; fpsAcc=0; fpsN=0; } }
-    acc += dt; let it=0;
-    while (acc>=STEP && it<4){ engine.step(); tickSequence(); acc-=STEP; it++; }
-    colTimer += dt; colWindow += engine.collisions; engine.collisions = 0;
-    if (colTimer>=1000){ collisionsPerSec = colWindow; colWindow=0; colTimer=0; }
-    render(engine);
-    requestAnimationFrame(loop);
-  }
+    // 홀더
+    for(let i=0;i<TOTAL_DRAW;i++){ const p=holderPos(i),bonus=(i===TOTAL_DRAW-1);
+      ctx.beginPath(); ctx.arc(p.x,p.y,c.ballR+4,0,Math.PI*2); ctx.fillStyle=bonus?'rgba(80,140,255,0.14)':'rgba(255,255,255,0.07)'; ctx.fill();
+      ctx.lineWidth=bonus?2:1; ctx.strokeStyle=bonus?'rgba(90,150,255,0.8)':'rgba(255,255,255,0.28)'; ctx.stroke(); }
+    const pb=holderPos(TOTAL_DRAW-1); ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='bold 17px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('+', pb.x-HOLDER_GAP/2, pb.y);
+
+    // 외부 보호 프레임 + 지지 스트럿
+    ctx.beginPath(); ctx.arc(cx,cy,r+12,0,Math.PI*2); ctx.lineWidth=6;
+    const of=ctx.createLinearGradient(cx-r,cy-r,cx+r,cy+r); of.addColorStop(0,'#e9eef4'); of.addColorStop(0.5,'#9aa6b4'); of.addColorStop(1,'#69737f');
+    ctx.strokeStyle=of; ctx.stroke(); ctx.lineWidth=1;
+    ctx.strokeStyle='rgba(200,210,222,0.5)'; ctx.lineWidth=5;
+    for(const ang of [Math.PI*0.74, Math.PI*0.26]){ const sx=cx+Math.cos(ang)*(r+12), sy=cy+Math.sin(ang)*(r+12); ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(cx+(sx-cx)*0.5, baseTop); ctx.stroke(); }
+    ctx.lineWidth=1;
+
+    // 드럼 유리
+    const gg=ctx.createRadialGradient(cx-r*0.34,cy-r*0.42,r*0.1,cx,cy,r);
+    gg.addColorStop(0,'rgba(255,255,255,0.16)'); gg.addColorStop(0.5,'rgba(150,175,210,0.06)'); gg.addColorStop(0.86,'rgba(30,42,66,0.05)'); gg.addColorStop(1,'rgba(90,110,140,0.14)');
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=gg; ctx.fill();
+
+    // 드럼 안 공
+    for(const b of eng.balls){ const p=eng.ballPose(b); drawBall(p.x,p.y,b.n,c.ballR,p.angle); }
+
+    // 상단 4구멍 회전 디스크 (배출 게이팅)
+    ctx.save(); ctx.translate(dc.x, dc.y);
+    ctx.beginPath(); ctx.ellipse(0,0,dR,dR*0.30,0,0,Math.PI*2); ctx.fillStyle='rgba(210,226,246,0.20)'; ctx.fill(); ctx.strokeStyle='rgba(185,205,230,0.68)'; ctx.lineWidth=2; ctx.stroke();
+    for(let k=0;k<4;k++){ const a=eng.disc+k*Math.PI/2; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Math.cos(a)*dR, Math.sin(a)*dR*0.30); ctx.strokeStyle='rgba(170,192,220,0.85)'; ctx.lineWidth=2; ctx.stroke(); }
+    for(let k=0;k<4;k++){ const a=eng.disc+Math.PI/4+k*Math.PI/2; ctx.beginPath(); ctx.ellipse(Math.cos(a)*dR*0.6, Math.sin(a)*dR*0.30*0.6, 8, 4.5, 0, 0, Math.PI*2); ctx.fillStyle='rgba(15,25,40,0.5)'; ctx.fill(); }
+    ctx.restore(); ctx.lineWidth=1;
+
+    // 드럼 내부 림
+    ctx.beginPath(); ctx.arc(cx,cy,r-1,0,Math.PI*2); ctx.lineWidth=3; ctx.strokeStyle='rgba(210,225,242,0.32)'; ctx.stroke(); ctx.lineWidth=1;
+
+    // 상단 배출 하우징 + 배출구
+    ctx.beginPath(); ctx.ellipse(cx, ex.y-2, 24, 15, 0, 0, Math.PI*2); ctx.fillStyle='#e9eef4'; ctx.fill(); ctx.strokeStyle='#9aa6b3'; ctx.stroke();
+    ctx.strokeStyle=eng.gateOpen?'#5aa0ff':'#9aa6b3'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(cx, ex.y-4, eng.gateOpen?6:4, 0, Math.PI*2); ctx.fillStyle=eng.gateOpen?'#5aa0ff':'#c9d3dd'; ctx.fill(); ctx.lineWidth=1;
+
+    // 유리 하이라이트
+    ctx.beginPath(); ctx.ellipse(cx-r*0.4, cy-r*0.5, r*0.26, r*0.12, -0.5, 0, Math.PI*2); ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fill();
+
+    // 레일/홀더 위 공
+    for(const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
+
+    // 버전 표시
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('상단배출v3 · '+c.name, LW-8, LH-6);
+
+    // 디버그
+    if(DEBUG){ ctx.fillStyle='rgba(0,0,0,0.55)'; roundRectPath(8,8,152,92,8); ctx.fill();
+      ctx.fillStyle='#7CFFB2'; ctx.font='bold 11px monospace'; ctx.textAlign='left'; ctx.textBaseline='top';
+      ['FPS: '+fps.toFixed(0),'공 평균속도: '+eng.avgSpeed().toFixed(2),'충돌/초: '+collisionsPerSec,'송풍: '+(eng.blowing?'ON':'OFF'),'드럼R: '+r+' 볼: '+eng.balls.length,'단계: '+phase].forEach((t,i)=>ctx.fillText(t,16,16+i*13)); } }
+
+  // ═══ SoundSystem ═══
+  const Sound = { ac:null, blowerGain:null, on:true,
+    ensure(){ if(this.ac) return; try{ this.ac=new (window.AudioContext||window.webkitAudioContext)();
+      const buf=this.ac.createBuffer(1,this.ac.sampleRate*2,this.ac.sampleRate); const d=buf.getChannelData(0); for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
+      const src=this.ac.createBufferSource(); src.buffer=buf; src.loop=true; const lp=this.ac.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=360;
+      this.blowerGain=this.ac.createGain(); this.blowerGain.gain.value=0; src.connect(lp); lp.connect(this.blowerGain); this.blowerGain.connect(this.ac.destination); src.start(); }catch(e){this.ac=null;} },
+    blower(v){ if(this.ac&&this.blowerGain) this.blowerGain.gain.setTargetAtTime(this.on?v:0,this.ac.currentTime,0.15); },
+    ding(){ if(!this.ac||!this.on)return; const o=this.ac.createOscillator(),g=this.ac.createGain(); o.type='triangle'; o.frequency.value=640;
+      g.gain.setValueAtTime(0.0001,this.ac.currentTime); g.gain.exponentialRampToValueAtTime(0.25,this.ac.currentTime+0.01); g.gain.exponentialRampToValueAtTime(0.0001,this.ac.currentTime+0.35);
+      o.connect(g); g.connect(this.ac.destination); o.start(); o.stop(this.ac.currentTime+0.36); } };
+
+  // ═══ 추첨 시퀀스 ═══
+  let engine=new MachineEngine(MACHINE_CONFIGS[3]); let currentM=3, phase='idle', phaseT=0, drawCount=0, plan=null; let DEBUG=false;
+  const statusEl=document.getElementById('status'), timerEl=document.getElementById('timer'), btnStart=document.getElementById('btnStart');
+  engine.onExtract=()=>Sound.ding();
+  function setStatus(t){ statusEl.textContent=t; } function rand(a,b){ return a+Math.random()*(b-a); }
+  function startDraw(){ if(phase!=='idle'&&phase!=='done')return; engine.spawnBalls(); drawCount=0; const c=engine.cfg;
+    const total=rand(c.totalSec[0],c.totalSec[1]), mixSec=total*c.mixRatio, drawSpan=total-3-mixSec, gap=Math.max(1.0,drawSpan/TOTAL_DRAW);
+    plan={total,waitF:Math.round(3*60),mixF:Math.round(mixSec*60),gapF:Math.round(gap*60),startTime:perfNow()};
+    phase='wait'; phaseT=0; engine.blowing=false; engine.gateOpen=false; btnStart.disabled=true; Sound.ensure(); setStatus('추첨 준비 — 3초 대기…'); }
+  function reset(){ phase='idle'; phaseT=0; drawCount=0; engine.spawnBalls(); engine.blowing=false; engine.gateOpen=false; Sound.blower(0); btnStart.disabled=false; setStatus('추첨기를 선택하고 [추첨 시작]을 누르세요'); timerEl.textContent=''; }
+  function selectMachine(m){ if(phase!=='idle'&&phase!=='done')return; currentM=m; engine=new MachineEngine(MACHINE_CONFIGS[m]); engine.onExtract=()=>Sound.ding();
+    document.querySelectorAll('.mbtn').forEach(el=>el.classList.toggle('active',+el.dataset.m===m)); reset(); }
+  function tickSequence(){ if(phase==='idle'||phase==='done')return; phaseT++; const c=engine.cfg;
+    if(phase==='wait'){ setStatus('추첨 준비 — '+Math.max(0,Math.ceil((plan.waitF-phaseT)/60))+'초'); if(phaseT>=plan.waitF){ phase='mixing'; phaseT=0; engine.blowing=true; Sound.blower(0.17); setStatus('송풍기 가동 — 공 상승·혼합 중…'); } }
+    else if(phase==='mixing'){ setStatus('송풍기 가동 — 공 상승·혼합 중…'); if(phaseT>=plan.mixF){ phase='drawing'; phaseT=0; engine.gateOpen=true; setStatus('1번째 공 추첨 중…'); } }
+    else if(phase==='drawing'){ const held=engine.railBalls.length;
+      if(held>drawCount){ drawCount=held;
+        if(drawCount>=TOTAL_DRAW){ phase='done'; engine.blowing=false; engine.gateOpen=false; Sound.blower(0); const nums=engine.railBalls.map(b=>b.n); setStatus('추첨 종료 — '+nums.slice(0,6).join(', ')+' + '+nums[6]); btnStart.disabled=false; notifyParent(nums); }
+        else { engine.gateOpen=false; phaseT=0; } }
+      if(phase==='drawing'&&drawCount<TOTAL_DRAW&&!engine.gateOpen&&phaseT>=plan.gapF){ engine.gateOpen=true; setStatus(drawCount===TOTAL_DRAW-1?'보너스 볼 추첨 중…':(drawCount+1)+'번째 공 추첨 중…'); } }
+    if(plan) timerEl.textContent='경과 '+((perfNow()-plan.startTime)/1000).toFixed(1)+'s / 예상 '+plan.total.toFixed(0)+'s · '+c.name; }
+  function notifyParent(nums){ try{ window.parent&&window.parent.postMessage({type:'venus-draw',machine:currentM,numbers:nums},'*'); }catch(e){} }
+
+  // ═══ 루프 ═══
+  let acc=0,last=0,fps=60,fpsAcc=0,fpsN=0,collisionsPerSec=0,colWindow=0,colTimer=0; const STEP=1000/60;
+  function loop(ts){ if(!last)last=ts; const dt=Math.min(80,ts-last); last=ts;
+    if(dt>0){ const inst=1000/dt; fpsAcc+=inst; fpsN++; if(fpsN>=15){ fps=fpsAcc/fpsN; fpsAcc=0; fpsN=0; } }
+    acc+=dt; let it=0; while(acc>=STEP&&it<4){ engine.step(); tickSequence(); acc-=STEP; it++; }
+    colTimer+=dt; colWindow+=engine.collisions; engine.collisions=0; if(colTimer>=1000){ collisionsPerSec=colWindow; colWindow=0; colTimer=0; }
+    render(engine); requestAnimationFrame(loop); }
 
   document.querySelectorAll('.mbtn').forEach(el=>el.addEventListener('click',()=>selectMachine(+el.dataset.m)));
   btnStart.addEventListener('click', startDraw);
@@ -485,7 +307,7 @@
   document.getElementById('dbgBtn').addEventListener('click', function(){ DEBUG=!DEBUG; this.style.opacity=DEBUG?1:0.5; });
   window.addEventListener('keydown', e=>{ if(e.key==='d'||e.key==='D') DEBUG=!DEBUG; });
 
-  if (!hasMatter) setStatus('물리엔진 로드 실패 — 폴백 물리로 동작합니다');
+  if(!hasMatter) setStatus('물리엔진 로드 실패 — 폴백 물리로 동작합니다');
   requestAnimationFrame(loop);
 })();
 </script>

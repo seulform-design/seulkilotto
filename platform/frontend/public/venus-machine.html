@@ -161,21 +161,32 @@
           if(bi>=0){ this.capture(bi,k); this.lastCapW=this.wheel; }
           return; } } }
 
-    // 진입: 공이 중앙관을 타고 상승(rise) → 12시 포켓 진입 후 테두리와 함께 CCW 이동(ring) → 좌하단 배출
+    // 포켓 k의 현재 각도/좌표 (테두리와 함께 회전)
+    pocketPos(k){ const a=-Math.PI/2 - this.wheel + k*Math.PI/2; return { a, x:this.cx+Math.cos(a)*this.Rr, y:this.cy+Math.sin(a)*this.Rr }; }
+    // 포켓 k가 12시를 지난 뒤 이동한 각도(0~2π)
+    pocketTravel(k){ return ((this.wheel - k*Math.PI/2)%(2*Math.PI)+2*Math.PI)%(2*Math.PI); }
+
+    // 진입: 공이 중앙관을 타고 상승해 '실제 포켓 k' 위치로 들어감(rise) → 포켓과 함께 회전(ring) → 좌하단 배출
     capture(i,k){ const b=this.balls[i]; const p=this.ballPose(b); this.balls.splice(i,1);
       if(this.usePhysics) M.Composite.remove(this.world,b.body);
-      this.railBalls.push({ n:b.n, slot:this.railBalls.length, phase:'rise', k, w0:this.wheel,
+      this.railBalls.push({ n:b.n, slot:this.railBalls.length, phase:'rise', k,
         x:p.x, y:p.y, angle:0, av:0.16, held:false, path:null, wp:0, spd:4.6 });
       if(this.onExtract) this.onExtract(b.n); }
 
-    // ⑨ 레일: rise(중앙관 상승 → 12시 포켓) → ring(포켓 타고 좌하강) → chute(슈트 → 홀더)
-    updateRail(){ const topY=this.cy-this.Rr;
+    // ⑨ 레일: rise(중앙관 상승 → 포켓 k 진입) → ring(포켓 k와 함께 회전) → chute(슈트 → 홀더)
+    updateRail(){
       for(const rb of this.railBalls){ if(rb.held) continue;
-        if(rb.phase==='rise'){ rb.x+=(this.cx-rb.x)*0.25; rb.y-=5.2; rb.angle+=rb.av;
-          if(rb.y<=topY){ rb.y=topY; rb.x=this.cx; rb.phase='ring'; rb.w0=this.wheel; } }
-        else if(rb.phase==='ring'){ const phi=this.wheel-rb.w0, a=-Math.PI/2 - phi;
-          rb.x=this.cx+Math.cos(a)*this.Rr; rb.y=this.cy+Math.sin(a)*this.Rr; rb.angle=a+Math.PI/2;
-          if(phi>=this.exitPhi){ rb.phase='chute'; const tgt=holderPos(rb.slot); rb.av=0.16;
+        if(rb.phase==='rise'){ // 먼저 중앙관을 따라 수직 상승, 상단 근처에서 포켓 k 위치로 진입
+          const pk=this.pocketPos(rb.k);
+          const tx=(rb.y>this.cy-this.r*0.5)? this.cx : pk.x;   // 상단부 전엔 중앙관(수직), 이후 포켓으로
+          const ty=Math.min(pk.y, rb.y-5.4);
+          const dx=tx-rb.x, dy=ty-rb.y, d=Math.hypot(dx,dy)||1; const s=5.6;
+          rb.x+=dx/d*Math.min(s,d); rb.y+=dy/d*Math.min(s,d); rb.angle+=rb.av;
+          const dp=Math.hypot(pk.x-rb.x, pk.y-rb.y);
+          if(dp<3.5){ rb.phase='ring'; } }
+        else if(rb.phase==='ring'){ const pk=this.pocketPos(rb.k);
+          rb.x=pk.x; rb.y=pk.y; rb.angle=pk.a+Math.PI/2;
+          if(this.pocketTravel(rb.k)>=this.exitPhi){ rb.phase='chute'; const tgt=holderPos(rb.slot); rb.av=0.16;
             rb.path=[ {x:rb.x-6,y:rb.y+10}, {x:this.cx-this.r*0.5,y:this.cy+this.r+40}, {x:(rb.x+tgt.x)/2,y:HOLDER_Y-42}, tgt ]; rb.wp=0; } }
         else { const t=rb.path[rb.wp]; if(!t){ rb.held=true; continue; }
           const dx=t.x-rb.x, dy=t.y-rb.y, d=Math.hypot(dx,dy)||1; const spd=(rb.wp>=rb.path.length-2)?rb.spd*0.6:rb.spd;
@@ -301,7 +312,7 @@
     for(const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
 
     // 버전 표시
-    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('회전링+중앙관 v15 · '+c.name, LW-8, LH-6);
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('포켓정렬 v16 · '+c.name, LW-8, LH-6);
 
     // 디버그
     if(DEBUG){ ctx.fillStyle='rgba(0,0,0,0.55)'; roundRectPath(8,8,152,92,8); ctx.fill();

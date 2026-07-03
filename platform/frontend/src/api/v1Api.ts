@@ -224,6 +224,30 @@ export interface MachineOverview {
   note: string;
 }
 
+export interface MachineTrait {
+  key: string;
+  label: string;
+  value: number;
+  baseline: number;
+  unit: string;
+  delta: number;
+}
+
+export interface MachineProfile {
+  machine_id: number;
+  confirmed_count: number;
+  persona: string;
+  tagline: string;
+  decade_pct: number[];
+  decade_labels: string[];
+  hot: { number: number; z: number }[];
+  cold: { number: number; z: number }[];
+  avg_sum: number;
+  avg_odd: number;
+  traits: MachineTrait[];
+  honesty: string;
+}
+
 export interface MachineDrawResult {
   machine_id: number;
   draw_count: number;
@@ -236,6 +260,7 @@ export interface MachineDrawResult {
   signature_numbers: number[];
   avg_sum: number;
   avg_odd: number;
+  profile: MachineProfile | null;
   seed: number | null;
   disclaimer: string;
 }
@@ -423,6 +448,11 @@ export const v1Api = {
 
   getMachineOverview: () =>
     fetchJson<MachineOverview>('/api/v1/recommend/machine-overview'),
+
+  getMachineProfile: (machine: 1 | 2 | 3) =>
+    fetchJson<MachineProfile>(
+      `/api/v1/recommend/machine-profile?machine=${machine}`
+    ),
 
   getMachineDraw: (machine: 1 | 2 | 3, seed?: number) => {
     const q = new URLSearchParams({ machine: String(machine) });

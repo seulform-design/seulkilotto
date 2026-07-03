@@ -62,11 +62,13 @@
   // 공:구 지름비 ≈ 0.09 (실제 동행복권 추첨기 실측 ~0.12 기준 근접). drawInterval=볼 1개당 초(실측 ~5s).
   const DRUM_R = 166, BALL_R = 15;   // 전 호기 공통 크기
   const MACHINE_CONFIGS = {
-    1: { name:'1호기', accent:'#E8570D', drumR:DRUM_R, ballR:BALL_R, gravity:1.05, restitution:0.93, friction:0.0004, frictionAir:0.0034, density:0.0012,
+    // persona: 969회(262~1230, 100% 라벨검증) 누적 실측 역산 성향 라벨.
+    // 백엔드 machine_analytics.machine_profile 이 단일 소스이며 여기 라벨은 표시용.
+    1: { name:'1호기', persona:'고번·연번형', accent:'#E8570D', drumR:DRUM_R, ballR:BALL_R, gravity:1.05, restitution:0.93, friction:0.0004, frictionAir:0.0034, density:0.0012,
       jet:0.104, jetW:0.24, turb:0.008, spin:1.25, drawInterval:5.0, mixSec:6, waitSec:2 },
-    2: { name:'2호기', accent:'#0D8A3E', drumR:DRUM_R, ballR:BALL_R, gravity:1.10, restitution:0.88, friction:0.0008, frictionAir:0.0042, density:0.0012,
+    2: { name:'2호기', persona:'저번·이월형', accent:'#0D8A3E', drumR:DRUM_R, ballR:BALL_R, gravity:1.10, restitution:0.88, friction:0.0008, frictionAir:0.0042, density:0.0012,
       jet:0.098, jetW:0.26, turb:0.007, spin:0.85, drawInterval:5.5, mixSec:7, waitSec:2 },
-    3: { name:'3호기', accent:'#2952CC', drumR:DRUM_R, ballR:BALL_R, gravity:1.00, restitution:0.94, friction:0.0004, frictionAir:0.0030, density:0.0012,
+    3: { name:'3호기', persona:'중저번·동끝수형', accent:'#2952CC', drumR:DRUM_R, ballR:BALL_R, gravity:1.00, restitution:0.94, friction:0.0004, frictionAir:0.0030, density:0.0012,
       jet:0.108, jetW:0.24, turb:0.009, spin:1.05, drawInterval:4.8, mixSec:6, waitSec:2 },
   };
   const TOTAL_DRAW = 7;
@@ -309,8 +311,20 @@
     // 레일/홀더 위 공
     for(const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
 
+    // 호기 명패(persona) — 좌상단, 호기 액센트 컬러. 실측 성향 라벨.
+    if(c.persona){
+      ctx.save();
+      ctx.font='bold 12px "Malgun Gothic",sans-serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
+      const pw = ctx.measureText(c.name+' · '+c.persona).width + 20;
+      roundRectPath(10, 10, pw, 22, 11);
+      ctx.fillStyle=shade(c.accent,-0.15); ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,0.35)'; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle='#fff'; ctx.fillText(c.name+' · '+c.persona, 20, 22);
+      ctx.restore();
+    }
+
     // 버전 표시
-    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('좌측배출 v18 · '+c.name, LW-8, LH-6);
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('좌측배출 v19 · '+c.name, LW-8, LH-6);
 
     // 디버그
     if(DEBUG){ ctx.fillStyle='rgba(0,0,0,0.55)'; roundRectPath(8,8,152,92,8); ctx.fill();

@@ -89,6 +89,169 @@ def _weighted_draw_without_replacement(
     return out
 
 
+# ── 호기 성향 프로파일 (역대 실측 누적 데이터 역산) ───────────────────
+# 동행복권 추첨기 3기는 공정관리 대상이라 실측상 호기 예측력은 사실상 중립
+# (lift ~0). 아래 프로파일은 '예측'이 아니라 969회(262~1230, 100% 라벨검증)
+# 누적 데이터에서 각 호기가 상대적으로 어느 쪽으로 미세하게 기울었는지를
+# 정직하게 역산한 '성향 연출'이다. 볼 가중치(_machine_ball_weights)와 함께
+# 같은 실측 데이터를 근거로 하므로 시뮬레이션과 프로파일이 일관된다.
+_DECADE_LABELS = ["1-10", "11-20", "21-30", "31-40", "41-45"]
+
+
+def _decade_band(n: int) -> int:
+    return min((n - 1) // 10, 4)
+
+
+def _confirmed_subset(dfm: pd.DataFrame, machine_id: int) -> pd.DataFrame:
+    """추정(estimated)을 제외하고 '확정(confirmed)' 라벨 회차만 — 실측 근거."""
+    mask = (dfm["machine_id"] == machine_id) & (dfm.get("machine_source") == "confirmed")
+    return dfm[mask]
+
+
+def _global_prev_map(dfm: pd.DataFrame) -> Dict[int, Set[int]]:
+    """회차 → 그 회차의 (당첨6+보너스) 집합 — 이월수 판정용 전역 룩업.
+    이월은 '직전 회차가 어느 호기였든' 그 번호가 되돌아왔는지를 본다."""
+    out: Dict[int, Set[int]] = {}
+    for _, row in dfm.iterrows():
+        rd = int(row["round"])
+        nums = {int(row[c]) for c in NUMBER_COLUMNS}
+        bonus = int(row["bonus"]) if not pd.isna(row.get("bonus")) else 0
+        if 1 <= bonus <= 45:
+            nums.add(bonus)
+        out[rd] = nums
+    return out
+
+
+def _row_metrics(sub: pd.DataFrame, prev_map: Optional[Dict[int, Set[int]]] = None) -> Dict[str, float]:
+    """부분집합의 성향 지표를 한 번에 계산. prev_map(전역 회차→번호집합)이 있으면
+    이월수를 직전 회차(호기 무관) 기준으로 판정한다."""
+    n = len(sub)
+    if n == 0:
+        return {}
+    dec = [0] * 5
+    freq: Dict[int, int] = {x: 0 for x in ALL_NUMBERS}
+    consec = samelast = high = 0
+    sums: List[int] = []
+    odds: List[int] = []
+    carry = carry_den = 0
+    rows = sub.sort_values("round")
+    for _, row in rows.iterrows():
+        rd = int(row["round"])
+        nums = sorted(int(row[c]) for c in NUMBER_COLUMNS)
+        for x in nums:
+            freq[x] += 1
+            dec[_decade_band(x)] += 1
+            if x >= 31:
+                high += 1
+        if any(nums[i + 1] - nums[i] == 1 for i in range(5)):
+            consec += 1
+        last = {}
+        for x in nums:
+            last[x % 10] = last.get(x % 10, 0) + 1
+        if any(v >= 2 for v in last.values()):
+            samelast += 1
+        sums.append(sum(nums))
+        odds.append(sum(1 for x in nums if x % 2 == 1))
+        if prev_map is not None and (rd - 1) in prev_map:
+            carry_den += 1
+            if set(nums) & prev_map[rd - 1]:
+                carry += 1
+    tot = sum(dec) or 1
+    return {
+        "n": n,
+        "freq": freq,
+        "decade_pct": [round(d / tot * 100, 1) for d in dec],
+        "consec_rate": consec / n,
+        "samelast_rate": samelast / n,
+        "carry_rate": (carry / carry_den) if carry_den else 0.0,
+        "high_avg": high / n,             # 31~45 평균 개수
+        "avg_sum": sum(sums) / n,
+        "avg_odd": sum(odds) / n,
+    }
+
+
+def _persona(mid: int, m: Dict[str, float], base: Dict[str, float]) -> Tuple[str, str]:
+    """실측 편차에서 성향 라벨/한줄평 도출 (하드코딩 아님, 데이터 우선)."""
+    dec = m["decade_pct"]
+    dom = max(range(5), key=lambda b: dec[b] - base["decade_pct"][b])
+    band_word = {0: "저번(1~10)", 1: "중저번(11~20)", 2: "중번(21~30)",
+                 3: "고번(31~40)", 4: "끝번(41~45)"}[dom]
+    # 가장 두드러진 부가 성향
+    cand = [
+        ("연번", m["consec_rate"] - base["consec_rate"]),
+        ("동끝수", m["samelast_rate"] - base["samelast_rate"]),
+        ("이월수", m["carry_rate"] - base["carry_rate"]),
+        ("고번", (m["high_avg"] - base["high_avg"]) / 6.0),
+    ]
+    trait, _ = max(cand, key=lambda x: x[1])
+    label = f"{band_word.split('(')[0]}·{trait}형"
+    tag = {
+        "연번": "연속번호가 상대적으로 잦은 흐름",
+        "동끝수": "같은 끝수(예 3·13·23)가 잘 뭉치는 흐름",
+        "이월수": "직전 회차 번호가 되돌아오는 이월이 잦은 흐름",
+        "고번": "30번대 위 묵직한 번호에 무게가 실리는 흐름",
+    }[trait]
+    return label, f"{band_word} 대가 상대적으로 강하고, {tag}."
+
+
+def machine_profile(dfm: pd.DataFrame, machine_id: int) -> Dict:
+    """호기별 실측 성향 프로파일 — 역대 누적(확정 라벨) 데이터에서 역산.
+    반환은 프론트 표시용(정직 캡션 포함)."""
+    prev_map = _global_prev_map(dfm)
+    base = _row_metrics(dfm[dfm.get("machine_source") == "confirmed"], prev_map)
+    m = _row_metrics(_confirmed_subset(dfm, machine_id), prev_map)
+    if not m or not base:
+        return {}
+    freq = m["freq"]
+    n = m["n"]
+    exp = n * 6 / 45.0
+    zdev = sorted(
+        ((round((freq[x] - exp) / (exp ** 0.5), 2), x) for x in ALL_NUMBERS),
+        reverse=True,
+    )
+    hot = [{"number": x, "z": z} for z, x in zdev[:6]]
+    cold = [{"number": x, "z": z} for z, x in zdev[-6:][::-1]]
+    label, tagline = _persona(machine_id, m, base)
+
+    def dv(cur: float, ref: float) -> float:
+        return round((cur - ref) * 100, 1)
+
+    traits = [
+        {"key": "고번강세", "label": "고번(31~45) 평균",
+         "value": round(m["high_avg"], 2), "baseline": round(base["high_avg"], 2),
+         "unit": "개", "delta": round(m["high_avg"] - base["high_avg"], 2)},
+        {"key": "연번", "label": "연번 출현율",
+         "value": round(m["consec_rate"] * 100, 1), "baseline": round(base["consec_rate"] * 100, 1),
+         "unit": "%", "delta": dv(m["consec_rate"], base["consec_rate"])},
+        {"key": "동끝수", "label": "동끝수 뭉침율",
+         "value": round(m["samelast_rate"] * 100, 1), "baseline": round(base["samelast_rate"] * 100, 1),
+         "unit": "%", "delta": dv(m["samelast_rate"], base["samelast_rate"])},
+        {"key": "이월수", "label": "이월수 출현율",
+         "value": round(m["carry_rate"] * 100, 1), "baseline": round(base["carry_rate"] * 100, 1),
+         "unit": "%", "delta": dv(m["carry_rate"], base["carry_rate"])},
+    ]
+    # 절대 편차가 큰 순으로 정렬(그 호기에서 가장 두드러진 지표가 위로)
+    traits.sort(key=lambda t: -abs(t["delta"]))
+    return {
+        "machine_id": machine_id,
+        "confirmed_count": n,
+        "persona": label,
+        "tagline": tagline,
+        "decade_pct": m["decade_pct"],
+        "decade_labels": _DECADE_LABELS,
+        "hot": hot,
+        "cold": cold,
+        "avg_sum": round(m["avg_sum"], 1),
+        "avg_odd": round(m["avg_odd"], 2),
+        "traits": traits,
+        "honesty": (
+            "공정관리 추첨기라 호기별 예측력은 실측상 중립(lift~0)입니다. "
+            "위 수치는 969회 누적에서 역산한 미세 성향(통계적 유희)일 뿐, "
+            "다음 회차 확률을 바꾸지 않습니다."
+        ),
+    }
+
+
 def simulate_machine_draw(
     df: pd.DataFrame, machine_id: int, seed: Optional[int] = None
 ) -> Dict:
@@ -139,6 +302,7 @@ def simulate_machine_draw(
         "signature_numbers": signature,
         "avg_sum": round(sum(sums) / len(sums), 1) if sums else 0.0,
         "avg_odd": round(sum(odds) / len(odds), 2) if odds else 0.0,
+        "profile": machine_profile(dfm, machine_id),   # 실측 역산 성향 프로파일
         "seed": seed,
         "disclaimer": (
             f"{machine_id}호기의 실제 추첨 {draw_count}회 데이터 특성(번호 출현 성향)을 "

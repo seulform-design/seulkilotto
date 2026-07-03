@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   Box,
@@ -11,7 +11,7 @@ import {
   Typography,
 } from '@mui/material';
 import LottoBall from './LottoBall';
-import { v1Api, type MachineDrawResult } from '../api/v1Api';
+import { v1Api, type MachineDrawResult, type MachineProfile } from '../api/v1Api';
 
 const MACHINE_ACCENT: Record<number, string> = {
   1: '#E8570D',
@@ -27,8 +27,26 @@ export default function MachineDrawSimulator() {
   const [revealed, setRevealed] = useState<number[]>([]);
   const [drawing, setDrawing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [profile, setProfile] = useState<MachineProfile | null>(null);
 
   const accent = MACHINE_ACCENT[machine];
+
+  // 호기 선택 즉시 실측 성향 프로파일 로드 (추첨과 무관)
+  useEffect(() => {
+    let alive = true;
+    setProfile(null);
+    v1Api
+      .getMachineProfile(machine)
+      .then((p) => {
+        if (alive) setProfile(p);
+      })
+      .catch(() => {
+        if (alive) setProfile(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [machine]);
 
   const draw = async () => {
     if (drawing) return;
@@ -82,7 +100,7 @@ export default function MachineDrawSimulator() {
       >
         <iframe
           title="동행복권 로또 추첨기 (1/2/3호기)"
-          src="/venus-machine.html?v=18"
+          src="/venus-machine.html?v=19"
           style={{ display: 'block', width: '100%', height: 800, border: 0 }}
           scrolling="no"
         />
@@ -135,6 +153,106 @@ export default function MachineDrawSimulator() {
           {drawing ? <CircularProgress size={22} color="inherit" /> : `${machine}호기 추첨`}
         </Button>
       </Stack>
+
+      {/* 호기별 실측 성향 프로파일 (969회 누적 역산) */}
+      {profile && profile.persona && (
+        <Box
+          sx={{
+            mb: 2,
+            p: 1.5,
+            borderRadius: 2,
+            border: `1px solid ${accent}55`,
+            background: `linear-gradient(180deg, ${accent}14, transparent)`,
+          }}
+        >
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.75 }}>
+            <Chip
+              size="small"
+              label={`${machine}호기 · ${profile.persona}`}
+              sx={{ bgcolor: accent, color: '#fff', fontWeight: 800 }}
+            />
+            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+              실측 {profile.confirmed_count}회 역산
+            </Typography>
+          </Stack>
+          <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 1 }}>
+            {profile.tagline}
+          </Typography>
+
+          {/* 번호대 점유 막대 */}
+          <Stack direction="row" spacing={0.5} sx={{ mb: 1 }}>
+            {profile.decade_pct.map((pct, i) => {
+              const max = Math.max(...profile.decade_pct);
+              return (
+                <Box key={i} sx={{ flex: 1, textAlign: 'center' }}>
+                  <Box
+                    sx={{
+                      height: 34,
+                      display: 'flex',
+                      alignItems: 'flex-end',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        width: '70%',
+                        height: `${(pct / max) * 100}%`,
+                        borderRadius: '3px 3px 0 0',
+                        bgcolor: pct === max ? accent : `${accent}66`,
+                      }}
+                    />
+                  </Box>
+                  <Typography sx={{ color: '#cbd5e1', fontSize: 10, fontWeight: 700 }}>
+                    {pct}%
+                  </Typography>
+                  <Typography sx={{ color: '#64748b', fontSize: 9 }}>
+                    {profile.decade_labels[i]}
+                  </Typography>
+                </Box>
+              );
+            })}
+          </Stack>
+
+          {/* 대표 성향 지표 (편차 큰 순 상위 3) */}
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+            {profile.traits.slice(0, 3).map((t) => {
+              const up = t.delta > 0;
+              return (
+                <Chip
+                  key={t.key}
+                  size="small"
+                  variant="outlined"
+                  label={`${t.label} ${t.value}${t.unit} (${up ? '▲' : '▼'}${Math.abs(
+                    t.delta
+                  )})`}
+                  sx={{
+                    color: '#e2e8f0',
+                    borderColor: up ? `${accent}aa` : '#475569',
+                    fontSize: 11,
+                  }}
+                />
+              );
+            })}
+          </Stack>
+
+          {/* 다출 번호(핫) */}
+          <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+            <Typography variant="caption" sx={{ color: '#94a3b8', mr: 0.25 }}>
+              다출 번호
+            </Typography>
+            {profile.hot.map((h) => (
+              <LottoBall key={h.number} number={h.number} size={26} />
+            ))}
+          </Stack>
+
+          <Typography
+            variant="caption"
+            sx={{ color: '#64748b', display: 'block', mt: 1, fontStyle: 'italic' }}
+          >
+            {profile.honesty}
+          </Typography>
+        </Box>
+      )}
 
       <Box sx={{ minHeight: 52, display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', mb: 1 }}>
         {revealed.length === 0 && !drawing && (

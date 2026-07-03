@@ -11,8 +11,10 @@ from ..data_meta import effective_current_round
 from ..database import load_history
 from ..json_utils import to_jsonable
 from ..machine_analytics import (
+    attach_machine_column,
     build_round_recommendation,
     machine_overview,
+    machine_profile,
     simulate_machine_draw,
 )
 from ..video_analysis.store import record_current_rule_engine_output
@@ -119,6 +121,17 @@ def machine_draw_endpoint(
     if df.empty:
         raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
     return to_jsonable(simulate_machine_draw(df, machine, seed=seed))
+
+
+@router.get("/machine-profile")
+def machine_profile_endpoint(
+    machine: int = Query(..., ge=1, le=3, description="호기 1~3"),
+):
+    """호기별 실측 성향 프로파일 — 추첨 없이 역대 누적 데이터 역산 결과만 반환."""
+    df = load_history()
+    if df.empty:
+        raise HTTPException(status_code=404, detail="당첨 데이터가 없습니다.")
+    return to_jsonable(machine_profile(attach_machine_column(df), machine))
 
 
 @router.get("/machine-overview")

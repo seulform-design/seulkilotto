@@ -66,8 +66,9 @@ export default function MachineDrawSimulator() {
         🎰 로또 추첨기 (Editec Venus VIII 재현)
       </Typography>
       <Typography variant="caption" sx={{ color: '#cbd5e1', display: 'block', mb: 1.5 }}>
-        Matter.js 물리엔진 기반 — 3대 모두 동일한 기종(같은 크기·구조)이며 호기별로 송풍세기·반발·추첨시간만 다릅니다.
-        실제 동행복권과 동일한 공기혼합(air-mix): 하단 송풍기로 45개 볼이 솟구쳐 순환하고, 상단 배출 로터로 빨려 올라가 레일을 타고 추출됩니다(번호는 물리 결과로 결정).
+        Matter.js 물리엔진 기반 — 3대 모두 동일 기종(같은 크기·구조), 호기별 송풍·추첨간격만 다릅니다.
+        실제 동행복권 추첨기 구조: 구 전체를 감싸는 회전 테두리에 4개 배출구가 90°로 배치되어, 12시로 올라온 공이 포켓에 담겨 왼쪽으로 내려가 배출됩니다.
+        실측 기준 볼 1개당 약 5초 간격이며, 테두리 회전속도는 이 간격에서 역산합니다(번호는 물리 결과로 결정).
       </Typography>
 
       {/* Matter.js 물리 추첨기 (1/2/3호기, 상단 배출식) */}
@@ -82,7 +83,7 @@ export default function MachineDrawSimulator() {
       >
         <iframe
           title="동행복권 로또 추첨기 (1/2/3호기)"
-          src="/venus-machine.html?v=10"
+          src="/venus-machine.html?v=11"
           style={{ display: 'block', width: '100%', height: 820, border: 0 }}
           scrolling="no"
         />

@@ -99,7 +99,7 @@
       this.wheel=0; this.usePhysics=hasMatter;
       this.BZ=32; this.Rr=this.r+this.BZ/2;                       // 테두리 두께/포켓 반경
       this.discSpeed=(Math.PI/2)/(cfg.drawInterval*60);           // 역산: 포켓이 drawInterval마다 12시 도달
-      this.exitPhi=Math.PI*0.78;                                  // 12시→좌하단(포켓 이동각) 후 배출
+      this.exitPhi=Math.PI/2;                                     // 12시→9시(좌측)까지 내려간 뒤, 속도가 '아래'인 지점에서 배출(튕김 없음)
       if(this.usePhysics){ this.engine=M.Engine.create({enableSleeping:false}); this.engine.gravity.y=cfg.gravity; this.world=this.engine.world;
         M.Events.on(this.engine,'collisionStart',(e)=>{ this.collisions+=e.pairs.length; }); }
       this.spawnBalls(); }
@@ -186,8 +186,10 @@
           if(dp<3.5){ rb.phase='ring'; } }
         else if(rb.phase==='ring'){ const pk=this.pocketPos(rb.k);
           rb.x=pk.x; rb.y=pk.y; rb.angle=pk.a+Math.PI/2;
-          if(this.pocketTravel(rb.k)>=this.exitPhi){ rb.phase='chute'; const tgt=holderPos(rb.slot); rb.av=0.16;
-            rb.path=[ {x:rb.x-6,y:rb.y+10}, {x:this.cx-this.r*0.5,y:this.cy+this.r+40}, {x:(rb.x+tgt.x)/2,y:HOLDER_Y-42}, tgt ]; rb.wp=0; } }
+          if(this.pocketTravel(rb.k)>=this.exitPhi){ rb.phase='chute'; const tgt=holderPos(rb.slot); rb.av=0.18;
+            // 9시(좌측)에서 아래로 낙하(속도 방향과 일치) → 홀더 상단 레일 → 슬롯
+            const railY=HOLDER_Y-this.cfg.ballR-12, dropX=this.cx-this.Rr;
+            rb.path=[ {x:dropX, y:this.cy+this.r*0.45}, {x:dropX, y:railY}, {x:tgt.x, y:railY}, tgt ]; rb.wp=0; } }
         else { const t=rb.path[rb.wp]; if(!t){ rb.held=true; continue; }
           const dx=t.x-rb.x, dy=t.y-rb.y, d=Math.hypot(dx,dy)||1; const spd=(rb.wp>=rb.path.length-2)?rb.spd*0.6:rb.spd;
           rb.x+=dx/d*Math.min(spd,d); rb.y+=dy/d*Math.min(spd,d); rb.angle+=rb.av;
@@ -234,21 +236,17 @@
     ctx.save(); ctx.filter='blur(6px)'; ctx.beginPath(); ctx.ellipse(cx, LH-38, r*0.66, 12, 0, 0, Math.PI*2); ctx.fillStyle='rgba(0,0,0,0.36)'; ctx.fill(); ctx.restore();
     // ② 우측 지지 기둥 (구 뒤)
     ctx.fillStyle=postG; roundRectPath(postX-19, postTop, 38, (LH-42)-postTop, 18); ctx.fill();
-    // ③ 하단: 목 → 아크릴 베이스 → 삼각 트러스 → 반원 톱니 레일
-    const baseTop=gy+52;
-    ctx.fillStyle='rgba(196,210,228,0.16)'; ctx.strokeStyle='rgba(210,225,242,0.28)'; ctx.lineWidth=1.5;
-    ctx.beginPath(); ctx.moveTo(cx-28,gy-4); ctx.lineTo(cx+28,gy-4); ctx.lineTo(cx+62,baseTop); ctx.lineTo(cx-62,baseTop); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.strokeStyle='rgba(188,203,224,0.5)'; ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(cx-38,baseTop); ctx.lineTo(cx,gy+26); ctx.lineTo(cx+38,baseTop); ctx.stroke();
-    ctx.strokeStyle='rgba(190,205,224,0.5)'; ctx.lineWidth=7; ctx.beginPath(); ctx.arc(cx,gy+30,52,Math.PI*0.18,Math.PI*0.82); ctx.stroke();
-    ctx.lineWidth=2; ctx.strokeStyle='rgba(210,225,242,0.45)'; for(let t=0;t<=12;t++){ const a=Math.PI*0.18+(Math.PI*0.64)*(t/12); ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*48,gy+30+Math.sin(a)*48); ctx.lineTo(cx+Math.cos(a)*58,gy+30+Math.sin(a)*58); ctx.stroke(); }
+    // ③ 하단 지지 베이스(측면 다리) — 중앙은 배출 통로로 비움
+    const baseTop=gy+56;
+    ctx.strokeStyle='rgba(188,203,224,0.45)'; ctx.lineWidth=5;
+    ctx.beginPath(); ctx.moveTo(cx-58,baseTop); ctx.lineTo(cx-20,gy+8); ctx.moveTo(cx+58,baseTop); ctx.lineTo(cx+20,gy+8); ctx.stroke();
     ctx.lineWidth=1;
-    // ④ 배출 슈트 (테두리 좌하단 포켓 배출 → 홀더) — 프레임 뒤
-    const exA=-Math.PI/2 - eng.exitPhi, exOut={ x:cx+Math.cos(exA)*Rr, y:cy+Math.sin(exA)*Rr };
-    ctx.strokeStyle='rgba(188,210,240,0.16)'; ctx.lineWidth=c.ballR*2+10; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(exOut.x-2, exOut.y+2);
-    ctx.quadraticCurveTo(cx-r*0.55, gy+30, (cx-r*0.4+HOLDER_X0)/2, HOLDER_Y-30);
-    ctx.quadraticCurveTo(HOLDER_X0-4, HOLDER_Y-12, HOLDER_X0+4, HOLDER_Y-4);
-    ctx.stroke(); ctx.lineCap='butt';
+    // ④ 배출 슈트: 9시(좌측) 배출 → 좌측 수직 낙하관 → 홀더 상단 레일 → 슬롯
+    const dropX=cx-Rr, railY=HOLDER_Y-c.ballR-12;
+    ctx.strokeStyle='rgba(188,210,240,0.15)'; ctx.lineWidth=c.ballR*2+10; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(dropX, cy+4); ctx.lineTo(dropX, railY); ctx.stroke();                     // 좌측 수직 낙하관
+    ctx.beginPath(); ctx.moveTo(dropX, railY); ctx.lineTo(HOLDER_X0+6*HOLDER_GAP, railY); ctx.stroke();    // 홀더 상단 레일
+    ctx.lineCap='butt';
     // ⑤ 홀더 트레이(7슬롯 + 보너스) — 트레이 바 + 슬롯 + 번호 라벨
     roundRectPath(HOLDER_X0-22, HOLDER_Y-c.ballR-11, 6*HOLDER_GAP+44, c.ballR*2+30, 13);
     const trayG=ctx.createLinearGradient(0,HOLDER_Y-c.ballR-11,0,HOLDER_Y+c.ballR+19); trayG.addColorStop(0,'rgba(206,220,238,0.16)'); trayG.addColorStop(1,'rgba(110,130,160,0.10)');
@@ -312,7 +310,7 @@
     for(const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
 
     // 버전 표시
-    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('포켓정렬 v16 · '+c.name, LW-8, LH-6);
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('좌측배출 v17 · '+c.name, LW-8, LH-6);
 
     // 디버그
     if(DEBUG){ ctx.fillStyle='rgba(0,0,0,0.55)'; roundRectPath(8,8,152,92,8); ctx.fill();

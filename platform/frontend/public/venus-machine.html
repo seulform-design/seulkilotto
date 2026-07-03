@@ -73,16 +73,16 @@
 
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
-  const LW = 480, LH = 684;
+  const LW = 480, LH = 600;
   let DPR = Math.max(1, window.devicePixelRatio || 1);
   function setupCanvas() { DPR = Math.max(1, window.devicePixelRatio || 1);
     cv.width = Math.round(LW*DPR); cv.height = Math.round(LH*DPR);
     cv.style.width = LW+'px'; cv.style.height = LH+'px'; ctx.setTransform(DPR,0,0,DPR,0,0); }
   setupCanvas(); window.addEventListener('resize', setupCanvas);
 
-  const DRUM_CX = 232, DRUM_CY = 268;    // 구를 낮춰 위에 4구 회전 휠 공간 확보
+  const DRUM_CX = 232, DRUM_CY = 250;    // 컴팩트 배치(상하 여백 최소화)
   const EXIT_W = 28;                      // 상단 배출구 폭
-  const HOLDER_Y = 654, HOLDER_X0 = 40, HOLDER_GAP = 62;
+  const HOLDER_Y = 562, HOLDER_X0 = 40, HOLDER_GAP = 62;
   function holderPos(i){ return { x: HOLDER_X0 + i*HOLDER_GAP, y: HOLDER_Y }; }
 
   function ballColor(n){ return n<=10?'#FBC02D':n<=20?'#1976D2':n<=30?'#D32F2F':n<=40?'#5a5a5a':'#388E3C'; }
@@ -222,7 +222,7 @@
     // ② 우측 지지 기둥 (구 뒤)
     ctx.fillStyle=postG; roundRectPath(postX-19, postTop, 38, (LH-42)-postTop, 18); ctx.fill();
     // ③ 하단: 목 → 아크릴 베이스 → 삼각 트러스 → 반원 톱니 레일
-    const baseTop=gy+92;
+    const baseTop=gy+52;
     ctx.fillStyle='rgba(196,210,228,0.16)'; ctx.strokeStyle='rgba(210,225,242,0.28)'; ctx.lineWidth=1.5;
     ctx.beginPath(); ctx.moveTo(cx-28,gy-4); ctx.lineTo(cx+28,gy-4); ctx.lineTo(cx+62,baseTop); ctx.lineTo(cx-62,baseTop); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.strokeStyle='rgba(188,203,224,0.5)'; ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(cx-38,baseTop); ctx.lineTo(cx,gy+26); ctx.lineTo(cx+38,baseTop); ctx.stroke();
@@ -233,11 +233,16 @@
     const exOut={ x:cx+Math.cos(Math.PI*0.75)*Rr, y:cy+Math.sin(Math.PI*0.75)*Rr };
     ctx.strokeStyle='rgba(190,212,240,0.20)'; ctx.lineWidth=c.ballR*2+8; ctx.lineCap='round';
     ctx.beginPath(); ctx.moveTo(exOut.x-2, exOut.y+2); ctx.quadraticCurveTo(cx-r*0.5, gy+34, HOLDER_X0+4, HOLDER_Y-4); ctx.stroke(); ctx.lineCap='butt';
-    // ⑤ 홀더 (7슬롯 + 보너스)
+    // ⑤ 홀더 트레이(7슬롯 + 보너스) — 트레이 바 + 슬롯 + 번호 라벨
+    roundRectPath(HOLDER_X0-22, HOLDER_Y-c.ballR-11, 6*HOLDER_GAP+44, c.ballR*2+30, 13);
+    const trayG=ctx.createLinearGradient(0,HOLDER_Y-c.ballR-11,0,HOLDER_Y+c.ballR+19); trayG.addColorStop(0,'rgba(206,220,238,0.16)'); trayG.addColorStop(1,'rgba(110,130,160,0.10)');
+    ctx.fillStyle=trayG; ctx.fill(); ctx.strokeStyle='rgba(200,215,238,0.24)'; ctx.lineWidth=1; ctx.stroke();
     for(let i=0;i<TOTAL_DRAW;i++){ const p=holderPos(i),bonus=(i===TOTAL_DRAW-1);
-      ctx.beginPath(); ctx.arc(p.x,p.y,c.ballR+4,0,Math.PI*2); ctx.fillStyle=bonus?'rgba(80,140,255,0.14)':'rgba(255,255,255,0.07)'; ctx.fill();
-      ctx.lineWidth=bonus?2:1; ctx.strokeStyle=bonus?'rgba(90,150,255,0.8)':'rgba(255,255,255,0.28)'; ctx.stroke(); }
-    const pb=holderPos(TOTAL_DRAW-1); ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='bold 17px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('+', pb.x-HOLDER_GAP/2, pb.y);
+      ctx.beginPath(); ctx.arc(p.x,p.y,c.ballR+4,0,Math.PI*2); ctx.fillStyle=bonus?'rgba(80,140,255,0.16)':'rgba(255,255,255,0.06)'; ctx.fill();
+      ctx.lineWidth=bonus?2:1; ctx.strokeStyle=bonus?'rgba(90,150,255,0.85)':'rgba(255,255,255,0.30)'; ctx.stroke(); }
+    ctx.fillStyle='rgba(255,255,255,0.42)'; ctx.font='bold 10px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='top';
+    for(let i=0;i<TOTAL_DRAW;i++){ const p=holderPos(i); ctx.fillText(i<6?String(i+1):'B', p.x, p.y+c.ballR+7); }
+    const pb=holderPos(TOTAL_DRAW-1); ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='bold 17px sans-serif'; ctx.textBaseline='middle'; ctx.fillText('+', pb.x-HOLDER_GAP/2, pb.y);
     // ⑥ 회전 테두리(틀) — 구 전체를 감싸는 두꺼운 금속 링
     const bez=ctx.createLinearGradient(cx-r,cy-r,cx+r,cy+r); bez.addColorStop(0,'#f4f7fa'); bez.addColorStop(0.34,'#c6cfda'); bez.addColorStop(0.56,'#8b96a4'); bez.addColorStop(1,'#59636f');
     ctx.beginPath(); ctx.arc(cx,cy,Rr,0,Math.PI*2); ctx.lineWidth=BZ; ctx.strokeStyle=bez; ctx.stroke();
@@ -252,6 +257,13 @@
       const px=cx+Math.cos(a)*Rr, py=cy+Math.sin(a)*Rr;
       ctx.beginPath(); ctx.arc(px,py, c.ballR+4, 0, Math.PI*2); ctx.fillStyle='rgba(22,30,44,0.72)'; ctx.fill();
       ctx.strokeStyle='rgba(244,248,252,0.7)'; ctx.lineWidth=2.5; ctx.stroke(); }
+    ctx.lineWidth=1;
+    // 볼트 스터드(테두리 장식) — 포켓 사이 45° (실제 추첨기 볼트)
+    for(let k=0;k<4;k++){ const a=-Math.PI/2 - eng.wheel + k*Math.PI/2 + Math.PI/4;
+      const bx=cx+Math.cos(a)*Rr, by=cy+Math.sin(a)*Rr;
+      const bgr=ctx.createRadialGradient(bx-2,by-2,1,bx,by,6); bgr.addColorStop(0,'#eef3f8'); bgr.addColorStop(1,'#6b7580');
+      ctx.beginPath(); ctx.arc(bx,by,5,0,Math.PI*2); ctx.fillStyle=bgr; ctx.fill(); ctx.strokeStyle='rgba(50,58,70,0.6)'; ctx.lineWidth=1; ctx.stroke();
+      ctx.beginPath(); ctx.arc(bx,by,1.6,0,Math.PI*2); ctx.fillStyle='rgba(38,46,58,0.85)'; ctx.fill(); }
     ctx.lineWidth=1;
     // ⑧ 유리 구
     const gg=ctx.createRadialGradient(cx-r*0.34,cy-r*0.42,r*0.1,cx,cy,r);
@@ -278,7 +290,7 @@
     for(const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
 
     // 버전 표시
-    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('회전연동추첨 v12 · '+c.name, LW-8, LH-6);
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('컴팩트·디테일 v13 · '+c.name, LW-8, LH-6);
 
     // 디버그
     if(DEBUG){ ctx.fillStyle='rgba(0,0,0,0.55)'; roundRectPath(8,8,152,92,8); ctx.fill();

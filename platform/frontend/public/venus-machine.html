@@ -200,11 +200,12 @@
 
     // ══ 사진 기준 구조 (뒤 → 앞) ══
     const postX=cx+r+8, postTop=cy-r*0.5;
+    const BZ=32, Rr=r+BZ/2;                          // 회전 테두리 두께 / 중심반경
     const postG=ctx.createLinearGradient(postX-20,0,postX+20,0);
     postG.addColorStop(0,'#7f8b9a'); postG.addColorStop(0.42,'#c8d1dc'); postG.addColorStop(0.6,'#b0bac8'); postG.addColorStop(1,'#5f6976');
     // ① 바닥 그림자
     ctx.save(); ctx.filter='blur(6px)'; ctx.beginPath(); ctx.ellipse(cx, LH-38, r*0.66, 12, 0, 0, Math.PI*2); ctx.fillStyle='rgba(0,0,0,0.36)'; ctx.fill(); ctx.restore();
-    // ② 우측 지지 기둥 (구 뒤 — 사진의 두꺼운 회색 포스트)
+    // ② 우측 지지 기둥 (구 뒤)
     ctx.fillStyle=postG; roundRectPath(postX-19, postTop, 38, (LH-42)-postTop, 18); ctx.fill();
     // ③ 하단: 목 → 아크릴 베이스 → 삼각 트러스 → 반원 톱니 레일
     const baseTop=gy+92;
@@ -214,27 +215,29 @@
     ctx.strokeStyle='rgba(190,205,224,0.5)'; ctx.lineWidth=7; ctx.beginPath(); ctx.arc(cx,gy+30,52,Math.PI*0.18,Math.PI*0.82); ctx.stroke();
     ctx.lineWidth=2; ctx.strokeStyle='rgba(210,225,242,0.45)'; for(let t=0;t<=12;t++){ const a=Math.PI*0.18+(Math.PI*0.64)*(t/12); ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*48,gy+30+Math.sin(a)*48); ctx.lineTo(cx+Math.cos(a)*58,gy+30+Math.sin(a)*58); ctx.stroke(); }
     ctx.lineWidth=1;
-    // ④ 배출 슈트/레일 (로터 배출 → 우측 하강 → 홀더)
-    const disch={ x:wc.x+Math.cos(70*Math.PI/180)*wr, y:wc.y+Math.sin(70*Math.PI/180)*wr };
-    ctx.strokeStyle='rgba(190,212,240,0.22)'; ctx.lineWidth=c.ballR*2+8; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(disch.x+4, disch.y+24);
-    ctx.quadraticCurveTo(cx+r+30, cy-r*0.1, cx+r+14, cy+r*0.35);
-    ctx.quadraticCurveTo(cx+r+6, cy+r*0.9, (cx+r+14+HOLDER_X0+6*HOLDER_GAP)/2, HOLDER_Y-30);
-    ctx.quadraticCurveTo(HOLDER_X0+6*HOLDER_GAP, HOLDER_Y-14, HOLDER_X0+4, HOLDER_Y-4);
-    ctx.stroke(); ctx.lineCap='butt';
+    // ④ 배출 슈트 (테두리 좌하단 배출 → 홀더)
+    const exOut={ x:cx+Math.cos(Math.PI*0.75)*Rr, y:cy+Math.sin(Math.PI*0.75)*Rr };
+    ctx.strokeStyle='rgba(190,212,240,0.20)'; ctx.lineWidth=c.ballR*2+8; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(exOut.x-2, exOut.y+2); ctx.quadraticCurveTo(cx-r*0.5, gy+34, HOLDER_X0+4, HOLDER_Y-4); ctx.stroke(); ctx.lineCap='butt';
     // ⑤ 홀더 (7슬롯 + 보너스)
     for(let i=0;i<TOTAL_DRAW;i++){ const p=holderPos(i),bonus=(i===TOTAL_DRAW-1);
       ctx.beginPath(); ctx.arc(p.x,p.y,c.ballR+4,0,Math.PI*2); ctx.fillStyle=bonus?'rgba(80,140,255,0.14)':'rgba(255,255,255,0.07)'; ctx.fill();
       ctx.lineWidth=bonus?2:1; ctx.strokeStyle=bonus?'rgba(90,150,255,0.8)':'rgba(255,255,255,0.28)'; ctx.stroke(); }
     const pb=holderPos(TOTAL_DRAW-1); ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='bold 17px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('+', pb.x-HOLDER_GAP/2, pb.y);
-    // ⑥ 외곽 프레임 링 (구에 밀착)
-    ctx.beginPath(); ctx.arc(cx,cy,r+13,0,Math.PI*2); ctx.lineWidth=8;
-    const of=ctx.createLinearGradient(cx-r,cy-r,cx+r,cy+r); of.addColorStop(0,'#eef2f7'); of.addColorStop(0.5,'#9aa6b4'); of.addColorStop(1,'#6b7580'); ctx.strokeStyle=of; ctx.stroke(); ctx.lineWidth=1;
-    // ⑦ 좌우 포트(3·9시) — 링에 밀착
-    for(const sgn of [-1,1]){ const gx=cx+sgn*(r+9);
-      ctx.fillStyle='rgba(198,211,230,0.9)'; ctx.strokeStyle='#7f8a98'; ctx.lineWidth=1.5;
-      roundRectPath(sgn>0?gx:gx-16, cy-11, 16, 22, 3); ctx.fill(); ctx.stroke();
-      ctx.fillStyle='rgba(20,30,45,0.42)'; ctx.beginPath(); ctx.ellipse(gx+sgn*8, cy, 3, 7, 0, 0, Math.PI*2); ctx.fill(); }
+    // ⑥ 회전 테두리(틀) — 구 전체를 감싸는 두꺼운 금속 링
+    const bez=ctx.createLinearGradient(cx-r,cy-r,cx+r,cy+r); bez.addColorStop(0,'#f4f7fa'); bez.addColorStop(0.34,'#c6cfda'); bez.addColorStop(0.56,'#8b96a4'); bez.addColorStop(1,'#59636f');
+    ctx.beginPath(); ctx.arc(cx,cy,Rr,0,Math.PI*2); ctx.lineWidth=BZ; ctx.strokeStyle=bez; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx,cy,r+2,0,Math.PI*2); ctx.lineWidth=2; ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx,cy,r+BZ-2,0,Math.PI*2); ctx.lineWidth=2; ctx.strokeStyle='rgba(58,68,82,0.5)'; ctx.stroke();
+    // 회전 눈금(테두리가 도는 것이 보이도록)
+    ctx.strokeStyle='rgba(70,80,94,0.3)'; ctx.lineWidth=1.5;
+    for(let t=0;t<48;t++){ const a=-eng.wheel + t*Math.PI*2/48; ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*(r+4), cy+Math.sin(a)*(r+4)); ctx.lineTo(cx+Math.cos(a)*(r+BZ-4), cy+Math.sin(a)*(r+BZ-4)); ctx.stroke(); }
+    ctx.lineWidth=1;
+    // ⑦ 4배출구 포켓(90° 간격) — 12시 진입, CCW(좌하강). 사진의 배출구·좌우포트·하단이 이 4개
+    for(let k=0;k<4;k++){ const a=-Math.PI/2 - eng.wheel + k*Math.PI/2;
+      const px=cx+Math.cos(a)*Rr, py=cy+Math.sin(a)*Rr;
+      ctx.beginPath(); ctx.arc(px,py, c.ballR+4, 0, Math.PI*2); ctx.fillStyle='rgba(22,30,44,0.72)'; ctx.fill();
+      ctx.strokeStyle='rgba(244,248,252,0.7)'; ctx.lineWidth=2.5; ctx.stroke(); }
     ctx.lineWidth=1;
     // ⑧ 유리 구
     const gg=ctx.createRadialGradient(cx-r*0.34,cy-r*0.42,r*0.1,cx,cy,r);
@@ -245,32 +248,23 @@
     ctx.strokeStyle='rgba(200,215,235,0.14)'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(cx,cy-r*0.72); ctx.lineTo(cx,cy+r*0.5); ctx.stroke();
     for(const yy of [-0.25,0.15]){ const yv=cy+r*yy, hw=Math.sqrt(Math.max(0,r*r-(yv-cy)*(yv-cy)))*0.84; ctx.beginPath(); ctx.moveTo(cx-hw,yv); ctx.lineTo(cx+hw,yv); ctx.stroke(); }
     ctx.restore();
-    // ⑩ 상단 구동 암 (로터 → 우측 기둥, 유리 위 가림)
-    ctx.strokeStyle=postG; ctx.lineWidth=28; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(cx+wr*0.4, wc.y+2); ctx.quadraticCurveTo(cx+r*0.55, cy-r-2, postX, cy-r*0.28); ctx.stroke();
-    ctx.lineCap='butt'; ctx.lineWidth=1;
+    // ⑩ 구동 커플링 (우측 기둥 → 회전 테두리)
+    ctx.strokeStyle=postG; ctx.lineWidth=20; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(cx+Math.cos(-0.55)*Rr, cy+Math.sin(-0.55)*Rr); ctx.lineTo(postX, cy-r*0.15); ctx.stroke(); ctx.lineCap='butt'; ctx.lineWidth=1;
     // ⑪ 드럼 안 공(다면체) — 구 경계로 클립(이탈 방지)
     ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r-1,0,Math.PI*2); ctx.clip();
     for(const b of eng.balls){ const p=eng.ballPose(b); drawBall(p.x,p.y,b.n,c.ballR,p.angle); }
     ctx.restore();
     // ⑫ 림
     ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.lineWidth=4; ctx.strokeStyle='#aeb8c6'; ctx.stroke(); ctx.lineWidth=1;
-    // ⑬ 상단 진입구 + 회전 로터(밀착, 3구 배출홀)
-    ctx.beginPath(); ctx.ellipse(cx, cy-r+3, 9, 5, 0, 0, Math.PI*2); ctx.fillStyle='rgba(20,30,45,0.5)'; ctx.fill();
-    ctx.save(); ctx.translate(wc.x, wc.y);
-    const rg=ctx.createRadialGradient(-wr*0.3,-wr*0.3,wr*0.2,0,0,wr+7); rg.addColorStop(0,'#eef2f7'); rg.addColorStop(1,'#98a4b2');
-    ctx.beginPath(); ctx.arc(0,0,wr+7,0,Math.PI*2); ctx.fillStyle=rg; ctx.fill(); ctx.strokeStyle='#7f8a98'; ctx.lineWidth=2; ctx.stroke();
-    for(let k=0;k<3;k++){ const a=eng.wheel+k*2*Math.PI/3, bx=Math.cos(a)*wr*0.6, by=Math.sin(a)*wr*0.6;
-      ctx.beginPath(); ctx.arc(bx,by,wr*0.28,0,Math.PI*2); ctx.fillStyle='rgba(30,42,62,0.55)'; ctx.fill(); ctx.strokeStyle='#c9d3dd'; ctx.lineWidth=1.5; ctx.stroke(); }
-    ctx.beginPath(); ctx.arc(0,0,wr*0.22,0,Math.PI*2); ctx.fillStyle='#aeb8c6'; ctx.fill(); ctx.restore(); ctx.lineWidth=1;
-    // ⑭ 유리 하이라이트
+    // ⑬ 유리 하이라이트
     ctx.beginPath(); ctx.ellipse(cx-r*0.4, cy-r*0.5, r*0.26, r*0.12, -0.5, 0, Math.PI*2); ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fill();
 
     // 레일/홀더 위 공
     for(const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
 
     // 버전 표시
-    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('사진구조 v8 · '+c.name, LW-8, LH-6);
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('회전테두리 v10 · '+c.name, LW-8, LH-6);
 
     // 디버그
     if(DEBUG){ ctx.fillStyle='rgba(0,0,0,0.55)'; roundRectPath(8,8,152,92,8); ctx.fill();

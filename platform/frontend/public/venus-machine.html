@@ -183,10 +183,10 @@
           const dx=tx-rb.x, dy=ty-rb.y, d=Math.hypot(dx,dy)||1; const s=5.6;
           rb.x+=dx/d*Math.min(s,d); rb.y+=dy/d*Math.min(s,d); rb.angle+=rb.av;
           const dp=Math.hypot(pk.x-rb.x, pk.y-rb.y);
-          if(dp<3.5){ rb.phase='ring'; } }
+          if(dp<3.5){ rb.phase='ring'; rb.w0=this.wheel; } }   // 링 진입 시점 기록(누적 이동각 기준)
         else if(rb.phase==='ring'){ const pk=this.pocketPos(rb.k);
           rb.x=pk.x; rb.y=pk.y; rb.angle=pk.a+Math.PI/2;
-          if(this.pocketTravel(rb.k)>=this.exitPhi){ rb.phase='chute'; const tgt=holderPos(rb.slot); rb.av=0.18;
+          if(this.wheel - rb.w0 >= this.exitPhi){ rb.phase='chute'; const tgt=holderPos(rb.slot); rb.av=0.18;
             // 9시(좌측)에서 아래로 낙하(속도 방향과 일치) → 홀더 상단 레일 → 슬롯
             const railY=HOLDER_Y-this.cfg.ballR-12, dropX=this.cx-this.Rr;
             rb.path=[ {x:dropX, y:this.cy+this.r*0.45}, {x:dropX, y:railY}, {x:tgt.x, y:railY}, tgt ]; rb.wp=0; } }
@@ -310,7 +310,7 @@
     for(const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
 
     // 버전 표시
-    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('좌측배출 v17 · '+c.name, LW-8, LH-6);
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('좌측배출 v18 · '+c.name, LW-8, LH-6);
 
     // 디버그
     if(DEBUG){ ctx.fillStyle='rgba(0,0,0,0.55)'; roundRectPath(8,8,152,92,8); ctx.fill();

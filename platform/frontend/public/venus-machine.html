@@ -95,7 +95,7 @@
   // ═══ MachineEngine — 공통 엔진(BlowerSystem/AirField/Outlet/Extraction/Rail) ═══
   class MachineEngine {
     constructor(cfg){ this.cfg=cfg; this.cx=DRUM_CX; this.cy=DRUM_CY; this.r=cfg.drumR;
-      this.blowing=false; this.gateOpen=false; this.balls=[]; this.railBalls=[]; this.collisions=0;
+      this.blowing=false; this.gateOpen=false; this.drawing=false; this.lastCapW=-99; this.balls=[]; this.railBalls=[]; this.collisions=0;
       this.wheel=0; this.usePhysics=hasMatter;
       this.BZ=32; this.Rr=this.r+this.BZ/2;                       // 테두리 두께/포켓 반경
       this.discSpeed=(Math.PI/2)/(cfg.drawInterval*60);           // 역산: 포켓이 drawInterval마다 12시 도달
@@ -133,11 +133,11 @@
 
     step(){ const c=this.cfg;
       // 테두리 회전: 추첨 중이거나 포켓에 실린 공이 있으면 discSpeed, 대기 시 미세 회전
-      const spinning=this.blowing||this.gateOpen||this.railBalls.some(rb=>rb.phase==='ring');
+      const spinning=this.blowing||this.drawing||this.railBalls.some(rb=>rb.phase==='ring');
       this.wheel += spinning ? this.discSpeed : 0.0016;
       if(this.usePhysics){
         if(this.blowing) for(const b of this.balls) this.applyAirField(b);
-        if(this.gateOpen) for(const b of this.balls) this.applyLift(b);
+        if(this.drawing) for(const b of this.balls) this.applyLift(b);
         M.Engine.update(this.engine,1000/60);
         for(const b of this.balls){ const p=b.body.position,dx=p.x-this.cx,dy=p.y-this.cy,d=Math.hypot(dx,dy),lim=this.r-c.ballR;
           if(d>lim){ const nx=dx/d,ny=dy/d; M.Body.setPosition(b.body,{x:this.cx+nx*lim,y:this.cy+ny*lim});
@@ -147,21 +147,23 @@
       this.tryCapture();
       this.updateRail(); }
 
-    // ⑩ 포켓이 12시를 지날 때, 상단으로 올라온 공을 그 포켓에 담음(진입)
-    tryCapture(){ if(!this.gateOpen || this.railBalls.length>=TOTAL_DRAW) return;
-      const topA=-Math.PI/2, tol=Math.max(0.13, this.discSpeed*1.5);
+    // ⑩ 추첨 중 테두리가 회전하며 포켓이 12시를 지날 때, 올라온 공을 그 포켓에 담음(진입).
+    //    캡처 주기 = 포켓 12시 주기 = drawInterval (역산된 discSpeed에서 자연 발생).
+    tryCapture(){ if(!this.drawing || this.railBalls.length>=TOTAL_DRAW) return;
+      if(this.wheel - this.lastCapW < Math.PI/3) return;    // 한 포켓 통과당 1회
+      const topA=-Math.PI/2, tol=0.16;
       for(let k=0;k<4;k++){ const a=-Math.PI/2 - this.wheel + k*Math.PI/2;
         const d=Math.atan2(Math.sin(a-topA),Math.cos(a-topA));
         if(Math.abs(d)<tol){
-          // 상단부(y<cy-r*0.15)로 올라온 공 중 가장 높은 공 선택
-          let bi=-1,best=this.cy-this.r*0.15;
+          // 상단부로 올라온 공 중 가장 높은 공 선택
+          let bi=-1,best=this.cy-this.r*0.05;
           for(let i=0;i<this.balls.length;i++){ const p=this.ballPose(this.balls[i]); if(p.y<best){best=p.y;bi=i;} }
-          if(bi>=0) this.capture(bi,k);
+          if(bi>=0){ this.capture(bi,k); this.lastCapW=this.wheel; }
           return; } } }
 
     // 진입: 공을 포켓(k)에 담아 테두리와 함께 CCW로 이동
     capture(i,k){ const b=this.balls[i]; this.balls.splice(i,1);
-      if(this.usePhysics) M.Composite.remove(this.world,b.body); this.gateOpen=false;
+      if(this.usePhysics) M.Composite.remove(this.world,b.body);
       const slot=this.railBalls.length;
       this.railBalls.push({ n:b.n, phase:'ring', k, w0:this.wheel, slot,
         x:this.cx, y:this.cy-this.Rr, angle:0, av:0.14, held:false, path:null, wp:0, spd:4.6 });
@@ -276,7 +278,7 @@
     for(const rb of eng.railBalls) drawBall(rb.x, rb.y, rb.n, c.ballR, rb.angle);
 
     // 버전 표시
-    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('실측디테일 v11 · '+c.name, LW-8, LH-6);
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='10px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('회전연동추첨 v12 · '+c.name, LW-8, LH-6);
 
     // 디버그
     if(DEBUG){ ctx.fillStyle='rgba(0,0,0,0.55)'; roundRectPath(8,8,152,92,8); ctx.fill();
@@ -303,18 +305,17 @@
     // 실측 기준: 볼 1개당 drawInterval초 → 테두리 회전속도(discSpeed)도 역산 일치
     const gap=c.drawInterval, mixSec=c.mixSec, waitSec=c.waitSec, total=waitSec+mixSec+TOTAL_DRAW*gap;
     plan={total,waitF:Math.round(waitSec*60),mixF:Math.round(mixSec*60),gapF:Math.round(gap*60),startTime:perfNow()};
-    phase='wait'; phaseT=0; engine.blowing=false; engine.gateOpen=false; btnStart.disabled=true; Sound.ensure(); setStatus('추첨 준비 — '+waitSec+'초 대기…'); }
-  function reset(){ phase='idle'; phaseT=0; drawCount=0; engine.spawnBalls(); engine.blowing=false; engine.gateOpen=false; Sound.blower(0); btnStart.disabled=false; setStatus('추첨기를 선택하고 [추첨 시작]을 누르세요'); timerEl.textContent=''; }
+    phase='wait'; phaseT=0; engine.blowing=false; engine.drawing=false; engine.gateOpen=false; engine.lastCapW=-99; btnStart.disabled=true; Sound.ensure(); setStatus('추첨 준비 — '+waitSec+'초 대기…'); }
+  function reset(){ phase='idle'; phaseT=0; drawCount=0; engine.spawnBalls(); engine.blowing=false; engine.drawing=false; engine.gateOpen=false; engine.lastCapW=-99; Sound.blower(0); btnStart.disabled=false; setStatus('추첨기를 선택하고 [추첨 시작]을 누르세요'); timerEl.textContent=''; }
   function selectMachine(m){ if(phase!=='idle'&&phase!=='done')return; currentM=m; engine=new MachineEngine(MACHINE_CONFIGS[m]); engine.onExtract=()=>Sound.ding();
     document.querySelectorAll('.mbtn').forEach(el=>el.classList.toggle('active',+el.dataset.m===m)); reset(); }
   function tickSequence(){ if(phase==='idle'||phase==='done')return; phaseT++; const c=engine.cfg;
     if(phase==='wait'){ setStatus('추첨 준비 — '+Math.max(0,Math.ceil((plan.waitF-phaseT)/60))+'초'); if(phaseT>=plan.waitF){ phase='mixing'; phaseT=0; engine.blowing=true; Sound.blower(0.17); setStatus('송풍기 가동 — 공 상승·혼합 중…'); } }
-    else if(phase==='mixing'){ setStatus('송풍기 가동 — 공 상승·혼합 중…'); if(phaseT>=plan.mixF){ phase='drawing'; phaseT=0; engine.gateOpen=true; setStatus('1번째 공 추첨 중…'); } }
+    else if(phase==='mixing'){ setStatus('송풍기 가동 — 공 상승·혼합 중…'); if(phaseT>=plan.mixF){ phase='drawing'; phaseT=0; engine.drawing=true; engine.lastCapW=engine.wheel; setStatus('추첨 중 — 테두리 회전…'); } }
     else if(phase==='drawing'){ const held=engine.railBalls.length;
       if(held>drawCount){ drawCount=held;
-        if(drawCount>=TOTAL_DRAW){ phase='done'; engine.blowing=false; engine.gateOpen=false; Sound.blower(0); const nums=engine.railBalls.map(b=>b.n); setStatus('추첨 종료 — '+nums.slice(0,6).join(', ')+' + '+nums[6]); btnStart.disabled=false; notifyParent(nums); }
-        else { engine.gateOpen=false; phaseT=0; } }
-      if(phase==='drawing'&&drawCount<TOTAL_DRAW&&!engine.gateOpen&&phaseT>=plan.gapF){ engine.gateOpen=true; setStatus(drawCount===TOTAL_DRAW-1?'보너스 볼 추첨 중…':(drawCount+1)+'번째 공 추첨 중…'); } }
+        if(drawCount>=TOTAL_DRAW){ phase='done'; engine.drawing=false; engine.blowing=false; Sound.blower(0); const nums=engine.railBalls.map(b=>b.n); setStatus('추첨 종료 — '+nums.slice(0,6).join(', ')+' + '+nums[6]); btnStart.disabled=false; notifyParent(nums); }
+        else setStatus(drawCount===TOTAL_DRAW-1?'보너스 볼 추첨 중…':(drawCount+1)+'번째 공 추첨 중…'); } }
     if(plan) timerEl.textContent='경과 '+((perfNow()-plan.startTime)/1000).toFixed(1)+'s / 예상 '+plan.total.toFixed(0)+'s · '+c.name; }
   function notifyParent(nums){ try{ window.parent&&window.parent.postMessage({type:'venus-draw',machine:currentM,numbers:nums},'*'); }catch(e){} }
 

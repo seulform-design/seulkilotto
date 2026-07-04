@@ -1189,6 +1189,30 @@ export default function SemiAutoComparePanel({
   });
   const predictionSignals = predictionSignalsQuery.data ?? null;
 
+  // 종합 추천의 핵심 축 — 평행회차 강수/기대수 + 호기(추첨기) 상위 신호.
+  const parallelRoundQuery = useQuery({
+    queryKey: ['v1-parallel-round', effectiveRound ?? 'auto'],
+    queryFn: () => v1Api.getParallelRoundAnalysis(effectiveRound ?? undefined),
+    staleTime: 300_000,
+    retry: 1,
+  });
+  const machineRecommendQuery = useQuery({
+    queryKey: ['v1-recommend-round-auto'],
+    queryFn: () => v1Api.getRoundRecommend(),
+    staleTime: 300_000,
+    retry: 1,
+  });
+  const parallelStrong = parallelRoundQuery.data?.parallel_strong ?? [];
+  const parallelExpected = parallelRoundQuery.data?.parallel_expected ?? [];
+  const machineStrong = useMemo<number[]>(() => {
+    const d = machineRecommendQuery.data;
+    if (!d) return [];
+    // 호기 상위 신호: top_scored(구간미출현·회귀 종합) 우선, 없으면 hot_top5.
+    const scored = (d.top_scored ?? []).map((s) => s.number);
+    if (scored.length) return scored.slice(0, 12);
+    return (d.stats?.hot_top5 ?? []).map((h) => h.number);
+  }, [machineRecommendQuery.data]);
+
   const resolvedStrongCandidates = useMemo(() => {
     if (predictionSignals?.strong_candidates?.length) {
       return predictionSignals.strong_candidates;
@@ -1961,6 +1985,9 @@ export default function SemiAutoComparePanel({
           score: r.score,
           sources: r.sources,
         })),
+        parallelStrong,
+        parallelExpected,
+        machineStrong,
         regenNonce: nonce,
       },
       5
@@ -1984,6 +2011,9 @@ export default function SemiAutoComparePanel({
     winningNumbers,
     predictionSignals,
     resolvedExcludedCandidates,
+    parallelStrong,
+    parallelExpected,
+    machineStrong,
   ]);
 
   /**
@@ -2997,8 +3027,9 @@ export default function SemiAutoComparePanel({
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
               {compareWinning ? (
                 <>
-                  <strong>자동∩반자동 교집합</strong>과 <strong>자동↔반자동 1:1 줄 매칭(공통 번호)</strong>을
-                  핵심 축으로, 강한 후보·콤보 패턴을 더해 6번호 5세트를 생성합니다.
+                  <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차 강수</strong> ·{' '}
+                  <strong>호기(추첨기) 상위</strong> 세 축을 핵심으로, 강한 후보·콤보 패턴을 더해
+                  6번호 5세트를 생성합니다.
                   당첨 일치 개수는 점수에 넣지 않고 결과 카드에 표시만 합니다(예측 정합성 평가용).
                 </>
               ) : (
@@ -3065,67 +3096,6 @@ export default function SemiAutoComparePanel({
             )}
           </Paper>
 
-          {/* 신호 매치 상위 — 당첨번호 없이 강한후보·콤보 패턴 기준 */}
-          {activeComparison.bestSignalTickets.length > 0 && (
-            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
-              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-                🏆 {intentSectionLabel} 신호 매치 상위 5장
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                추첨기·후속출현·클래식·용지 4신호 통합 강한후보 + 누적 페어/트리플 콤보 일치 점수 —{' '}
-                <strong>당첨번호 사후 비교와 무관</strong>한 예측 신호입니다.
-              </Typography>
-              <Stack spacing={1}>
-                {activeComparison.bestSignalTickets.map((t) => (
-                  <Stack
-                    key={`signal-${t.index}`}
-                    direction="row"
-                    alignItems="center"
-                    spacing={0.75}
-                    sx={{ flexWrap: 'wrap' }}
-                    useFlexGap
-                  >
-                    <Chip
-                      size="small"
-                      label={`#${t.index + 1}`}
-                      variant="outlined"
-                      sx={{ minWidth: 48 }}
-                    />
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      {t.ticket.map((n) => (
-                        <LottoBall
-                          key={n}
-                          number={n}
-                          size={24}
-                          dimmed={
-                            winningSet && compareWinning ? !winningSet.has(n) : false
-                          }
-                        />
-                      ))}
-                    </Stack>
-                    <Chip
-                      size="small"
-                      color={t.vsStrongMatch.length >= 3 ? 'success' : t.vsStrongMatch.length >= 2 ? 'warning' : 'default'}
-                      label={`강한후보 ${t.vsStrongMatch.length}`}
-                      sx={{ fontWeight: 700 }}
-                    />
-                    {(t.matchedPairCount > 0 || t.matchedTripleCount > 0) && (
-                      <Chip
-                        size="small"
-                        color="primary"
-                        variant="outlined"
-                        label={`콤보 P${t.matchedPairCount} T${t.matchedTripleCount}`}
-                        sx={{ fontWeight: 700 }}
-                      />
-                    )}
-                    <Typography variant="caption" color="text.secondary">
-                      신호점수 {ticketSignalScore(t).toFixed(0)}
-                    </Typography>
-                  </Stack>
-                ))}
-              </Stack>
-            </Paper>
-          )}
 
           {/* 복기 사후 검증 — 당첨번호 일치 상위 (접기, 기본 숨김) */}
           {compareWinning &&

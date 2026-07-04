@@ -4,7 +4,6 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Collapse,
   Divider,
   IconButton,
   Paper,
@@ -38,7 +37,6 @@ import {
   v1Api,
   type ArchivedCurrentRoundSnapshot,
   type ComboDuplicatePatterns,
-  type CrossLineAnalysisReport,
   type DrawReviewTemplate,
   type ManualSlipInput,
   type PhotoAnalysisAccumulated,
@@ -93,128 +91,6 @@ function DrawWinningTemplatePanel({ data, intentLabel }: { data?: DrawReviewTemp
         수기 5×6 (A~E×6번호) · 2조합 {data.winning_combo_reference?.pair_count ?? 15}개 · 3조합{' '}
         {data.winning_combo_reference?.triple_count ?? 20}개 검증 · 회색 공 = 당첨번호 아님
       </Typography>
-    </Paper>
-  );
-}
-
-function CrossLineAnalysisPanel({
-  data,
-  winningSet,
-}: {
-  data?: CrossLineAnalysisReport | null;
-  winningSet?: Set<number> | null;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  if (!data) return null;
-  const renderSets = (
-    title: string,
-    items: CrossLineAnalysisReport['triple_sets'],
-    emptyLabel: string,
-  ) => (
-    <Box sx={{ mb: 2 }}>
-      <Typography variant="subtitle2" fontWeight={700} gutterBottom>
-        {title}
-      </Typography>
-      {!items.length ? (
-        <Typography variant="body2" color="text.secondary">
-          - {emptyLabel}
-        </Typography>
-      ) : (
-        <Stack spacing={1.5}>
-          {items.map((item) => (
-            <Box
-              key={item.numbers.join('-')}
-              sx={{
-                pl: 1.5,
-                py: 0.75,
-                borderLeft: '3px solid',
-                borderColor: 'secondary.main',
-                bgcolor: 'action.hover',
-                borderRadius: 1,
-              }}
-            >
-              <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap" sx={{ mb: 0.5 }}>
-                <Typography variant="body2" fontWeight={600} color="text.primary">
-                  [{item.numbers.join(', ')}] 세트 (총 {item.appearance_count ?? item.line_count ?? 0}회)
-                </Typography>
-                {item.numbers.map((n) => (
-                  <ReviewBall key={n} number={n} size={28} winningSet={winningSet} />
-                ))}
-              </Stack>
-              <Typography variant="body2" color="text.secondary">
-                위치: {(item.locations ?? []).join(', ') || '-'}
-              </Typography>
-            </Box>
-          ))}
-        </Stack>
-      )}
-    </Box>
-  );
-
-  const hasSets = (data.triple_sets?.length ?? 0) > 0 || (data.pair_sets?.length ?? 0) > 0;
-
-  return (
-    <Paper
-      sx={{
-        p: 2,
-        border: '1px solid',
-        borderColor: 'secondary.main',
-        bgcolor: 'background.paper',
-      }}
-    >
-      {/* 헤더 — 클릭으로 접기/펼치기 */}
-      <Stack
-        direction="row"
-        alignItems="center"
-        justifyContent="space-between"
-        sx={{ cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <Box>
-          <Typography variant="subtitle1" fontWeight={700} color="text.primary">
-            이미지·A~E 줄 교차 분석 (2·3번호 세트)
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            이미지 {data.image_count}장 · 게임 줄 {data.line_count}개 ·
-            세트 {(data.triple_sets?.length ?? 0) + (data.pair_sets?.length ?? 0)}건
-            {expanded ? ' · ▼ 접기' : ' · ▶ 펼치기'}
-          </Typography>
-        </Box>
-        <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}>
-          {expanded ? '접기' : '펼치기'}
-        </Button>
-      </Stack>
-
-      <Collapse in={expanded} timeout="auto" unmountOnExit>
-        <Box sx={{ mt: 1.5 }}>
-          <Stack direction="row" flexWrap="wrap" gap={0.5} alignItems="center" sx={{ mb: 1.5 }}>
-            <Typography variant="caption" color="text.secondary">
-              2회 이상 공동 출현 기준
-            </Typography>
-            {data.line_label_counts &&
-              ['A', 'B', 'C', 'D', 'E'].map((label) =>
-                (data.line_label_counts?.[label] ?? 0) > 0 ? (
-                  <Chip key={label} label={`${label} ${data.line_label_counts![label]}`} size="small" variant="outlined" />
-                ) : null
-              )}
-          </Stack>
-          {!hasSets && (
-            <Alert severity="info" sx={{ mb: 1.5 }}>
-              2회 이상 함께 나온 2·3번호 세트가 없습니다. (줄 {data.line_count}개 분석됨)
-            </Alert>
-          )}
-          {renderSets('■ 1. [3개 세트] 다른 줄에서도 겹치는 3인조', data.triple_sets, '없음')}
-          {renderSets('■ 2. [2개 세트] 다른 줄에서도 겹치는 2인조', data.pair_sets, '없음')}
-          <Box sx={{ mt: 1, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
-            <Typography variant="subtitle2" fontWeight={700} gutterBottom color="text.primary">
-              ■ 3. 교차 분석 종합 의견
-            </Typography>
-            <Typography variant="body2" color="text.primary">
-              {data.summary_opinion}
-            </Typography>
-          </Box>
-        </Box>
-      </Collapse>
     </Paper>
   );
 }
@@ -463,12 +339,6 @@ function IntentAccumulatedPanel({
       )}
       {intent === 'review' && (
         <SavedReviewTemplatePanel data={slice.saved_review_template} winningSet={winningSet} />
-      )}
-      {slice.accumulated_combo_patterns?.cross_line_analysis && (
-        <CrossLineAnalysisPanel
-          data={slice.accumulated_combo_patterns.cross_line_analysis}
-          winningSet={winningSet}
-        />
       )}
       {slice.accumulated_combo_patterns &&
         (slice.accumulated_combo_patterns.same_line_matches?.length ||

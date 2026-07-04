@@ -59,6 +59,12 @@ export interface RecommendationContext {
   seedTickets: SeedTicketInput[];
   /** 서버 통합 예측 신호 (/api/v1/prediction/signals) */
   unifiedSignals?: UnifiedSignalInput[];
+  /** 평행회차 강수 (상위, 순위순) — /api/v1/analysis/parallel-round */
+  parallelStrong?: number[];
+  /** 평행회차 기대수 (상위, 순위순) */
+  parallelExpected?: number[];
+  /** 호기(추첨기) 상위 신호 번호 (순위순) — /api/v1/recommend/round */
+  machineStrong?: number[];
   /** [추천 생성] 클릭마다 증가 — 같은 데이터에서도 매번 다른 5세트를 낸다. */
   regenNonce?: number;
 }
@@ -118,6 +124,11 @@ function buildNumberScores(ctx: RecommendationContext): Record<number, number> {
     const w = g.matchCount ** 2 * Math.log2(g.cardWeight + 1) * 1.5;
     for (const n of g.matchedNumbers) bump(scores, n, w);
   }
+
+  // 평행회차·호기(추첨기) — 자동↔반자동 1:1 매칭과 함께 종합 추천의 핵심 축.
+  ctx.parallelStrong?.forEach((n, idx) => bump(scores, n, 12 - idx * 0.5));
+  ctx.parallelExpected?.forEach((n, idx) => bump(scores, n, 5 - idx * 0.25));
+  ctx.machineStrong?.forEach((n, idx) => bump(scores, n, 12 - idx * 0.5));
 
   const combos = ctx.comboPatterns;
   if (combos) {
@@ -220,6 +231,20 @@ function scoreCombo(
   }
   if (bestLineMatch > 0) signals.push(`자동∩반자동${bestLineMatch}`);
 
+  // 평행회차·호기(추첨기) 정합 — 조합에 2개 이상 포함되면 가산·표시.
+  const parallelSet = new Set(ctx.parallelStrong ?? []);
+  const parHit = combo.filter((n) => parallelSet.has(n)).length;
+  if (parHit >= 2) {
+    total += parHit * 2;
+    signals.push(`평행${parHit}`);
+  }
+  const machineSet = new Set(ctx.machineStrong ?? []);
+  const machHit = combo.filter((n) => machineSet.has(n)).length;
+  if (machHit >= 2) {
+    total += machHit * 2;
+    signals.push(`추첨기${machHit}`);
+  }
+
   // 복기 당첨 일치는 점수에 더하지 않는다(사후 편향 방지). winMatch 는 결과
   // 카드에 '당첨 N개 일치'로 표시만 되어 예측 정합성을 정직하게 보여준다.
   if (ctx.sheetIntent === 'review' && winMatch >= 3) {
@@ -284,6 +309,10 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
   for (const g of ctx.intersection.three) addCon(g.numbers, 9 * g.size * Math.log2(g.ticketCount + 2));
   for (const g of ctx.intersection.two) addCon(g.numbers, 5 * Math.log2(g.ticketCount + 2));
   for (const g of ctx.lineMatchGroups) addCon(g.matchedNumbers, g.matchCount * g.matchCount * Math.log2(g.cardWeight + 2));
+  // 평행회차 강수·호기(추첨기) 상위도 합의 코어에 포함 — 종합 추천을
+  // 자동↔반자동 1:1 + 평행회차 + 호기 세 축으로 구성(사용자 요청).
+  (ctx.parallelStrong ?? []).forEach((n, idx) => addCon([n], Math.max(2, 11 - idx)));
+  (ctx.machineStrong ?? []).forEach((n, idx) => addCon([n], Math.max(2, 11 - idx)));
   const consensusPool = Object.entries(consensusScore)
     .sort(([, a], [, b]) => b - a)
     .map(([n]) => Number(n));

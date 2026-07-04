@@ -189,12 +189,17 @@ def analyze_manual(body: ManualAnalyzeRequest):
                 )
                 stored_entry_id = entry["id"]
             except DuplicateAnalysisError as exc:
+                dup = _duplicate_payload(exc.existing_entry, exc.reason)
+                # 거대한 result(수십 MB)는 프론트 미사용 — 응답에서 제거해 게이트웨이 절단 방지.
+                dup.pop("result", None)
                 return to_jsonable({
-                    **_duplicate_payload(exc.existing_entry, exc.reason),
+                    **dup,
                     "accumulated": build_accumulated(),
                 })
+        # result 는 수기 저장 경로에서 프론트가 쓰지 않고 용량이 수십 MB라
+        # 응답에 넣으면 게이트웨이가 응답을 절단(→ HTML 502)한다. accumulated 만 반환.
         return to_jsonable({
-            "result": result,
+            "result": None,
             "stored_entry_id": stored_entry_id,
             "duplicate_skipped": False,
             "accumulated": build_accumulated() if body.persist else None,

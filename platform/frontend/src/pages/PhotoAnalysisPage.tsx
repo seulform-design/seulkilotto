@@ -1353,7 +1353,7 @@ export default function PhotoAnalysisPage() {
             )}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            번호 6개 선택 → <strong>줄 저장</strong> (A→B→C→D→E). 5줄이 모이면 용지 1장 누적. 여러 장 후 <strong>분석·저장</strong>.
+            번호 6개 선택 → <strong>줄 저장</strong> (A→B→C→D→E). 5줄이 모이면 용지 1장 누적. 여러 장 후 <strong>누적·저장</strong>.
           </Typography>
         </Stack>
       </Alert>
@@ -1452,10 +1452,9 @@ export default function PhotoAnalysisPage() {
                 currentSlipLines.length +
                 slipQueue.reduce((s, sl) => s + sl.lines.length, 0) +
                 bulkAutoTickets.length;
-              const label = activeTab === 'review' ? '복기 분석·저장' : '이번회차 분석·저장';
               return totalLines > 0
-                ? `💾 ${label} (${totalLines}줄)`
-                : `💾 ${label}`;
+                ? `💾 누적·저장 (${totalLines}줄)`
+                : '💾 누적·저장';
             })()}
           </Button>
           <Button
@@ -1482,7 +1481,7 @@ export default function PhotoAnalysisPage() {
         {unsavedLocalCount > 0 && (
           <Alert severity="info" sx={{ mt: 1 }}>
             📋 아직 서버에 반영 안 된 줄 {unsavedLocalCount}개가 있습니다.
-            위 <strong>[💾 {activeTab === 'review' ? '복기' : '이번회차'} 분석·저장]</strong> 버튼을 눌러야 통계에 반영됩니다.
+            위 <strong>[💾 누적·저장]</strong> 버튼을 눌러야 통계에 반영됩니다.
           </Alert>
         )}
         <Divider sx={{ my: 2 }} />

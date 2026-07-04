@@ -233,8 +233,16 @@ def find_cross_line_combos(
             }
         )
     out.sort(key=lambda x: (-x["line_count"], -x["size"], x["numbers"]))
-    # 조합 수 상한 — 빈도 상위 N개만. 수천 개는 표시도 불가하고 메모리만 잡아먹는다.
-    return out[:_COMBO_MAX]
+    # 조합 수 상한 — '크기별'로 상위 N개씩. 합쳐서 자르면 빈도 높은 2번호(pair)가
+    # 상한을 채워 3·4번호(triple/quad)가 통째로 잘려나가는 버그가 있었다.
+    per_size: Dict[int, int] = {}
+    capped: List[Dict[str, Any]] = []
+    for c in out:
+        s = int(c["size"])
+        if per_size.get(s, 0) < _COMBO_MAX:
+            per_size[s] = per_size.get(s, 0) + 1
+            capped.append(c)
+    return capped
 
 
 def score_lines_vs_reference(

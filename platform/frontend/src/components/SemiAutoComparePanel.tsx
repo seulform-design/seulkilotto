@@ -1921,26 +1921,23 @@ export default function SemiAutoComparePanel({
     winningSet,
   ]);
 
-  // 🎯 당첨 예상번호 — 2축(1:1 전수비교 심층 역산 + 평행회차) + 세트 중복 역산 보너스.
-  // 당첨번호(winningSet)는 계산에 넣지 않는다(누수 방지) — 복기 탭은 대조만 표시.
+  // 🎯 당첨 예상번호 & 번호별 반복 출현 정밀 프로파일 (단일 소스).
+  // 핵심 신호 = 자동↔반자동 1:1 전수비교에서 '서로 다른 자동 줄 수 × 서로 다른
+  // 반자동 줄 수'(distinct line — 같은 줄 중복 안 셈). 자동·반자동 '양쪽 모두'에서
+  // 반복 출현할수록 강하고, 큰 매치(3+)에 든 번호는 보너스. 한쪽만 인기인 번호는
+  // 곱(log×log)으로 자동 억제된다. 여기에 세트 중복(동반 반복)·평행회차를 더한다.
+  // 당첨번호(winningSet)는 계산에 넣지 않는다(누수 방지) — 복기 탭은 대조만.
   const predictedNumbers = useMemo(() => {
-    const score: Record<number, number> = {};
-    const srcMap: Record<number, Set<string>> = {};
-    const maxMatch: Record<number, number> = {};
-    const autoSup: Record<number, number> = {};
-    const semiSup: Record<number, number> = {};
-    const grpCnt: Record<number, number> = {};
-    const add = (n: number, w: number, src: string) => {
-      if (!Number.isInteger(n) || n < 1 || n > 45 || w <= 0) return;
-      score[n] = (score[n] ?? 0) + w;
-      (srcMap[n] ??= new Set<string>()).add(src);
+    type Prof = {
+      autoIdx: Set<number>;
+      semiIdx: Set<number>;
+      byLevel: Record<number, number>;
+      maxMatch: number;
+      partners: Record<number, number>;
     };
-    // ── 자동↔반자동 1:1 전수비교 심층 역산 (주 신호) ──────────────────
-    // 두 줄의 공통 번호 개수(matchCount)가 클수록 '우연이 아닌' 강한 신호다
-    // (6/45 무작위 두 줄의 기대 공통≈0.8개 → matchCount 3+ 는 유의). 따라서
-    // matchCount³ 로 큰 매치를 강하게 가중하고, 자동·반자동 '양쪽' 지지가 모두
-    // 있어야(각 log 곱) 점수가 오른다 → 인기번호(한쪽 빈발)가 아니라 자동·반자동이
-    // 함께 반복해 가리킨 번호가 상위로 온다.
+    const prof: Record<number, Prof> = {};
+    const ens = (n: number): Prof =>
+      (prof[n] ??= { autoIdx: new Set(), semiIdx: new Set(), byLevel: {}, maxMatch: 0, partners: {} });
     const groups = [
       ...groupLineMatching.groups6,
       ...groupLineMatching.groups5,
@@ -1949,43 +1946,64 @@ export default function SemiAutoComparePanel({
       ...groupLineMatching.groups2,
     ];
     for (const g of groups) {
-      const ac = g.autoList.length;
-      const sc = g.semiList.length;
-      // 양쪽(자동·반자동) 모두의 지지를 min 으로 반영 → 한쪽만 인기 있는 번호가
-      // 부풀지 않는다. matchCount 2 는 무작위 기대(≈0.8)에 가까운 노이즈라 미약한
-      // 보조만, 3+ 는 '우연 초과' 실제 겹침이라 matchCount³ 로 강하게 가중한다.
-      const support = Math.log2(Math.min(ac, sc) + 1);
-      const w = g.matchCount >= 3 ? g.matchCount ** 3 * support : 0.3 * support;
       for (const n of g.matchedNumbers) {
-        add(n, w, '1:1');
-        maxMatch[n] = Math.max(maxMatch[n] ?? 0, g.matchCount);
-        autoSup[n] = (autoSup[n] ?? 0) + ac;
-        semiSup[n] = (semiSup[n] ?? 0) + sc;
-        grpCnt[n] = (grpCnt[n] ?? 0) + 1;
+        if (!Number.isInteger(n) || n < 1 || n > 45) continue;
+        const p = ens(n);
+        for (const a of g.autoList) p.autoIdx.add(a.idx);
+        for (const s of g.semiList) p.semiIdx.add(s.idx);
+        p.byLevel[g.matchCount] = (p.byLevel[g.matchCount] ?? 0) + 1;
+        p.maxMatch = Math.max(p.maxMatch, g.matchCount);
+        for (const m of g.matchedNumbers) if (m !== n) p.partners[m] = (p.partners[m] ?? 0) + 1;
       }
     }
-    // ── 세트 중복 역산 보너스 — 여러 그룹에 걸쳐 반복 등장한 강한 세트({13,38}
-    //    처럼 자동·반자동이 반복해 함께 가리킨 조합)의 번호를 지지·반복도로 가산.
-    //    matchCount 2 라도 여러 그룹에 반복되면 강한 신호로 인정된다.
-    for (const s of [...crossSetPatterns.pairs, ...crossSetPatterns.triples]) {
-      const bonus = Math.log2(s.support + 1) * Math.log2(s.groupCount + 1) * s.numbers.length * 2;
-      for (const n of s.numbers) add(n, bonus, '세트');
+    const score: Record<number, number> = {};
+    const srcMap: Record<number, Set<string>> = {};
+    const add = (n: number, w: number, src: string) => {
+      if (!Number.isInteger(n) || n < 1 || n > 45 || w <= 0) return;
+      score[n] = (score[n] ?? 0) + w;
+      (srcMap[n] ??= new Set<string>()).add(src);
+    };
+    for (const key of Object.keys(prof)) {
+      const n = Number(key);
+      const p = prof[n];
+      const a = p.autoIdx.size;
+      const s = p.semiIdx.size;
+      // 양쪽 합의(곱) × 큰 매치 보너스. distinct 줄 기준이라 브레드스 노이즈에 강함.
+      const w = Math.log2(a + 1) * Math.log2(s + 1) * (1 + 0.4 * Math.max(0, p.maxMatch - 2)) * 4;
+      add(n, w, '1:1');
     }
-    // ── 평행회차 (보조 신호, 전수비교보다 낮게) ───────────────────────
+    // 세트 중복 역산 보너스 — 여러 그룹에 반복 등장한 강한 세트({13,38}) 가산.
+    for (const st of [...crossSetPatterns.pairs, ...crossSetPatterns.triples]) {
+      const bonus = Math.log2(st.support + 1) * Math.log2(st.groupCount + 1) * st.numbers.length * 2;
+      for (const n of st.numbers) add(n, bonus, '세트');
+    }
+    // 평행회차 (보조).
     parallelStrong.forEach((n, idx) => add(n, Math.max(2, 14 - idx * 0.8), '평행'));
     parallelExpected.forEach((n, idx) => add(n, Math.max(1, 7 - idx * 0.4), '평행'));
 
     const ranked = Object.keys(score)
       .map(Number)
-      .map((n) => ({
-        number: n,
-        score: score[n],
-        sources: Array.from(srcMap[n] ?? []),
-        maxMatch: maxMatch[n] ?? 0,
-        autoSupport: autoSup[n] ?? 0,
-        semiSupport: semiSup[n] ?? 0,
-        groupCount: grpCnt[n] ?? 0,
-      }))
+      .map((n) => {
+        const p = prof[n];
+        const partners = p
+          ? Object.entries(p.partners)
+              .sort((x, y) => y[1] - x[1])
+              .slice(0, 3)
+              .map(([m]) => Number(m))
+          : [];
+        const totalGroups = p ? Object.values(p.byLevel).reduce((x, y) => x + y, 0) : 0;
+        return {
+          number: n,
+          score: score[n],
+          sources: Array.from(srcMap[n] ?? []),
+          maxMatch: p?.maxMatch ?? 0,
+          auto: p?.autoIdx.size ?? 0,
+          semi: p?.semiIdx.size ?? 0,
+          byLevel: p?.byLevel ?? ({} as Record<number, number>),
+          partners,
+          totalGroups,
+        };
+      })
       .sort((a, b) => b.score - a.score || a.number - b.number);
     const maxScore = ranked[0]?.score ?? 1;
     return ranked.map((r) => ({ ...r, confidence: Math.round((r.score / maxScore) * 100) }));
@@ -2032,75 +2050,40 @@ export default function SemiAutoComparePanel({
     winningSet,
   ]);
 
-  // 🔬 번호별 반복 출현 정밀 역산 (당첨번호 무관) — 이번회차 탭 예측의 근거.
-  // 각 번호가 '어느 일치 레벨(6·5·4·3·2)에 몇 번' 반복 등장했는지(byLevel), 자동·반자동
-  // 지지, 최대 매치, 가장 자주 함께 나온 동반 번호(partners)를 집계한다. 점수는 당첨을
-  // 전혀 쓰지 않는 순수 반복도(Σ matchCount×log2(min(자동,반자동)+1)) — 그래서 당첨을
-  // 모르는 이번회차에서도 동일하게 '계속 반복 출현하는 번호'를 찾는다.
-  const numberRecurrence = useMemo(() => {
-    type P = {
-      byLevel: Record<number, number>;
-      auto: number;
-      semi: number;
-      maxMatch: number;
-      score: number;
-      partners: Record<number, number>;
-    };
-    const profile: Record<number, P> = {};
-    const ensure = (n: number): P =>
-      (profile[n] ??= { byLevel: {}, auto: 0, semi: 0, maxMatch: 0, score: 0, partners: {} });
-    const allGroups = [
-      ...groupLineMatching.groups6,
-      ...groupLineMatching.groups5,
-      ...groupLineMatching.groups4,
-      ...groupLineMatching.groups3,
-      ...groupLineMatching.groups2,
-    ];
-    for (const g of allGroups) {
-      const a = g.autoList.length;
-      const s = g.semiList.length;
-      const w = g.matchCount * Math.log2(Math.min(a, s) + 1);
-      for (const n of g.matchedNumbers) {
-        const p = ensure(n);
-        p.byLevel[g.matchCount] = (p.byLevel[g.matchCount] ?? 0) + 1;
-        p.auto += a;
-        p.semi += s;
-        p.maxMatch = Math.max(p.maxMatch, g.matchCount);
-        p.score += w;
-        for (const m of g.matchedNumbers) if (m !== n) p.partners[m] = (p.partners[m] ?? 0) + 1;
-      }
-    }
-    return Object.keys(profile)
-      .map(Number)
+  // 📌 당첨번호 출현 패턴 (복기 전용, 당첨번호 사용) — 실제 당첨번호가 전수비교에서
+  // '어느 레벨에 얼마나 반복' 나왔고, 순수 반복도(당첨 무관) 전체 순위 몇 위였는지 역산.
+  // 목적: 복기(당첨 이미 있음)에서 '반복도 방식이 당첨을 얼마나 포착했는지' 를 눈으로
+  // 확인 → 그 근거로 다음 회차(1232) 예상번호(반복도 상위)를 쓴다. predictedNumbers
+  // (순수 반복도 전체 정렬)를 그대로 재사용해 당첨번호의 순위·프로파일을 뽑는다.
+  const winningPatternAnalysis = useMemo(() => {
+    if (!compareWinning || winningSet == null || winningSet.size === 0) return null;
+    const rankByNum = new Map(predictedNumbers.map((p, i) => [p.number, { ...p, rank: i + 1 }]));
+    const winNums = Array.from(winningSet).sort((a, b) => a - b);
+    const perWinning = winNums
       .map((n) => {
-        const p = profile[n];
-        const partners = Object.entries(p.partners)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 3)
-          .map(([m]) => Number(m));
-        const totalGroups = Object.values(p.byLevel).reduce((x, y) => x + y, 0);
-        return {
-          number: n,
-          byLevel: p.byLevel,
-          auto: p.auto,
-          semi: p.semi,
-          maxMatch: p.maxMatch,
-          score: p.score,
-          totalGroups,
-          partners,
-          winning: winningSet != null && winningSet.size > 0 ? winningSet.has(n) : false,
-        };
+        const e = rankByNum.get(n);
+        return e
+          ? { number: n, appeared: true, rank: e.rank, totalGroups: e.totalGroups, byLevel: e.byLevel, auto: e.auto, semi: e.semi }
+          : { number: n, appeared: false, rank: null as number | null, totalGroups: 0, byLevel: {} as Record<number, number>, auto: 0, semi: 0 };
       })
-      .sort((a, b) => b.score - a.score || a.number - b.number)
-      .slice(0, 14);
-  }, [
-    groupLineMatching.groups6,
-    groupLineMatching.groups5,
-    groupLineMatching.groups4,
-    groupLineMatching.groups3,
-    groupLineMatching.groups2,
-    winningSet,
-  ]);
+      .sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
+    const winByLevel: Record<number, number> = {};
+    for (const w of perWinning)
+      for (const [L, c] of Object.entries(w.byLevel)) winByLevel[Number(L)] = (winByLevel[Number(L)] ?? 0) + c;
+    const dominantLevel = Object.entries(winByLevel).sort((a, b) => b[1] - a[1])[0] ?? null;
+    const ranks = perWinning.map((w) => w.rank).filter((r): r is number => r != null);
+    return {
+      perWinning,
+      dominantLevel,
+      winPairs: crossSetPatterns.pairs.filter((s) => s.winning),
+      winTriples: crossSetPatterns.triples.filter((s) => s.winning),
+      inTop8: ranks.filter((r) => r <= 8).length,
+      inTop14: ranks.filter((r) => r <= 14).length,
+      appearedCount: perWinning.filter((w) => w.appeared).length,
+      totalWin: winNums.length,
+      totalNumbers: predictedNumbers.length,
+    };
+  }, [compareWinning, winningSet, predictedNumbers, crossSetPatterns]);
 
   // 일치 개수별(6/5/4/3/2) 겹침 번호 역산 — 각 레벨에서 어떤 번호가 반복해 겹쳐
   // 나왔는지(groupCount)와 양쪽 지지(support=Σ min(자동수,반자동수))로 정렬.
@@ -3345,8 +3328,59 @@ export default function SemiAutoComparePanel({
                 </Typography>
               )}
 
+              {/* 📌 당첨번호 출현 패턴 (복기 전용, 당첨번호로 역산) */}
+              {winningPatternAnalysis && (
+                <Box sx={{ mt: 1.25, p: 1, border: '1px solid', borderColor: 'success.dark', borderRadius: 1 }}>
+                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                    📌 {effectiveRound ?? '?'}회 당첨번호 출현 패턴 (복기 전용 — 실제 당첨으로 역산)
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                    실제 당첨번호가 전수비교에서 '어느 레벨에 얼마나 반복' 나왔는지 + <strong>순수 반복도 전체 {winningPatternAnalysis.totalNumbers}개 중 몇 위</strong>였는지.
+                    이 순위가 높을수록 → 반복도 방식이 당첨을 잘 포착 → 다음 회차(1232) 예상번호로 쓰는 근거.
+                  </Typography>
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                    <Chip
+                      size="small"
+                      color={winningPatternAnalysis.inTop8 >= 3 ? 'success' : winningPatternAnalysis.inTop8 >= 2 ? 'warning' : 'default'}
+                      label={`당첨 ${winningPatternAnalysis.appearedCount}/${winningPatternAnalysis.totalWin}개 전수비교 등장 · 반복도 상위8위 안 ${winningPatternAnalysis.inTop8}개 · 상위14위 안 ${winningPatternAnalysis.inTop14}개`}
+                      sx={{ fontWeight: 700, height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.25 } }}
+                    />
+                    {winningPatternAnalysis.dominantLevel && (
+                      <Chip size="small" variant="outlined" label={`당첨번호 최다 등장 = ${winningPatternAnalysis.dominantLevel[0]}일치 레벨 (${winningPatternAnalysis.dominantLevel[1]}회)`} />
+                    )}
+                  </Stack>
+                  <Stack spacing={0.4}>
+                    {winningPatternAnalysis.perWinning.map((w) => {
+                      const levelStr = [6, 5, 4, 3, 2]
+                        .filter((L) => (w.byLevel[L] ?? 0) > 0)
+                        .map((L) => `${L}일치×${w.byLevel[L]}`)
+                        .join(' · ');
+                      return (
+                        <Stack key={`win-${w.number}`} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
+                          <LottoBall number={w.number} size={24} />
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                            {w.appeared
+                              ? <>반복도 <strong>{w.rank}위</strong> · {w.totalGroups}그룹 ({levelStr}) · 자동 {w.auto}줄·반자동 {w.semi}줄</>
+                              : '전수비교 매치에 미등장 (아무 줄과도 2개+ 안 겹침)'}
+                          </Typography>
+                        </Stack>
+                      );
+                    })}
+                  </Stack>
+                  {(winningPatternAnalysis.winPairs.length > 0 || winningPatternAnalysis.winTriples.length > 0) && (
+                    <Typography variant="caption" color="success.light" sx={{ display: 'block', fontSize: 10, mt: 0.5 }}>
+                      당첨번호끼리 반복 등장한 세트:{' '}
+                      {[...winningPatternAnalysis.winPairs, ...winningPatternAnalysis.winTriples]
+                        .slice(0, 6)
+                        .map((s) => `{${s.numbers.join(',')}}×${s.groupCount}`)
+                        .join(' · ')}
+                    </Typography>
+                  )}
+                </Box>
+              )}
+
               {/* 🔬 번호별 반복 출현 정밀 역산 (당첨 무관) — 이번회차 예측 근거 */}
-              {numberRecurrence.length > 0 && (
+              {predictedNumbers.length > 0 && (
                 <Box sx={{ mt: 1.25 }}>
                   <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
                     🔬 번호별 반복 출현 정밀 역산 (당첨번호 무관 · 이번회차에도 동일)
@@ -3354,28 +3388,29 @@ export default function SemiAutoComparePanel({
                   </Typography>
                   <Box
                     sx={{
-                      maxHeight: numberRecurrence.length > 8 ? 260 : undefined,
-                      overflowY: numberRecurrence.length > 8 ? 'auto' : undefined,
+                      maxHeight: 260,
+                      overflowY: 'auto',
                       bgcolor: 'action.hover',
                       borderRadius: 1,
                       p: 0.75,
                     }}
                   >
                     <Stack spacing={0.5}>
-                      {numberRecurrence.map((r) => {
+                      {predictedNumbers.slice(0, 14).map((r) => {
                         const levelStr = [6, 5, 4, 3, 2]
                           .filter((L) => (r.byLevel[L] ?? 0) > 0)
                           .map((L) => `${L}일치×${r.byLevel[L]}`)
                           .join(' · ');
+                        const isWin = compareWinning && winningSet ? winningSet.has(r.number) : false;
                         return (
                           <Stack key={`rec-${r.number}`} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
                             <LottoBall
                               number={r.number}
                               size={26}
-                              dimmed={compareWinning && winningSet ? !r.winning : false}
+                              dimmed={compareWinning && winningSet ? !isWin : false}
                             />
                             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                              <strong>{r.totalGroups}그룹</strong> ({levelStr}) · 자동 {r.auto}·반자동 {r.semi} 지지
+                              <strong>{r.totalGroups}그룹</strong>{levelStr ? ` (${levelStr})` : ''} · 자동 {r.auto}줄·반자동 {r.semi}줄
                               {r.partners.length > 0 ? ` · 동반 ${r.partners.join(',')}` : ''}
                             </Typography>
                           </Stack>

@@ -82,10 +82,55 @@ def compute_ticket_fingerprint(result: Dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 
+def compute_content_fingerprint(result: Dict[str, Any]) -> str:
+    """번호 내용 전용 지문 — 회차 감지·용지 그룹핑·줄 순서와 무관하게
+    '같은 줄들의 묶음'이면 같은 값. 같은 티켓을 재업로드했는데 회차 인식이
+    흔들리거나 용지 분할이 달라져도 중복으로 잡아낸다. (intent 만 구분)
+
+    sheet_details 의 각 줄(2번호 이상) 번호튜플을 전부 모아 정렬·해시한다.
+    강한 내용 신호(줄 2개 이상)가 없으면 '' 반환 → 이 지문으로는 판단 보류."""
+    meta = result.get("meta") or {}
+    vva = result.get("video_visual_analysis") or {}
+    intent = str(vva.get("video_intent") or meta.get("sheet_intent") or "")
+
+    line_keys: List[str] = []
+    for detail in meta.get("sheet_details") or []:
+        if not isinstance(detail, dict):
+            continue
+        for raw_line in detail.get("lines") or []:
+            if not isinstance(raw_line, dict):
+                continue
+            nums = _normalize_numbers(raw_line.get("numbers"))
+            if len(nums) >= 2:
+                line_keys.append(",".join(str(n) for n in nums))
+        # 줄 구조가 없으면 용지 전체 번호로 대체
+        if not (detail.get("lines")):
+            nums = _normalize_numbers(detail.get("numbers"))
+            if len(nums) >= 2:
+                line_keys.append("S:" + ",".join(str(n) for n in nums))
+
+    if not line_keys:
+        for raw in meta.get("sheet_number_sets") or []:
+            nums = _normalize_numbers(raw)
+            if len(nums) >= 2:
+                line_keys.append("S:" + ",".join(str(n) for n in nums))
+
+    if len(line_keys) < 1:
+        return ""
+    raw = "CONTENT|" + intent + "|" + "|".join(sorted(line_keys))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
 def _entry_fingerprint(entry: Dict[str, Any]) -> str:
     if entry.get("ticket_fingerprint"):
         return str(entry["ticket_fingerprint"])
     return compute_ticket_fingerprint(entry.get("result") or entry)
+
+
+def _entry_content_fingerprint(entry: Dict[str, Any]) -> str:
+    if entry.get("content_fingerprint"):
+        return str(entry["content_fingerprint"])
+    return compute_content_fingerprint(entry.get("result") or entry)
 
 
 def file_content_hash(path: Path) -> str:
@@ -148,6 +193,7 @@ def find_duplicate_entry(
     *,
     source_id: Optional[str] = None,
     ticket_fingerprint: Optional[str] = None,
+    content_fingerprint: Optional[str] = None,
     exclude_source_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     for entry in reversed(entries):
@@ -158,5 +204,11 @@ def find_duplicate_entry(
             if exclude_source_id and sid == exclude_source_id:
                 continue
             if _entry_fingerprint(entry) == ticket_fingerprint:
+                return entry
+        # 내용 지문 — 회차/그룹핑 흔들려도 같은 줄 묶음이면 중복.
+        if content_fingerprint:
+            if exclude_source_id and sid == exclude_source_id:
+                continue
+            if _entry_content_fingerprint(entry) == content_fingerprint:
                 return entry
     return None

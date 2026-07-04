@@ -144,13 +144,28 @@ def find_cross_line_combos(
     sizes: Iterable[int] = (2, 3, 4),
     min_line_repeat: int = 2,
 ) -> List[Dict[str, Any]]:
-    """여러 게임 줄에 함께 나타난 2·3·4번호 조합."""
+    """여러 게임 줄에 함께 나타난 2·3·4번호 조합.
+
+    각 조합에 '우연 대비 초과' 지표를 함께 계산한다:
+      expected = 각 번호의 줄 출현 빈도로부터 독립가정 기대 동시출현 수
+                 = ∏(freq_i) / N^(size-1)
+      lift     = 관측 / 기대  (>1 이면 우연보다 자주 함께 등장 = 의도적 묶음)
+      z        = (관측 - 기대) / √기대  (표본 크기 반영)
+    대량 자동 용지에서는 인기번호끼리 우연히 겹쳐 노이즈가 범람하는데, lift/z 로
+    '실제로 함께 묶인' 조합만 가려낼 수 있다."""
     combo_hits: Dict[tuple[int, ...], List[Dict[str, Any]]] = defaultdict(list)
+    # 번호별 '고유 줄' 출현 빈도 (기대 동시출현 계산용)
+    num_line_ids: Dict[int, Set[str]] = defaultdict(set)
+    all_line_ids: Set[str] = set()
 
     for line in lines:
         nums = sorted({int(n) for n in line.get("numbers") or [] if 1 <= int(n) <= 45})
         if len(nums) < 2:
             continue
+        lid = str(line.get("line_id") or f"{line.get('image_index')}-{line.get('line_label')}")
+        all_line_ids.add(lid)
+        for n in nums:
+            num_line_ids[n].add(lid)
         meta = {
             "sheet_index": int(line.get("sheet_index", 0)),
             "image_index": int(line.get("image_index", line.get("sheet_index", 0) + 1)),
@@ -166,6 +181,9 @@ def find_cross_line_combos(
             for combo in combinations(nums, size):
                 combo_hits[tuple(combo)].append(meta)
 
+    total_lines = max(1, len(all_line_ids))
+    freq = {n: len(ids) for n, ids in num_line_ids.items()}
+
     out: List[Dict[str, Any]] = []
     for combo, appearances in combo_hits.items():
         unique_ids = {a["line_id"] for a in appearances if a["line_id"]}
@@ -179,13 +197,24 @@ def find_cross_line_combos(
         locations = [a["location"] for a in unique_apps if a.get("location")]
         sheet_indices = sorted({a["sheet_index"] for a in unique_apps})
         image_indices = sorted({a["image_index"] for a in unique_apps})
+        obs = len(unique_apps)
+        # 기대 동시출현 & 우연 대비 초과
+        prod = 1.0
+        for n in combo:
+            prod *= freq.get(int(n), 0)
+        expected = prod / (total_lines ** (len(combo) - 1)) if total_lines else 0.0
+        lift = round(obs / expected, 2) if expected > 0 else float(obs)
+        z = round((obs - expected) / (expected ** 0.5), 2) if expected > 0 else float(obs)
         out.append(
             {
                 "numbers": list(combo),
                 "size": len(combo),
-                "line_count": len(unique_apps),
-                "repeat_count": len(unique_apps),
-                "appearance_count": len(unique_apps),
+                "line_count": obs,
+                "repeat_count": obs,
+                "appearance_count": obs,
+                "expected": round(expected, 2),
+                "lift": lift,
+                "z": z,
                 "sheet_indices": sheet_indices,
                 "image_indices": image_indices,
                 "locations": locations,
@@ -376,16 +405,44 @@ def _line_overlap_candidates(
     *,
     limit: int = 18,
 ) -> List[int]:
+    """강한 후보 — 기준일치는 일치수², 교차조합은 '우연 대비 초과(lift)'로 가중.
+    과거엔 line_count 로 가중해 인기번호 노이즈가 후보를 잠식했다. lift 가중으로
+    실제 의도적 묶음만 후보에 반영한다."""
     scores: Counter = Counter()
     for m in same_line:
         weight = int(m.get("overlap_count", 2)) ** 2
         for n in m.get("matching_numbers") or []:
             scores[int(n)] += weight
     for c in cross:
-        weight = int(c.get("size", 2)) * int(c.get("line_count", 2))
+        size = int(c.get("size", 2))
+        lift = float(c.get("lift", 1.0) or 1.0)
+        # lift 기반 가중(우연 대비 초과분). lift<=1 은 노이즈 → 가중 0.
+        excess = max(0.0, lift - 1.0)
+        weight = size * (1.0 + 2.0 * excess)
         for n in c.get("numbers") or []:
             scores[int(n)] += weight
     return [n for n, _ in scores.most_common(limit)]
+
+
+# 표시 최소 겹침 — 사용자 요청: 누적 화면은 '최소 2줄까지' 모든 겹침을 노출.
+# (과거엔 적응형 줄수 기준으로 2~4줄 겹침을 잘라 일부만 보였다.)
+_DISPLAY_MIN_REPEAT = 2
+# '우연 대비 초과' 유의 기준 — 표시는 안 자르되, 강한후보(당첨 신호) 산출에는
+# 이 기준을 넘는 실제 묶음만 반영해 인기번호 노이즈를 배제한다.
+_SIG_Z_MIN = 2.0
+_SIG_LIFT_MIN = 1.3
+
+
+def _significance_subset(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """강한후보 산출용 — 우연 대비 유의(z·lift)한 조합만. 표시 목록엔 영향 없음."""
+    sig = [
+        c for c in items
+        if float(c.get("z", 0)) >= _SIG_Z_MIN and float(c.get("lift", 0)) >= _SIG_LIFT_MIN
+    ]
+    # 유의 조합이 거의 없으면(균질 데이터) 상위 z 로 최소 보완
+    if len(sig) < 5:
+        sig = sorted(items, key=lambda c: (-float(c.get("z", 0)), -c["line_count"]))[:20]
+    return sig
 
 
 def analyze_line_overlap_patterns(
@@ -411,29 +468,25 @@ def analyze_line_overlap_patterns(
 
     cross_report = build_cross_line_analysis_report(lines, min_repeat=2)
 
-    raw_cross = find_cross_line_combos(lines, sizes=(2, 3, 4), min_line_repeat=2)
-    pair_min = _adaptive_cross_line_min(line_count, 2) if min_cross_line_repeat is None else min_cross_line_repeat
-    triple_min = _adaptive_cross_line_min(line_count, 3) if min_cross_line_repeat is None else min_cross_line_repeat
-    quad_min = _adaptive_cross_line_min(line_count, 4) if min_cross_line_repeat is None else min_cross_line_repeat
+    # 표시 최소 겹침 — 사용자 요청대로 '최소 2줄까지' 모든 겹침 노출(자르지 않음).
+    # 외부에서 min_cross_line_repeat 를 명시하면 그 값을 따른다.
+    disp_min = _DISPLAY_MIN_REPEAT if min_cross_line_repeat is None else int(min_cross_line_repeat)
+    raw_cross = find_cross_line_combos(lines, sizes=(2, 3, 4), min_line_repeat=disp_min)
 
-    # pair_duplicates/triple_duplicates 는 combo_verification 의 criteria(적응형
-    # 줄수 기준)와 일치하도록 같은 임계로 거른다. 과거엔 항상 min_repeat=2 라
-    # 대량 업로드 시 노이즈가 범람하고, 표시되는 기준(예: 2번호 5줄+)과 실제
-    # 데이터(2줄+)가 어긋났다. (cross_report 자체는 '2회 이상' 패널용으로 보존)
-    def _repeat_of(item: Dict[str, Any]) -> int:
-        return int(item.get("line_count", item.get("appearance_count", 0)))
+    # 표시 목록: 2줄 이상 모든 조합(빈도순). find_cross_line_combos 가 이미
+    # line_count desc 정렬 + expected/lift/z 주석을 달아 반환한다.
+    pairs = [c for c in raw_cross if c["size"] == 2]
+    triples = [c for c in raw_cross if c["size"] == 3]
+    quads = [c for c in raw_cross if c["size"] == 4]
 
-    pairs = [p for p in cross_report["pair_sets"] if _repeat_of(p) >= pair_min]
-    triples = [t for t in cross_report["triple_sets"] if _repeat_of(t) >= triple_min]
+    # 강한 후보(당첨 신호)는 '우연 대비 초과' 유의 조합만 반영 — 인기번호 노이즈 배제.
+    sig_pairs = _significance_subset(pairs)
+    sig_triples = _significance_subset(triples)
+    sig_quads = _significance_subset(quads)
+    sig_active = len(pairs) > 40  # 대량 노이즈 영역 여부(표시 문구용)
 
-    cross: List[Dict[str, Any]] = []
-    for item in raw_cross:
-        need = pair_min if item["size"] == 2 else triple_min if item["size"] == 3 else quad_min
-        if item["line_count"] >= need:
-            cross.append(item)
-
-    _, _, quads = _split_cross_by_size(cross)
-    strong = _line_overlap_candidates(same_line, pairs + triples)
+    cross = pairs + triples + quads
+    strong = _line_overlap_candidates(same_line, sig_pairs + sig_triples + sig_quads)
 
     avg_marks = round(sum(len(l["numbers"]) for l in lines) / line_count, 1) if line_count else 0.0
     verification = {
@@ -441,19 +494,24 @@ def analyze_line_overlap_patterns(
         "physical_sheets_detected": sheet_count,
         "lines_analyzed": line_count,
         "avg_marks_per_line": avg_marks,
-        "pair_min_repeat": pair_min,
-        "triple_min_repeat": triple_min,
-        "quad_min_repeat": quad_min,
-        "raw_pair_candidates": len([c for c in raw_cross if c["size"] == 2]),
-        "raw_triple_candidates": len([c for c in raw_cross if c["size"] == 3]),
-        "raw_quad_candidates": len([c for c in raw_cross if c["size"] == 4]),
+        "pair_min_repeat": disp_min,
+        "triple_min_repeat": disp_min,
+        "quad_min_repeat": disp_min,
+        "raw_pair_candidates": len(pairs),
+        "raw_triple_candidates": len(triples),
+        "raw_quad_candidates": len(quads),
         "significant_pairs": len(pairs),
         "significant_triples": len(triples),
         "significant_quads": len(quads),
+        # 표시는 자르지 않음(2줄+ 전체). 강한후보만 우연대비 유의 조합으로 산출.
+        "signal_pairs": len(sig_pairs),
+        "signal_triples": len(sig_triples),
+        "significance_active": sig_active,
         "same_line_tier_counts": {k: len(v) for k, v in tiers.items() if v},
         "criteria": (
-            f"게임 줄 {line_count}개 · 줄당 표시 평균 {avg_marks}개 · "
-            f"기준번호 {len(ref)}개 · 줄간 2번호 {pair_min}줄+ · 3번호 {triple_min}줄+ · 4번호 {quad_min}줄+"
+            f"게임 줄 {line_count}개 · 줄당 표시 평균 {avg_marks}개 · 기준번호 {len(ref)}개 · "
+            f"줄간 2·3·4번호 {disp_min}줄+ 전체 표시 · "
+            f"강한후보는 우연 대비 초과(z≥{_SIG_Z_MIN}·lift≥{_SIG_LIFT_MIN}) {len(sig_pairs)}쌍 반영"
         ),
     }
 

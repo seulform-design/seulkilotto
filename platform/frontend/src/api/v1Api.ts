@@ -751,6 +751,9 @@ export interface ComboDuplicateItem {
   size: number;
   repeat_count: number;
   line_count?: number;
+  expected?: number;
+  lift?: number;
+  z?: number;
   label: string;
   sheet_indices?: number[];
 }

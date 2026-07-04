@@ -245,47 +245,77 @@ function ComboDuplicatePanel({
   }
   const ver = data.combo_verification;
 
-  // 모든 항목 노출 — 상한 제거. 50건 이상이면 스크롤 컨테이너로 페이지 길이 방어.
-  const renderCross = (items: ComboDuplicatePatterns['pair_duplicates'], title: string) =>
-    items?.length ? (
+  // 모든 항목 노출(최소 2줄까지 전체) — 상한 없음. 많으면 스크롤 컨테이너.
+  // 각 조합에 '우연 대비 초과(lift)' 를 표시해 노이즈와 실제 묶음을 구분한다.
+  const renderCross = (items: ComboDuplicatePatterns['pair_duplicates'], title: string) => {
+    if (!items?.length) return null;
+    const sigCount = items.filter((r) => (r.lift ?? 1) >= 1.3 && (r.z ?? 0) >= 2).length;
+    return (
       <Box>
         <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
-          {title} ({items.length}건 전체)
+          {title} ({items.length}건 전체{sigCount > 0 ? ` · 유의 ${sigCount}건` : ''})
         </Typography>
         <Box
           sx={{
-            maxHeight: items.length > 20 ? 360 : undefined,
-            overflowY: items.length > 20 ? 'auto' : undefined,
-            bgcolor: items.length > 20 ? 'action.hover' : undefined,
+            maxHeight: items.length > 14 ? 560 : undefined,
+            overflowY: items.length > 14 ? 'auto' : undefined,
+            bgcolor: items.length > 14 ? 'action.hover' : undefined,
             borderRadius: 1,
-            p: items.length > 20 ? 0.5 : 0,
+            p: items.length > 14 ? 0.5 : 0,
           }}
         >
-          <Table size="small">
+          <Table size="small" stickyHeader>
             <TableHead>
               <TableRow>
                 <TableCell>번호 조합</TableCell>
                 <TableCell>겹친 줄 수</TableCell>
+                <TableCell>우연 대비</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {items.map((row) => (
-                <TableRow key={`${title}-${row.numbers.join('-')}`}>
-                  <TableCell>
-                    <Stack direction="row" gap={0.5} flexWrap="wrap">
-                      {row.numbers.map((n) => (
-                        <ReviewBall key={n} number={n} size={28} winningSet={mode === 'review' ? winningSet : null} />
-                      ))}
-                    </Stack>
-                  </TableCell>
-                  <TableCell>{row.repeat_count ?? row.line_count ?? 0}줄</TableCell>
-                </TableRow>
-              ))}
+              {items.map((row) => {
+                const lift = row.lift ?? null;
+                const isSig = (row.lift ?? 1) >= 1.3 && (row.z ?? 0) >= 2;
+                return (
+                  <TableRow
+                    key={`${title}-${row.numbers.join('-')}`}
+                    sx={isSig ? { bgcolor: 'success.main', opacity: 0.96 } : undefined}
+                  >
+                    <TableCell>
+                      <Stack direction="row" gap={0.5} flexWrap="wrap">
+                        {row.numbers.map((n) => (
+                          <ReviewBall key={n} number={n} size={28} winningSet={mode === 'review' ? winningSet : null} />
+                        ))}
+                      </Stack>
+                    </TableCell>
+                    <TableCell>{row.repeat_count ?? row.line_count ?? 0}줄</TableCell>
+                    <TableCell>
+                      {lift != null ? (
+                        <Chip
+                          size="small"
+                          label={`×${lift}${isSig ? ' ★' : ''}`}
+                          color={isSig ? 'success' : 'default'}
+                          variant={isSig ? 'filled' : 'outlined'}
+                          sx={{ fontWeight: isSig ? 800 : 500, height: 20 }}
+                        />
+                      ) : (
+                        '—'
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </Box>
+        {sigCount > 0 && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+            ★ = 우연 대비 초과(lift≥1.3·z≥2) — 실제 의도적으로 함께 묶인 조합. 강한 후보 산출에 반영됩니다.
+          </Typography>
+        )}
       </Box>
-    ) : null;
+    );
+  };
 
   const renderSameLine = () => {
     const matches = data.same_line_matches ?? [];

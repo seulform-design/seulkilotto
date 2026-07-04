@@ -27,11 +27,17 @@ def test_pair_only_two_sheets():
     assert not out["triple_duplicates"]
 
 
-def test_large_batch_filters_noise_candidates():
-    """많은 줄에서 후보는 많아도, 적응형 기준으로 축소."""
+def test_large_batch_shows_all_and_annotates_significance():
+    """대량이어도 겹침은 2줄+ 전체 노출(사용자 요청). 노이즈 축소는 '표시'가
+    아니라 '강한후보 신호(우연 대비 초과)'에서 처리한다."""
     base = {7, 12, 24}
     details = _details(*[set(base) | {i} for i in range(1, 25)])
     out = analyze_current_round_sheet_combos(sheet_details=details)
     ver = out.get("combo_verification") or {}
-    assert ver.get("pair_min_repeat", 2) >= 3
-    assert ver.get("raw_pair_candidates", 0) >= len(out.get("pair_duplicates") or [])
+    # 표시는 최소 2줄까지 모두
+    assert ver.get("pair_min_repeat") == 2
+    # 각 조합에 우연 대비 초과(expected/lift/z) 주석이 붙는다
+    pairs = out.get("pair_duplicates") or []
+    assert pairs and all("lift" in p and "z" in p and "expected" in p for p in pairs)
+    # 강한후보 신호는 유의 조합만 반영(표시보다 작거나 같음)
+    assert ver.get("signal_pairs", 0) <= len(pairs)

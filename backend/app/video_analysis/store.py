@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from . import pg_store
-from .dedup import compute_ticket_fingerprint, find_duplicate_entry
+from .dedup import compute_content_fingerprint, compute_ticket_fingerprint, find_duplicate_entry
 from .overlap_patterns import accumulate_frequency_patterns, build_frequency_overlap_patterns
 from .position_template import build_sheet_template, merge_review_templates
 
@@ -528,9 +528,11 @@ def check_stored_duplicate(
 
     if result:
         fp = compute_ticket_fingerprint(result)
+        content_fp = compute_content_fingerprint(result)
         hit = find_duplicate_entry(
             entries,
             ticket_fingerprint=fp,
+            content_fingerprint=content_fp or None,
             exclude_source_id=sid,
         )
         if hit:
@@ -562,6 +564,7 @@ def append_analysis(
     evp = result.get("extracted_visual_patterns") or {}
     fop = evp.get("frequency_overlap_patterns") or build_frequency_overlap_patterns({})
     ticket_fp = compute_ticket_fingerprint(result)
+    content_fp = compute_content_fingerprint(result)
     label = source_label or vva.get("video_title") or source_id
 
     meta = result.get("meta") or {}
@@ -576,6 +579,7 @@ def append_analysis(
         "url": label,
         "video_id": vva.get("video_id") or source_id,
         "ticket_fingerprint": ticket_fp,
+        "content_fingerprint": content_fp,
         "video_title": label,
         "ticket_round": vva.get("ticket_round") or vva.get("detected_round"),
         "ticket_round_confidence": vva.get("ticket_round_confidence"),

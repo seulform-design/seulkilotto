@@ -108,3 +108,27 @@ def test_line_level_fingerprint_avoids_union_collisions():
     r1 = _sample_result_with_lines("img1", "1227", [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]])
     r2 = _sample_result_with_lines("img2", "1227", [[1, 2, 3, 7, 8, 9], [4, 5, 6, 10, 11, 12]])
     assert compute_ticket_fingerprint(r1) != compute_ticket_fingerprint(r2)
+
+
+def test_content_fingerprint_dedups_across_round_variance(monkeypatch, tmp_path):
+    """같은 티켓을 재업로드했는데 회차 인식이 흔들려도(1231→1230) 중복으로 잡힌다."""
+    from app.video_analysis.dedup import compute_content_fingerprint
+    monkeypatch.setattr("app.video_analysis.store.STORE_PATH", tmp_path / "store.json")
+    clear_store()
+    lines = [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]]
+    r1 = _sample_result_with_lines("imgA", "1231", lines)
+    r2 = _sample_result_with_lines("imgB", "1230", lines)  # 회차만 다르게 인식
+    # 기존 ticket 지문은 회차 때문에 갈라지지만, content 지문은 동일해야 함
+    assert compute_ticket_fingerprint(r1) != compute_ticket_fingerprint(r2)
+    assert compute_content_fingerprint(r1) == compute_content_fingerprint(r2)
+    append_analysis("imgA", r1, source_label="a.jpg")
+    with pytest.raises(DuplicateAnalysisError):
+        append_analysis("imgB", r2, source_label="b.jpg")
+
+
+def test_content_fingerprint_order_independent():
+    """용지 분할·줄 순서가 달라도 같은 줄 묶음이면 같은 content 지문."""
+    from app.video_analysis.dedup import compute_content_fingerprint
+    r1 = _sample_result_with_lines("img1", "1227", [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]])
+    r2 = _sample_result_with_lines("img2", "1227", [[7, 8, 9, 10, 11, 12], [1, 2, 3, 4, 5, 6]])
+    assert compute_content_fingerprint(r1) == compute_content_fingerprint(r2)

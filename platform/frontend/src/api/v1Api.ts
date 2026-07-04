@@ -617,6 +617,25 @@ export const v1Api = {
       { method: 'DELETE' }
     ),
 
+  /** 레거시 수기 저장분의 픽 타입 일괄 재분류 (예: 갇힌 반자동 → 자동). */
+  reclassifyManualPickType: (
+    sheetIntent: 'review' | 'current_round',
+    fromPickType: '자동' | '반자동',
+    toPickType: '자동' | '반자동'
+  ) =>
+    fetchJson<{ ok: boolean; reclassified: number; accumulated: PhotoAnalysisAccumulated }>(
+      '/api/v1/photo-analysis/reclassify',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          sheet_intent: sheetIntent,
+          from_pick_type: fromPickType,
+          to_pick_type: toPickType,
+        }),
+      }
+    ),
+
   generateEpo: (params: {
     nSets?: number;
     lookback?: number;

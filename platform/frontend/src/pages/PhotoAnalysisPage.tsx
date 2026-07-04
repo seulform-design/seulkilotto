@@ -1232,6 +1232,29 @@ export default function PhotoAnalysisPage() {
     }
   };
 
+  // 레거시 정정 — 이전 버전에서 '반자동'으로 갇힌 서버 저장분을 '자동'으로 재분류.
+  const migrateSemiToAuto = async () => {
+    const semiCount = activeSlice?.saved_semi_lines?.length ?? 0;
+    if (semiCount === 0) return;
+    if (!(await confirm({
+      message:
+        `현재 탭의 서버 저장 반자동 ${semiCount}줄을 '자동'으로 재분류합니다.\n` +
+        `(§3 반자동 비교에 실제로 사용하던 데이터가 있다면 함께 이동됩니다.) 진행할까요?`,
+      confirmText: '자동으로 이동',
+    }))) return;
+    try {
+      const res = await v1Api.reclassifyManualPickType(activeTab, '반자동', '자동');
+      if (!mountedRef.current) return;
+      setAccumulated(res.accumulated);
+      hydratedAutoRef.current[activeTab] = false; // 자동 누적 재복원 허용
+      setNotice(`✅ ${res.reclassified}건을 자동으로 재분류했습니다. 자동 누적에 반영됩니다.`);
+      setError(null);
+    } catch (e) {
+      if (!mountedRef.current) return;
+      setError(e instanceof Error ? e.message : '재분류 실패');
+    }
+  };
+
   return (
     <Stack spacing={2}>
       {/* ━━ 헤더 ━━ — 누적 삭제는 §1/§3 각 영역의 추가 세팅으로 분리 */}
@@ -1364,7 +1387,7 @@ export default function PhotoAnalysisPage() {
             용지 초기화
           </Button>
           <Button type="button" variant="outlined" color="primary" onClick={() => setBulkOpen(true)}>
-            ⬆ 대량 입력 (반자동 500줄+)
+            ⬆ 대량 입력 (자동 500줄+)
           </Button>
           <Button
             type="button"
@@ -1458,10 +1481,32 @@ export default function PhotoAnalysisPage() {
             <>
               <Typography variant="body2" sx={{ mb: 0.5 }}>
                 자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkAutoTickets.length}장 · 총 {ticketLines.length}줄
+                {' '}(서버 저장 자동 {activeSlice?.saved_auto_lines?.length ?? 0}줄)
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 아래 목록의 [×] 로 개별 줄 삭제. 하단 [자동 입력 초기화] 는 현재 탭의 자동 입력 서버 데이터 + 로컬 자동 누적만 삭제합니다. 반자동은 § 3 추가 세팅에서 따로 관리됩니다.
               </Typography>
+              {(activeSlice?.saved_semi_lines?.length ?? 0) > 0 && (
+                <Alert
+                  severity="warning"
+                  sx={{ mb: 1.5 }}
+                  action={
+                    <Button
+                      type="button"
+                      size="small"
+                      color="warning"
+                      variant="contained"
+                      onClick={migrateSemiToAuto}
+                    >
+                      자동으로 이동
+                    </Button>
+                  }
+                >
+                  이전 버전에서 저장돼 <strong>반자동</strong>으로 분류된 서버 저장분{' '}
+                  {activeSlice?.saved_semi_lines?.length ?? 0}줄이 있습니다. 이 데이터가 실제{' '}
+                  <strong>자동 구매 용지</strong>라면 [자동으로 이동] 으로 재분류하세요.
+                </Alert>
+              )}
               {ticketLines.length === 0 ? (
                 <Alert severity="info" sx={{ mb: 1.5 }}>
                   자동 누적 줄이 없습니다. 위 그리드에서 6개 선택 후 [줄 저장].

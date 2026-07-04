@@ -162,6 +162,9 @@ def get_walk_forward(
                 "hit_rate_4plus": s.hit_rate_4plus,
                 "hit_rate_5plus": s.hit_rate_5plus,
                 "hit_rate_6": s.hit_rate_6,
+                "delta_vs_baseline": s.delta_vs_baseline,
+                "z_score": s.z_score,
+                "beats_baseline": s.beats_baseline,
             }
             for s in summary.strategies
         ],

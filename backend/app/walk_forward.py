@@ -54,6 +54,10 @@ class StrategyResult:
     hit_rate_4plus: float  # 4등 이상
     hit_rate_5plus: float  # 3등 이상
     hit_rate_6: float      # 1등
+    # 무작위 기준선 대비 판정 (평균 적중 z-검정)
+    delta_vs_baseline: float  # 평균 적중 - 무작위 기대(0.8)
+    z_score: float            # (delta) / 표준오차
+    beats_baseline: bool      # z>=2 이고 delta>0 이어야 '우위'
 
 
 @dataclass
@@ -216,6 +220,15 @@ def _run_strategy(
     if total == 0:
         return None
 
+    # 무작위 기준선(0.8개) 대비 통계 판정 — 평균 적중의 z-검정.
+    # 표본분산으로 평균의 표준오차를 구하고, (평균-기준)/SE 로 z 를 계산.
+    mean = cum_total / total
+    var = sum(((h - mean) ** 2) * c for h, c in dist.items()) / total
+    se = (var / total) ** 0.5 if total > 0 else 0.0
+    delta = mean - BASELINE_AVG_HITS
+    z = round(delta / se, 2) if se > 0 else 0.0
+    beats = bool(z >= 2.0 and delta > 0)
+
     return StrategyResult(
         strategy=strategy,
         rounds_tested=len(rounds_axis),
@@ -228,6 +241,9 @@ def _run_strategy(
         hit_rate_4plus=sum(dist[h] for h in range(4, 7)) / total,
         hit_rate_5plus=sum(dist[h] for h in range(5, 7)) / total,
         hit_rate_6=dist.get(6, 0) / total,
+        delta_vs_baseline=round(delta, 4),
+        z_score=z,
+        beats_baseline=beats,
     )
 
 

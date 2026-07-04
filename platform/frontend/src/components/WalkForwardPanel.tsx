@@ -111,13 +111,32 @@ function StrategySummary({
           <Typography variant="body2">{pct(result.hit_rate_6)}</Typography>
         </Stack>
       </Stack>
+      {result.strategy !== 'uniform' && (
+        <Box sx={{ mt: 0.75, pt: 0.75, borderTop: '1px solid', borderColor: 'divider' }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Typography variant="caption" color="text.secondary">
+              무작위 대비 판정
+            </Typography>
+            <Chip
+              size="small"
+              color={result.beats_baseline ? 'warning' : 'success'}
+              variant={result.beats_baseline ? 'filled' : 'outlined'}
+              label={
+                result.beats_baseline
+                  ? `기준선 초과 z=${result.z_score} (표본 우연 의심)`
+                  : `차이 없음 · Δ${result.delta_vs_baseline >= 0 ? '+' : ''}${result.delta_vs_baseline.toFixed(3)} · z=${result.z_score}`
+              }
+            />
+          </Stack>
+        </Box>
+      )}
     </Paper>
   );
 }
 
 export default function WalkForwardPanel({
   defaultIncludeEpo = false,
-  defaultIncludeComposite = false,
+  defaultIncludeComposite = true,
   title = 'Walk-Forward 백테스트',
 }: WalkForwardPanelProps = {}) {
   const [params, setParams] = useState<RunParams>({
@@ -348,6 +367,24 @@ export default function WalkForwardPanel({
             회차당 {data.sets_per_round} 세트 · 베이스라인{' '}
             <strong>{data.baseline_avg_hits.toFixed(3)}</strong>
           </Alert>
+
+          {(() => {
+            const cand = data.strategies.filter((s) => s.strategy !== 'uniform');
+            const winners = cand.filter((s) => s.beats_baseline);
+            const maxZ = cand.reduce((m, s) => Math.max(m, s.z_score), 0);
+            return (
+              <Alert severity={winners.length ? 'warning' : 'success'} sx={{ mb: 1.5 }}>
+                <Typography variant="body2" fontWeight={700}>
+                  🎯 판정:{' '}
+                  {winners.length === 0
+                    ? `어떤 전략도 무작위 기준선을 통계적으로 이기지 못했습니다 (최대 z=${maxZ.toFixed(2)} < 2.0). 예측 우위 없음 — 실제 당첨 확률은 무작위와 동일합니다.`
+                    : `${winners
+                        .map((s) => STRATEGY_LABELS[s.strategy] ?? s.strategy)
+                        .join(', ')} 이(가) 기준선을 넘었습니다(z≥2). 단, 여러 전략·회차를 반복 검정하면 우연히 나올 수 있어(다중비교), 다른 시드·구간에서 재현되지 않으면 신호가 아닙니다.`}
+                </Typography>
+              </Alert>
+            );
+          })()}
 
           <Grid container spacing={1.5} sx={{ mb: 2 }}>
             {data.strategies.map((s) => (

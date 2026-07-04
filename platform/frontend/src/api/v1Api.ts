@@ -112,6 +112,9 @@ export interface WalkForwardStrategyResult {
   hit_rate_4plus: number;
   hit_rate_5plus: number;
   hit_rate_6: number;
+  delta_vs_baseline: number;
+  z_score: number;
+  beats_baseline: boolean;
 }
 
 export interface WalkForwardResponse {

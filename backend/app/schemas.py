@@ -71,6 +71,9 @@ class WalkForwardStrategyResult(BaseModel):
     hit_rate_4plus: float
     hit_rate_5plus: float
     hit_rate_6: float
+    delta_vs_baseline: float = 0.0
+    z_score: float = 0.0
+    beats_baseline: bool = False
 
 
 class WalkForwardResponse(BaseModel):

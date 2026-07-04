@@ -91,17 +91,10 @@ function comboKey(nums: number[]): string {
 function buildNumberScores(ctx: RecommendationContext): Record<number, number> {
   const scores: Record<number, number> = {};
 
-  ctx.strongCandidates.forEach((n, idx) => {
-    bump(scores, n, 18 - idx * 0.6);
-  });
-
-  if (ctx.unifiedSignals?.length) {
-    const gradeBonus: Record<string, number> = { S: 16, A: 11, B: 7, C: 3, X: -50 };
-    for (const sig of ctx.unifiedSignals) {
-      if (sig.grade === 'X') continue;
-      bump(scores, sig.number, (gradeBonus[sig.grade] ?? 0) + sig.score * 0.35);
-    }
-  }
+  // 종합 추천은 '강한 후보(unifiedSignals)' 를 점수 축으로 쓰지 않는다(사용자 요청).
+  // 대신 아래 세 축 — 자동↔반자동 1:1 전수비교(lineMatchGroups) · 평행회차
+  // (parallelStrong/Expected) · 호기(추첨기, machineStrong) — 으로만 산출한다.
+  // strongCandidates/unifiedSignals 는 scoreCombo 표시·필터에도 반영하지 않는다.
 
   for (const [n, count] of Object.entries(ctx.semiFreq)) {
     bump(scores, Number(n), count * 2.5);
@@ -174,13 +167,8 @@ function scoreCombo(
 
   if (excludedHit >= 2) total -= 80;
   if (excludedHit >= 1) signals.push(`배제${excludedHit}`);
-  if (strongMatch >= 3) {
-    total += strongMatch * 6;
-    signals.push(`강한후보${strongMatch}`);
-  } else if (strongMatch >= 2) {
-    total += strongMatch * 3;
-    signals.push(`강한후보${strongMatch}`);
-  }
+  // 강한 후보 일치는 점수·신호에 반영하지 않는다(사용자 요청 — 3축 기준).
+  // strongMatch 는 반환 타입 호환을 위해 계산만 유지하고 표시하지 않는다.
 
   const combos = ctx.comboPatterns;
   let comboScore = 0;

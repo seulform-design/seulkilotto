@@ -92,11 +92,32 @@ def _slim_accumulated():
     프론트가 "게이트웨이 연결이 일시적으로 끊겼습니다" + saved_auto_lines 미수신으로
     "자동 서버 저장 0줄" 을 표시했다. 클라이언트 응답에서만 제거해 절단을 막는다.
     """
-    acc = build_accumulated()
+    full = build_accumulated()
+    acc = full
     if isinstance(acc, dict):
         acc = dict(acc)  # 얕은 복사 — 캐시/원본 dict 를 훼손하지 않는다.
         acc.pop("accumulated_combo_patterns", None)
-    return _slim_for_client(acc)
+    slim = _slim_for_client(acc)
+
+    # '다른 줄에도 겹침'(자동 누적 pair/triple/quad — pick_type='자동' 만 집계)은
+    # 화면에서 전체를 봐야 한다. 리스트 캡(_SLIM_LIST_CAP)이 이를 잘라 "N건 전체"가
+    # 실제로는 상위 N만 보였다. by_intent 슬라이스에 한해 캡을 풀되, 각 항목 내부
+    # 상세(lines/locations)만 슬림화해 재주입한다. 최상위(제거됨)·아카이브 스냅숏은
+    # 그대로 캡 유지 → 응답 크기·게이트웨이 절단 여유는 보존.
+    if isinstance(full, dict) and isinstance(slim, dict):
+        uncap_keys = ("pair_duplicates", "triple_duplicates", "quad_duplicates")
+        for intent, fslice in (full.get("by_intent") or {}).items():
+            if not isinstance(fslice, dict):
+                continue
+            fcombo = fslice.get("accumulated_combo_patterns")
+            sslice = (slim.get("by_intent") or {}).get(intent)
+            scombo = sslice.get("accumulated_combo_patterns") if isinstance(sslice, dict) else None
+            if isinstance(fcombo, dict) and isinstance(scombo, dict):
+                for key in uncap_keys:
+                    items = fcombo.get(key)
+                    if isinstance(items, list):
+                        scombo[key] = [_slim_for_client(it) for it in items]
+    return slim
 
 
 def _duplicate_payload(existing: dict, reason: str) -> dict:

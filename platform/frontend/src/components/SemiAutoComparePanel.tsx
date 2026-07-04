@@ -1273,7 +1273,6 @@ export default function SemiAutoComparePanel({
 
   // UI 토글 상태
   const [showAllTickets, setShowAllTickets] = useState(false);
-  const [showBacktestTop, setShowBacktestTop] = useState(false);
   const [recommendations, setRecommendations] = useState<ScoredRecommendation[]>([]);
   // [추천 5세트 생성] 클릭마다 증가 — 같은 데이터에서도 매번 다른 5세트 생성.
   const regenNonceRef = useRef(0);
@@ -3017,33 +3016,27 @@ export default function SemiAutoComparePanel({
                 onClick={generateRecommendations}
                 disabled={
                   combinedTickets.length === 0 &&
-                  !accumulated &&
-                  resolvedStrongCandidates.length === 0
+                  parallelStrong.length === 0 &&
+                  machineStrong.length === 0
                 }
               >
                 추천 5세트 생성
               </Button>
             </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              {compareWinning ? (
-                <>
-                  <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차 강수</strong> ·{' '}
-                  <strong>호기(추첨기) 상위</strong> 세 축을 핵심으로, 강한 후보·콤보 패턴을 더해
-                  6번호 5세트를 생성합니다.
-                  당첨 일치 개수는 점수에 넣지 않고 결과 카드에 표시만 합니다(예측 정합성 평가용).
-                </>
-              ) : (
-                <>
-                  반자동/자동 빈도 + 강한 후보 + 줄간 겹침 신호를 종합해 6번호 5세트를 생성합니다.
-                </>
-              )}
+              <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차(강수·기대수)</strong> ·{' '}
+              <strong>호기(추첨기)</strong> — 이 세 축을 핵심으로 6번호 5세트를 생성합니다.
+              (강한 후보 점수는 사용하지 않습니다.)
+              {compareWinning
+                ? ' 당첨 일치 개수는 점수에 넣지 않고 결과 카드에 표시만 합니다(예측 정합성 평가용).'
+                : ''}
               {combinedTickets.length === 0
-                ? (resolvedStrongCandidates.length > 0
-                    ? ` ※ 입력 줄이 없어 복기 통계 신호(강한 후보 ${resolvedStrongCandidates.length}개)만으로 생성합니다.`
-                    : ' ※ 자동·반자동 번호를 입력하거나 [재분석]으로 통계 신호를 먼저 불러오세요.')
+                ? (parallelStrong.length > 0 || machineStrong.length > 0
+                    ? ' ※ 입력 줄이 없어 평행회차·호기(추첨기) 신호만으로 생성합니다.'
+                    : ' ※ [재분석]으로 평행회차·호기 신호를 먼저 불러오세요.')
                 : ` 분석 대상 ${combinedTickets.length}줄.`}
               {' '}정직성: 수학적 당첨 확률(1/8,145,060)은 동일하며, 통계적으로 1등에 거의 없는
-              조합(합 극단·전부 홀짝·4연속 등)을 제외하고 복기 신호와의 정합성을 높입니다.
+              조합(합 극단·전부 홀짝·4연속 등)을 제외합니다.
             </Typography>
             {recommendations.length > 0 && (
               <Stack spacing={0.75}>
@@ -3070,15 +3063,6 @@ export default function SemiAutoComparePanel({
                         sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
                       />
                     )}
-                    {rec.strongMatch >= 2 && (
-                      <Chip
-                        size="small"
-                        color={rec.strongMatch >= 3 ? 'success' : 'warning'}
-                        variant="outlined"
-                        label={`강한후보 ${rec.strongMatch}`}
-                        sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                      />
-                    )}
                     {rec.signals.length > 0 && (
                       <Chip
                         size="small"
@@ -3096,79 +3080,6 @@ export default function SemiAutoComparePanel({
             )}
           </Paper>
 
-
-          {/* 복기 사후 검증 — 당첨번호 일치 상위 (접기, 기본 숨김) */}
-          {compareWinning &&
-            winningNumbers.length > 0 &&
-            activeComparison.bestTickets.some((t) => t.vsLatestMatch.length > 0) && (
-            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'divider', opacity: 0.92 }}>
-              <Stack
-                direction="row"
-                alignItems="center"
-                justifyContent="space-between"
-                sx={{ mb: showBacktestTop ? 1 : 0 }}
-              >
-                <Box>
-                  <Typography variant="body2" fontWeight={700}>
-                    📋 {effectiveRound ?? '?'}회 복기 검증 — 당첨 일치 상위 (사후 확인)
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    이미 추첨된 {effectiveRound ?? '?'}회 당첨번호와 비교 — 다음 회차 예측에는 의미 없음
-                  </Typography>
-                </Box>
-                <Button
-                  type="button"
-                  size="small"
-                  variant="text"
-                  onClick={() => setShowBacktestTop((v) => !v)}
-                >
-                  {showBacktestTop ? '접기' : '펼치기'}
-                </Button>
-              </Stack>
-              {showBacktestTop && (
-                <Stack spacing={1}>
-                  {activeComparison.bestTickets
-                    .filter((t) => t.vsLatestMatch.length > 0)
-                    .map((t) => (
-                      <Stack
-                        key={t.index}
-                        direction="row"
-                        alignItems="center"
-                        spacing={0.75}
-                        sx={{ flexWrap: 'wrap' }}
-                        useFlexGap
-                      >
-                        <Chip
-                          size="small"
-                          label={`#${t.index + 1}`}
-                          variant="outlined"
-                          sx={{ minWidth: 48 }}
-                        />
-                        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                          {t.ticket.map((n) => (
-                            <LottoBall
-                              key={n}
-                              number={n}
-                              size={24}
-                              dimmed={winningSet ? !winningSet.has(n) : false}
-                            />
-                          ))}
-                        </Stack>
-                        <Chip
-                          size="small"
-                          color={t.vsLatestMatch.length >= 3 ? 'success' : 'default'}
-                          label={`당첨 ${t.vsLatestMatch.length}/6${t.bonusMatch ? ' +🎁' : ''}`}
-                          sx={{ fontWeight: 700 }}
-                        />
-                        <Typography variant="caption" color="text.secondary">
-                          ({t.vsLatestMatch.join(', ')})
-                        </Typography>
-                      </Stack>
-                    ))}
-                </Stack>
-              )}
-            </Paper>
-          )}
 
         </>
       )}
@@ -3673,6 +3584,28 @@ export default function SemiAutoComparePanel({
           대상 회차: <strong>{predictionSignals?.target_round ?? effectiveRound ?? '?'}</strong>회
           {predictionSignals?.machine_id ? ` · ${predictionSignals.machine_id}호기` : ''}.
         </Typography>
+        {/* 강한 후보 개수·번호 — 통합 신호 로딩/실패와 무관하게 항상 노출
+            (resolvedStrongCandidates 는 통합규칙 없으면 누적/로컬로 폴백). */}
+        {resolvedStrongCandidates.length > 0 && (
+          <Box sx={{ mb: 1 }}>
+            <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+              <Chip
+                size="small"
+                color="primary"
+                label={`강한 후보 ${resolvedStrongCandidates.length}개`}
+                sx={{ fontWeight: 700 }}
+              />
+              <Typography variant="caption" color="text.secondary">
+                {strongCandidateSource === 'unified-rules' ? '통합 규칙 기준' : '누적/로컬 기준'}
+              </Typography>
+            </Stack>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              {resolvedStrongCandidates.map((n) => (
+                <LottoBall key={`strong-${n}`} number={n} size={24} />
+              ))}
+            </Stack>
+          </Box>
+        )}
         {predictionSignals ? (
           <>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
@@ -3730,11 +3663,6 @@ export default function SemiAutoComparePanel({
                   sx={{ bgcolor: GRADE_COLORS[g], color: '#fff', fontWeight: 700 }}
                 />
               ))}
-              <Chip
-                size="small"
-                variant="outlined"
-                label={`강한후보 ${resolvedStrongCandidates.length}개`}
-              />
             </Stack>
             <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
               {predictionSignals.ranked_numbers.slice(0, 12).map((r) => (

@@ -606,13 +606,19 @@ export const v1Api = {
       { method: 'DELETE' }
     ),
 
-  clearPhotoAnalysisStore: (intent?: 'review' | 'current_round') =>
-    fetchJson<{ ok: boolean; removed: number }>(
-      `/api/v1/photo-analysis/store${intent ? `?intent=${intent}` : ''}`,
-      {
-      method: 'DELETE',
-      }
-    ),
+  clearPhotoAnalysisStore: (
+    intent?: 'review' | 'current_round',
+    pickType?: '자동' | '반자동',
+  ) => {
+    const q = new URLSearchParams();
+    if (intent) q.set('intent', intent);
+    if (pickType) q.set('pick_type', pickType);
+    const qs = q.toString();
+    return fetchJson<{ ok: boolean; removed: number }>(
+      `/api/v1/photo-analysis/store${qs ? `?${qs}` : ''}`,
+      { method: 'DELETE' },
+    );
+  },
 
   deletePhotoAnalysisEntry: (entryId: string) =>
     fetchJson<{ ok: boolean; accumulated: PhotoAnalysisAccumulated }>(

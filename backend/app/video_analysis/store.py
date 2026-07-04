@@ -1370,19 +1370,39 @@ def clear_store() -> int:
 
 
 @_synchronized
-def clear_store_intent(intent: str) -> int:
-    """특정 intent 에 해당하는 저장소만 비운다."""
+def clear_store_intent(intent: str, pick_type: str | None = None) -> int:
+    """특정 intent 저장소를 비운다.
+
+    pick_type('자동'/'반자동') 지정 시 해당 픽타입 엔트리만 삭제하고 나머지는
+    보존한다(예: 자동 삭제 시 반자동 저장분 유지). 미지정 시 intent 전체 삭제.
+    """
     if intent == "review":
         historical = _load_historical_raw()
-        kept_entries = [e for e in historical.get("entries") or [] if e.get("video_intent") != "review"]
-        removed = len(historical.get("entries") or []) - len(kept_entries)
+        entries = historical.get("entries") or []
+        if pick_type:
+            kept_entries = [
+                e for e in entries
+                if not (e.get("video_intent") == "review" and _entry_pick_type(e) == pick_type)
+            ]
+        else:
+            kept_entries = [e for e in entries if e.get("video_intent") != "review"]
+        removed = len(entries) - len(kept_entries)
         historical["entries"] = kept_entries
         _save_historical_raw(historical)
         return removed
 
     if intent == "current_round":
         current = _load_current_raw()
-        removed = len(current.get("entries") or [])
+        entries = current.get("entries") or []
+        if pick_type:
+            # 부분 삭제 — 해당 픽타입만 제거하고 파생 데이터셋/상태는 다음 저장·
+            # 갱신 시 재계산되도록 그대로 둔다(누적 응답은 매번 재계산됨).
+            kept = [e for e in entries if _entry_pick_type(e) != pick_type]
+            removed = len(entries) - len(kept)
+            current["entries"] = kept
+            _save_current_raw(current)
+            return removed
+        removed = len(entries)
         current["entries"] = []
         current["derived_datasets"] = {}
         current["rule_snapshots"] = {}

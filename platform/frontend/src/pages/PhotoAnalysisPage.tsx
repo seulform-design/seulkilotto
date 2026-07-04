@@ -1149,18 +1149,18 @@ export default function PhotoAnalysisPage() {
   const clearStore = async () => {
     const targetLabel = activeTab === 'review' ? '복기 탭' : '이번회차 탭';
     if (!(await confirm({
-      message: `${targetLabel}의 서버 저장 데이터를 모두 삭제합니다 (자동 + 반자동 포함). 로컬 자동 누적도 초기화됩니다. 다른 탭은 유지됩니다. 진행할까요?`,
+      message: `${targetLabel}의 서버 저장 '자동' 누적만 삭제합니다. 반자동 저장분은 유지됩니다. 로컬 자동 누적도 초기화됩니다. 다른 탭은 유지됩니다. 진행할까요?`,
       destructive: true,
-      confirmText: '삭제',
+      confirmText: '자동만 삭제',
     }))) return;
     try {
-      await v1Api.clearPhotoAnalysisStore(activeTab);
+      await v1Api.clearPhotoAnalysisStore(activeTab, '자동');
       setManualByIntent((prev) => ({
         ...prev,
         [activeTab]: emptyManualDraft(),
       }));
       await refreshAccumulated();
-      setNotice(`${targetLabel} 데이터가 삭제되었습니다.`);
+      setNotice(`${targetLabel} 자동 누적이 삭제되었습니다 (반자동 유지).`);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : '삭제 실패');
@@ -1414,7 +1414,7 @@ export default function PhotoAnalysisPage() {
                 {' '}(서버 저장 자동 {activeSlice?.saved_auto_lines?.length ?? 0}줄)
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                아래 목록의 [×] 로 개별 줄 삭제. 하단 [이 탭 서버 데이터 전체 삭제] 는 현재 탭의 서버 저장분(자동+반자동)과 로컬 자동 누적을 모두 지웁니다.
+                아래 목록의 [×] 로 개별 줄 삭제. 하단 [이 탭 자동 서버 데이터 삭제] 는 현재 탭의 서버 저장분 중 <strong>자동만</strong> 지웁니다(반자동 저장분은 유지). 로컬 자동 누적도 초기화됩니다.
               </Typography>
               {ticketLines.length === 0 ? (
                 <Alert severity="info" sx={{ mb: 1.5 }}>
@@ -1476,7 +1476,7 @@ export default function PhotoAnalysisPage() {
                     (!accumulated || accumulated.total_analyses === 0)
                   }
                 >
-                  이 탭 서버 데이터 전체 삭제
+                  이 탭 자동 서버 데이터 삭제
                 </Button>
               </Stack>
             </>

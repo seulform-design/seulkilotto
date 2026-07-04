@@ -96,52 +96,18 @@ function buildNumberScores(ctx: RecommendationContext): Record<number, number> {
   // (parallelStrong/Expected) · 호기(추첨기, machineStrong) — 으로만 산출한다.
   // strongCandidates/unifiedSignals 는 scoreCombo 표시·필터에도 반영하지 않는다.
 
-  for (const [n, count] of Object.entries(ctx.semiFreq)) {
-    bump(scores, Number(n), count * 2.5);
-  }
-  for (const [n, count] of Object.entries(ctx.autoFreq)) {
-    bump(scores, Number(n), count * 1.8);
-  }
-
-  const addIntersection = (groups: IntersectionGroupInput[], sizeWeight: number) => {
-    for (const g of groups) {
-      const w = sizeWeight * Math.log2(g.ticketCount + 1) * g.size;
-      for (const n of g.numbers) bump(scores, n, w);
-    }
-  };
-  addIntersection(ctx.intersection.two, 4);
-  addIntersection(ctx.intersection.three, 7);
-  addIntersection(ctx.intersection.fourPlus, 12);
-
+  // ① 자동↔반자동 1:1 전수비교 — 공통 번호가 많고 겹친 카드가 많을수록 가중.
   for (const g of ctx.lineMatchGroups) {
-    const w = g.matchCount ** 2 * Math.log2(g.cardWeight + 1) * 1.5;
+    const w = g.matchCount ** 2 * Math.log2(g.cardWeight + 1) * 2.2;
     for (const n of g.matchedNumbers) bump(scores, n, w);
   }
+  // ② 평행회차 — 강수(상위 가중) + 기대수(보조).
+  ctx.parallelStrong?.forEach((n, idx) => bump(scores, n, 26 - idx * 1.0));
+  ctx.parallelExpected?.forEach((n, idx) => bump(scores, n, 12 - idx * 0.4));
+  // ③ 호기(추첨기) 상위.
+  ctx.machineStrong?.forEach((n, idx) => bump(scores, n, 26 - idx * 1.2));
 
-  // 평행회차·호기(추첨기) — 자동↔반자동 1:1 매칭과 함께 종합 추천의 핵심 축.
-  ctx.parallelStrong?.forEach((n, idx) => bump(scores, n, 12 - idx * 0.5));
-  ctx.parallelExpected?.forEach((n, idx) => bump(scores, n, 5 - idx * 0.25));
-  ctx.machineStrong?.forEach((n, idx) => bump(scores, n, 12 - idx * 0.5));
-
-  const combos = ctx.comboPatterns;
-  if (combos) {
-    for (const p of combos.pair_duplicates ?? []) {
-      const w = (p.repeat_count ?? p.line_count ?? 1) * 2.5;
-      for (const n of p.numbers) bump(scores, n, w);
-    }
-    for (const t of combos.triple_duplicates ?? []) {
-      const w = (t.repeat_count ?? t.line_count ?? 1) * 4;
-      for (const n of t.numbers) bump(scores, n, w);
-    }
-    for (const q of combos.quad_duplicates ?? []) {
-      const w = (q.repeat_count ?? q.line_count ?? 1) * 6;
-      for (const n of q.numbers) bump(scores, n, w);
-    }
-    for (const n of combos.strong_candidates ?? []) {
-      bump(scores, n, 6);
-    }
-  }
-
+  // 강한후보·빈도·교집합·콤보패턴은 종합 추천 점수에 반영하지 않는다(3축 전용).
   // 복기 모드라도 실제 당첨번호(winningNumbers)는 점수에 주입하지 않는다.
   // (사후 편향 제거 — 그러면 추천이 곧 당첨번호가 되어 예측 정합성 평가가
   //  무의미해진다.) 당첨 일치 개수는 scoreCombo 의 winMatch 로 '표시'만 한다.
@@ -170,44 +136,9 @@ function scoreCombo(
   // 강한 후보 일치는 점수·신호에 반영하지 않는다(사용자 요청 — 3축 기준).
   // strongMatch 는 반환 타입 호환을 위해 계산만 유지하고 표시하지 않는다.
 
-  const combos = ctx.comboPatterns;
-  let comboScore = 0;
-  if (combos) {
-    for (const p of combos.pair_duplicates ?? []) {
-      if (p.numbers.every((n) => comboSet.has(n))) {
-        comboScore += (p.repeat_count ?? 1) * 2;
-        signals.push('페어');
-      }
-    }
-    for (const t of combos.triple_duplicates ?? []) {
-      if (t.numbers.every((n) => comboSet.has(n))) {
-        comboScore += (t.repeat_count ?? 1) * 5;
-        signals.push('트리플');
-      }
-    }
-  }
-  total += comboScore;
-
-  for (const g of ctx.intersection.three) {
-    if (g.numbers.every((n) => comboSet.has(n))) {
-      total += Math.log2(g.ticketCount + 1) * 10;
-      signals.push('교집합3');
-      break;
-    }
-  }
-  for (const g of ctx.intersection.fourPlus) {
-    if (g.numbers.every((n) => comboSet.has(n))) {
-      total += Math.log2(g.ticketCount + 1) * 16;
-      signals.push(`교집합${g.size}`);
-      break;
-    }
-  }
-  for (const g of ctx.intersection.two) {
-    if (g.numbers.every((n) => comboSet.has(n))) {
-      total += Math.log2(g.ticketCount + 1) * 4;
-      signals.push('교집합2');
-    }
-  }
+  // 콤보(페어/트리플)·교집합은 점수·신호에 반영하지 않는다(3축 전용).
+  // comboScore 는 반환 타입 호환을 위해 0 으로 고정한다.
+  const comboScore = 0;
 
   // 자동↔반자동 1:1 매칭 정합 — 3개 이상 공통 줄겹침이 조합에 들어가면 가산.
   let bestLineMatch = 0;
@@ -283,24 +214,18 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
     candidates.push(combo);
   };
 
-  // ── 합의(consensus) 풀 — 복기 종합 추천의 핵심 축 ──────────────────
-  // 자동∩반자동 교집합 + 자동↔반자동 1:1 매칭 번호를 신뢰도순으로 모은다.
-  // 자동·반자동이 '함께' 가리키는 번호일수록, 그리고 겹친 티켓·줄이 많을수록
-  // 가중이 높다. 추천 6번호의 코어를 여기서 우선 채워 데이터 기반으로 만든다.
+  // ── 합의(consensus) 풀 — 종합 추천의 세 축 ─────────────────────────
+  // ① 자동↔반자동 1:1 매칭 ② 평행회차 강수 ③ 호기(추첨기) 상위 번호를
+  // 신뢰도순으로 모아 추천 6번호의 코어를 채운다(교집합·빈도·콤보 미사용).
   const consensusScore: Record<number, number> = {};
   const addCon = (nums: number[], w: number) => {
     for (const n of nums) {
       if (!excludedSet.has(n)) consensusScore[n] = (consensusScore[n] ?? 0) + w;
     }
   };
-  for (const g of ctx.intersection.fourPlus) addCon(g.numbers, 14 * g.size * Math.log2(g.ticketCount + 2));
-  for (const g of ctx.intersection.three) addCon(g.numbers, 9 * g.size * Math.log2(g.ticketCount + 2));
-  for (const g of ctx.intersection.two) addCon(g.numbers, 5 * Math.log2(g.ticketCount + 2));
   for (const g of ctx.lineMatchGroups) addCon(g.matchedNumbers, g.matchCount * g.matchCount * Math.log2(g.cardWeight + 2));
-  // 평행회차 강수·호기(추첨기) 상위도 합의 코어에 포함 — 종합 추천을
-  // 자동↔반자동 1:1 + 평행회차 + 호기 세 축으로 구성(사용자 요청).
-  (ctx.parallelStrong ?? []).forEach((n, idx) => addCon([n], Math.max(2, 11 - idx)));
-  (ctx.machineStrong ?? []).forEach((n, idx) => addCon([n], Math.max(2, 11 - idx)));
+  (ctx.parallelStrong ?? []).forEach((n, idx) => addCon([n], Math.max(4, 16 - idx)));
+  (ctx.machineStrong ?? []).forEach((n, idx) => addCon([n], Math.max(4, 16 - idx)));
   const consensusPool = Object.entries(consensusScore)
     .sort(([, a], [, b]) => b - a)
     .map(([n]) => Number(n));
@@ -320,12 +245,11 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
   // C1) 합의 상위 6 — 가장 많은 자동·반자동이 동의한 번호 묶음
   if (consensusPool.length >= 6) push(fillConsensus(consensusPool.slice(0, 6)));
 
-  // C2) 교집합 그룹 + 1:1 매칭(2개 이상 공통) 을 코어로 한 조합
+  // C2) 1:1 매칭(2개 이상 공통) + 평행회차 강수·호기 상위를 코어로 한 조합
   const cores: number[][] = [
-    ...ctx.intersection.fourPlus.map((g) => g.numbers),
-    ...ctx.intersection.three.map((g) => g.numbers),
     ...ctx.lineMatchGroups.filter((g) => g.matchCount >= 2).map((g) => g.matchedNumbers),
-    ...ctx.intersection.two.map((g) => g.numbers),
+    ...((ctx.parallelStrong ?? []).length >= 3 ? [(ctx.parallelStrong ?? []).slice(0, 4)] : []),
+    ...((ctx.machineStrong ?? []).length >= 3 ? [(ctx.machineStrong ?? []).slice(0, 4)] : []),
   ];
   for (const core of cores) push(fillConsensus(core));
 
@@ -337,34 +261,13 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
     }
   }
 
-  // 1) 상위 점수 번호 그리디 슬라이딩 윈도우 (합의가 부족할 때 보충)
+  // 1) 상위 점수(3축) 번호 그리디 슬라이딩 윈도우 (합의가 부족할 때 보충)
   for (let start = 0; start <= Math.min(8, pool.length - 6); start += 1) {
     push(pool.slice(start, start + 6));
   }
 
-  // 4) 분석 상위 시드 티켓 및 변형
-  for (const seed of ctx.seedTickets.slice(0, 12)) {
-    push([...seed.ticket]);
-    for (let drop = 0; drop < 2; drop += 1) {
-      const trimmed = seed.ticket.filter((_, i) => i !== drop);
-      push(fillFromPool(trimmed, pool, 6));
-    }
-    for (const swapN of pool.slice(0, 10)) {
-      if (!seed.ticket.includes(swapN)) {
-        push(fillFromPool([...seed.ticket.slice(0, 5), swapN], pool, 6));
-      }
-    }
-  }
-
-  // 5) 콤보 패턴 트리플/페어 기반
-  if (ctx.comboPatterns) {
-    for (const t of (ctx.comboPatterns.triple_duplicates ?? []).slice(0, 8)) {
-      push(fillFromPool(t.numbers, pool, 6));
-    }
-    for (const p of (ctx.comboPatterns.pair_duplicates ?? []).slice(0, 10)) {
-      push(fillFromPool(p.numbers, pool, 6));
-    }
-  }
+  // (시드 티켓·콤보 패턴 기반 후보는 3축 전용화로 제거 — pool 자체가 3축 점수라
+  //  아래 가중 무작위 탐색이 세 축 번호 위주로 조합을 만든다.)
 
   // 6) 가중 무작위 탐색
   const weights = pool.map((n) => Math.max(0.1, numberScores[n] ?? 0.1));

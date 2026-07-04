@@ -1402,16 +1402,26 @@ export default function SemiAutoComparePanel({
     if (semiCurrentLines.length > 0) parts.push(`입력 중 ${semiCurrentLines.length}줄`);
     if (bulkCount > 0) parts.push(`대량 ${bulkCount}장`);
     const ok = await confirm({
-      message: `반자동 누적 (${parts.join(' + ')}) 을 모두 삭제할까요?`,
+      message: `반자동 누적 (${parts.join(' + ')}) 을 서버·로컬에서 모두 삭제할까요? (자동 저장분은 유지)`,
       destructive: true,
-      confirmText: '전체 삭제',
+      confirmText: '반자동만 삭제',
     });
     if (!ok) return;
+    // 서버의 '반자동' 저장분만 삭제(자동 유지). 로컬 반자동 누적도 초기화.
+    try {
+      await v1Api.clearPhotoAnalysisStore(sheetIntent, '반자동');
+    } catch (e) {
+      setSaveNotice(e instanceof Error ? `반자동 서버 삭제 실패: ${e.message}` : '반자동 서버 삭제 실패');
+      return;
+    }
     setSemiCurrentLines([]);
     setSemiSlipQueue([]);
     setBulkTickets([]);
     setLastSavedAt(null);
-    setSaveNotice('반자동 누적이 모두 삭제되었습니다.');
+    if (onRefreshAccumulated) {
+      try { await onRefreshAccumulated(); } catch { /* 삭제는 완료됨 — 갱신 실패는 무시 */ }
+    }
+    setSaveNotice('반자동 누적(서버+로컬)이 모두 삭제되었습니다.');
   };
 
   /** 입력 중인 용지 (picked + semiCurrentLines) 만 비움 — semiSlipQueue 보존. */

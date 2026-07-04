@@ -1,0 +1,49 @@
+name: Weekly round upgrade
+
+# 인프로세스 스케줄러(backend/app/scheduler.py)는 Railway 무료 티어 컨테이너가
+# 추첨 시각에 잠들어 있으면 발화하지 못해 회차가 갱신되지 않는다(1231 미반영 사고).
+# GitHub Actions 는 항상 깨어 있으므로 외부에서 upgrade 엔드포인트를 POST 해
+# 컨테이너를 깨우고 크롤을 확실히 트리거한다. 볼륨에 CSV 가 영구 저장되므로 반영은 유지.
+
+on:
+  schedule:
+    # 추첨 토 20:50 KST, 결과 공개 ~21:xx. 여유를 둬 토 22:40 KST = 13:40 UTC.
+    - cron: "40 13 * * 6"
+    # 토요일 실패 대비 일 04:05 KST = 전일(토) 19:05 UTC 재시도.
+    - cron: "5 19 * * 6"
+  workflow_dispatch:
+
+concurrency:
+  group: weekly-round-upgrade
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    name: Trigger round upgrade
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /api/v1/data/upgrade
+        env:
+          # 기본 URL. Actions 변수 PROD_BASE_URL 로 덮어쓸 수 있음.
+          BASE_URL: ${{ vars.PROD_BASE_URL || 'https://lotto-analyzer-production-8678.up.railway.app' }}
+          # UPGRADE_API_KEY 가 서버에 설정돼 있으면 동일 값을 시크릿으로 넣어두면 됨(없으면 무시).
+          UPGRADE_API_KEY: ${{ secrets.UPGRADE_API_KEY }}
+        run: |
+          set -euo pipefail
+          echo "Upgrading rounds at ${BASE_URL}"
+          # 컨테이너 웨이크업 여유를 두고 최대 3회 재시도.
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o /tmp/upgrade.json -w "%{http_code}" \
+              --max-time 180 \
+              -X POST "${BASE_URL}/api/v1/data/upgrade" \
+              ${UPGRADE_API_KEY:+-H "X-Upgrade-Key: ${UPGRADE_API_KEY}"} || echo "000")
+            echo "attempt ${attempt}: HTTP ${code}"
+            cat /tmp/upgrade.json || true
+            echo
+            if [ "${code}" = "200" ]; then
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "Upgrade failed after retries"
+          exit 1

@@ -57,7 +57,9 @@ _SLIM_KEEP_FULL = {
 }
 _SLIM_DETAIL_KEYS = {"lines", "locations"}  # 조합별 출현 상세 — 극소수만
 _SLIM_DETAIL_CAP = 3
-_SLIM_LIST_CAP = 100    # 그 외 모든 리스트(조합·세트·요약) 상위 N — 전체 건수는 스칼라로 별도 제공
+_SLIM_LIST_CAP = 50     # 그 외 모든 리스트(조합·세트·요약) 상위 N — 전체 건수는 스칼라로 별도 제공.
+                        # 화면은 상위 8~10개만 렌더링하므로 50이면 충분하고, 티켓 수가 커져도
+                        # 아카이브 스냅숏 등 잔여 대용량 배열을 눌러 게이트웨이 절단 여유를 둔다.
 _SLIM_STR_CAP = 4000    # 초장문 문자열(formatted_text 등) 절단
 
 
@@ -81,8 +83,20 @@ def _slim_for_client(obj):
 
 
 def _slim_accumulated():
-    """슬림화된 누적 응답 — 대용량 상세 배열을 캡해 게이트웨이 절단을 방지."""
-    return _slim_for_client(build_accumulated())
+    """슬림화된 누적 응답 — 대용량 상세 배열을 캡해 게이트웨이 절단을 방지.
+
+    최상위 accumulated_combo_patterns(레거시 전체집계, ~0.5MB)는 어떤 화면도
+    참조하지 않는다. 프론트는 by_intent[intent].accumulated_combo_patterns 와
+    historical_dataset.latest_archived_current_snapshot 만 읽는다. 티켓 수가
+    늘면 이 최상위 필드가 응답을 수 MB 로 부풀려 게이트웨이가 502(HTML)로 절단 →
+    프론트가 "게이트웨이 연결이 일시적으로 끊겼습니다" + saved_auto_lines 미수신으로
+    "자동 서버 저장 0줄" 을 표시했다. 클라이언트 응답에서만 제거해 절단을 막는다.
+    """
+    acc = build_accumulated()
+    if isinstance(acc, dict):
+        acc = dict(acc)  # 얕은 복사 — 캐시/원본 dict 를 훼손하지 않는다.
+        acc.pop("accumulated_combo_patterns", None)
+    return _slim_for_client(acc)
 
 
 def _duplicate_payload(existing: dict, reason: str) -> dict:

@@ -138,6 +138,12 @@ def _adaptive_cross_line_min(line_count: int, combo_size: int) -> int:
     return max(2, min(4, line_count // 6))
 
 
+# 조합 생성 상한 — 대량 입력에서 메모리 폭증(→ 워커 OOM/502) 방지.
+# obs(카운트)는 전체를 유지하되, 조합별 출현 상세와 조합 총개수만 제한한다.
+_COMBO_APP_CAP = 5     # 조합별 보관 출현 예시 수
+_COMBO_MAX = 400       # 크기별(pairs/triples/quads) 반환 조합 상한(빈도순)
+
+
 def find_cross_line_combos(
     lines: List[Dict[str, Any]],
     *,
@@ -194,10 +200,14 @@ def find_cross_line_combos(
             lid = a.get("line_id") or f"{a.get('image_index')}-{a.get('line_label')}"
             deduped[lid] = a
         unique_apps = list(deduped.values())
-        locations = [a["location"] for a in unique_apps if a.get("location")]
+        obs = len(unique_apps)  # 전체 카운트(정확도 유지)
+        # 메모리·용량 절감: 조합별 출현 상세(lines/locations)는 예시 몇 개만 보관한다.
+        # 대량 입력(수백 줄)에서 조합마다 전체 출현을 담으면 result/accumulated 가
+        # 수십 MB(파이썬 객체 수백 MB)로 커져 무료 워커가 OOM 크래시 → nginx 502.
+        kept_apps = unique_apps[:_COMBO_APP_CAP]
+        locations = [a["location"] for a in kept_apps if a.get("location")]
         sheet_indices = sorted({a["sheet_index"] for a in unique_apps})
         image_indices = sorted({a["image_index"] for a in unique_apps})
-        obs = len(unique_apps)
         # 기대 동시출현 & 우연 대비 초과
         prod = 1.0
         for n in combo:
@@ -218,12 +228,13 @@ def find_cross_line_combos(
                 "sheet_indices": sheet_indices,
                 "image_indices": image_indices,
                 "locations": locations,
-                "lines": unique_apps,
+                "lines": kept_apps,
                 "label": f"{len(combo)}번호 줄겹침",
             }
         )
     out.sort(key=lambda x: (-x["line_count"], -x["size"], x["numbers"]))
-    return out
+    # 조합 수 상한 — 빈도 상위 N개만. 수천 개는 표시도 불가하고 메모리만 잡아먹는다.
+    return out[:_COMBO_MAX]
 
 
 def score_lines_vs_reference(

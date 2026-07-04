@@ -1189,41 +1189,18 @@ export default function SemiAutoComparePanel({
   });
   const predictionSignals = predictionSignalsQuery.data ?? null;
 
-  // 종합 추천의 핵심 축 — 평행회차 강수/기대수 + 호기(추첨기) 상위 신호.
+  // 종합 추천/예상번호의 보조 축 — 평행회차 강수/기대수(주 축은 자동↔반자동 1:1).
   const parallelRoundQuery = useQuery({
     queryKey: ['v1-parallel-round', effectiveRound ?? 'auto'],
     queryFn: () => v1Api.getParallelRoundAnalysis(effectiveRound ?? undefined),
     staleTime: 300_000,
     retry: 1,
   });
-  const machineRecommendQuery = useQuery({
-    queryKey: ['v1-recommend-round-auto'],
-    queryFn: () => v1Api.getRoundRecommend(),
-    staleTime: 300_000,
-    retry: 1,
-  });
   const parallelStrong = parallelRoundQuery.data?.parallel_strong ?? [];
   const parallelExpected = parallelRoundQuery.data?.parallel_expected ?? [];
-  const machineStrong = useMemo<number[]>(() => {
-    const d = machineRecommendQuery.data;
-    if (!d) return [];
-    // 호기 상위 신호: top_scored(구간미출현·회귀 종합) 우선, 없으면 hot_top5.
-    const scored = (d.top_scored ?? []).map((s) => s.number);
-    if (scored.length) return scored.slice(0, 12);
-    return (d.stats?.hot_top5 ?? []).map((h) => h.number);
-  }, [machineRecommendQuery.data]);
-
-  // 회차별 예상 추첨기(1/2/3호기) — recommend/round 가 다음 회차용으로 예측한다.
-  const machineData = machineRecommendQuery.data ?? null;
-  const expectedMachineLabel = machineData
-    ? `${machineData.next_round}회 예상 ${machineData.machine_id}호기${
-        machineData.machine_source === 'estimated'
-          ? ' (추정)'
-          : machineData.machine_source === 'confirmed'
-            ? ' (확정)'
-            : ''
-      }`
-    : null;
+  // 호기(추첨기) 축은 '추정값' 신뢰도 문제로 제외(사용자 요청). 예측은 자동↔반자동
+  // 1:1 전수비교 + 평행회차 두 축으로만 진행한다. (안정 참조로 빈 배열 고정.)
+  const machineStrong = useMemo<number[]>(() => [], []);
 
   const resolvedStrongCandidates = useMemo(() => {
     if (predictionSignals?.strong_candidates?.length) {
@@ -1891,11 +1868,21 @@ export default function SemiAutoComparePanel({
   const predictedNumbers = useMemo(() => {
     const score: Record<number, number> = {};
     const srcMap: Record<number, Set<string>> = {};
+    const maxMatch: Record<number, number> = {};
+    const autoSup: Record<number, number> = {};
+    const semiSup: Record<number, number> = {};
+    const grpCnt: Record<number, number> = {};
     const add = (n: number, w: number, src: string) => {
       if (!Number.isInteger(n) || n < 1 || n > 45 || w <= 0) return;
       score[n] = (score[n] ?? 0) + w;
       (srcMap[n] ??= new Set<string>()).add(src);
     };
+    // ── 자동↔반자동 1:1 전수비교 심층 역산 (주 신호) ──────────────────
+    // 두 줄의 공통 번호 개수(matchCount)가 클수록 '우연이 아닌' 강한 신호다
+    // (6/45 무작위 두 줄의 기대 공통≈0.8개 → matchCount 3+ 는 유의). 따라서
+    // matchCount³ 로 큰 매치를 강하게 가중하고, 자동·반자동 '양쪽' 지지가 모두
+    // 있어야(각 log 곱) 점수가 오른다 → 인기번호(한쪽 빈발)가 아니라 자동·반자동이
+    // 함께 반복해 가리킨 번호가 상위로 온다.
     const groups = [
       ...groupLineMatching.groups6,
       ...groupLineMatching.groups5,
@@ -1904,19 +1891,35 @@ export default function SemiAutoComparePanel({
       ...groupLineMatching.groups2,
     ];
     for (const g of groups) {
-      const cardWeight = g.autoList.length + g.semiList.length;
-      const w = g.matchCount * g.matchCount * Math.log2(cardWeight + 1);
-      for (const n of g.matchedNumbers) add(n, w, '1:1');
+      const ac = g.autoList.length;
+      const sc = g.semiList.length;
+      // 양쪽(자동·반자동) 모두의 지지를 min 으로 반영 → 한쪽만 인기 있는 번호가
+      // 부풀지 않는다. matchCount 2 는 무작위 기대(≈0.8)에 가까운 노이즈라 미약한
+      // 보조만, 3+ 는 '우연 초과' 실제 겹침이라 matchCount³ 로 강하게 가중한다.
+      const support = Math.log2(Math.min(ac, sc) + 1);
+      const w = g.matchCount >= 3 ? g.matchCount ** 3 * support : 0.3 * support;
+      for (const n of g.matchedNumbers) {
+        add(n, w, '1:1');
+        maxMatch[n] = Math.max(maxMatch[n] ?? 0, g.matchCount);
+        autoSup[n] = (autoSup[n] ?? 0) + ac;
+        semiSup[n] = (semiSup[n] ?? 0) + sc;
+        grpCnt[n] = (grpCnt[n] ?? 0) + 1;
+      }
     }
-    parallelStrong.forEach((n, idx) => add(n, Math.max(3, 20 - idx * 1.2), '평행'));
-    parallelExpected.forEach((n, idx) => add(n, Math.max(2, 10 - idx * 0.6), '평행'));
-    machineStrong.forEach((n, idx) => add(n, Math.max(4, 20 - idx * 1.5), '추첨기'));
+    // ── 평행회차 (보조 신호, 전수비교보다 낮게) ───────────────────────
+    parallelStrong.forEach((n, idx) => add(n, Math.max(2, 14 - idx * 0.8), '평행'));
+    parallelExpected.forEach((n, idx) => add(n, Math.max(1, 7 - idx * 0.4), '평행'));
 
-    const ranked = Object.entries(score)
-      .map(([n, s]) => ({
-        number: Number(n),
-        score: s,
-        sources: Array.from(srcMap[Number(n)] ?? []),
+    const ranked = Object.keys(score)
+      .map(Number)
+      .map((n) => ({
+        number: n,
+        score: score[n],
+        sources: Array.from(srcMap[n] ?? []),
+        maxMatch: maxMatch[n] ?? 0,
+        autoSupport: autoSup[n] ?? 0,
+        semiSupport: semiSup[n] ?? 0,
+        groupCount: grpCnt[n] ?? 0,
       }))
       .sort((a, b) => b.score - a.score || a.number - b.number);
     const maxScore = ranked[0]?.score ?? 1;
@@ -1929,7 +1932,42 @@ export default function SemiAutoComparePanel({
     groupLineMatching.groups2,
     parallelStrong,
     parallelExpected,
-    machineStrong,
+  ]);
+
+  // 전수비교 '강한 패턴' — matchCount 3+ 그룹(우연 초과의 실제 겹침)을 크기·지지순.
+  // 복기 탭에선 matchedNumbers 가 모두 당첨번호인 그룹을 표시(당첨 패턴 하이라이트).
+  const topPatterns = useMemo(() => {
+    const list = [
+      ...groupLineMatching.groups6,
+      ...groupLineMatching.groups5,
+      ...groupLineMatching.groups4,
+      ...groupLineMatching.groups3,
+    ]
+      .map((g) => ({
+        matchCount: g.matchCount,
+        numbers: g.matchedNumbers,
+        autoCount: g.autoList.length,
+        semiCount: g.semiList.length,
+        support: g.autoList.length + g.semiList.length,
+        allWinning:
+          winningSet != null && winningSet.size > 0
+            ? g.matchedNumbers.every((n) => winningSet.has(n))
+            : false,
+        winHit: winningSet != null ? g.matchedNumbers.filter((n) => winningSet.has(n)).length : 0,
+      }))
+      .sort(
+        (a, b) =>
+          Number(b.allWinning) - Number(a.allWinning) ||
+          b.matchCount - a.matchCount ||
+          b.support - a.support,
+      );
+    return list.slice(0, 20);
+  }, [
+    groupLineMatching.groups6,
+    groupLineMatching.groups5,
+    groupLineMatching.groups4,
+    groupLineMatching.groups3,
+    winningSet,
   ]);
   const lineMatchNumber = lineMatchNumberFilter ? Number(lineMatchNumberFilter) : null;
   const filterLineMatchGroups = <T extends { matchCount: number; matchedNumbers: number[] }>(groups: T[]): T[] =>
@@ -3072,25 +3110,21 @@ export default function SemiAutoComparePanel({
             );
           })()}
 
-          {/* 🎯 당첨 예상번호 — 3축(1:1 전수비교 역산·평행회차·예상 추첨기) 합산 */}
+          {/* 🎯 당첨 예상번호 — 전수비교 심층 역산(주) + 평행회차(보조). 호기 제외. */}
           {predictedNumbers.length > 0 && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main' }}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-                <Typography variant="body2" fontWeight={700}>
-                  🎯 {effectiveRound ?? '?'}회 당첨 예상번호 (3축 역산)
-                </Typography>
-                {expectedMachineLabel && (
-                  <Chip size="small" color="secondary" variant="outlined" label={expectedMachineLabel} sx={{ fontWeight: 700 }} />
-                )}
-              </Stack>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+                🎯 {effectiveRound ?? '?'}회 당첨 예상번호 (전수비교 심층 역산)
+              </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                <strong>자동↔반자동 1:1 전수비교 역산</strong>(여러 자동·반자동 줄이 공통으로 가진 번호일수록↑) ·{' '}
-                <strong>평행회차</strong>(강수·기대수) · <strong>예상 추첨기</strong>(회차별 1/2/3호기 고빈도) —
-                세 축 점수를 합산해 신뢰도순으로 정렬한 예상번호입니다. 당첨번호는 계산에 넣지 않습니다.
+                <strong>자동↔반자동 1:1 전수비교</strong>를 전수 분석 — 두 줄의 공통 번호 개수(matchCount)가
+                클수록(무작위 기대≈0.8개 → 3개+ 는 유의) 강하게 가중하고, <strong>자동·반자동 양쪽이 함께 반복</strong>해
+                가리킨 번호를 상위로 올립니다(인기 한쪽 번호 배제). <strong>평행회차</strong>(강수·기대수)는 보조.
+                당첨번호는 계산에 넣지 않습니다(누수 방지).
               </Typography>
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
                 {predictedNumbers.slice(0, 8).map((p) => (
-                  <Box key={`pred-${p.number}`} sx={{ textAlign: 'center', minWidth: 40 }}>
+                  <Box key={`pred-${p.number}`} sx={{ textAlign: 'center', minWidth: 44 }}>
                     <LottoBall
                       number={p.number}
                       size={36}
@@ -3100,7 +3134,7 @@ export default function SemiAutoComparePanel({
                       {p.sources.join('·')}
                     </Typography>
                     <Typography variant="caption" sx={{ display: 'block', fontSize: 9, lineHeight: 1.1, color: 'text.disabled' }}>
-                      {p.confidence}%
+                      {p.confidence}%{p.maxMatch >= 3 ? ` · 최대${p.maxMatch}일치` : ''}
                     </Typography>
                   </Box>
                 ))}
@@ -3124,6 +3158,60 @@ export default function SemiAutoComparePanel({
                 <Typography variant="caption" color="text.secondary">
                   ※ 상위 6~8개 중 6개를 골라 조합하세요. 로또는 무작위라 확률 자체는 오르지 않습니다.
                 </Typography>
+              )}
+
+              {/* 전수비교 강한 패턴 — matchCount 3+ 그룹(우연 초과의 실제 겹침) 상세 */}
+              {topPatterns.length > 0 && (
+                <Box sx={{ mt: 1.25 }}>
+                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
+                    🔎 전수비교 강한 패턴 (공통 3개+ 그룹 · 자동↔반자동 양쪽 겹침)
+                    {compareWinning ? ' — 초록: 전부 당첨번호였던 패턴' : ''}
+                  </Typography>
+                  <Box
+                    sx={{
+                      maxHeight: topPatterns.length > 8 ? 240 : undefined,
+                      overflowY: topPatterns.length > 8 ? 'auto' : undefined,
+                      bgcolor: 'action.hover',
+                      borderRadius: 1,
+                      p: 0.75,
+                    }}
+                  >
+                    <Stack spacing={0.5}>
+                      {topPatterns.map((pt, idx) => (
+                        <Stack
+                          key={`pat-${idx}`}
+                          direction="row"
+                          alignItems="center"
+                          spacing={0.5}
+                          flexWrap="wrap"
+                          useFlexGap
+                          sx={{
+                            bgcolor: pt.allWinning ? 'success.main' : undefined,
+                            opacity: pt.allWinning ? 0.95 : 1,
+                            borderRadius: 0.5,
+                            px: pt.allWinning ? 0.5 : 0,
+                          }}
+                        >
+                          <Chip size="small" variant="outlined" label={`${pt.matchCount}개 공통`} sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />
+                          <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                            {pt.numbers.map((n) => (
+                              <LottoBall
+                                key={n}
+                                number={n}
+                                size={22}
+                                dimmed={compareWinning && winningSet ? !winningSet.has(n) : false}
+                              />
+                            ))}
+                          </Stack>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                            자동 {pt.autoCount}줄 ↔ 반자동 {pt.semiCount}줄
+                            {compareWinning && winningSet && winningSet.size > 0 ? ` · 당첨 ${pt.winHit}/${pt.matchCount}` : ''}
+                          </Typography>
+                        </Stack>
+                      ))}
+                    </Stack>
+                  </Box>
+                </Box>
               )}
             </Paper>
           )}
@@ -3150,16 +3238,16 @@ export default function SemiAutoComparePanel({
               </Button>
             </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차(강수·기대수)</strong> ·{' '}
-              <strong>호기(추첨기)</strong> — 이 세 축을 핵심으로 6번호 5세트를 생성합니다.
-              (강한 후보 점수는 사용하지 않습니다.)
+              <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차(강수·기대수)</strong> —
+              이 두 축을 핵심으로 6번호 5세트를 생성합니다.
+              (강한 후보·호기 추정값은 사용하지 않습니다.)
               {compareWinning
                 ? ' 당첨 일치 개수는 점수에 넣지 않고 결과 카드에 표시만 합니다(예측 정합성 평가용).'
                 : ''}
               {combinedTickets.length === 0
-                ? (parallelStrong.length > 0 || machineStrong.length > 0
-                    ? ' ※ 입력 줄이 없어 평행회차·호기(추첨기) 신호만으로 생성합니다.'
-                    : ' ※ [재분석]으로 평행회차·호기 신호를 먼저 불러오세요.')
+                ? (parallelStrong.length > 0
+                    ? ' ※ 입력 줄이 없어 평행회차 신호만으로 생성합니다.'
+                    : ' ※ [재분석]으로 평행회차 신호를 먼저 불러오세요.')
                 : ` 분석 대상 ${combinedTickets.length}줄.`}
               {' '}정직성: 수학적 당첨 확률(1/8,145,060)은 동일하며, 통계적으로 1등에 거의 없는
               조합(합 극단·전부 홀짝·4연속 등)을 제외합니다.

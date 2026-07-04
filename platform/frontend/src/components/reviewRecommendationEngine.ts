@@ -91,21 +91,18 @@ function comboKey(nums: number[]): string {
 function buildNumberScores(ctx: RecommendationContext): Record<number, number> {
   const scores: Record<number, number> = {};
 
-  // 종합 추천은 '강한 후보(unifiedSignals)' 를 점수 축으로 쓰지 않는다(사용자 요청).
-  // 대신 아래 세 축 — 자동↔반자동 1:1 전수비교(lineMatchGroups) · 평행회차
-  // (parallelStrong/Expected) · 호기(추첨기, machineStrong) — 으로만 산출한다.
-  // strongCandidates/unifiedSignals 는 scoreCombo 표시·필터에도 반영하지 않는다.
+  // 종합 추천은 두 축으로만 산출한다(사용자 요청 — 호기 '추정값' 제외):
+  //   ① 자동↔반자동 1:1 전수비교(lineMatchGroups) ② 평행회차(parallelStrong/Expected).
+  // 강한후보(unifiedSignals)·호기(machineStrong)·빈도·교집합·콤보는 미반영.
 
-  // ① 자동↔반자동 1:1 전수비교 — 공통 번호가 많고 겹친 카드가 많을수록 가중.
+  // ① 자동↔반자동 1:1 전수비교 — 공통 번호가 클수록(큰 매치) 강한 신호로 가중.
   for (const g of ctx.lineMatchGroups) {
-    const w = g.matchCount ** 2 * Math.log2(g.cardWeight + 1) * 2.2;
+    const w = g.matchCount ** 3 * Math.log2(g.cardWeight + 1);
     for (const n of g.matchedNumbers) bump(scores, n, w);
   }
   // ② 평행회차 — 강수(상위 가중) + 기대수(보조).
   ctx.parallelStrong?.forEach((n, idx) => bump(scores, n, 26 - idx * 1.0));
   ctx.parallelExpected?.forEach((n, idx) => bump(scores, n, 12 - idx * 0.4));
-  // ③ 호기(추첨기) 상위.
-  ctx.machineStrong?.forEach((n, idx) => bump(scores, n, 26 - idx * 1.2));
 
   // 강한후보·빈도·교집합·콤보패턴은 종합 추천 점수에 반영하지 않는다(3축 전용).
   // 복기 모드라도 실제 당첨번호(winningNumbers)는 점수에 주입하지 않는다.
@@ -150,18 +147,12 @@ function scoreCombo(
   }
   if (bestLineMatch > 0) signals.push(`자동∩반자동${bestLineMatch}`);
 
-  // 평행회차·호기(추첨기) 정합 — 조합에 2개 이상 포함되면 가산·표시.
+  // 평행회차 정합 — 조합에 2개 이상 포함되면 가산·표시.
   const parallelSet = new Set(ctx.parallelStrong ?? []);
   const parHit = combo.filter((n) => parallelSet.has(n)).length;
   if (parHit >= 2) {
     total += parHit * 2;
     signals.push(`평행${parHit}`);
-  }
-  const machineSet = new Set(ctx.machineStrong ?? []);
-  const machHit = combo.filter((n) => machineSet.has(n)).length;
-  if (machHit >= 2) {
-    total += machHit * 2;
-    signals.push(`추첨기${machHit}`);
   }
 
   // 복기 당첨 일치는 점수에 더하지 않는다(사후 편향 방지). winMatch 는 결과
@@ -223,9 +214,8 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
       if (!excludedSet.has(n)) consensusScore[n] = (consensusScore[n] ?? 0) + w;
     }
   };
-  for (const g of ctx.lineMatchGroups) addCon(g.matchedNumbers, g.matchCount * g.matchCount * Math.log2(g.cardWeight + 2));
+  for (const g of ctx.lineMatchGroups) addCon(g.matchedNumbers, g.matchCount ** 3 * Math.log2(g.cardWeight + 2));
   (ctx.parallelStrong ?? []).forEach((n, idx) => addCon([n], Math.max(4, 16 - idx)));
-  (ctx.machineStrong ?? []).forEach((n, idx) => addCon([n], Math.max(4, 16 - idx)));
   const consensusPool = Object.entries(consensusScore)
     .sort(([, a], [, b]) => b - a)
     .map(([n]) => Number(n));
@@ -245,11 +235,10 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
   // C1) 합의 상위 6 — 가장 많은 자동·반자동이 동의한 번호 묶음
   if (consensusPool.length >= 6) push(fillConsensus(consensusPool.slice(0, 6)));
 
-  // C2) 1:1 매칭(2개 이상 공통) + 평행회차 강수·호기 상위를 코어로 한 조합
+  // C2) 1:1 매칭(2개 이상 공통) + 평행회차 강수 상위를 코어로 한 조합
   const cores: number[][] = [
     ...ctx.lineMatchGroups.filter((g) => g.matchCount >= 2).map((g) => g.matchedNumbers),
     ...((ctx.parallelStrong ?? []).length >= 3 ? [(ctx.parallelStrong ?? []).slice(0, 4)] : []),
-    ...((ctx.machineStrong ?? []).length >= 3 ? [(ctx.machineStrong ?? []).slice(0, 4)] : []),
   ];
   for (const core of cores) push(fillConsensus(core));
 

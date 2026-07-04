@@ -176,6 +176,7 @@ def analyze_manual(body: ManualAnalyzeRequest):
                     result,
                     allow_duplicate=body.allow_duplicate,
                     replace_existing=True,
+                    replace_prior_manual=True,
                     source_label=label,
                 )
                 stored_entry_id = entry["id"]

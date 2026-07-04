@@ -132,3 +132,27 @@ def test_content_fingerprint_order_independent():
     r1 = _sample_result_with_lines("img1", "1227", [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]])
     r2 = _sample_result_with_lines("img2", "1227", [[7, 8, 9, 10, 11, 12], [1, 2, 3, 4, 5, 6]])
     assert compute_content_fingerprint(r1) == compute_content_fingerprint(r2)
+
+
+def _manual_result(image_id: str, lines: list[list[int]]) -> dict:
+    r = _sample_result_with_lines(image_id, "1231", lines)
+    r["video_visual_analysis"]["video_intent"] = "current_round"
+    r["meta"]["sheet_intent"] = "current_round"
+    r["meta"]["entry_mode"] = "manual"
+    return r
+
+
+def test_manual_resave_replaces_prior_no_pileup(monkeypatch, tmp_path):
+    """수기/대량 재저장 — 내용이 달라져도 같은 회차·intent 수기 세트는 1건만
+    유지(replace_prior_manual)해 통계가 누적(중복)되지 않는다."""
+    monkeypatch.setattr("app.video_analysis.store.STORE_PATH", tmp_path / "store.json")
+    clear_store()
+    from app.video_analysis.store import append_analysis, _live_entries
+
+    rA = _manual_result("a", [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]])
+    append_analysis("a", rA, replace_existing=True, replace_prior_manual=True)
+    assert len(_live_entries()) == 1
+    # 다른 내용으로 재저장 → 이전 수기 세트 대체(누적 아님)
+    rB = _manual_result("b", [[10, 20, 30, 40, 41, 42], [1, 5, 9, 13, 17, 21]])
+    append_analysis("b", rB, replace_existing=True, replace_prior_manual=True)
+    assert len(_live_entries()) == 1

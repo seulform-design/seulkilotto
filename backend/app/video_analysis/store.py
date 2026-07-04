@@ -548,7 +548,22 @@ def append_analysis(
     allow_duplicate: bool = False,
     source_label: str = "",
     replace_existing: bool = False,
+    replace_prior_manual: bool = False,
 ) -> Dict[str, Any]:
+    _vva0 = result.get("video_visual_analysis") or {}
+    _meta0 = result.get("meta") or {}
+    _mode0 = str(_meta0.get("entry_mode") or "photo")
+    _intent0 = str(_vva0.get("video_intent") or _meta0.get("sheet_intent") or "")
+    # 수기/대량 저장은 '현재 전체 세트'를 뜻한다 — 같은 회차·intent 의 기존 수기
+    # 엔트리를 지우고 새로 저장해 재저장 시 통계가 누적(중복)되지 않게 한다.
+    if replace_prior_manual and _mode0 == "manual":
+        for prior in list(_live_entries()):
+            if (
+                str(prior.get("entry_mode") or "") == "manual"
+                and str(prior.get("video_intent") or "") == _intent0
+            ):
+                delete_entry(str(prior.get("id")))
+
     existing = check_stored_duplicate(source_id, result, allow_duplicate=allow_duplicate)
     if existing:
         sid = (result.get("video_visual_analysis") or {}).get("video_id") or source_id
@@ -570,9 +585,11 @@ def append_analysis(
     meta = result.get("meta") or {}
     evp_full = result.get("extracted_visual_patterns") or {}
 
+    entry_mode = str(meta.get("entry_mode") or "photo")
     entry = {
         "id": str(uuid.uuid4()),
         "source_type": "photo",
+        "entry_mode": entry_mode,
         "source_id": source_id,
         "image_id": vva.get("video_id") or source_id,
         "source_label": label,
@@ -612,11 +629,14 @@ def append_analysis(
             current_data["current_round"] = entry_round or int(current_data.get("current_round") or 0)
         current_data["status"] = "open"
         current_data["entries"].append(entry)
+        # 내용 중복 자기치유 — 같은 줄 묶음 중복 엔트리 제거(최신 유지).
+        current_data["entries"] = _dedupe_entries_by_content(current_data["entries"])
         _refresh_current_dataset(current_data)
         _save_current_raw(current_data)
     else:
         data = _load_historical_raw()
         data["entries"].append(entry)
+        data["entries"] = _dedupe_entries_by_content(data["entries"])
         _save_historical_raw(data)
     return entry
 
@@ -767,6 +787,23 @@ def _entry_position_template(entry: Dict[str, Any]) -> Dict[str, Any] | None:
     meta = r.get("meta") or {}
     evp = r.get("extracted_visual_patterns") or {}
     return meta.get("position_template") or evp.get("position_template")
+
+
+def _dedupe_entries_by_content(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """내용 지문(content_fingerprint)이 같은 엔트리 중복 제거 — 최신(뒤) 것만 유지.
+
+    같은 줄 묶음을 (회차·순서 흔들려도) 두 번 저장했을 때 통계가 2배로
+    부풀던 문제를 자기치유한다. 내용 지문이 없는(약신호) 엔트리는 고유키로
+    취급해 절대 병합하지 않는다(오병합 방지)."""
+    from .dedup import _entry_content_fingerprint
+
+    last_idx: Dict[str, int] = {}
+    for i, e in enumerate(entries):
+        cfp = e.get("content_fingerprint") or _entry_content_fingerprint(e)
+        key = cfp if cfp else f"__uid_{e.get('id') or i}"
+        last_idx[key] = i
+    keep = set(last_idx.values())
+    return [e for i, e in enumerate(entries) if i in keep]
 
 
 def _dedupe_sheet_sets(sheet_sets: List[set[int]]) -> List[set[int]]:

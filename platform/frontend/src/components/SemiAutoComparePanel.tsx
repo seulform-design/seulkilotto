@@ -1969,6 +1969,53 @@ export default function SemiAutoComparePanel({
     groupLineMatching.groups3,
     winningSet,
   ]);
+
+  // 일치 개수별(6/5/4/3/2) 겹침 번호 역산 — 각 레벨에서 어떤 번호가 반복해 겹쳐
+  // 나왔는지(groupCount)와 양쪽 지지(support=Σ min(자동수,반자동수))로 정렬.
+  // 복기 탭은 각 레벨에서 실제 당첨번호가 몇 개 나왔는지 함께 표시(당첨 패턴 확인).
+  const levelBreakdown = useMemo(() => {
+    const levels = [
+      { mc: 6, groups: groupLineMatching.groups6 },
+      { mc: 5, groups: groupLineMatching.groups5 },
+      { mc: 4, groups: groupLineMatching.groups4 },
+      { mc: 3, groups: groupLineMatching.groups3 },
+      { mc: 2, groups: groupLineMatching.groups2 },
+    ];
+    return levels
+      .map(({ mc, groups }) => {
+        const freq: Record<number, number> = {};
+        const support: Record<number, number> = {};
+        for (const g of groups) {
+          const s = Math.min(g.autoList.length, g.semiList.length);
+          for (const n of g.matchedNumbers) {
+            freq[n] = (freq[n] ?? 0) + 1;
+            support[n] = (support[n] ?? 0) + s;
+          }
+        }
+        const numbers = Object.keys(freq)
+          .map(Number)
+          .map((n) => ({
+            number: n,
+            groupCount: freq[n],
+            support: support[n],
+            winning: winningSet != null && winningSet.size > 0 ? winningSet.has(n) : false,
+          }))
+          .sort(
+            (a, b) => b.support - a.support || b.groupCount - a.groupCount || a.number - b.number,
+          );
+        const winHits = numbers.filter((x) => x.winning).length;
+        return { mc, groupCount: groups.length, numbers, winHits };
+      })
+      .filter((lv) => lv.groupCount > 0);
+  }, [
+    groupLineMatching.groups6,
+    groupLineMatching.groups5,
+    groupLineMatching.groups4,
+    groupLineMatching.groups3,
+    groupLineMatching.groups2,
+    winningSet,
+  ]);
+
   const lineMatchNumber = lineMatchNumberFilter ? Number(lineMatchNumberFilter) : null;
   const filterLineMatchGroups = <T extends { matchCount: number; matchedNumbers: number[] }>(groups: T[]): T[] =>
     groups.filter((g) => {
@@ -3211,6 +3258,42 @@ export default function SemiAutoComparePanel({
                       ))}
                     </Stack>
                   </Box>
+                </Box>
+              )}
+
+              {/* 일치 개수별(6·5·4·3·2) 겹침 번호 역산 — 레벨마다 반복 겹친 번호 */}
+              {levelBreakdown.length > 0 && (
+                <Box sx={{ mt: 1.25 }}>
+                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
+                    📊 일치 개수별 겹침 번호 역산 (6·5·4·3·2개 각 레벨 · 숫자 아래 = 등장 그룹 수)
+                    {compareWinning ? ' — 초록: 실제 당첨번호' : ''}
+                  </Typography>
+                  <Stack spacing={0.75}>
+                    {levelBreakdown.map((lv) => (
+                      <Box key={`lv-${lv.mc}`}>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.25 }}>
+                          <strong>{lv.mc}개 일치</strong> — {lv.groupCount}개 그룹
+                          {compareWinning && winningSet && winningSet.size > 0
+                            ? ` · 당첨번호 ${lv.winHits}개 등장`
+                            : ''}
+                        </Typography>
+                        <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                          {lv.numbers.slice(0, 12).map((x) => (
+                            <Box key={x.number} sx={{ textAlign: 'center', minWidth: 26 }}>
+                              <LottoBall
+                                number={x.number}
+                                size={22}
+                                dimmed={compareWinning && winningSet ? !x.winning : false}
+                              />
+                              <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
+                                {x.groupCount}회
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Stack>
+                      </Box>
+                    ))}
+                  </Stack>
                 </Box>
               )}
             </Paper>

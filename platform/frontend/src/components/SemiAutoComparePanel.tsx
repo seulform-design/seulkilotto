@@ -3199,6 +3199,15 @@ export default function SemiAutoComparePanel({
               각 티켓의 번호 중 강한 후보에 속한 것 (vsStrongMatch) 이 2개 이상일 때만 그 교집합 세트를 그룹화.
               아래 별도 패널인 '🔀 자동 ∩ 반자동' 은 <strong>1~45 전체 모집단</strong>을 보는 다른 분석 — 모집단이 달라 카운트도 다름.
             </Typography>
+            <Typography
+              variant="caption"
+              sx={{ display: 'block', mb: 1, p: 1, borderRadius: 1, bgcolor: 'warning.dark', color: 'common.white', fontWeight: 600 }}
+            >
+              ⚠ 이 지표는 <strong>내가 산 티켓들의 번호 패턴</strong> 요약일 뿐, 추첨 결과와는 무관합니다.
+              로또는 매 회 완전 무작위라 어떤 '강한 후보'도 <strong>당첨 확률을 높이지 못합니다</strong>
+              (모든 조합 동일 1/8,145,060). 자동 티켓은 애초에 무작위라 번호 겹침 자체가 노이즈이며,
+              '유의'하게 뜬 쌍 수가 순수 우연 기대치(45C2=990쌍 × z≥2.0 ≈ 23쌍)와 비슷하면 신호가 아닙니다.
+            </Typography>
             {resolvedStrongCandidates.length > 0 ? (
               <>
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>

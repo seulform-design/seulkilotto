@@ -431,6 +431,12 @@ _DISPLAY_MIN_REPEAT = 2
 # 이 기준을 넘는 실제 묶음만 반영해 인기번호 노이즈를 배제한다.
 _SIG_Z_MIN = 2.0
 _SIG_LIFT_MIN = 1.3
+# 다중비교 경고용 baseline — 45C2=990 쌍을 z≥2.0(단측 p≈0.0228)로 전수 검정하면
+# 순수 우연만으로도 ≈23쌍이 '유의'하게 뜬다. 즉 z≥2.0 단독으로는 신호와 노이즈를
+# 구분하지 못한다(다중비교 미보정). 이 값을 노출해 사용자가 강한후보 수를 우연
+# 기대치와 직접 대조할 수 있게 한다.
+_PAIR_UNIVERSE = 45 * 44 // 2  # 990
+_EXPECTED_SIG_PAIRS_BY_CHANCE = round(_PAIR_UNIVERSE * 0.0228)  # ≈ 23
 
 
 def _significance_subset(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -506,12 +512,14 @@ def analyze_line_overlap_patterns(
         # 표시는 자르지 않음(2줄+ 전체). 강한후보만 우연대비 유의 조합으로 산출.
         "signal_pairs": len(sig_pairs),
         "signal_triples": len(sig_triples),
+        "expected_sig_pairs_by_chance": _EXPECTED_SIG_PAIRS_BY_CHANCE,
         "significance_active": sig_active,
         "same_line_tier_counts": {k: len(v) for k, v in tiers.items() if v},
         "criteria": (
             f"게임 줄 {line_count}개 · 줄당 표시 평균 {avg_marks}개 · 기준번호 {len(ref)}개 · "
             f"줄간 2·3·4번호 {disp_min}줄+ 전체 표시 · "
-            f"강한후보는 우연 대비 초과(z≥{_SIG_Z_MIN}·lift≥{_SIG_LIFT_MIN}) {len(sig_pairs)}쌍 반영"
+            f"강한후보는 우연 대비 초과(z≥{_SIG_Z_MIN}·lift≥{_SIG_LIFT_MIN}) {len(sig_pairs)}쌍 반영 "
+            f"· ⚠순수 우연 기대 ≈{_EXPECTED_SIG_PAIRS_BY_CHANCE}쌍(다중비교 미보정) — 예측용 아님"
         ),
     }
 

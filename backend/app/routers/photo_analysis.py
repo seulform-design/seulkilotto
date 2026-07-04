@@ -45,6 +45,33 @@ def _save_uploads(files: List[UploadFile], tmp: Path) -> List[Path]:
     return paths
 
 
+# 클라이언트 응답 슬림화 — 조합(pair/triple/quad)이 각자 '모든 출현 위치·줄'
+# (lines/locations)을 통째로 담아 응답이 10MB+ 로 커지고 게이트웨이가 절단한다.
+# 화면엔 조합·카운트(line_count 등 스칼라)만 필요하므로 상세 배열만 소수로 캡한다.
+# saved_semi_lines/saved_auto_lines/numbers 등 다른 키는 건드리지 않는다.
+_SLIM_DETAIL_KEYS = {"lines", "locations"}
+_SLIM_DETAIL_CAP = 3
+
+
+def _slim_for_client(obj, cap: int = _SLIM_DETAIL_CAP):
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if k in _SLIM_DETAIL_KEYS and isinstance(v, list):
+                out[k] = [_slim_for_client(x, cap) for x in v[:cap]]
+            else:
+                out[k] = _slim_for_client(v, cap)
+        return out
+    if isinstance(obj, list):
+        return [_slim_for_client(x, cap) for x in obj]
+    return obj
+
+
+def _slim_accumulated():
+    """슬림화된 누적 응답 — 대용량 상세 배열을 캡해 게이트웨이 절단을 방지."""
+    return _slim_for_client(build_accumulated())
+
+
 def _duplicate_payload(existing: dict, reason: str) -> dict:
     stored = existing.get("result") or existing
     return {
@@ -129,7 +156,7 @@ async def analyze_photos(
             except DuplicateAnalysisError as exc:
                 return to_jsonable({
                     **_duplicate_payload(exc.existing_entry, exc.reason),
-                    "accumulated": build_accumulated(),
+                    "accumulated": _slim_accumulated(),
                 })
 
         dup_removed = (result.get("meta") or {}).get("duplicates_removed", 0)
@@ -138,7 +165,7 @@ async def analyze_photos(
             "stored_entry_id": stored_entry_id,
             "duplicate_skipped": False,
             "duplicates_removed": dup_removed,
-            "accumulated": build_accumulated() if persist else None,
+            "accumulated": _slim_accumulated() if persist else None,
         })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -194,7 +221,7 @@ def analyze_manual(body: ManualAnalyzeRequest):
                 dup.pop("result", None)
                 return to_jsonable({
                     **dup,
-                    "accumulated": build_accumulated(),
+                    "accumulated": _slim_accumulated(),
                 })
         # result 는 수기 저장 경로에서 프론트가 쓰지 않고 용량이 수십 MB라
         # 응답에 넣으면 게이트웨이가 응답을 절단(→ HTML 502)한다. accumulated 만 반환.
@@ -202,7 +229,7 @@ def analyze_manual(body: ManualAnalyzeRequest):
             "result": None,
             "stored_entry_id": stored_entry_id,
             "duplicate_skipped": False,
-            "accumulated": build_accumulated() if body.persist else None,
+            "accumulated": _slim_accumulated() if body.persist else None,
         })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -276,12 +303,12 @@ def get_storage_status():
 
 @router.get("/accumulated")
 def get_accumulated():
-    return to_jsonable(build_accumulated())
+    return to_jsonable(_slim_accumulated())
 
 
 @router.get("/history")
 def get_history(limit: int = Query(50, ge=1, le=200)):
-    return to_jsonable({"entries": list_entries(limit=limit), "accumulated": build_accumulated()})
+    return to_jsonable({"entries": list_entries(limit=limit), "accumulated": _slim_accumulated()})
 
 
 @router.delete("/store")
@@ -299,4 +326,4 @@ def delete_store(intent: str | None = Query(default=None)):
 def delete_store_entry(entry_id: str):
     if not delete_entry(entry_id):
         raise HTTPException(status_code=404, detail="분석 기록을 찾을 수 없습니다.")
-    return to_jsonable({"ok": True, "accumulated": build_accumulated()})
+    return to_jsonable({"ok": True, "accumulated": _slim_accumulated()})

@@ -887,6 +887,8 @@ export interface PhotoAnalysisIntentSlice {
   draw_template?: DrawReviewTemplate;
   pattern_ready?: boolean;
   entries_summary: PhotoAnalysisAccumulated['entries_summary'];
+  /** 서버에 저장된 수기/대량 게임 줄(번호배열) — 기기 간 동기화 복원용. */
+  saved_semi_lines?: number[][];
   app_ui_message: string;
 }
 

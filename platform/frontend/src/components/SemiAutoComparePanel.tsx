@@ -1101,6 +1101,25 @@ export default function SemiAutoComparePanel({
     });
   }, [sheetIntent, picked, bulkTickets, semiCurrentLines, semiSlipQueue, lastSavedAt]);
 
+  // 기기 간 동기화 — 로컬(이 기기)이 비어 있으면 서버 저장분(saved_semi_lines)을
+  // 반자동 누적으로 복원. 로컬에 데이터가 있으면 덮어쓰지 않는다. intent별 1회만.
+  const hydratedIntentRef = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    const serverLines = accumulated?.by_intent?.[sheetIntent]?.saved_semi_lines ?? [];
+    if (!serverLines.length || hydratedIntentRef.current[sheetIntent]) return;
+    const localEmpty =
+      bulkTickets.length === 0 &&
+      semiSlipQueue.length === 0 &&
+      semiCurrentLines.length === 0;
+    if (localEmpty) {
+      hydratedIntentRef.current[sheetIntent] = true;
+      setBulkTickets(serverLines.map((a) => [...a]));
+      setSaveNotice(
+        `☁ 다른 기기에서 저장한 ${serverLines.length}줄을 서버에서 불러왔습니다.`
+      );
+    }
+  }, [accumulated, sheetIntent, bulkTickets.length, semiSlipQueue.length, semiCurrentLines.length]);
+
   /** 다음 저장 시 부여될 라벨 — currentSlipLines 의 크기로 결정. */
   const currentLabel: GameLabel =
     GAME_LABELS[semiCurrentLines.length] ?? GAME_LABELS[0];

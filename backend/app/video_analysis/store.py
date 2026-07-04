@@ -1480,6 +1480,32 @@ def _recompute_intent_combo(entries: List[Dict[str, Any]], intent: str) -> Dict[
     )
 
 
+def _manual_saved_lines(group: List[Dict[str, Any]]) -> List[List[int]]:
+    """수기/대량 엔트리의 게임 줄(번호배열) 목록 — 기기 간 동기화용.
+    프론트 반자동 누적(bulkTickets)을 서버 저장분에서 복원하는 데 쓴다."""
+    from .line_overlap_patterns import extract_betting_lines
+
+    def _is_manual(e: Dict[str, Any]) -> bool:
+        if str(e.get("entry_mode") or "") == "manual":
+            return True
+        return str(((e.get("result") or {}).get("meta") or {}).get("entry_mode") or "") == "manual"
+
+    details: List[Dict[str, Any]] = []
+    for e in group:
+        if _is_manual(e):
+            details.extend(_entry_sheet_details(e))
+    if not details:
+        return []
+    details = _dedupe_sheet_details(details)
+    lines = extract_betting_lines(details)
+    out: List[List[int]] = []
+    for ln in lines:
+        nums = [int(n) for n in (ln.get("numbers") or []) if 1 <= int(n) <= 45]
+        if len(nums) >= 2:
+            out.append(sorted(nums))
+    return out
+
+
 def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str, Any]:
     """복기 / 이번회차 탭별 누적 데이터."""
     from .draw_template import build_draw_review_template, get_review_round_no, get_current_round_no
@@ -1516,6 +1542,7 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         "accumulated_combo_patterns": combo,
         "final_predictions": slice_fp,
         "entries_summary": _entries_summary_for(group),
+        "saved_semi_lines": _manual_saved_lines(group),  # 기기 간 동기화용
         "app_ui_message": " · ".join(p for p in parts if p),
     }
     if intent == "review":

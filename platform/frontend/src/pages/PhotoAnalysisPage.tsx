@@ -971,7 +971,11 @@ export default function PhotoAnalysisPage() {
       slipQueue.length === 0;
     if (localAutoEmpty) {
       hydratedAutoRef.current[activeTab] = true;
-      patchManual({ bulkAutoTickets: serverAutoLines.map((a) => [...a]) });
+      // 서버 복원분은 '이미 저장된' 데이터 → lastSavedAt 도 함께 세팅해 '아직 저장 안 됨' 오표기 방지.
+      patchManual({
+        bulkAutoTickets: serverAutoLines.map((a) => [...a]),
+        lastSavedAt: lastSavedAt ?? new Date().toISOString(),
+      });
       setNotice(`☁ 다른 기기에서 저장한 자동 누적 ${serverAutoLines.length}줄을 불러왔습니다.`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -979,15 +983,32 @@ export default function PhotoAnalysisPage() {
 
   const currentLabel = GAME_LABELS[currentSlipLines.length] ?? 'A';
 
+  // 서버에 이미 저장된 자동 줄 키 (미저장 판정 기준)
+  const savedAutoKeySet = useMemo(
+    () => new Set((activeSlice?.saved_auto_lines ?? []).map(lineKey)),
+    [activeSlice?.saved_auto_lines]
+  );
+
   // 이미 등록·저장된 자동 줄 키 — 대량입력 시 누적 겹침 검증용 (서버 누적 + 로컬 버킷)
   const existingAutoKeys = useMemo(() => {
-    const keys = new Set<string>();
-    for (const a of activeSlice?.saved_auto_lines ?? []) keys.add(lineKey(a));
+    const keys = new Set<string>(savedAutoKeySet);
     for (const t of bulkAutoTickets) keys.add(lineKey(t));
     for (const slip of slipQueue) for (const l of slip.lines) keys.add(lineKey(l.numbers));
     for (const l of currentSlipLines) keys.add(lineKey(l.numbers));
     return keys;
-  }, [activeSlice?.saved_auto_lines, bulkAutoTickets, slipQueue, currentSlipLines]);
+  }, [savedAutoKeySet, bulkAutoTickets, slipQueue, currentSlipLines]);
+
+  // 진짜 '미저장' 로컬 줄 수 — 서버에 아직 없는 줄만 (중복 제외).
+  const unsavedLocalCount = useMemo(() => {
+    const seen = new Set<string>();
+    const consider = (k: string) => {
+      if (!savedAutoKeySet.has(k)) seen.add(k);
+    };
+    for (const t of bulkAutoTickets) consider(lineKey(t));
+    for (const slip of slipQueue) for (const l of slip.lines) consider(lineKey(l.numbers));
+    for (const l of currentSlipLines) consider(lineKey(l.numbers));
+    return seen.size;
+  }, [savedAutoKeySet, bulkAutoTickets, slipQueue, currentSlipLines]);
 
   const togglePicked = (n: number) => {
     const prev = picked;
@@ -1069,13 +1090,9 @@ export default function PhotoAnalysisPage() {
   const handleBulkInsert = (lines: number[][]) => {
     if (!lines.length) return;
 
-    // 중복 검사 대상: 입력 중·저장 용지·기존 대량 입력 모두.
-    const existingKeys = new Set<string>();
-    for (const l of currentSlipLines) existingKeys.add(dupKey(l.numbers));
-    for (const slip of slipQueue) {
-      for (const l of slip.lines) existingKeys.add(dupKey(l.numbers));
-    }
-    for (const t of bulkAutoTickets) existingKeys.add(dupKey(t));
+    // 중복 검사 대상: 입력 중·저장 용지·기존 대량 입력 + 서버 저장분(existingAutoKeys).
+    // 단일 키 함수(lineKey)로 통일해 다이얼로그 경고 카운트와 실제 필터가 일치하게 한다.
+    const existingKeys = new Set<string>(existingAutoKeys);
 
     const freshLines: number[][] = [];
     const seenInBulk = new Set<string>();
@@ -1084,7 +1101,7 @@ export default function PhotoAnalysisPage() {
 
     for (const nums of lines) {
       const sorted = [...nums].sort((a, b) => a - b);
-      const key = dupKey(sorted);
+      const key = lineKey(sorted);
       if (existingKeys.has(key)) {
         externalDupCount += 1;
         continue;
@@ -1173,13 +1190,18 @@ export default function PhotoAnalysisPage() {
   // 재분석 — 반자동의 [↻ 재분석] 과 동일: 저장된 누적 데이터로 통계를 다시 계산·갱신.
   // (기존 저장분만 재분석하거나, 새로 추가·저장 후 눌러 최신 반영)
   const handleReanalyze = async () => {
+    // 로컬 줄이 있으면 재전송해 실제 재분석(중복은 백엔드가 정상 처리). 없으면 서버만 새로고침.
+    if (bulkAutoTickets.length > 0 || slipQueue.length > 0 || currentSlipLines.length > 0) {
+      await runManualAnalyze();
+      return;
+    }
     setIsReanalyzing(true);
     setError(null);
     setNotice(null);
     try {
       await refreshAccumulated();
       if (!mountedRef.current) return;
-      setNotice('↻ 재분석 완료 — 저장된 누적 데이터로 통계를 다시 계산했습니다.');
+      setNotice('↻ 서버 최신 데이터로 새로고침 완료.');
     } catch (e) {
       if (!mountedRef.current) return;
       setError(e instanceof Error ? e.message : '재분석 실패');
@@ -1220,14 +1242,17 @@ export default function PhotoAnalysisPage() {
         pickType: '자동',
       });
       if (!mountedRef.current) return;
+      // POST 응답에 이미 최신 accumulated 가 포함됨 — 추가 GET 은 레이스만 유발하므로 제거.
       if (data.accumulated) setAccumulated(data.accumulated);
+      const nowIso = new Date().toISOString();
       if (data.duplicate_skipped) {
-        setError(data.duplicate_message || '이미 등록된 용지입니다.');
+        // 중복은 오류가 아니라 '이미 저장된 상태' — 시간도 갱신하고 완료된 입력을 정리.
+        patchManual({ slipQueue: [], currentSlipLines: [], picked: [], lastSavedAt: nowIso });
+        setNotice(data.duplicate_message || '이미 최신 상태로 저장되어 있습니다.');
       } else {
-        patchManual({ slipQueue: [], currentSlipLines: [], picked: [], lastSavedAt: new Date().toISOString() });
+        patchManual({ slipQueue: [], currentSlipLines: [], picked: [], lastSavedAt: nowIso });
         setNotice(`✅ ${slips.length}장 분석·저장 완료 — 결과는 페이지 하단`);
       }
-      await refreshAccumulated();
     } catch (e) {
       if (!mountedRef.current) return;
       setError(e instanceof Error ? e.message : '분석 실패 — 저장된 줄은 유지됩니다.');
@@ -1251,7 +1276,7 @@ export default function PhotoAnalysisPage() {
   const clearStore = async () => {
     const targetLabel = activeTab === 'review' ? '복기 탭' : '이번회차 탭';
     if (!(await confirm({
-      message: `${targetLabel}의 서버 분석 데이터와 자동 입력 누적만 삭제할까요? 다른 탭 데이터는 유지됩니다.`,
+      message: `${targetLabel}의 서버 저장 데이터를 모두 삭제합니다 (자동 + 반자동 포함). 로컬 자동 누적도 초기화됩니다. 다른 탭은 유지됩니다. 진행할까요?`,
       destructive: true,
       confirmText: '삭제',
     }))) return;
@@ -1449,16 +1474,14 @@ export default function PhotoAnalysisPage() {
           </Button>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
-          누적 저장(서버): <strong>{activeSlice?.saved_auto_lines?.length ?? 0}줄</strong>
+          자동 서버 저장: <strong>{savedAutoKeySet.size}줄</strong>
           {lastSavedAt ? ` · 마지막 저장: ${new Date(lastSavedAt).toLocaleString('ko-KR', { hour: '2-digit', minute: '2-digit', month: 'numeric', day: 'numeric' })}` : ' · 아직 저장 안 됨'}
-          {bulkAutoTickets.length + slipQueue.reduce((s, sl) => s + sl.lines.length, 0) + currentSlipLines.length > 0
-            ? ` · 미저장 로컬 ${bulkAutoTickets.length + slipQueue.reduce((s, sl) => s + sl.lines.length, 0) + currentSlipLines.length}줄`
-            : ''}
+          {unsavedLocalCount > 0 ? ` · 미저장 로컬 ${unsavedLocalCount}줄` : ' · 모두 저장됨'}
         </Typography>
-        {/* 대량 입력 후 미저장 경고 */}
-        {bulkAutoTickets.length > 0 && (
+        {/* 미저장 로컬 줄이 실제로 남아 있을 때만 경고 */}
+        {unsavedLocalCount > 0 && (
           <Alert severity="info" sx={{ mt: 1 }}>
-            📋 대량 입력 {bulkAutoTickets.length}줄이 로컬에 저장됐습니다.
+            📋 아직 서버에 반영 안 된 줄 {unsavedLocalCount}개가 있습니다.
             위 <strong>[💾 {activeTab === 'review' ? '복기' : '이번회차'} 분석·저장]</strong> 버튼을 눌러야 통계에 반영됩니다.
           </Alert>
         )}
@@ -1519,7 +1542,7 @@ export default function PhotoAnalysisPage() {
                 {' '}(서버 저장 자동 {activeSlice?.saved_auto_lines?.length ?? 0}줄)
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                아래 목록의 [×] 로 개별 줄 삭제. 하단 [자동 입력 초기화] 는 현재 탭의 자동 입력 서버 데이터 + 로컬 자동 누적만 삭제합니다. 반자동은 § 3 추가 세팅에서 따로 관리됩니다.
+                아래 목록의 [×] 로 개별 줄 삭제. 하단 [이 탭 서버 데이터 전체 삭제] 는 현재 탭의 서버 저장분(자동+반자동)과 로컬 자동 누적을 모두 지웁니다.
               </Typography>
               {ticketLines.length === 0 ? (
                 <Alert severity="info" sx={{ mb: 1.5 }}>
@@ -1581,7 +1604,7 @@ export default function PhotoAnalysisPage() {
                     (!accumulated || accumulated.total_analyses === 0)
                   }
                 >
-                  자동 입력 초기화
+                  이 탭 서버 데이터 전체 삭제
                 </Button>
               </Stack>
             </>

@@ -285,7 +285,28 @@ export interface RoundRecommendResponse {
   combinations: (GeneratedCombination & {
     pattern?: string | null;
     pattern_label?: string | null;
+    signal_hits?: number;
   })[];
+  top_scored?: {
+    number: number;
+    score: number;
+    decade: number;
+    reversion: number;
+    gap: number;
+  }[];
+  backtest?: {
+    available: boolean;
+    rounds_tested: number;
+    top_k: number;
+    random_baseline: number;
+    new_avg_hits: number;
+    new_lift: number;
+    new_3plus: number;
+    old_avg_hits: number;
+    old_lift: number;
+    old_3plus: number;
+    improvement: number;
+  } | null;
   warning?: string | null;
   filter_rule: string;
   compose_rule: string;

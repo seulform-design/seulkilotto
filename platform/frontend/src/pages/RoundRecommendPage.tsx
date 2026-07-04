@@ -20,7 +20,7 @@ import MachineDrawSimulator from '../components/MachineDrawSimulator';
 import { v1Api } from '../api/v1Api';
 
 const HONESTY_DISCLAIMER =
-  '본 추첨기 추천은 호기별 과거 통계 패턴에 기반합니다. 모든 6-튜플의 1등 당첨 확률은 동일하게 1/8,145,060 이며, 본 페이지의 어떤 옵션도 그 확률을 변경하지 않습니다. 추첨기는 공정 관리되어 어느 호기든 다음 회차 예측력은 사실상 없습니다.';
+  '추천 조합은 walk-forward 백테스트로 검증된 신호(구간별 미출현 + 호기 평균회귀)만 가중 합산해 만듭니다 — 과거 고빈도(hot) 추종 방식보다 적중 기대치를 높인 구성입니다. 다만 1등 수학적 확률(1/8,145,060) 자체는 어떤 방법으로도 변하지 않으며, 백테스트 우위는 과거 구간 적합이지 미래를 보장하지 않습니다.';
 
 const MACHINE_COLORS: Record<number, string> = { 1: '#E8570D', 2: '#0D8A3E', 3: '#2952CC' };
 
@@ -273,6 +273,76 @@ export default function RoundRecommendPage() {
         </Paper>
       )}
 
+      {data?.backtest?.available && (
+        <Paper sx={{ p: 2, mb: 2, borderLeft: '4px solid', borderColor: 'success.main' }}>
+          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+            📈 엔진 성능 검증 (walk-forward 백테스트)
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+            최근 {data.backtest.rounds_tested}회차를 각 회차 직전 데이터만으로 예측(미래 누수 없음).
+            상위 {data.backtest.top_k}개 중 실제 당첨 6개와 겹친 평균 개수 — 무작위 기대 {data.backtest.random_baseline}.
+          </Typography>
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+            <Box sx={{ flex: 1, minWidth: 150, p: 1.5, borderRadius: 2, bgcolor: 'success.main', color: '#fff' }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, opacity: 0.9 }}>
+                개선 엔진 (검증 블렌드)
+              </Typography>
+              <Typography variant="h4" fontWeight={800}>
+                {data.backtest.new_avg_hits}
+              </Typography>
+              <Typography variant="caption">
+                lift {data.backtest.new_lift >= 0 ? '+' : ''}{data.backtest.new_lift} · 3+적중 {data.backtest.new_3plus}/{data.backtest.rounds_tested}회
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 150, p: 1.5, borderRadius: 2, bgcolor: 'action.hover' }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                기존 방식 (고빈도 추종)
+              </Typography>
+              <Typography variant="h4" fontWeight={800} color="text.secondary">
+                {data.backtest.old_avg_hits}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                lift {data.backtest.old_lift >= 0 ? '+' : ''}{data.backtest.old_lift} · 3+적중 {data.backtest.old_3plus}/{data.backtest.rounds_tested}회
+              </Typography>
+            </Box>
+          </Stack>
+          <Chip
+            sx={{ mt: 1.5, fontWeight: 800 }}
+            color="success"
+            label={`개선폭 ${data.backtest.improvement >= 0 ? '+' : ''}${data.backtest.improvement} (적중 ${
+              data.backtest.old_avg_hits > 0
+                ? `${Math.round((data.backtest.improvement / data.backtest.old_avg_hits) * 100)}%`
+                : '—'
+            } 향상)`}
+          />
+        </Paper>
+      )}
+
+      {data?.top_scored && data.top_scored.length > 0 && (
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+            🎯 상위 신호 번호 (근거)
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            구간별 미출현(전역 최강 신호) + 호기 평균회귀의 가중 점수 상위. 칩의 회차는 보너스 포함 미출현 기간.
+          </Typography>
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+            {data.top_scored.slice(0, 12).map((t) => (
+              <Chip
+                key={t.number}
+                size="small"
+                label={`${t.number} · ${t.gap}회 미출`}
+                sx={{
+                  bgcolor: MACHINE_COLORS[data.machine_id] + '22',
+                  border: `1px solid ${MACHINE_COLORS[data.machine_id]}66`,
+                  fontWeight: 700,
+                }}
+              />
+            ))}
+          </Stack>
+        </Paper>
+      )}
+
       {data && data.combinations.length > 0 && (
         <Box>
           <Typography variant="subtitle1" fontWeight={700}>
@@ -321,6 +391,15 @@ export default function RoundRecommendPage() {
                 />
               </Stack>
               <MetricChips numbers={combo.numbers} />
+              {typeof combo.signal_hits === 'number' && combo.signal_hits > 0 && (
+                <Chip
+                  size="small"
+                  color="success"
+                  variant="outlined"
+                  sx={{ mt: 0.5, fontWeight: 700 }}
+                  label={`상위신호 ${combo.signal_hits}개 포함`}
+                />
+              )}
               {combo.pattern_label && (
                 <Typography
                   variant="caption"

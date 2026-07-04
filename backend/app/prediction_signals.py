@@ -366,7 +366,7 @@ def _source_top_numbers(df_prior, source: str, target_round: int, top_k: int) ->
     try:
         if source == "machine":
             _, _, auto_machine = predict_next_round(df_prior)
-            _apply_machine_signals(scores, srcs, build_round_recommendation(df_prior, machine_id=auto_machine))
+            _apply_machine_signals(scores, srcs, build_round_recommendation(df_prior, machine_id=auto_machine, with_backtest=False))
         elif source == "classic":
             _apply_classic_signals(scores, srcs, build_classic_recommendation(df_prior, method="blend"))
         elif source == "parallel":
@@ -490,7 +490,7 @@ def build_prediction_signals(
     # 통계 4신호(추첨기·후속·클래식·평행)는 복기/이번회차 모두 최신 전체
     # 데이터로 계산한다. 복기 탭은 이 통계예측 + 신호원별 적중률(백테스트)을
     # 함께 보고 약한 신호를 이번회차 보정에 활용한다.
-    machine_payload = build_round_recommendation(df, machine_id=auto_machine, seed=seed)
+    machine_payload = build_round_recommendation(df, machine_id=auto_machine, seed=seed, with_backtest=False)
     post_payload = run_post_occurrence_analysis(df, trigger_round=latest_round)
     classic_payload = build_classic_recommendation(df, method="blend", seed=seed)
     machine_src = _apply_machine_signals(scores, sources, machine_payload)

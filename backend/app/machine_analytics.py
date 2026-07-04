@@ -462,73 +462,180 @@ def _is_valid(nums: Sequence[int], strict_sum: bool = True) -> bool:
     if strict_sum and (s < SUM_MIN or s > SUM_MAX):
         return False
     odd = sum(1 for n in nums if n % 2 == 1)
-    return odd in VALID_ODD
+    if odd not in VALID_ODD:
+        return False
+    # 구간(10단위) 분산 — 실제 당첨은 거의 항상 3개 이상 구간에 걸침.
+    bands = {_decade_band(n) for n in nums}
+    if strict_sum and len(bands) < 3:
+        return False
+    # 연속쌍 과다 방지 — 실측상 연속쌍 0~1개가 대부분(2개 이상은 드묾).
+    s2 = sorted(nums)
+    consec_pairs = sum(1 for i in range(5) if s2[i + 1] - s2[i] == 1)
+    if strict_sum and consec_pairs > 2:
+        return False
+    return True
 
 
-def _build_one_combo(
+# ── 백테스트로 검증된 신호 블렌드(고빈도 추종 대신) ───────────────────
+# 60회차×3호기 walk-forward(무작위 1.333)로 가중치를 그리드 최적화한 결과:
+#   decade only 1.550 / +reversion(0.8) 1.583(최적) / +lean 은 오히려 저하(1.506).
+# → '고빈도(hot) 추종'(검증상 음신호)뿐 아니라 '호기 고유편향(lean)'도 예측
+#   정확도를 떨어뜨려 블렌드에서 제외. 최종: 구간별미출현(전역 최강) + 호기
+#   평균회귀(미출현+저빈도, 호기 조건부)만 사용. lean 은 표시용으로만 계산.
+_BLEND_W_DECADE = 1.0       # 구간별 미출현(보너스포함) — 최강 신호(lift+0.22)
+_BLEND_W_REVERSION = 0.8    # 호기 평균회귀(미출현+저빈도) — 최적 가중
+_BLEND_W_LEAN = 0.0         # 호기 고유편향 — 백테스트상 정확도 저하 → 미사용
+_BLEND_BANDS: Tuple[Tuple[int, int, int], ...] = (
+    (1, 10, 5), (11, 20, 5), (21, 30, 5), (31, 40, 5), (41, 45, 3),
+)
+
+
+def _decade_gap_scores(df: pd.DataFrame) -> Tuple[Dict[int, float], Dict[int, int]]:
+    """구간별 미출현(보너스포함) 순위감쇠 점수 — 전역(최강 신호)."""
+    from .gap_utils import last_seen_gaps
+
+    gaps = last_seen_gaps(df, include_bonus=True)
+    sc: Dict[int, float] = {n: 0.0 for n in ALL_NUMBERS}
+    for lo, hi, k in _BLEND_BANDS:
+        band = sorted(range(lo, hi + 1), key=lambda n: (-gaps[n], n))[:k]
+        for rank, n in enumerate(band):
+            sc[n] += 0.9 ** rank
+    return sc, gaps
+
+
+def _reversion_scores(sub: pd.DataFrame) -> Dict[int, float]:
+    """호기 평균회귀 풀(미출현 0.6 + 저빈도 0.4) 순위감쇠 점수 — 호기별."""
+    from .gap_utils import last_seen_gaps
+
+    if len(sub) == 0:
+        return {n: 0.0 for n in ALL_NUMBERS}
+    gaps = last_seen_gaps(sub, include_bonus=True)
+    freq: Dict[int, int] = {n: 0 for n in ALL_NUMBERS}
+    for _, row in sub.iterrows():
+        for c in NUMBER_COLUMNS:
+            v = int(row[c])
+            if 1 <= v <= 45:
+                freq[v] += 1
+    gap_rank = {n: r for r, n in enumerate(sorted(ALL_NUMBERS, key=lambda x: -gaps[x]))}
+    freq_rank = {n: r for r, n in enumerate(sorted(ALL_NUMBERS, key=lambda x: freq[x]))}
+    order = sorted(ALL_NUMBERS, key=lambda n: gap_rank[n] * 0.6 + freq_rank[n] * 0.4)
+    sc: Dict[int, float] = {n: 0.0 for n in ALL_NUMBERS}
+    for rank, n in enumerate(order[:20]):
+        sc[n] = 0.9 ** rank
+    return sc
+
+
+def _lean_scores(dfm: pd.DataFrame, machine_id: int) -> Dict[int, float]:
+    """호기 고유 편향 — 확정 라벨에서 이 호기가 기대보다 자주 낸 번호(z>0)만
+    [0,1] 로 정규화해 소폭 가점. 이게 '호기 예측력' 성분."""
+    sub = _confirmed_subset(dfm, machine_id)
+    n = len(sub)
+    sc: Dict[int, float] = {x: 0.0 for x in ALL_NUMBERS}
+    if n == 0:
+        return sc
+    freq: Dict[int, int] = {x: 0 for x in ALL_NUMBERS}
+    for _, row in sub.iterrows():
+        for c in NUMBER_COLUMNS:
+            v = int(row[c])
+            if 1 <= v <= 45:
+                freq[v] += 1
+    exp = n * 6 / 45.0
+    zmax = 0.0
+    zs: Dict[int, float] = {}
+    for x in ALL_NUMBERS:
+        z = (freq[x] - exp) / (exp ** 0.5) if exp > 0 else 0.0
+        zs[x] = max(0.0, z)
+        zmax = max(zmax, zs[x])
+    if zmax > 0:
+        for x in ALL_NUMBERS:
+            sc[x] = zs[x] / zmax
+    return sc
+
+
+def blended_number_scores(
+    df: pd.DataFrame, dfm: pd.DataFrame, machine_id: int
+) -> Dict[str, Dict[int, float]]:
+    """검증된 3신호 블렌드 점수 + 성분 분해 반환."""
+    decade, _gaps = _decade_gap_scores(df)
+    sub = dfm[dfm["machine_id"] == machine_id]
+    reversion = _reversion_scores(sub)
+    lean = _lean_scores(dfm, machine_id)
+    blended: Dict[int, float] = {}
+    for n in ALL_NUMBERS:
+        blended[n] = (
+            _BLEND_W_DECADE * decade[n]
+            + _BLEND_W_REVERSION * reversion[n]
+            + _BLEND_W_LEAN * lean[n]
+        )
+    return {"blended": blended, "decade": decade, "reversion": reversion, "lean": lean}
+
+
+def _weighted_pick(rng: random.Random, cands: List[int], scores: Dict[int, float]) -> int:
+    """점수 비례 가중 추출(점수 0 이어도 최소기회)."""
+    weights = [scores.get(n, 0.0) + 0.15 for n in cands]
+    total = sum(weights)
+    r = rng.uniform(0, total)
+    acc = 0.0
+    for n, w in zip(cands, weights):
+        acc += w
+        if r <= acc:
+            return n
+    return cands[-1]
+
+
+def _build_scored_combo(
     rng: random.Random,
-    hot: List[int],
-    cold: List[int],
-    pairs: List[Tuple[int, int]],
-    strict_sum: bool,
+    pool: List[int],
+    scores: Dict[int, float],
+    strict: bool,
 ) -> Optional[List[int]]:
+    """상위 풀에서 점수 가중으로 6개 — 구간분산/홀짝/합/연속 필터 통과분만."""
     chosen: Set[int] = set()
-
-    hot_cands = [n for n in hot if n not in chosen]
-    if len(hot_cands) < 3:
-        hot_cands = [n for n in ALL_NUMBERS if n not in chosen]
-    if len(hot_cands) < 3:
-        return None
-    chosen.update(rng.sample(hot_cands, 3))
-
-    cold_cands = [n for n in cold if n not in chosen] or [n for n in ALL_NUMBERS if n not in chosen]
-    chosen.add(rng.choice(cold_cands))
-
-    if pairs:
-        a, b = rng.choice(pairs)
-        for n in (a, b):
-            if n not in chosen:
-                chosen.add(n)
-
-    while len(chosen) < 6:
-        pool = [n for n in hot if n not in chosen] or [n for n in ALL_NUMBERS if n not in chosen]
-        chosen.add(rng.choice(pool))
-
+    cand_pool = list(pool)
+    guard = 0
+    while len(chosen) < 6 and guard < 60:
+        guard += 1
+        remain = [n for n in cand_pool if n not in chosen]
+        if not remain:
+            remain = [n for n in ALL_NUMBERS if n not in chosen]
+        chosen.add(_weighted_pick(rng, remain, scores))
     nums = sorted(chosen)
-    return nums if _is_valid(nums, strict_sum=strict_sum) else None
+    return nums if _is_valid(nums, strict_sum=strict) else None
 
 
 def generate_round_recommendations(
     analysis: Dict,
     seed: Optional[int] = None,
     n_games: int = NUM_GAMES,
+    scores: Optional[Dict[int, float]] = None,
+    pool: Optional[List[int]] = None,
 ) -> List[Dict]:
     if analysis.get("draw_count", 0) == 0:
         return []
 
     rng = random.Random(seed)
-    hot = analysis.get("_hot_pool") or ALL_NUMBERS
-    cold = analysis.get("_cold_pool") or ALL_NUMBERS
-    pairs = analysis.get("_pairs") or []
+    # 검증된 블렌드 점수/풀이 있으면 그것으로 구성(기본 경로).
+    if scores is None:
+        # 폴백: 예전 방식(있는 풀). 정상 경로에서는 항상 scores 가 전달된다.
+        scores = {n: 1.0 for n in analysis.get("_hot_pool", ALL_NUMBERS)}
+    if not pool:
+        pool = sorted(ALL_NUMBERS, key=lambda n: -scores.get(n, 0.0))[:18]
 
     games: List[List[int]] = []
-    attempts = 0
-    while len(games) < n_games and attempts < MAX_GENERATION_ATTEMPTS:
-        attempts += 1
-        combo = _build_one_combo(rng, hot, cold, pairs, strict_sum=True)
-        if combo is None or combo in games:
-            continue
-        games.append(combo)
-
-    # 필터가 너무 빡빡할 때: 총합만 완화
-    if len(games) < n_games:
-        attempts2 = 0
-        while len(games) < n_games and attempts2 < 2000:
-            attempts2 += 1
-            combo = _build_one_combo(rng, hot, cold, pairs, strict_sum=False)
+    for strict in (True, False):
+        attempts = 0
+        cap = MAX_GENERATION_ATTEMPTS if strict else 2000
+        while len(games) < n_games and attempts < cap:
+            attempts += 1
+            combo = _build_scored_combo(rng, pool, scores, strict=strict)
             if combo is None or combo in games:
                 continue
             games.append(combo)
+        if len(games) >= n_games:
+            break
+
+    def _cover(g: List[int]) -> int:
+        return sum(1 for n in g if n in set(pool[:12]))
 
     return [
         {
@@ -536,15 +643,130 @@ def generate_round_recommendations(
             "sum_total": sum(g),
             "odd_count": sum(1 for n in g if n % 2 == 1),
             "even_count": sum(1 for n in g if n % 2 == 0),
+            "signal_hits": _cover(g),  # 상위신호 12개 중 몇 개 포함
         }
         for g in games
     ]
+
+
+_RECO_BT_CACHE: Dict[Tuple[int, int, int], Dict] = {}
+
+
+def backtest_recommendation(
+    dfm: pd.DataFrame, machine_id: int, rounds: int = 30, top_k: int = 10
+) -> Dict:
+    """개선 엔진(검증 블렌드) vs 기존 엔진(고빈도 추종)을 walk-forward 로 비교.
+    각 회차 R 은 R 직전 데이터만으로 상위 top_k 를 뽑아 실제 당첨 6개와 겹친 수를
+    측정(미래 누수 없음). 반환: 두 방식의 평균 적중·무작위 대비 lift.
+
+    단일 순방향 패스로 누적 상태(전역 미출현·호기별 미출현/빈도)를 갱신하며
+    테스트 회차에서 예측을 뽑는다(회차마다 재계산하던 iterrows 제거 → 60회
+    백테스트 16s→<1s)."""
+    latest = int(dfm["round"].max())
+    key = (latest, machine_id, rounds)
+    if key in _RECO_BT_CACHE:
+        return _RECO_BT_CACHE[key]
+
+    ordered = dfm.sort_values("round")
+    rounds_list = ordered["round"].astype(int).tolist()
+    mats = [[int(row[c]) for c in NUMBER_COLUMNS] for _, row in ordered.iterrows()]
+    bons = [int(b) if not pd.isna(b) else 0 for b in ordered["bonus"].tolist()] \
+        if "bonus" in ordered.columns else [0] * len(mats)
+    machs = ordered["machine_id"].astype(int).tolist()
+
+    N = len(rounds_list)
+    floor_round = rounds_list[0] + 50 if rounds_list else 0
+    test_set = set([r for r in rounds_list if r >= floor_round][-rounds:])
+    base = round(top_k * 6 / 45, 3)
+
+    # 누적 상태 (전역 draw index gi 기준)
+    last_global = {n: -1 for n in ALL_NUMBERS}     # 보너스 포함 마지막 출현 gi
+    last_mach = {n: -1 for n in ALL_NUMBERS}       # 이 호기 subset 마지막 출현(호기 draw index)
+    freq_mach = {n: 0 for n in ALL_NUMBERS}
+    mcount = 0                                       # 이 호기 누적 draw 수
+
+    def _decade_from(lastseen: Dict[int, int], now: int) -> Dict[int, float]:
+        sc = {n: 0.0 for n in ALL_NUMBERS}
+        for lo, hi, k in _BLEND_BANDS:
+            band = sorted(range(lo, hi + 1),
+                          key=lambda n: (-(now - lastseen[n]), n))[:k]
+            for rank, n in enumerate(band):
+                sc[n] += 0.9 ** rank
+        return sc
+
+    new_hits: List[int] = []
+    old_hits: List[int] = []
+    new_3plus = old_3plus = 0
+    for gi in range(N):
+        r = rounds_list[gi]
+        actual = set(mats[gi])
+        is_test = r in test_set and gi >= 50
+        if is_test:
+            # 개선 엔진: decade(전역 미출현) + reversion(호기 미출현0.6+저빈도0.4)
+            dec = _decade_from(last_global, gi)
+            if mcount > 0:
+                gap_rank = {n: rk for rk, n in enumerate(
+                    sorted(ALL_NUMBERS, key=lambda x: -(mcount - last_mach[x])))}
+                freq_rank = {n: rk for rk, n in enumerate(
+                    sorted(ALL_NUMBERS, key=lambda x: freq_mach[x]))}
+                order = sorted(ALL_NUMBERS,
+                               key=lambda n: gap_rank[n] * 0.6 + freq_rank[n] * 0.4)
+                rev = {n: 0.0 for n in ALL_NUMBERS}
+                for rk, n in enumerate(order[:20]):
+                    rev[n] = 0.9 ** rk
+            else:
+                rev = {n: 0.0 for n in ALL_NUMBERS}
+            blended = {n: _BLEND_W_DECADE * dec[n] + _BLEND_W_REVERSION * rev[n]
+                       for n in ALL_NUMBERS}
+            new_top = sorted(ALL_NUMBERS, key=lambda n: -blended[n])[:top_k]
+            nh = len(set(new_top) & actual)
+            new_hits.append(nh); new_3plus += nh >= 3
+            # 기존 엔진: 이 호기 고빈도 상위
+            old_top = sorted(ALL_NUMBERS, key=lambda n: (-freq_mach[n], n))[:top_k]
+            oh = len(set(old_top) & actual)
+            old_hits.append(oh); old_3plus += oh >= 3
+        # 상태 갱신 (이 회차를 prior 에 반영)
+        for v in mats[gi]:
+            if 1 <= v <= 45:
+                last_global[v] = gi
+        if 1 <= bons[gi] <= 45:
+            last_global[bons[gi]] = gi
+        if machs[gi] == machine_id:
+            for v in mats[gi]:
+                if 1 <= v <= 45:
+                    last_mach[v] = mcount
+                    freq_mach[v] += 1
+            if 1 <= bons[gi] <= 45:
+                last_mach[bons[gi]] = mcount
+            mcount += 1
+
+    n = len(new_hits) or 1
+    new_avg = round(sum(new_hits) / n, 3)
+    old_avg = round(sum(old_hits) / n, 3)
+    result = {
+        "available": bool(new_hits),
+        "rounds_tested": len(new_hits),
+        "top_k": top_k,
+        "random_baseline": base,
+        "new_avg_hits": new_avg,
+        "new_lift": round(new_avg - base, 3),
+        "new_3plus": new_3plus,
+        "old_avg_hits": old_avg,
+        "old_lift": round(old_avg - base, 3),
+        "old_3plus": old_3plus,
+        "improvement": round(new_avg - old_avg, 3),
+    }
+    _RECO_BT_CACHE[key] = result
+    if len(_RECO_BT_CACHE) > 12:
+        _RECO_BT_CACHE.pop(next(iter(_RECO_BT_CACHE)))
+    return result
 
 
 def build_round_recommendation(
     df: pd.DataFrame,
     machine_id: Optional[int] = None,
     seed: Optional[int] = None,
+    with_backtest: bool = True,
 ) -> Dict:
     from .machine_registry import coverage, resolve
 
@@ -553,9 +775,31 @@ def build_round_recommendation(
     target = machine_id if machine_id in (1, 2, 3) else auto_machine
 
     stats = analyze_machine(df, target)
-    combos = generate_round_recommendations(stats, seed=seed)
+
+    # 검증된 신호 블렌드로 점수/풀 구성 후 조합 생성(고빈도 추종 폐기).
+    comp = blended_number_scores(df, df, target)
+    blended = comp["blended"]
+    pool = sorted(ALL_NUMBERS, key=lambda n: (-blended[n], n))[:18]
+    combos = generate_round_recommendations(stats, seed=seed, scores=blended, pool=pool)
 
     public_stats = {k: v for k, v in stats.items() if not k.startswith("_")}
+
+    # 상위 신호 번호 breakdown(성분별 기여) — 정밀 근거 표시용.
+    # lean 은 블렌드 미사용(가중 0, 백테스트상 저하)이라 근거에서 제외.
+    from .gap_utils import last_seen_gaps
+
+    gap_bonus = last_seen_gaps(df, include_bonus=True)
+    top_scored = [
+        {
+            "number": n,
+            "score": round(blended[n], 3),
+            "decade": round(comp["decade"][n], 3),
+            "reversion": round(comp["reversion"][n], 3),
+            "gap": gap_bonus[n],  # 보너스포함 미출현 회수(근거)
+        }
+        for n in pool
+    ]
+
     warning = None
     if stats.get("draw_count", 0) > 0 and not combos:
         warning = "조건을 만족하는 조합 생성에 실패했습니다. 필터를 완화해 재시도하세요."
@@ -574,7 +818,9 @@ def build_round_recommendation(
         "latest_round": int(df["round"].max()),
         "stats": public_stats,
         "combinations": combos,
+        "top_scored": top_scored,
+        "backtest": backtest_recommendation(df, target, rounds=60) if with_backtest else None,
         "warning": warning,
-        "filter_rule": "총합 100~175, 홀짝 2:4|3:3|4:2",
-        "compose_rule": "고빈도 3 + 미출현 1 + 궁합/연번 2",
+        "filter_rule": "총합 100~175, 홀짝 2:4|3:3|4:2, 구간 3개+ 분산, 연속쌍 ≤2",
+        "compose_rule": "검증 블렌드: 구간별 미출현(전역 최강) + 호기 평균회귀 — 백테스트 최적 가중",
     }

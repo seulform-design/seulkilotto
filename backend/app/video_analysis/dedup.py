@@ -155,11 +155,14 @@ def dedupe_paths_by_content(paths: List[Path]) -> tuple[List[Path], int]:
     return unique, removed
 
 
-def compute_manual_source_id(slips: List[Dict[str, Any]], sheet_intent: str = "") -> str:
-    """수기 등록 세트 ID."""
+def compute_manual_source_id(
+    slips: List[Dict[str, Any]], sheet_intent: str = "", pick_type: str = ""
+) -> str:
+    """수기 등록 세트 ID — 픽 타입(자동/반자동)까지 구분해 자동·반자동 세트가 충돌하지 않게 한다."""
     h = hashlib.sha256()
     h.update((sheet_intent or "").encode("utf-8"))
     h.update(b"manual")
+    h.update((pick_type or "").encode("utf-8"))
     for slip in slips:
         name = str(slip.get("name") or slip.get("label") or "").strip()
         h.update(name.encode("utf-8"))

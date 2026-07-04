@@ -251,6 +251,7 @@ def analyze_from_sheet_payloads(
     title: str,
     source_id: str,
     entry_mode: str = "photo",
+    pick_type: str = "",
     source_count: int = 0,
     paths: List[Path] | None = None,
     analyses: List[Dict[str, Any]] | None = None,
@@ -266,6 +267,8 @@ def analyze_from_sheet_payloads(
     intent_label = "복기" if intent == "review" else "이번회차"
     round_ctx = resolve_sheet_round(intent)
     analysis_mode = "manual" if entry_mode == "manual" else "local"
+    # 픽 타입(자동/반자동) — 수기 등록은 기본 반자동, 그 외(사진)는 미지정.
+    pick_type_eff = pick_type or ("반자동" if entry_mode == "manual" else "")
     vision_error: str | None = None
     paths = paths or []
 
@@ -534,6 +537,7 @@ def analyze_from_sheet_payloads(
         "video_visual_analysis": vva,
         "meta": {
             "entry_mode": entry_mode,
+            "pick_type": pick_type_eff,
             "images_analyzed": len(paths),
             "manual_slips_analyzed": len(sheet_payloads) if entry_mode == "manual" else 0,
             "duplicates_removed": dup_removed,
@@ -570,6 +574,7 @@ def analyze_from_sheet_payloads(
                     "layout_mode": p.get("layout_mode"),
                     "source_layout": p.get("source_layout"),
                     "entry_mode": p.get("entry_mode"),
+                    "pick_type": p.get("pick_type") or pick_type_eff,
                 }
                 for p in sheet_payloads
                 if len(p.get("numbers") or []) >= 2 or len(p.get("lines") or []) >= 1

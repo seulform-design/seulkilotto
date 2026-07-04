@@ -950,6 +950,24 @@ export default function PhotoAnalysisPage() {
     }));
   };
 
+  // 기기 간 동기화 — 로컬 자동 누적이 비어 있으면 서버 저장분(saved_auto_lines)을
+  // 자동 대량(bulkAutoTickets)으로 복원. intent별 1회, 로컬 데이터가 있으면 덮어쓰지 않음.
+  const hydratedAutoRef = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    const serverAutoLines = accumulated?.by_intent?.[activeTab]?.saved_auto_lines ?? [];
+    if (!serverAutoLines.length || hydratedAutoRef.current[activeTab]) return;
+    const localAutoEmpty =
+      bulkAutoTickets.length === 0 &&
+      currentSlipLines.length === 0 &&
+      slipQueue.length === 0;
+    if (localAutoEmpty) {
+      hydratedAutoRef.current[activeTab] = true;
+      patchManual({ bulkAutoTickets: serverAutoLines.map((a) => [...a]) });
+      setNotice(`☁ 다른 기기에서 저장한 자동 누적 ${serverAutoLines.length}줄을 불러왔습니다.`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accumulated, activeTab, bulkAutoTickets.length, currentSlipLines.length, slipQueue.length]);
+
   const currentLabel = GAME_LABELS[currentSlipLines.length] ?? 'A';
 
   const togglePicked = (n: number) => {
@@ -1159,7 +1177,11 @@ export default function PhotoAnalysisPage() {
     setError(null);
     setNotice(null);
     try {
-      const data = await v1Api.analyzeManualSlips(slips, { sheetIntent: activeTab, persist: true });
+      const data = await v1Api.analyzeManualSlips(slips, {
+        sheetIntent: activeTab,
+        persist: true,
+        pickType: '자동',
+      });
       if (!mountedRef.current) return;
       if (data.accumulated) setAccumulated(data.accumulated);
       if (data.duplicate_skipped) {
@@ -1662,6 +1684,7 @@ export default function PhotoAnalysisPage() {
         onClose={() => setBulkOpen(false)}
         onConfirm={handleBulkInsert}
         linesPerSlip={GAME_LABELS.length}
+        pickTypeLabel="자동"
       />
       {ConfirmDialog}
     </Stack>

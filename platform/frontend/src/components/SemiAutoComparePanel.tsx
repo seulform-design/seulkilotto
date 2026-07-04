@@ -1433,6 +1433,7 @@ export default function SemiAutoComparePanel({
       const res = await v1Api.analyzeManualSlips(slips, {
         sheetIntent,
         persist: true,
+        pickType: '반자동',
       });
       if (!mountedRef.current) return;
 
@@ -4159,6 +4160,7 @@ export default function SemiAutoComparePanel({
         onClose={() => setBulkOpen(false)}
         onConfirm={handleBulkInsert}
         linesPerSlip={GAME_LABELS.length}
+        pickTypeLabel="반자동"
       />
       {ConfirmDialog}
     </Paper>

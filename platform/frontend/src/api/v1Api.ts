@@ -516,7 +516,12 @@ export const v1Api = {
 
   analyzeManualSlips: async (
     slips: ManualSlipInput[],
-    opts: { sheetIntent?: 'review' | 'current_round'; persist?: boolean } = {}
+    opts: {
+      sheetIntent?: 'review' | 'current_round';
+      persist?: boolean;
+      /** 이 세트의 픽 타입 — 자동/반자동을 서버에서 분리 저장 */
+      pickType?: '자동' | '반자동';
+    } = {}
   ) =>
     fetchJson<PhotoAnalysisJobResult>('/api/v1/photo-analysis/manual', {
       method: 'POST',
@@ -524,6 +529,7 @@ export const v1Api = {
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
         sheet_intent: opts.sheetIntent ?? 'current_round',
+        pick_type: opts.pickType ?? '반자동',
         persist: opts.persist ?? true,
         allow_duplicate: false,
         slips: slips.map((slip) => ({
@@ -887,8 +893,10 @@ export interface PhotoAnalysisIntentSlice {
   draw_template?: DrawReviewTemplate;
   pattern_ready?: boolean;
   entries_summary: PhotoAnalysisAccumulated['entries_summary'];
-  /** 서버에 저장된 수기/대량 게임 줄(번호배열) — 기기 간 동기화 복원용. */
+  /** 서버에 저장된 반자동 게임 줄(번호배열) — 기기 간 동기화 복원용. */
   saved_semi_lines?: number[][];
+  /** 서버에 저장된 자동 게임 줄(번호배열) — 기기 간 동기화 복원용. */
+  saved_auto_lines?: number[][];
   app_ui_message: string;
 }
 

@@ -541,6 +541,15 @@ def check_stored_duplicate(
 
 
 @_synchronized
+def _entry_pick_type(e: Dict[str, Any]) -> str:
+    """엔트리의 픽 타입(자동/반자동). 미기록 구엔트리는 과거 전량 반자동이었으므로 반자동으로 간주."""
+    pt = str(e.get("pick_type") or "").strip()
+    if pt:
+        return pt
+    pt = str(((e.get("result") or {}).get("meta") or {}).get("pick_type") or "").strip()
+    return pt or "반자동"
+
+
 def append_analysis(
     source_id: str,
     result: Dict[str, Any],
@@ -553,6 +562,7 @@ def append_analysis(
     _vva0 = result.get("video_visual_analysis") or {}
     _meta0 = result.get("meta") or {}
     _mode0 = str(_meta0.get("entry_mode") or "photo")
+    _pick0 = str(_meta0.get("pick_type") or "").strip() or "반자동"
     _intent0 = str(_vva0.get("video_intent") or _meta0.get("sheet_intent") or "")
     # 수기/대량 저장은 '현재 전체 세트'를 뜻한다 — 같은 회차·intent 의 기존 수기
     # 엔트리를 지우고 새로 저장해 재저장 시 통계가 누적(중복)되지 않게 한다.
@@ -562,9 +572,15 @@ def append_analysis(
             return True
         return str(((e.get("result") or {}).get("meta") or {}).get("entry_mode") or "") == "manual"
 
+    # 같은 intent + 같은 픽 타입의 이전 수기 세트만 교체한다.
+    # (자동/반자동은 서로 독립 세트 — 반자동 저장이 자동 저장을 지우지 않게 한다.)
     if replace_prior_manual and _mode0 == "manual":
         for prior in list(_live_entries()):
-            if _is_manual(prior) and str(prior.get("video_intent") or "") == _intent0:
+            if (
+                _is_manual(prior)
+                and str(prior.get("video_intent") or "") == _intent0
+                and _entry_pick_type(prior) == _pick0
+            ):
                 delete_entry(str(prior.get("id")))
 
     existing = check_stored_duplicate(source_id, result, allow_duplicate=allow_duplicate)
@@ -589,10 +605,14 @@ def append_analysis(
     evp_full = result.get("extracted_visual_patterns") or {}
 
     entry_mode = str(meta.get("entry_mode") or "photo")
+    pick_type = str(meta.get("pick_type") or "").strip() or (
+        "반자동" if entry_mode == "manual" else ""
+    )
     entry = {
         "id": str(uuid.uuid4()),
         "source_type": "photo",
         "entry_mode": entry_mode,
+        "pick_type": pick_type,
         "source_id": source_id,
         "image_id": vva.get("video_id") or source_id,
         "source_label": label,
@@ -1480,9 +1500,11 @@ def _recompute_intent_combo(entries: List[Dict[str, Any]], intent: str) -> Dict[
     )
 
 
-def _manual_saved_lines(group: List[Dict[str, Any]]) -> List[List[int]]:
+def _manual_saved_lines(
+    group: List[Dict[str, Any]], want_pick_type: str = "반자동"
+) -> List[List[int]]:
     """수기/대량 엔트리의 게임 줄(번호배열) 목록 — 기기 간 동기화용.
-    프론트 반자동 누적(bulkTickets)을 서버 저장분에서 복원하는 데 쓴다."""
+    want_pick_type(자동/반자동) 으로 필터해 프론트 자동·반자동 누적을 각각 복원한다."""
     from .line_overlap_patterns import extract_betting_lines
 
     def _is_manual(e: Dict[str, Any]) -> bool:
@@ -1492,7 +1514,7 @@ def _manual_saved_lines(group: List[Dict[str, Any]]) -> List[List[int]]:
 
     details: List[Dict[str, Any]] = []
     for e in group:
-        if _is_manual(e):
+        if _is_manual(e) and _entry_pick_type(e) == want_pick_type:
             details.extend(_entry_sheet_details(e))
     if not details:
         return []
@@ -1542,7 +1564,8 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         "accumulated_combo_patterns": combo,
         "final_predictions": slice_fp,
         "entries_summary": _entries_summary_for(group),
-        "saved_semi_lines": _manual_saved_lines(group),  # 기기 간 동기화용
+        "saved_semi_lines": _manual_saved_lines(group, "반자동"),  # 반자동 복원용
+        "saved_auto_lines": _manual_saved_lines(group, "자동"),    # 자동 복원용
         "app_ui_message": " · ".join(p for p in parts if p),
     }
     if intent == "review":

@@ -36,6 +36,7 @@ def build_manual_slip_payload(
     lines: List[Dict[str, Any]],
     *,
     slip_name: str = "",
+    pick_type: str = "반자동",
 ) -> Dict[str, Any]:
     """수기 용지 1장(5천원) → sheet payload."""
     game_lines: List[Dict[str, Any]] = []
@@ -63,6 +64,7 @@ def build_manual_slip_payload(
                 "mark_scores": mark_scores,
                 "positions": positions,
                 "source_layout": MANUAL_LAYOUT,
+                "pick_type": pick_type,
             }
         )
         merged_counts.update(mark_scores)
@@ -83,12 +85,16 @@ def build_manual_slip_payload(
     payload["image_index"] = slip_index
     payload["image_label"] = f"용지 {slip_index}"
     payload["entry_mode"] = "manual"
+    payload["pick_type"] = pick_type
     for line in payload.get("lines") or []:
         line["source_layout"] = MANUAL_LAYOUT
+        line["pick_type"] = pick_type
     return payload
 
 
-def build_manual_sheet_payloads(slips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def build_manual_sheet_payloads(
+    slips: List[Dict[str, Any]], *, pick_type: str = "반자동"
+) -> List[Dict[str, Any]]:
     if not slips:
         raise ValueError("등록할 용지가 없습니다.")
     out: List[Dict[str, Any]] = []
@@ -98,11 +104,14 @@ def build_manual_sheet_payloads(slips: List[Dict[str, Any]]) -> List[Dict[str, A
         # 6줄 이상이면 build_manual_slip_payload 가 lines[:GAME_LINE_COUNT] 로 잘라냄.
         if len(raw_lines) < 1:
             raise ValueError(f"용지 {idx}: 최소 1개 게임 줄이 필요합니다.")
+        # 슬립 단위로 픽 타입 지정 가능 (미지정 시 세트 기본값 사용).
+        slip_pick_type = str(slip.get("pick_type") or "").strip() or pick_type
         out.append(
             build_manual_slip_payload(
                 idx,
                 raw_lines,
                 slip_name=str(slip.get("name") or slip.get("label") or ""),
+                pick_type=slip_pick_type,
             )
         )
     return out
@@ -120,20 +129,24 @@ def analyze_manual_slips(
     slips: List[Dict[str, Any]],
     *,
     sheet_intent: str = "current_round",
+    pick_type: str = "반자동",
 ) -> Dict[str, Any]:
     from .dedup import compute_manual_source_id
     from .image_engine import analyze_from_sheet_payloads
 
-    sheet_payloads = build_manual_sheet_payloads(slips)
+    pick_type = pick_type if pick_type in ("자동", "반자동") else "반자동"
+    sheet_payloads = build_manual_sheet_payloads(slips, pick_type=pick_type)
     intent = sheet_intent if sheet_intent in ("review", "current_round") else "current_round"
     intent_label = "복기" if intent == "review" else "이번회차"
-    title = f"{intent_label} 수기 등록 {len(slips)}장"
-    source_id = compute_manual_source_id(slips, intent)
+    title = f"{intent_label} {pick_type} 등록 {len(slips)}장"
+    # 소스 ID 에 픽 타입 포함 — 자동/반자동을 서로 다른 세트로 저장(덮어쓰기 방지).
+    source_id = compute_manual_source_id(slips, intent, pick_type=pick_type)
     return analyze_from_sheet_payloads(
         sheet_payloads,
         sheet_intent=intent,
         title=title,
         source_id=source_id,
         entry_mode="manual",
+        pick_type=pick_type,
         source_count=len(slips),
     )

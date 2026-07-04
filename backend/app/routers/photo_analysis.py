@@ -74,6 +74,7 @@ class ManualSlip(BaseModel):
 
 class ManualAnalyzeRequest(BaseModel):
     sheet_intent: str = Field("current_round", description="review=복기, current_round=이번회차")
+    pick_type: str = Field("반자동", description="자동 | 반자동 — 이 세트의 픽 타입")
     persist: bool = True
     allow_duplicate: bool = False
     slips: List[ManualSlip] = Field(..., min_length=1)
@@ -157,6 +158,11 @@ def analyze_manual(body: ManualAnalyzeRequest):
             status_code=400,
             detail="sheet_intent 는 review(복기) 또는 current_round(이번회차) 이어야 합니다.",
         )
+    if body.pick_type not in ("자동", "반자동"):
+        raise HTTPException(
+            status_code=400,
+            detail="pick_type 은 자동 또는 반자동 이어야 합니다.",
+        )
     try:
         slips = [
             {
@@ -165,7 +171,9 @@ def analyze_manual(body: ManualAnalyzeRequest):
             }
             for slip in body.slips
         ]
-        result = analyze_manual_slips(slips, sheet_intent=body.sheet_intent)
+        result = analyze_manual_slips(
+            slips, sheet_intent=body.sheet_intent, pick_type=body.pick_type
+        )
         source_id = result["video_visual_analysis"]["video_id"]
         stored_entry_id = None
         if body.persist:

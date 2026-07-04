@@ -21,6 +21,8 @@ interface BulkLineInputDialogProps {
   onConfirm: (lines: number[][]) => void;
   /** 슬립당 줄 수 (= 5). 예상 용지 수 표시에 사용. */
   linesPerSlip?: number;
+  /** 이 대량입력이 등록되는 픽 타입 라벨 (예: '자동' / '반자동'). 제목에 표시. */
+  pickTypeLabel?: string;
 }
 
 const PLACEHOLDER = `한 줄에 6개 번호. 콤마/공백/탭 모두 OK.
@@ -179,6 +181,7 @@ export default function BulkLineInputDialog({
   onClose,
   onConfirm,
   linesPerSlip = 5,
+  pickTypeLabel,
 }: BulkLineInputDialogProps) {
   const [text, setText] = useState('');
 
@@ -235,7 +238,7 @@ export default function BulkLineInputDialog({
       }}
     >
       <DialogTitle>
-        대량 줄 입력
+        대량 줄 입력{pickTypeLabel ? ` · ${pickTypeLabel}` : ''}
         <Typography variant="caption" color="text.secondary" display="block">
           텍스트 붙여넣기 → 자동 파싱 → 5줄당 1용지로 분할 · 오류 줄은 인라인 수정/삭제 가능
         </Typography>

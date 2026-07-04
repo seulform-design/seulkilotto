@@ -551,6 +551,11 @@ def _slim_stored_result(result: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(result, dict):
         return result
 
+    combo_list_keys = {
+        "pair_duplicates", "triple_duplicates", "quad_duplicates",
+        "cross_line_combos", "pair_sets", "triple_sets", "same_line_matches",
+    }
+
     def walk(o: Any) -> None:
         if isinstance(o, dict):
             for k, v in list(o.items()):
@@ -564,6 +569,12 @@ def _slim_stored_result(result: Dict[str, Any]) -> Dict[str, Any]:
                     and "numbers" not in v[0]  # 게임 줄(numbers 포함)이 아닌 '조합 출현' dict 만 캡
                 ):
                     o[k] = v[:2]
+                elif k in combo_list_keys and isinstance(v, list) and len(v) > 60:
+                    # 조합 리스트는 빈도순 정렬 — 상위 60개만 저장(카운트·상위 조합 보존).
+                    # 아카이브 엔트리의 수천 개 uncapped 조합이 store 를 비대하게 만든다.
+                    o[k] = v[:60]
+                    for x in o[k]:
+                        walk(x)
                 else:
                     walk(v)
         elif isinstance(o, list):

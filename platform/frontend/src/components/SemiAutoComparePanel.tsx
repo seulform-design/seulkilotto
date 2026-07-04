@@ -1456,8 +1456,11 @@ export default function SemiAutoComparePanel({
           `✅ ${slips.length}장 (${totalLines}줄) 백엔드 저장 완료. 대량 입력은 아래 목록에 유지됩니다.`
         );
       }
-      // 상위에서 accumulated 를 갱신할 수 있도록 query 무효화
+      // 저장 응답에 누적 미포함(경량화) — 저장 성공 후 별도 GET 으로 누적 갱신.
       qc.invalidateQueries({ queryKey: ['photo-analysis-accumulated'] });
+      if (onRefreshAccumulated) {
+        try { await onRefreshAccumulated(); } catch { /* 저장은 완료됨 — 갱신 실패는 무시 */ }
+      }
     } catch (e) {
       if (!mountedRef.current) return;
       setSaveNotice(

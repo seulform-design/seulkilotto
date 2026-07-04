@@ -1253,6 +1253,9 @@ export default function PhotoAnalysisPage() {
         patchManual({ slipQueue: [], currentSlipLines: [], picked: [], lastSavedAt: nowIso });
         setNotice(`✅ ${slips.length}장 분석·저장 완료 — 결과는 페이지 하단`);
       }
+      // 저장은 경량 응답(누적 미포함). 저장 성공 후 별도 GET 으로 누적 갱신.
+      // (실패해도 저장은 이미 완료 — refreshAccumulated 는 내부에서 에러를 삼킨다.)
+      await refreshAccumulated();
     } catch (e) {
       if (!mountedRef.current) return;
       setError(e instanceof Error ? e.message : '분석 실패 — 저장된 줄은 유지됩니다.');

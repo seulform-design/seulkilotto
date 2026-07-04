@@ -230,19 +230,19 @@ def analyze_manual(body: ManualAnalyzeRequest):
                 stored_entry_id = entry["id"]
             except DuplicateAnalysisError as exc:
                 dup = _duplicate_payload(exc.existing_entry, exc.reason)
-                # 거대한 result(수십 MB)는 프론트 미사용 — 응답에서 제거해 게이트웨이 절단 방지.
                 dup.pop("result", None)
-                return to_jsonable({
-                    **dup,
-                    "accumulated": _slim_accumulated(),
-                })
-        # result 는 수기 저장 경로에서 프론트가 쓰지 않고 용량이 수십 MB라
-        # 응답에 넣으면 게이트웨이가 응답을 절단(→ HTML 502)한다. accumulated 만 반환.
+                # accumulated 는 응답에서 계산하지 않는다(아래 설명). 프론트가 별도 GET.
+                return to_jsonable({**dup, "accumulated": None})
+        # 저장 POST 에서는 build_accumulated 를 호출하지 않는다.
+        # analyze(결과 메모리) + append + build_accumulated 가 한 요청에 겹치면
+        # 무료 워커가 OOM(→ nginx 502) 한다. build_accumulated 단독(GET /accumulated)은
+        # 정상이므로, 저장은 경량(analyze+append)으로 끝내고 프론트가 저장 성공 후
+        # GET /accumulated 로 누적을 갱신한다.
         return to_jsonable({
             "result": None,
             "stored_entry_id": stored_entry_id,
             "duplicate_skipped": False,
-            "accumulated": _slim_accumulated() if body.persist else None,
+            "accumulated": None,
         })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

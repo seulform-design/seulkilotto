@@ -2001,7 +2001,8 @@ export default function SemiAutoComparePanel({
   ]);
 
   // 전수비교 '강한 패턴' — matchCount 3+ 그룹(우연 초과의 실제 겹침)을 크기·지지순.
-  // 복기 탭에선 matchedNumbers 가 모두 당첨번호인 그룹을 표시(당첨 패턴 하이라이트).
+  // 정렬은 '당첨 무관'(matchCount·지지) — 당첨 여부로 정렬하면 사후에 당첨을 끌어올려
+  // 착시가 생긴다. 복기 탭은 초록으로 '대조'만 하고 순서엔 영향 주지 않는다.
   const topPatterns = useMemo(() => {
     const list = [
       ...groupLineMatching.groups6,
@@ -2021,18 +2022,83 @@ export default function SemiAutoComparePanel({
             : false,
         winHit: winningSet != null ? g.matchedNumbers.filter((n) => winningSet.has(n)).length : 0,
       }))
-      .sort(
-        (a, b) =>
-          Number(b.allWinning) - Number(a.allWinning) ||
-          b.matchCount - a.matchCount ||
-          b.support - a.support,
-      );
+      .sort((a, b) => b.matchCount - a.matchCount || b.support - a.support);
     return list.slice(0, 20);
   }, [
     groupLineMatching.groups6,
     groupLineMatching.groups5,
     groupLineMatching.groups4,
     groupLineMatching.groups3,
+    winningSet,
+  ]);
+
+  // 🔬 번호별 반복 출현 정밀 역산 (당첨번호 무관) — 이번회차 탭 예측의 근거.
+  // 각 번호가 '어느 일치 레벨(6·5·4·3·2)에 몇 번' 반복 등장했는지(byLevel), 자동·반자동
+  // 지지, 최대 매치, 가장 자주 함께 나온 동반 번호(partners)를 집계한다. 점수는 당첨을
+  // 전혀 쓰지 않는 순수 반복도(Σ matchCount×log2(min(자동,반자동)+1)) — 그래서 당첨을
+  // 모르는 이번회차에서도 동일하게 '계속 반복 출현하는 번호'를 찾는다.
+  const numberRecurrence = useMemo(() => {
+    type P = {
+      byLevel: Record<number, number>;
+      auto: number;
+      semi: number;
+      maxMatch: number;
+      score: number;
+      partners: Record<number, number>;
+    };
+    const profile: Record<number, P> = {};
+    const ensure = (n: number): P =>
+      (profile[n] ??= { byLevel: {}, auto: 0, semi: 0, maxMatch: 0, score: 0, partners: {} });
+    const allGroups = [
+      ...groupLineMatching.groups6,
+      ...groupLineMatching.groups5,
+      ...groupLineMatching.groups4,
+      ...groupLineMatching.groups3,
+      ...groupLineMatching.groups2,
+    ];
+    for (const g of allGroups) {
+      const a = g.autoList.length;
+      const s = g.semiList.length;
+      const w = g.matchCount * Math.log2(Math.min(a, s) + 1);
+      for (const n of g.matchedNumbers) {
+        const p = ensure(n);
+        p.byLevel[g.matchCount] = (p.byLevel[g.matchCount] ?? 0) + 1;
+        p.auto += a;
+        p.semi += s;
+        p.maxMatch = Math.max(p.maxMatch, g.matchCount);
+        p.score += w;
+        for (const m of g.matchedNumbers) if (m !== n) p.partners[m] = (p.partners[m] ?? 0) + 1;
+      }
+    }
+    return Object.keys(profile)
+      .map(Number)
+      .map((n) => {
+        const p = profile[n];
+        const partners = Object.entries(p.partners)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([m]) => Number(m));
+        const totalGroups = Object.values(p.byLevel).reduce((x, y) => x + y, 0);
+        return {
+          number: n,
+          byLevel: p.byLevel,
+          auto: p.auto,
+          semi: p.semi,
+          maxMatch: p.maxMatch,
+          score: p.score,
+          totalGroups,
+          partners,
+          winning: winningSet != null && winningSet.size > 0 ? winningSet.has(n) : false,
+        };
+      })
+      .sort((a, b) => b.score - a.score || a.number - b.number)
+      .slice(0, 14);
+  }, [
+    groupLineMatching.groups6,
+    groupLineMatching.groups5,
+    groupLineMatching.groups4,
+    groupLineMatching.groups3,
+    groupLineMatching.groups2,
     winningSet,
   ]);
 
@@ -3231,9 +3297,10 @@ export default function SemiAutoComparePanel({
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 <strong>자동↔반자동 1:1 전수비교</strong>를 전수 분석 — 두 줄의 공통 번호 개수(matchCount)가
-                클수록(무작위 기대≈0.8개 → 3개+ 는 유의) 강하게 가중하고, <strong>자동·반자동 양쪽이 함께 반복</strong>해
-                가리킨 번호를 상위로 올립니다(인기 한쪽 번호 배제). <strong>평행회차</strong>(강수·기대수)는 보조.
-                당첨번호는 계산에 넣지 않습니다(누수 방지).
+                클수록(무작위 기대≈0.8개 → 3개+ 는 유의) 강하게, <strong>여러 그룹에 반복</strong> 등장할수록
+                강하게 가중해 <strong>자동·반자동이 함께 계속 가리킨 번호</strong>를 상위로 올립니다. 평행회차·세트 중복도 반영.
+                <strong>당첨번호를 전혀 쓰지 않으므로</strong>(순수 반복도), 당첨을 모르는 <strong>이번회차 탭에서도 동일</strong>하게
+                반복 출현 번호를 찾습니다. 복기 탭은 아래에서 실제 당첨과 '대조'만 합니다.
               </Typography>
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
                 {predictedNumbers.slice(0, 8).map((p) => (
@@ -3259,18 +3326,64 @@ export default function SemiAutoComparePanel({
                   const hit8 = top8.filter((n) => winningSet.has(n)).length;
                   const hit6 = top6.filter((n) => winningSet.has(n)).length;
                   return (
-                    <Chip
-                      size="small"
-                      color={hit6 >= 3 ? 'success' : hit6 >= 2 ? 'warning' : 'default'}
-                      label={`역산 검증 — ${effectiveRound ?? '?'}회 실제 당첨 대조: 상위 6개 중 ${hit6}개 · 상위 8개 중 ${hit8}개 적중`}
-                      sx={{ fontWeight: 700 }}
-                    />
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
+                      <Chip
+                        size="small"
+                        color={hit6 >= 3 ? 'success' : hit6 >= 2 ? 'warning' : 'default'}
+                        label={`역산 검증 — ${effectiveRound ?? '?'}회 실제 당첨 대조: 상위 6개 중 ${hit6}개 · 상위 8개 중 ${hit8}개 적중`}
+                        sx={{ fontWeight: 700 }}
+                      />
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                        (무작위 기대 ≈ 상위 6개 중 0.8개 · 이 값보다 높아야 신호로 의미 있음)
+                      </Typography>
+                    </Stack>
                   );
                 })()
               ) : (
                 <Typography variant="caption" color="text.secondary">
                   ※ 상위 6~8개 중 6개를 골라 조합하세요. 로또는 무작위라 확률 자체는 오르지 않습니다.
                 </Typography>
+              )}
+
+              {/* 🔬 번호별 반복 출현 정밀 역산 (당첨 무관) — 이번회차 예측 근거 */}
+              {numberRecurrence.length > 0 && (
+                <Box sx={{ mt: 1.25 }}>
+                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
+                    🔬 번호별 반복 출현 정밀 역산 (당첨번호 무관 · 이번회차에도 동일)
+                    {compareWinning ? ' — 초록: 실제 당첨번호' : ''}
+                  </Typography>
+                  <Box
+                    sx={{
+                      maxHeight: numberRecurrence.length > 8 ? 260 : undefined,
+                      overflowY: numberRecurrence.length > 8 ? 'auto' : undefined,
+                      bgcolor: 'action.hover',
+                      borderRadius: 1,
+                      p: 0.75,
+                    }}
+                  >
+                    <Stack spacing={0.5}>
+                      {numberRecurrence.map((r) => {
+                        const levelStr = [6, 5, 4, 3, 2]
+                          .filter((L) => (r.byLevel[L] ?? 0) > 0)
+                          .map((L) => `${L}일치×${r.byLevel[L]}`)
+                          .join(' · ');
+                        return (
+                          <Stack key={`rec-${r.number}`} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
+                            <LottoBall
+                              number={r.number}
+                              size={26}
+                              dimmed={compareWinning && winningSet ? !r.winning : false}
+                            />
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                              <strong>{r.totalGroups}그룹</strong> ({levelStr}) · 자동 {r.auto}·반자동 {r.semi} 지지
+                              {r.partners.length > 0 ? ` · 동반 ${r.partners.join(',')}` : ''}
+                            </Typography>
+                          </Stack>
+                        );
+                      })}
+                    </Stack>
+                  </Box>
+                </Box>
               )}
 
               {/* 전수비교 강한 패턴 — matchCount 3+ 그룹(우연 초과의 실제 겹침) 상세 */}

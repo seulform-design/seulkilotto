@@ -49,21 +49,34 @@ def _save_uploads(files: List[UploadFile], tmp: Path) -> List[Path]:
 # (lines/locations)을 통째로 담아 응답이 10MB+ 로 커지고 게이트웨이가 절단한다.
 # 화면엔 조합·카운트(line_count 등 스칼라)만 필요하므로 상세 배열만 소수로 캡한다.
 # saved_semi_lines/saved_auto_lines/numbers 등 다른 키는 건드리지 않는다.
-_SLIM_DETAIL_KEYS = {"lines", "locations"}
+# 절대 잘라선 안 되는 데이터 배열(복원·핵심 값). 나머지 dict-내 리스트는 상위 N만.
+_SLIM_KEEP_FULL = {
+    "saved_semi_lines", "saved_auto_lines", "numbers", "matching_numbers",
+    "strong_candidates", "excluded_candidates", "marked_numbers",
+    "winning", "referenced_rounds",
+}
+_SLIM_DETAIL_KEYS = {"lines", "locations"}  # 조합별 출현 상세 — 극소수만
 _SLIM_DETAIL_CAP = 3
+_SLIM_LIST_CAP = 100    # 그 외 모든 리스트(조합·세트·요약) 상위 N — 전체 건수는 스칼라로 별도 제공
+_SLIM_STR_CAP = 4000    # 초장문 문자열(formatted_text 등) 절단
 
 
-def _slim_for_client(obj, cap: int = _SLIM_DETAIL_CAP):
+def _slim_for_client(obj):
     if isinstance(obj, dict):
         out = {}
         for k, v in obj.items():
-            if k in _SLIM_DETAIL_KEYS and isinstance(v, list):
-                out[k] = [_slim_for_client(x, cap) for x in v[:cap]]
+            if isinstance(v, (dict, list)) and k in _SLIM_KEEP_FULL:
+                out[k] = _slim_for_client(v) if isinstance(v, dict) else [_slim_for_client(x) for x in v]
+            elif isinstance(v, list):
+                cap = _SLIM_DETAIL_CAP if k in _SLIM_DETAIL_KEYS else _SLIM_LIST_CAP
+                out[k] = [_slim_for_client(x) for x in v[:cap]]
+            elif isinstance(v, str) and len(v) > _SLIM_STR_CAP:
+                out[k] = v[:_SLIM_STR_CAP]
             else:
-                out[k] = _slim_for_client(v, cap)
+                out[k] = _slim_for_client(v)
         return out
     if isinstance(obj, list):
-        return [_slim_for_client(x, cap) for x in obj]
+        return [_slim_for_client(x) for x in obj]
     return obj
 
 

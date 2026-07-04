@@ -1213,6 +1213,18 @@ export default function SemiAutoComparePanel({
     return (d.stats?.hot_top5 ?? []).map((h) => h.number);
   }, [machineRecommendQuery.data]);
 
+  // 회차별 예상 추첨기(1/2/3호기) — recommend/round 가 다음 회차용으로 예측한다.
+  const machineData = machineRecommendQuery.data ?? null;
+  const expectedMachineLabel = machineData
+    ? `${machineData.next_round}회 예상 ${machineData.machine_id}호기${
+        machineData.machine_source === 'estimated'
+          ? ' (추정)'
+          : machineData.machine_source === 'confirmed'
+            ? ' (확정)'
+            : ''
+      }`
+    : null;
+
   const resolvedStrongCandidates = useMemo(() => {
     if (predictionSignals?.strong_candidates?.length) {
       return predictionSignals.strong_candidates;
@@ -1871,6 +1883,54 @@ export default function SemiAutoComparePanel({
   ]);
   const hasLineMatchingInputs = groupLineMatching.autoLineCount > 0 || groupLineMatching.semiLineCount > 0;
   const canRenderLineMatching = groupLineMatching.autoLineCount > 0 && groupLineMatching.semiLineCount > 0;
+
+  // 🎯 당첨 예상번호 — 3축 역산: ① 자동↔반자동 1:1 전수비교(여러 자동·반자동 줄이
+  // 공통으로 가진 번호일수록 강한 신호) ② 평행회차 강수·기대수 ③ 회차별 예상 추첨기
+  // 고빈도. 세 축 점수를 합산해 신뢰도순으로 정렬한다. 당첨번호(winningSet)는 계산에
+  // 넣지 않는다(사후 편향·누수 방지) — 복기 탭은 산출 후 실제 당첨과 대조만 표시.
+  const predictedNumbers = useMemo(() => {
+    const score: Record<number, number> = {};
+    const srcMap: Record<number, Set<string>> = {};
+    const add = (n: number, w: number, src: string) => {
+      if (!Number.isInteger(n) || n < 1 || n > 45 || w <= 0) return;
+      score[n] = (score[n] ?? 0) + w;
+      (srcMap[n] ??= new Set<string>()).add(src);
+    };
+    const groups = [
+      ...groupLineMatching.groups6,
+      ...groupLineMatching.groups5,
+      ...groupLineMatching.groups4,
+      ...groupLineMatching.groups3,
+      ...groupLineMatching.groups2,
+    ];
+    for (const g of groups) {
+      const cardWeight = g.autoList.length + g.semiList.length;
+      const w = g.matchCount * g.matchCount * Math.log2(cardWeight + 1);
+      for (const n of g.matchedNumbers) add(n, w, '1:1');
+    }
+    parallelStrong.forEach((n, idx) => add(n, Math.max(3, 20 - idx * 1.2), '평행'));
+    parallelExpected.forEach((n, idx) => add(n, Math.max(2, 10 - idx * 0.6), '평행'));
+    machineStrong.forEach((n, idx) => add(n, Math.max(4, 20 - idx * 1.5), '추첨기'));
+
+    const ranked = Object.entries(score)
+      .map(([n, s]) => ({
+        number: Number(n),
+        score: s,
+        sources: Array.from(srcMap[Number(n)] ?? []),
+      }))
+      .sort((a, b) => b.score - a.score || a.number - b.number);
+    const maxScore = ranked[0]?.score ?? 1;
+    return ranked.map((r) => ({ ...r, confidence: Math.round((r.score / maxScore) * 100) }));
+  }, [
+    groupLineMatching.groups6,
+    groupLineMatching.groups5,
+    groupLineMatching.groups4,
+    groupLineMatching.groups3,
+    groupLineMatching.groups2,
+    parallelStrong,
+    parallelExpected,
+    machineStrong,
+  ]);
   const lineMatchNumber = lineMatchNumberFilter ? Number(lineMatchNumberFilter) : null;
   const filterLineMatchGroups = <T extends { matchCount: number; matchedNumbers: number[] }>(groups: T[]): T[] =>
     groups.filter((g) => {
@@ -3011,6 +3071,62 @@ export default function SemiAutoComparePanel({
               </Paper>
             );
           })()}
+
+          {/* 🎯 당첨 예상번호 — 3축(1:1 전수비교 역산·평행회차·예상 추첨기) 합산 */}
+          {predictedNumbers.length > 0 && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main' }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                <Typography variant="body2" fontWeight={700}>
+                  🎯 {effectiveRound ?? '?'}회 당첨 예상번호 (3축 역산)
+                </Typography>
+                {expectedMachineLabel && (
+                  <Chip size="small" color="secondary" variant="outlined" label={expectedMachineLabel} sx={{ fontWeight: 700 }} />
+                )}
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                <strong>자동↔반자동 1:1 전수비교 역산</strong>(여러 자동·반자동 줄이 공통으로 가진 번호일수록↑) ·{' '}
+                <strong>평행회차</strong>(강수·기대수) · <strong>예상 추첨기</strong>(회차별 1/2/3호기 고빈도) —
+                세 축 점수를 합산해 신뢰도순으로 정렬한 예상번호입니다. 당첨번호는 계산에 넣지 않습니다.
+              </Typography>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                {predictedNumbers.slice(0, 8).map((p) => (
+                  <Box key={`pred-${p.number}`} sx={{ textAlign: 'center', minWidth: 40 }}>
+                    <LottoBall
+                      number={p.number}
+                      size={36}
+                      dimmed={compareWinning && winningSet ? !winningSet.has(p.number) : false}
+                    />
+                    <Typography variant="caption" sx={{ display: 'block', fontSize: 9, lineHeight: 1.2, color: 'text.secondary', mt: 0.25 }}>
+                      {p.sources.join('·')}
+                    </Typography>
+                    <Typography variant="caption" sx={{ display: 'block', fontSize: 9, lineHeight: 1.1, color: 'text.disabled' }}>
+                      {p.confidence}%
+                    </Typography>
+                  </Box>
+                ))}
+              </Stack>
+              {compareWinning && winningSet && winningSet.size > 0 ? (
+                (() => {
+                  const top8 = predictedNumbers.slice(0, 8).map((p) => p.number);
+                  const top6 = predictedNumbers.slice(0, 6).map((p) => p.number);
+                  const hit8 = top8.filter((n) => winningSet.has(n)).length;
+                  const hit6 = top6.filter((n) => winningSet.has(n)).length;
+                  return (
+                    <Chip
+                      size="small"
+                      color={hit6 >= 3 ? 'success' : hit6 >= 2 ? 'warning' : 'default'}
+                      label={`역산 검증 — ${effectiveRound ?? '?'}회 실제 당첨 대조: 상위 6개 중 ${hit6}개 · 상위 8개 중 ${hit8}개 적중`}
+                      sx={{ fontWeight: 700 }}
+                    />
+                  );
+                })()
+              ) : (
+                <Typography variant="caption" color="text.secondary">
+                  ※ 상위 6~8개 중 6개를 골라 조합하세요. 로또는 무작위라 확률 자체는 오르지 않습니다.
+                </Typography>
+              )}
+            </Paper>
+          )}
 
           {/* 추천 조합 — 복기 탭 통계 종합 스코어링 */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>

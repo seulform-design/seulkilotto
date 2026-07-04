@@ -106,6 +106,10 @@ def _slim_accumulated():
     # 그대로 캡 유지 → 응답 크기·게이트웨이 절단 여유는 보존.
     if isinstance(full, dict) and isinstance(slim, dict):
         uncap_keys = ("pair_duplicates", "triple_duplicates", "quad_duplicates")
+        # 화면(renderCross)이 실제 읽는 필드만 남겨 항목을 ~100B 로 줄인다. lines/
+        # locations/*_indices 등 미표시 대용량 필드는 버려 전체 노출해도 응답이
+        # 게이트웨이 한계를 넘지 않게 한다.
+        keep_item = ("numbers", "size", "line_count", "repeat_count", "lift", "z", "is_winning_combo")
         for intent, fslice in (full.get("by_intent") or {}).items():
             if not isinstance(fslice, dict):
                 continue
@@ -116,7 +120,11 @@ def _slim_accumulated():
                 for key in uncap_keys:
                     items = fcombo.get(key)
                     if isinstance(items, list):
-                        scombo[key] = [_slim_for_client(it) for it in items]
+                        scombo[key] = [
+                            {k: it[k] for k in keep_item if k in it}
+                            for it in items
+                            if isinstance(it, dict)
+                        ]
     return slim
 
 

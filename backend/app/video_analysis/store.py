@@ -1334,64 +1334,6 @@ def clear_store_intent(intent: str) -> int:
 
 
 @_synchronized
-def reclassify_manual_pick_type(
-    intent: str, from_pick_type: str, to_pick_type: str
-) -> int:
-    """특정 intent 의 수기 엔트리 픽 타입을 일괄 재분류한다.
-
-    구 버전(픽 타입 도입 전)에 저장돼 전부 '반자동'으로 갇힌 자동 구매 용지를
-    '자동'으로 되돌리는 등, 레거시 데이터 정정에 쓴다. pick_type 필드만 수정하며
-    번호·구조는 절대 건드리지 않는다.
-    """
-    if intent not in ("review", "current_round"):
-        raise ValueError("intent must be 'review' or 'current_round'")
-    from_pt = (from_pick_type or "").strip()
-    to_pt = (to_pick_type or "").strip()
-    if to_pt not in ("자동", "반자동"):
-        raise ValueError("to_pick_type must be '자동' or '반자동'")
-
-    def _is_manual(e: Dict[str, Any]) -> bool:
-        if str(e.get("entry_mode") or "") == "manual":
-            return True
-        return str(((e.get("result") or {}).get("meta") or {}).get("entry_mode") or "") == "manual"
-
-    def _apply(entries: List[Dict[str, Any]]) -> int:
-        changed = 0
-        for e in entries:
-            if not _is_manual(e):
-                continue
-            if str(e.get("video_intent") or "") != intent:
-                continue
-            if from_pt and _entry_pick_type(e) != from_pt:
-                continue
-            e["pick_type"] = to_pt
-            res = e.get("result")
-            if isinstance(res, dict):
-                meta = res.get("meta")
-                if isinstance(meta, dict):
-                    meta["pick_type"] = to_pt
-                    for sd in meta.get("sheet_details") or []:
-                        if isinstance(sd, dict):
-                            sd["pick_type"] = to_pt
-            changed += 1
-        return changed
-
-    if intent == "review":
-        historical = _load_historical_raw()
-        changed = _apply(historical.get("entries") or [])
-        if changed:
-            _save_historical_raw(historical)
-        return changed
-
-    current = _load_current_raw()
-    changed = _apply(current.get("entries") or [])
-    if changed:
-        _refresh_current_dataset(current)
-        _save_current_raw(current)
-    return changed
-
-
-@_synchronized
 def delete_entry(entry_id: str) -> bool:
     historical = _load_historical_raw()
     entries = historical.get("entries") or []

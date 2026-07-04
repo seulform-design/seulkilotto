@@ -21,7 +21,6 @@ from app.video_analysis.store import (
     clear_store_intent,
     delete_entry,
     list_entries,
-    reclassify_manual_pick_type,
 )
 from app.video_analysis.vision_config import clear_vision_api_key, save_vision_api_key, set_photo_use_vision
 
@@ -296,22 +295,3 @@ def delete_store_entry(entry_id: str):
     if not delete_entry(entry_id):
         raise HTTPException(status_code=404, detail="분석 기록을 찾을 수 없습니다.")
     return to_jsonable({"ok": True, "accumulated": build_accumulated()})
-
-
-class ReclassifyRequest(BaseModel):
-    sheet_intent: str = Field("current_round", description="review | current_round")
-    from_pick_type: str = Field("반자동", description="자동 | 반자동 — 재분류 대상 픽 타입")
-    to_pick_type: str = Field("자동", description="자동 | 반자동 — 변경할 픽 타입")
-
-
-@router.post("/reclassify")
-def reclassify_manual(body: ReclassifyRequest):
-    """레거시 수기 엔트리의 픽 타입 일괄 재분류 (예: 갇힌 반자동 → 자동)."""
-    if body.sheet_intent not in ("review", "current_round"):
-        raise HTTPException(status_code=400, detail="sheet_intent 는 review 또는 current_round 이어야 합니다.")
-    if body.from_pick_type not in ("자동", "반자동") or body.to_pick_type not in ("자동", "반자동"):
-        raise HTTPException(status_code=400, detail="pick_type 은 자동 또는 반자동 이어야 합니다.")
-    changed = reclassify_manual_pick_type(
-        body.sheet_intent, body.from_pick_type, body.to_pick_type
-    )
-    return to_jsonable({"ok": True, "reclassified": changed, "accumulated": build_accumulated()})

@@ -556,12 +556,15 @@ def append_analysis(
     _intent0 = str(_vva0.get("video_intent") or _meta0.get("sheet_intent") or "")
     # 수기/대량 저장은 '현재 전체 세트'를 뜻한다 — 같은 회차·intent 의 기존 수기
     # 엔트리를 지우고 새로 저장해 재저장 시 통계가 누적(중복)되지 않게 한다.
+    # entry_mode 미기록 구엔트리는 저장된 result.meta 로 역추론(하위호환 치유).
+    def _is_manual(e: Dict[str, Any]) -> bool:
+        if str(e.get("entry_mode") or "") == "manual":
+            return True
+        return str(((e.get("result") or {}).get("meta") or {}).get("entry_mode") or "") == "manual"
+
     if replace_prior_manual and _mode0 == "manual":
         for prior in list(_live_entries()):
-            if (
-                str(prior.get("entry_mode") or "") == "manual"
-                and str(prior.get("video_intent") or "") == _intent0
-            ):
+            if _is_manual(prior) and str(prior.get("video_intent") or "") == _intent0:
                 delete_entry(str(prior.get("id")))
 
     existing = check_stored_duplicate(source_id, result, allow_duplicate=allow_duplicate)

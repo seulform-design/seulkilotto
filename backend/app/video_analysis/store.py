@@ -417,6 +417,7 @@ def _load_historical_raw() -> Dict[str, Any]:
 
 
 def _save_historical_raw(data: Dict[str, Any]) -> None:
+    _slim_store_entries_inplace(data)  # 아카이브 포함 store 점진 축소
     payload = _deep_copy(data)
     payload.setdefault("entries", [])
     payload.setdefault("archived_current_rounds", [])
@@ -449,6 +450,7 @@ def _load_current_raw() -> Dict[str, Any]:
 
 
 def _save_current_raw(data: Dict[str, Any]) -> None:
+    _slim_store_entries_inplace(data)  # store 점진 축소
     payload = _deep_copy(data)
     payload.setdefault("entries", [])
     payload.setdefault("derived_datasets", {})
@@ -541,6 +543,51 @@ def check_stored_duplicate(
 
 
 @_synchronized
+def _slim_stored_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """저장용 result 슬림 — 조합 '출현 상세'(locations, 조합 appearance lines)만 제거해
+    저장 크기를 줄인다. sheet_details 의 게임 줄(numbers)과 조합 카운트(line_count 등)는
+    보존하므로 saved_lines 복원·조합 카운트 표시·재분석에 영향 없다.
+    (누적 응답용 _slim_for_client 와 달리, sheet_details 의 게임 줄은 자르지 않는다.)"""
+    if not isinstance(result, dict):
+        return result
+
+    def walk(o: Any) -> None:
+        if isinstance(o, dict):
+            for k, v in list(o.items()):
+                if k == "locations" and isinstance(v, list):
+                    o[k] = v[:2]
+                elif (
+                    k == "lines"
+                    and isinstance(v, list)
+                    and v
+                    and isinstance(v[0], dict)
+                    and "numbers" not in v[0]  # 게임 줄(numbers 포함)이 아닌 '조합 출현' dict 만 캡
+                ):
+                    o[k] = v[:2]
+                else:
+                    walk(v)
+        elif isinstance(o, list):
+            for x in o:
+                walk(x)
+
+    walk(result)
+    return result
+
+
+def _slim_store_entries_inplace(data: Dict[str, Any]) -> None:
+    """저장 store 의 모든 엔트리(라이브+아카이브)의 조합 출현 상세를 in-place 로 슬림.
+    저장 시마다 호출 → 롤오버로 비대해진 아카이브 result(수십 MB)를 점진 축소해
+    이후 저장/조회의 메모리(OOM→502)를 낮춘다. 게임 줄·카운트는 보존."""
+    if not isinstance(data, dict):
+        return
+    for e in data.get("entries") or []:
+        _slim_stored_result(e)
+    for batch in data.get("archived_current_rounds") or []:
+        if isinstance(batch, dict):
+            for e in batch.get("entries") or []:
+                _slim_stored_result(e)
+
+
 def _entry_pick_type(e: Dict[str, Any]) -> str:
     """엔트리의 픽 타입(자동/반자동). 미기록 구엔트리는 과거 전량 반자동이었으므로 반자동으로 간주."""
     pt = str(e.get("pick_type") or "").strip()
@@ -559,6 +606,9 @@ def append_analysis(
     replace_existing: bool = False,
     replace_prior_manual: bool = False,
 ) -> Dict[str, Any]:
+    # 저장 크기 축소 — 조합 출현 상세 제거(게임 줄·카운트 보존). 저장 store 비대·
+    # 저장 요청 메모리(OOM→502) 방지. 카운트만 쓰는 build_accumulated 에 영향 없음.
+    result = _slim_stored_result(result)
     _vva0 = result.get("video_visual_analysis") or {}
     _meta0 = result.get("meta") or {}
     _mode0 = str(_meta0.get("entry_mode") or "photo")

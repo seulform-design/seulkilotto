@@ -450,8 +450,8 @@ function IntentAccumulatedPanel({
           {slice.app_ui_message}
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          구성: 자동 {slice.saved_auto_lines?.length ?? 0}줄 · 반자동 {slice.saved_semi_lines?.length ?? 0}줄
-          {' '}— 이 누적은 <strong>자동+반자동 전체 등록분</strong>을 함께 분석합니다.
+          이 누적은 <strong>자동 등록분({slice.saved_auto_lines?.length ?? 0}줄)만</strong> 분석합니다.
+          반자동({slice.saved_semi_lines?.length ?? 0}줄)은 §3 반자동 비교에서 별도로 다룹니다.
         </Typography>
         <Chip label={`${slice.video_intent_label} ${slice.total_analyses}건`} size="small" color={intent === 'review' ? 'primary' : 'secondary'} />
       </Paper>

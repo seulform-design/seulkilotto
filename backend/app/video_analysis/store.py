@@ -1457,11 +1457,16 @@ def _latest_entry_combo(entry: Dict[str, Any]) -> Dict[str, Any] | None:
     return evp.get("combo_patterns") or meta.get("combo_patterns") or combo
 
 
-def _recompute_intent_combo(entries: List[Dict[str, Any]], intent: str) -> Dict[str, Any]:
+def _recompute_intent_combo(
+    entries: List[Dict[str, Any]], intent: str, pick_type: str | None = None
+) -> Dict[str, Any]:
     from .combo_patterns import analyze_current_round_sheet_combos
     from .draw_template import _winning_combo_hits, build_draw_review_template
 
     group = [e for e in entries if e.get("video_intent") == intent]
+    # 픽 타입 지정 시 해당 타입만 분석 (예: '자동 누적'은 자동 등록분만).
+    if pick_type:
+        group = [e for e in group if _entry_pick_type(e) == pick_type]
     if not group:
         return {"summary": "분석 없음", "pair_duplicates": [], "triple_duplicates": []}
 
@@ -1536,7 +1541,10 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     label = "복기" if intent == "review" else "이번회차"
     round_no = str(get_review_round_no()) if intent == "review" else str(get_current_round_no())
     intent_acc = _accumulate_entries(group) if group else None
-    combo = _recompute_intent_combo(entries, intent) if group else {
+    # 누적 조합 분석은 '자동 누적'만 대상으로 한다 (자동 탭 표시 + 반자동 탭의
+    # 자동↔반자동 비교 기준 + 백테스트 모두 '자동 누적'을 기대). 반자동 등록분은
+    # 각 탭이 자체 누적/비교로 처리한다.
+    combo = _recompute_intent_combo(entries, intent, pick_type="자동") if group else {
         "summary": f"{label} 분석 없음",
         "pair_duplicates": [],
         "triple_duplicates": [],

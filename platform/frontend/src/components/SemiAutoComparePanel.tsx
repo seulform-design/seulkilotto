@@ -1618,6 +1618,8 @@ export default function SemiAutoComparePanel({
         strongCandidateCount: resolvedStrongCandidates.length,
         strongDist: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 } as Record<number, number>,
         strongAvailable: resolvedStrongCandidates.length > 0,
+        allAutoNumbers: [] as number[][],
+        allSemiNumbers: [] as number[][],
       };
     }
     type LineRef = { idx: number; numbers: number[]; sourceLabel: string };
@@ -1841,6 +1843,11 @@ export default function SemiAutoComparePanel({
       strongCandidateCount: strongCandidates.length,
       strongDist,
       strongAvailable: strongCandidates.length > 0,
+      // 중복 제거된 '모든' 자동·반자동 줄(번호 배열) — 매치 여부와 무관하게 각 번호가
+      // 몇 줄에 나오는지(반복 출현 빈도)를 세기 위해 노출. 매치번호가 아니어도
+      // 그 줄에 든 번호(예: {6,24} 매치 줄 안의 14)까지 모두 집계된다.
+      allAutoNumbers: autoLines.map((l) => l.numbers),
+      allSemiNumbers: semiLines.map((l) => l.numbers),
     };
   }, [
     currentSlipLines,
@@ -1956,6 +1963,15 @@ export default function SemiAutoComparePanel({
         for (const m of g.matchedNumbers) if (m !== n) p.partners[m] = (p.partners[m] ?? 0) + 1;
       }
     }
+    // 반복 출현 빈도 = '모든' 자동·반자동 줄에서 각 번호가 몇 줄에 나오는지(줄 단위
+    // 중복 제거). 매치번호가 아니어도(예: {6,24} 매치 줄 안의 14) 그 줄에 있으면 센다.
+    const autoFreq: Record<number, number> = {};
+    const semiFreq: Record<number, number> = {};
+    for (const line of groupLineMatching.allAutoNumbers)
+      for (const n of new Set(line)) autoFreq[n] = (autoFreq[n] ?? 0) + 1;
+    for (const line of groupLineMatching.allSemiNumbers)
+      for (const n of new Set(line)) semiFreq[n] = (semiFreq[n] ?? 0) + 1;
+
     const score: Record<number, number> = {};
     const srcMap: Record<number, Set<string>> = {};
     const add = (n: number, w: number, src: string) => {
@@ -1963,13 +1979,14 @@ export default function SemiAutoComparePanel({
       score[n] = (score[n] ?? 0) + w;
       (srcMap[n] ??= new Set<string>()).add(src);
     };
-    for (const key of Object.keys(prof)) {
-      const n = Number(key);
-      const p = prof[n];
-      const a = p.autoIdx.size;
-      const s = p.semiIdx.size;
-      // 양쪽 합의(곱) × 큰 매치 보너스. distinct 줄 기준이라 브레드스 노이즈에 강함.
-      const w = Math.log2(a + 1) * Math.log2(s + 1) * (1 + 0.4 * Math.max(0, p.maxMatch - 2)) * 4;
+    // 자동·반자동 '양쪽 줄'에 반복 출현할수록 강함(곱). 큰 매치(3+)에 든 번호는 보너스.
+    // 한쪽만 인기인 번호는 반대쪽 log=0 으로 자동 억제. 후보=어느 한쪽이라도 등장한 번호.
+    const cand = new Set<number>([...Object.keys(autoFreq), ...Object.keys(semiFreq)].map(Number));
+    for (const n of cand) {
+      const a = autoFreq[n] ?? 0;
+      const s = semiFreq[n] ?? 0;
+      const mm = prof[n]?.maxMatch ?? 0;
+      const w = Math.log2(a + 1) * Math.log2(s + 1) * (1 + 0.4 * Math.max(0, mm - 2)) * 4;
       add(n, w, '1:1');
     }
     // 세트 중복 역산 보너스 — 여러 그룹에 반복 등장한 강한 세트({13,38}) 가산.
@@ -1997,8 +2014,8 @@ export default function SemiAutoComparePanel({
           score: score[n],
           sources: Array.from(srcMap[n] ?? []),
           maxMatch: p?.maxMatch ?? 0,
-          auto: p?.autoIdx.size ?? 0,
-          semi: p?.semiIdx.size ?? 0,
+          auto: autoFreq[n] ?? 0,
+          semi: semiFreq[n] ?? 0,
           byLevel: p?.byLevel ?? ({} as Record<number, number>),
           partners,
           totalGroups,
@@ -2013,6 +2030,8 @@ export default function SemiAutoComparePanel({
     groupLineMatching.groups4,
     groupLineMatching.groups3,
     groupLineMatching.groups2,
+    groupLineMatching.allAutoNumbers,
+    groupLineMatching.allSemiNumbers,
     parallelStrong,
     parallelExpected,
     crossSetPatterns,

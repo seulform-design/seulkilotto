@@ -142,6 +142,7 @@ def _adaptive_cross_line_min(line_count: int, combo_size: int) -> int:
 # obs(카운트)는 전체를 유지하되, 조합별 출현 상세와 조합 총개수만 제한한다.
 _COMBO_APP_CAP = 5     # 조합별 보관 출현 예시 수
 _COMBO_MAX = 400       # 크기별(pairs/triples/quads) 반환 조합 상한(빈도순)
+_ANALYSIS_LINE_CAP = 300  # 조합 분석 입력 줄 수 상한 — 메모리 OOM 방지(하드 바운드)
 
 
 def find_cross_line_combos(
@@ -483,7 +484,13 @@ def analyze_line_overlap_patterns(
     - same_line_matches: 기준번호와 줄별 2·3·4·5·6개 일치 (당첨 방식)
     - cross_line_combos: 다른 줄에도 함께 나온 2·3·4번호 조합
     """
-    lines = extract_betting_lines(sheet_details)
+    lines_all = extract_betting_lines(sheet_details)
+    # 메모리 하드 바운드 — 조합 분석은 O(줄수²) 로 중간 자료구조가 커져(pairs/
+    # triples/quads × 출현) 대량 누적(수백 줄) 저장 시 워커 OOM(→ 502)을 유발한다.
+    # 상한을 둬 분석 줄 수를 제한한다. 전체 건수는 별도 표기.
+    _analysis_truncated = len(lines_all) > _ANALYSIS_LINE_CAP
+    lines = lines_all[:_ANALYSIS_LINE_CAP] if _analysis_truncated else lines_all
+    total_lines_available = len(lines_all)
     ref = sorted({int(n) for n in (reference_numbers or []) if 1 <= int(n) <= 45})
     line_count = len(lines)
     sheet_count = len({l["sheet_index"] for l in lines})
@@ -544,7 +551,10 @@ def analyze_line_overlap_patterns(
 
     parts: List[str] = []
     if line_count:
-        parts.append(f"게임 줄 {line_count}개 (용지 {sheet_count}장)")
+        if _analysis_truncated:
+            parts.append(f"게임 줄 {line_count}개 분석 (전체 {total_lines_available}줄 중 최근 {_ANALYSIS_LINE_CAP}줄 · 메모리 보호)")
+        else:
+            parts.append(f"게임 줄 {line_count}개 (용지 {sheet_count}장)")
     if ref:
         tier_bits = []
         for k in ("6", "5", "4", "3", "2"):

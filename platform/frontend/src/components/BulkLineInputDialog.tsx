@@ -23,6 +23,13 @@ interface BulkLineInputDialogProps {
   linesPerSlip?: number;
   /** 이 대량입력이 등록되는 픽 타입 라벨 (예: '자동' / '반자동'). 제목에 표시. */
   pickTypeLabel?: string;
+  /** 이미 저장된 누적 줄 키 집합 (정렬번호 '-' 조인). 겹침 검증·경고에 사용. */
+  existingKeys?: Set<string>;
+}
+
+/** 번호 배열 → 정렬 '-' 조인 키. 겹침 비교 공통 규칙. */
+export function lineKey(nums: number[]): string {
+  return [...nums].sort((a, b) => a - b).join('-');
 }
 
 const PLACEHOLDER = `한 줄에 6개 번호. 콤마/공백/탭 모두 OK.
@@ -182,10 +189,17 @@ export default function BulkLineInputDialog({
   onConfirm,
   linesPerSlip = 5,
   pickTypeLabel,
+  existingKeys,
 }: BulkLineInputDialogProps) {
   const [text, setText] = useState('');
 
   const result = useMemo(() => parseBulkLines(text), [text]);
+
+  // 이미 저장된 누적 줄과 겹치는 입력 줄 (형식은 유효하지만 중복 등록)
+  const dupWithSaved = useMemo(() => {
+    if (!existingKeys || existingKeys.size === 0) return [];
+    return result.parsed.filter((p) => existingKeys.has(lineKey(p.numbers)));
+  }, [result.parsed, existingKeys]);
 
   const handleClose = () => onClose();
   const handleClear = () => setText('');
@@ -293,6 +307,14 @@ export default function BulkLineInputDialog({
               variant="outlined"
               label={`시도 ${result.attemptedLines}줄`}
             />
+            {dupWithSaved.length > 0 && (
+              <Chip
+                size="small"
+                color="warning"
+                label={`이미 저장된 줄과 중복 ${dupWithSaved.length}줄`}
+                sx={{ fontWeight: 700 }}
+              />
+            )}
             {errorCount > 0 && (
               <Button
                 type="button"
@@ -305,6 +327,24 @@ export default function BulkLineInputDialog({
               </Button>
             )}
           </Stack>
+        )}
+
+        {dupWithSaved.length > 0 && (
+          <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, p: 1, mb: 1 }}>
+            <Typography variant="caption" color="warning.main" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+              ⚠ 이미 저장된 누적 줄과 중복 (앞 10건) — 추가는 되지만 통계에 이미 반영된 줄입니다
+            </Typography>
+            {dupWithSaved.slice(0, 10).map((p, i) => (
+              <Typography key={i} variant="caption" sx={{ display: 'block', fontFamily: 'monospace' }}>
+                {p.numbers.join(', ')}
+              </Typography>
+            ))}
+            {dupWithSaved.length > 10 && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                ... 외 {dupWithSaved.length - 10}줄 더 중복
+              </Typography>
+            )}
+          </Box>
         )}
 
         {errorCount > 0 && (

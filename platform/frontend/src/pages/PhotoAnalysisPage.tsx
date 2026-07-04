@@ -21,7 +21,7 @@ import {
 } from '@mui/material';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import BulkLineInputDialog from '../components/BulkLineInputDialog';
+import BulkLineInputDialog, { lineKey } from '../components/BulkLineInputDialog';
 import LottoBall from '../components/LottoBall';
 import NumberFrequencyPanel from '../components/NumberFrequencyPanel';
 import ParallelRoundPanel from '../components/ParallelRoundPanel';
@@ -685,6 +685,8 @@ type ManualDraft = {
    * 분석 시에는 5줄/용지로 묶어 slipQueue 와 함께 백엔드로 전송.
    */
   bulkAutoTickets: number[][];
+  /** 마지막으로 [분석·저장] 을 성공한 시각 (ISO). 반자동 lastSavedAt 과 동일 개념. */
+  lastSavedAt: string | null;
 };
 
 const emptyManualDraft = (): ManualDraft => ({
@@ -692,6 +694,7 @@ const emptyManualDraft = (): ManualDraft => ({
   currentSlipLines: [],
   slipQueue: [],
   bulkAutoTickets: [],
+  lastSavedAt: null,
 });
 
 const emptyManualByIntent = (): Record<SheetIntent, ManualDraft> => ({
@@ -716,7 +719,7 @@ function loadManualByIntent(): Record<SheetIntent, ManualDraft> {
         Array.isArray((d as ManualDraft).currentSlipLines) &&
         Array.isArray((d as ManualDraft).slipQueue)
       ) {
-        const draft = d as ManualDraft & { bulkAutoTickets?: unknown };
+        const draft = d as ManualDraft & { bulkAutoTickets?: unknown; lastSavedAt?: unknown };
         const bulkAutoTickets: number[][] = Array.isArray(draft.bulkAutoTickets)
           ? (draft.bulkAutoTickets as unknown[])
               .filter((t): t is number[] => Array.isArray(t))
@@ -730,6 +733,7 @@ function loadManualByIntent(): Record<SheetIntent, ManualDraft> {
           currentSlipLines: draft.currentSlipLines,
           slipQueue: draft.slipQueue,
           bulkAutoTickets,
+          lastSavedAt: typeof draft.lastSavedAt === 'string' ? draft.lastSavedAt : null,
         };
       }
     }
@@ -836,6 +840,7 @@ export default function PhotoAnalysisPage() {
   }, [activeTab]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [manualLoading, setManualLoading] = useState(false);
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
   // 비동기 작업 중 unmount 가드 (메모리 안정성)
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -945,7 +950,7 @@ export default function PhotoAnalysisPage() {
   const displayReviewRound = latestRound ?? '…';
   const displayCurrentRound = currentRound ?? '…';
   const manualDraft = manualByIntent[activeTab];
-  const { picked, currentSlipLines, slipQueue, bulkAutoTickets } = manualDraft;
+  const { picked, currentSlipLines, slipQueue, bulkAutoTickets, lastSavedAt } = manualDraft;
 
   const patchManual = (patch: Partial<ManualDraft>) => {
     setManualByIntent((prev) => ({
@@ -973,6 +978,16 @@ export default function PhotoAnalysisPage() {
   }, [accumulated, activeTab, bulkAutoTickets.length, currentSlipLines.length, slipQueue.length]);
 
   const currentLabel = GAME_LABELS[currentSlipLines.length] ?? 'A';
+
+  // 이미 등록·저장된 자동 줄 키 — 대량입력 시 누적 겹침 검증용 (서버 누적 + 로컬 버킷)
+  const existingAutoKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const a of activeSlice?.saved_auto_lines ?? []) keys.add(lineKey(a));
+    for (const t of bulkAutoTickets) keys.add(lineKey(t));
+    for (const slip of slipQueue) for (const l of slip.lines) keys.add(lineKey(l.numbers));
+    for (const l of currentSlipLines) keys.add(lineKey(l.numbers));
+    return keys;
+  }, [activeSlice?.saved_auto_lines, bulkAutoTickets, slipQueue, currentSlipLines]);
 
   const togglePicked = (n: number) => {
     const prev = picked;
@@ -1155,6 +1170,24 @@ export default function PhotoAnalysisPage() {
     );
   };
 
+  // 재분석 — 반자동의 [↻ 재분석] 과 동일: 저장된 누적 데이터로 통계를 다시 계산·갱신.
+  // (기존 저장분만 재분석하거나, 새로 추가·저장 후 눌러 최신 반영)
+  const handleReanalyze = async () => {
+    setIsReanalyzing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await refreshAccumulated();
+      if (!mountedRef.current) return;
+      setNotice('↻ 재분석 완료 — 저장된 누적 데이터로 통계를 다시 계산했습니다.');
+    } catch (e) {
+      if (!mountedRef.current) return;
+      setError(e instanceof Error ? e.message : '재분석 실패');
+    } finally {
+      if (mountedRef.current) setIsReanalyzing(false);
+    }
+  };
+
   const runManualAnalyze = async () => {
     let slips = [...slipQueue];
     // 부분 용지(1~4줄)도 자동으로 슬립화하여 분석 — "저장이 안 됨" 결함 해소
@@ -1191,7 +1224,7 @@ export default function PhotoAnalysisPage() {
       if (data.duplicate_skipped) {
         setError(data.duplicate_message || '이미 등록된 용지입니다.');
       } else {
-        patchManual({ slipQueue: [], currentSlipLines: [], picked: [] });
+        patchManual({ slipQueue: [], currentSlipLines: [], picked: [], lastSavedAt: new Date().toISOString() });
         setNotice(`✅ ${slips.length}장 분석·저장 완료 — 결과는 페이지 하단`);
       }
       await refreshAccumulated();
@@ -1400,7 +1433,28 @@ export default function PhotoAnalysisPage() {
                 : `💾 ${label}`;
             })()}
           </Button>
+          <Button
+            type="button"
+            variant="outlined"
+            color="primary"
+            disabled={isReanalyzing}
+            onClick={() => void handleReanalyze()}
+            sx={{ minWidth: 110 }}
+          >
+            {isReanalyzing ? (
+              <><CircularProgress size={16} sx={{ mr: 0.5 }} />재분석…</>
+            ) : (
+              '↻ 재분석'
+            )}
+          </Button>
         </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+          누적 저장(서버): <strong>{activeSlice?.saved_auto_lines?.length ?? 0}줄</strong>
+          {lastSavedAt ? ` · 마지막 저장: ${new Date(lastSavedAt).toLocaleString('ko-KR', { hour: '2-digit', minute: '2-digit', month: 'numeric', day: 'numeric' })}` : ' · 아직 저장 안 됨'}
+          {bulkAutoTickets.length + slipQueue.reduce((s, sl) => s + sl.lines.length, 0) + currentSlipLines.length > 0
+            ? ` · 미저장 로컬 ${bulkAutoTickets.length + slipQueue.reduce((s, sl) => s + sl.lines.length, 0) + currentSlipLines.length}줄`
+            : ''}
+        </Typography>
         {/* 대량 입력 후 미저장 경고 */}
         {bulkAutoTickets.length > 0 && (
           <Alert severity="info" sx={{ mt: 1 }}>
@@ -1690,6 +1744,7 @@ export default function PhotoAnalysisPage() {
         onConfirm={handleBulkInsert}
         linesPerSlip={GAME_LABELS.length}
         pickTypeLabel="자동"
+        existingKeys={existingAutoKeys}
       />
       {ConfirmDialog}
     </Stack>

@@ -29,7 +29,7 @@ import {
 } from '@mui/material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import BulkLineInputDialog from './BulkLineInputDialog';
+import BulkLineInputDialog, { lineKey } from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
 import NumberFrequencyPanel from './NumberFrequencyPanel';
 import {
@@ -1993,6 +1993,16 @@ export default function SemiAutoComparePanel({
    * → 매번 새로 입력해도 사라지지 않고 누적됨 (사용자 요청).
    * → 명시 초기화 ('대량 결과 초기화') 시에만 비워짐.
    */
+  // 이미 등록·저장된 반자동 줄 키 — 대량입력 시 누적 겹침 검증용 (서버 누적 + 로컬 버킷)
+  const existingSemiKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const a of accumulated?.by_intent?.[sheetIntent]?.saved_semi_lines ?? []) keys.add(lineKey(a));
+    for (const t of bulkTickets) keys.add(lineKey(t));
+    for (const slip of semiSlipQueue) for (const l of slip.lines) keys.add(lineKey(l.numbers));
+    for (const l of semiCurrentLines) keys.add(lineKey(l.numbers));
+    return keys;
+  }, [accumulated, sheetIntent, bulkTickets, semiSlipQueue, semiCurrentLines]);
+
   const handleBulkInsert = (lines: number[][]) => {
     if (!lines.length) return;
     let addedCount = 0;
@@ -4170,6 +4180,7 @@ export default function SemiAutoComparePanel({
         onConfirm={handleBulkInsert}
         linesPerSlip={GAME_LABELS.length}
         pickTypeLabel="반자동"
+        existingKeys={existingSemiKeys}
       />
       {ConfirmDialog}
     </Paper>

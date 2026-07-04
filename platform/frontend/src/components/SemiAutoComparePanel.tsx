@@ -1861,10 +1861,68 @@ export default function SemiAutoComparePanel({
   const hasLineMatchingInputs = groupLineMatching.autoLineCount > 0 || groupLineMatching.semiLineCount > 0;
   const canRenderLineMatching = groupLineMatching.autoLineCount > 0 && groupLineMatching.semiLineCount > 0;
 
-  // 🎯 당첨 예상번호 — 3축 역산: ① 자동↔반자동 1:1 전수비교(여러 자동·반자동 줄이
-  // 공통으로 가진 번호일수록 강한 신호) ② 평행회차 강수·기대수 ③ 회차별 예상 추첨기
-  // 고빈도. 세 축 점수를 합산해 신뢰도순으로 정렬한다. 당첨번호(winningSet)는 계산에
-  // 넣지 않는다(사후 편향·누수 방지) — 복기 탭은 산출 후 실제 당첨과 대조만 표시.
+  // 🔁 세트 중복 역산 — 모든 일치 그룹(6·5·4·3·2)의 matchedNumbers 를 서로 교차해,
+  // 2·3개짜리 하위 세트가 '몇 개의 그룹에 걸쳐' 반복 등장하는지(groupCount)와 그
+  // 지지(support=Σ(자동수+반자동수))를 집계한다. 예: {13,38} 이 2일치·3일치·5일치
+  // 그룹 여러 곳에 나타나면 강한 반복 패턴. 자동·반자동이 반복해 함께 가리킨 세트를
+  // 찾는 2차 전수비교다. 당첨번호는 정렬에 쓰지 않고(누수 방지) 표시만 대조한다.
+  const crossSetPatterns = useMemo(() => {
+    const allGroups = [
+      ...groupLineMatching.groups6,
+      ...groupLineMatching.groups5,
+      ...groupLineMatching.groups4,
+      ...groupLineMatching.groups3,
+      ...groupLineMatching.groups2,
+    ];
+    type Acc = { numbers: number[]; groupCount: number; support: number; maxLevel: number };
+    const pairMap = new Map<string, Acc>();
+    const tripleMap = new Map<string, Acc>();
+    const addCombo = (map: Map<string, Acc>, combo: number[], support: number, level: number) => {
+      const key = combo.join('-');
+      const e = map.get(key);
+      if (e) {
+        e.groupCount += 1;
+        e.support += support;
+        e.maxLevel = Math.max(e.maxLevel, level);
+      } else {
+        map.set(key, { numbers: combo, groupCount: 1, support, maxLevel: level });
+      }
+    };
+    for (const g of allGroups) {
+      const nums = g.matchedNumbers;
+      const support = g.autoList.length + g.semiList.length;
+      for (let i = 0; i < nums.length; i += 1) {
+        for (let j = i + 1; j < nums.length; j += 1) {
+          addCombo(pairMap, [nums[i], nums[j]], support, g.matchCount);
+          for (let k = j + 1; k < nums.length; k += 1) {
+            addCombo(tripleMap, [nums[i], nums[j], nums[k]], support, g.matchCount);
+          }
+        }
+      }
+    }
+    const finalize = (map: Map<string, Acc>) =>
+      Array.from(map.values())
+        // 2개 이상 그룹에 걸쳐 반복 등장한 세트만(1회성 우연 제외).
+        .filter((e) => e.groupCount >= 2)
+        .map((e) => ({
+          ...e,
+          winning: winningSet != null && winningSet.size > 0 ? e.numbers.every((n) => winningSet.has(n)) : false,
+          winHit: winningSet != null ? e.numbers.filter((n) => winningSet.has(n)).length : 0,
+        }))
+        .sort((a, b) => b.support - a.support || b.groupCount - a.groupCount)
+        .slice(0, 15);
+    return { pairs: finalize(pairMap), triples: finalize(tripleMap) };
+  }, [
+    groupLineMatching.groups6,
+    groupLineMatching.groups5,
+    groupLineMatching.groups4,
+    groupLineMatching.groups3,
+    groupLineMatching.groups2,
+    winningSet,
+  ]);
+
+  // 🎯 당첨 예상번호 — 2축(1:1 전수비교 심층 역산 + 평행회차) + 세트 중복 역산 보너스.
+  // 당첨번호(winningSet)는 계산에 넣지 않는다(누수 방지) — 복기 탭은 대조만 표시.
   const predictedNumbers = useMemo(() => {
     const score: Record<number, number> = {};
     const srcMap: Record<number, Set<string>> = {};
@@ -1906,6 +1964,13 @@ export default function SemiAutoComparePanel({
         grpCnt[n] = (grpCnt[n] ?? 0) + 1;
       }
     }
+    // ── 세트 중복 역산 보너스 — 여러 그룹에 걸쳐 반복 등장한 강한 세트({13,38}
+    //    처럼 자동·반자동이 반복해 함께 가리킨 조합)의 번호를 지지·반복도로 가산.
+    //    matchCount 2 라도 여러 그룹에 반복되면 강한 신호로 인정된다.
+    for (const s of [...crossSetPatterns.pairs, ...crossSetPatterns.triples]) {
+      const bonus = Math.log2(s.support + 1) * Math.log2(s.groupCount + 1) * s.numbers.length * 2;
+      for (const n of s.numbers) add(n, bonus, '세트');
+    }
     // ── 평행회차 (보조 신호, 전수비교보다 낮게) ───────────────────────
     parallelStrong.forEach((n, idx) => add(n, Math.max(2, 14 - idx * 0.8), '평행'));
     parallelExpected.forEach((n, idx) => add(n, Math.max(1, 7 - idx * 0.4), '평행'));
@@ -1932,6 +1997,7 @@ export default function SemiAutoComparePanel({
     groupLineMatching.groups2,
     parallelStrong,
     parallelExpected,
+    crossSetPatterns,
   ]);
 
   // 전수비교 '강한 패턴' — matchCount 3+ 그룹(우연 초과의 실제 겹침)을 크기·지지순.
@@ -3294,6 +3360,67 @@ export default function SemiAutoComparePanel({
                       </Box>
                     ))}
                   </Stack>
+                </Box>
+              )}
+
+              {/* 🔁 세트 중복 역산 — 모든 일치 그룹 교차, 2·3개 세트 반복 패턴 */}
+              {(crossSetPatterns.pairs.length > 0 || crossSetPatterns.triples.length > 0) && (
+                <Box sx={{ mt: 1.25 }}>
+                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                    🔁 세트 중복 역산 (모든 일치 그룹 교차 — 2·3개 세트가 반복 등장)
+                    {compareWinning ? ' — 초록: 전부 당첨번호였던 세트' : ''}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                    여러 그룹(6·5·4·3·2일치)에 걸쳐 자동·반자동이 함께 가리킨 번호 세트 —
+                    반복 그룹 수·지지(Σ 자동+반자동 줄)가 높을수록 강한 패턴. 예상번호 상위에도 가산됩니다.
+                  </Typography>
+                  {([
+                    { label: '2개 세트', items: crossSetPatterns.pairs },
+                    { label: '3개 세트', items: crossSetPatterns.triples },
+                  ] as const).map(({ label, items }) =>
+                    items.length > 0 ? (
+                      <Box key={label} sx={{ mb: 0.75 }}>
+                        <Typography variant="caption" sx={{ display: 'block', fontSize: 10, fontWeight: 700, mb: 0.25 }}>
+                          {label}
+                        </Typography>
+                        <Stack spacing={0.4}>
+                          {items.map((s, idx) => (
+                            <Stack
+                              key={`${label}-${idx}`}
+                              direction="row"
+                              alignItems="center"
+                              spacing={0.5}
+                              flexWrap="wrap"
+                              useFlexGap
+                              sx={{
+                                bgcolor: s.winning ? 'success.main' : undefined,
+                                opacity: s.winning ? 0.95 : 1,
+                                borderRadius: 0.5,
+                                px: s.winning ? 0.5 : 0,
+                              }}
+                            >
+                              <Stack direction="row" spacing={0.4}>
+                                {s.numbers.map((n) => (
+                                  <LottoBall
+                                    key={n}
+                                    number={n}
+                                    size={22}
+                                    dimmed={compareWinning && winningSet ? !winningSet.has(n) : false}
+                                  />
+                                ))}
+                              </Stack>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                                {s.groupCount}개 그룹 반복 · 지지 {s.support}
+                                {compareWinning && winningSet && winningSet.size > 0
+                                  ? ` · 당첨 ${s.winHit}/${s.numbers.length}`
+                                  : ''}
+                              </Typography>
+                            </Stack>
+                          ))}
+                        </Stack>
+                      </Box>
+                    ) : null,
+                  )}
                 </Box>
               )}
             </Paper>

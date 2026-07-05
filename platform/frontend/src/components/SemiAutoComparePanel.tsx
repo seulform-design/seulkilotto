@@ -115,9 +115,6 @@ const IS_CONSTRAINED_DEVICE = (() => {
     return false;
   }
 })();
-/** 저사양 기기에서 상세 계산을 자동 보류하는 임계값(페어/줄 수). */
-const CONSTRAINED_TICKET_LIMIT = 500;
-const CONSTRAINED_LINE_PAIR_LIMIT = 15_000;
 /** 1:1 매칭 그룹 카드에서 한쪽(자동/반자동) 일치 줄을 최대 몇 개까지 렌더할지. */
 const GROUP_LINE_RENDER_CAP = 40;
 
@@ -1066,6 +1063,11 @@ export default function SemiAutoComparePanel({
   const lineMatchingRef = useRef<HTMLDivElement | null>(null);
   const [lineMatchFilter, setLineMatchFilter] = useState<'all' | 2 | 3 | 4 | 5 | 6>('all');
   const [lineMatchNumberFilter, setLineMatchNumberFilter] = useState('');
+  // 1:1 매칭 그룹 카드 렌더 페이지네이션 — 한 번에 모든 그룹(수백)×모든 줄을 DOM 에
+  // 올리면 모바일이 OOM 재부팅한다. 레벨당 이만큼만 렌더하고 [더 보기]로 늘린다.
+  const [groupShowLimit, setGroupShowLimit] = useState(IS_CONSTRAINED_DEVICE ? 10 : 60);
+  // 한 그룹 카드에서 렌더할 자동/반자동 줄 수 상한(모바일은 더 작게, [더 보기]로 확장).
+  const lineRenderCap = IS_CONSTRAINED_DEVICE ? 6 : GROUP_LINE_RENDER_CAP;
   const compareWinning = sheetIntent === 'review';
 
   // localStorage — 탭별 격리
@@ -1193,12 +1195,13 @@ export default function SemiAutoComparePanel({
     bulkTickets.length;
   const combinedTicketEstimate = autoLineCountEstimate + semiLineCountEstimate;
   const estimatedLinePairCount = autoLineCountEstimate * semiLineCountEstimate;
-  // 저사양(모바일) 기기에선 훨씬 낮은 상한을 적용해 상세 계산을 자동 보류 → 재부팅 방지.
-  const heavyTicketLimit = IS_CONSTRAINED_DEVICE ? CONSTRAINED_TICKET_LIMIT : HEAVY_COMPARISON_TICKET_LIMIT;
-  const heavyPairLimit = IS_CONSTRAINED_DEVICE ? CONSTRAINED_LINE_PAIR_LIMIT : HEAVY_LINE_PAIR_LIMIT;
+  // 1:1 전수비교 '계산'은 모바일에서도 보류하지 않는다(사용자 핵심 기능). 계산 자체는
+  // 가볍고, 모바일 재부팅의 진짜 원인은 결과 '렌더'(수만 DOM)였다 → 렌더를 페이지네이션·
+  // 줄수 캡으로 제한해 해결한다(아래 groupShowLimit / lineRenderCap). 보류는 원래의
+  // 극단적 대량(1200줄/20만 페어) 에서만.
   const suspendHeavyComparison =
-    combinedTicketEstimate > heavyTicketLimit ||
-    estimatedLinePairCount > heavyPairLimit;
+    combinedTicketEstimate > HEAVY_COMPARISON_TICKET_LIMIT ||
+    estimatedLinePairCount > HEAVY_LINE_PAIR_LIMIT;
 
   const strongCandidateResolution = useMemo(
     () => resolveStrongCandidates(accumulated, sheetIntent, autoOnlyLines, winningNumbers),
@@ -2811,17 +2814,10 @@ export default function SemiAutoComparePanel({
               상위 {FORCE_DETAILED_TICKET_CAP}장만으로 <strong>상세 교집합·요약 비교</strong>를 표시 중입니다.
               (무거운 1:1 전수비교는 브라우저 보호를 위해 보류 — 줄 수를 줄이면 전체가 표시됩니다.)
             </>
-          ) : IS_CONSTRAINED_DEVICE ? (
-            <>
-              📱 <strong>모바일에서는 상세 분석(1:1 전수비교·심층 역산)을 자동 보류</strong>합니다 — 데이터가 많으면 이 계산이
-              휴대폰을 멈추게 해(재부팅) 화면이 안 열리기 때문입니다. <strong>내가 넣은 데이터는 서버에 안전하게 저장</strong>돼
-              있어 그대로 보이고, 저장·삭제도 정상 동작합니다. <strong>정밀 분석은 PC에서</strong> 열면 전체가 표시됩니다.
-              (가벼운 요약만 보려면 <strong>[상세 비교 보기]</strong>.)
-            </>
           ) : (
             <>
-              대량 입력이 많아 브라우저 보호를 위해 상세 교집합/1:1 전수비교 계산을 잠시 보류합니다.
-              저장은 정상 동작하며, <strong>[상세 비교 보기]</strong> 로 상위 일부만 보거나 줄 수를 줄이면 세부 비교가 다시 표시됩니다.
+              매우 대량(1200줄/20만 페어 초과)이라 브라우저 보호를 위해 상세 계산을 잠시 보류합니다.
+              내 데이터는 서버에 안전하며, <strong>[상세 비교 보기]</strong> 로 상위 일부만 보거나 줄 수를 줄이면 세부 비교가 다시 표시됩니다.
             </>
           )}
         </Alert>
@@ -4307,7 +4303,7 @@ export default function SemiAutoComparePanel({
                         }}
                       >
                         <Stack spacing={0.75}>
-                          {groups.map((g, idx) => {
+                          {groups.slice(0, groupShowLimit).map((g, idx) => {
                             const mset = matchedSet(g.matchedNumbers);
                             return (
                               <Box
@@ -4380,7 +4376,7 @@ export default function SemiAutoComparePanel({
                                     {winningSet && ' — 당첨번호만 컬러, 나머지 회색'}
                                   </Typography>
                                   <Stack spacing={0.2}>
-                                    {g.autoList.slice(0, GROUP_LINE_RENDER_CAP).map((a) => (
+                                    {g.autoList.slice(0, lineRenderCap).map((a) => (
                                       <Stack
                                         key={`ga-${g.key}-${a.idx}`}
                                         direction="row"
@@ -4410,9 +4406,9 @@ export default function SemiAutoComparePanel({
                                         ))}
                                       </Stack>
                                     ))}
-                                    {g.autoList.length > GROUP_LINE_RENDER_CAP && (
+                                    {g.autoList.length > lineRenderCap && (
                                       <Typography variant="caption" color="text.secondary">
-                                        …외 자동 {g.autoList.length - GROUP_LINE_RENDER_CAP}줄
+                                        …외 자동 {g.autoList.length - lineRenderCap}줄
                                       </Typography>
                                     )}
                                   </Stack>
@@ -4423,7 +4419,7 @@ export default function SemiAutoComparePanel({
                                     {winningSet && ' — 당첨번호만 컬러, 나머지 회색'}
                                   </Typography>
                                   <Stack spacing={0.2}>
-                                    {g.semiList.slice(0, GROUP_LINE_RENDER_CAP).map((s) => (
+                                    {g.semiList.slice(0, lineRenderCap).map((s) => (
                                       <Stack
                                         key={`gs-${g.key}-${s.idx}`}
                                         direction="row"
@@ -4453,9 +4449,9 @@ export default function SemiAutoComparePanel({
                                         ))}
                                       </Stack>
                                     ))}
-                                    {g.semiList.length > GROUP_LINE_RENDER_CAP && (
+                                    {g.semiList.length > lineRenderCap && (
                                       <Typography variant="caption" color="text.secondary">
-                                        …외 반자동 {g.semiList.length - GROUP_LINE_RENDER_CAP}줄
+                                        …외 반자동 {g.semiList.length - lineRenderCap}줄
                                       </Typography>
                                     )}
                                   </Stack>
@@ -4465,6 +4461,17 @@ export default function SemiAutoComparePanel({
                           })}
                         </Stack>
                       </Box>
+                      {groups.length > groupShowLimit && (
+                        <Button
+                          type="button"
+                          size="small"
+                          variant="text"
+                          onClick={() => setGroupShowLimit((v) => v + (IS_CONSTRAINED_DEVICE ? 10 : 60))}
+                          sx={{ mt: 0.25 }}
+                        >
+                          더 보기 (+{Math.min(IS_CONSTRAINED_DEVICE ? 10 : 60, groups.length - groupShowLimit)} · 남은 {groups.length - groupShowLimit}건)
+                        </Button>
+                      )}
                     </Box>
                   );
                 };

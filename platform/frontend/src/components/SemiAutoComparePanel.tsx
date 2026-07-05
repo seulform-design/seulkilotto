@@ -2268,20 +2268,35 @@ export default function SemiAutoComparePanel({
     const medianTotal = totalsArr[Math.floor(totalsArr.length / 2)] ?? 0;
     const hidden = weightedRank.filter((x) => x.maxMatch >= 4 && ((af[x.number] ?? 0) + (sf[x.number] ?? 0)) <= medianTotal).slice(0, 8);
 
-    // (8/10) 종합 핵심 — 정규화 합성: 양쪽 빈도합의(0.45)+가중치(0.35)+허브(0.2)
-    const norm = (rec: Record<number, number>) => {
-      const mx = Math.max(1, ...Object.values(rec));
-      return (n: number) => (rec[n] ?? 0) / mx;
-    };
+    // (8/10) 종합 핵심 — 4개 '1:1 전수비교' 신호를 순위합산(borda)한 앙상블. 스케일이
+    // 다른 신호를 공정하게 합치고, 여러 신호에서 '고루 상위'인 번호(견고한 합의)를 최상위로
+    // 올린다(한 신호만 튀는 번호는 밀림). 1:1 이 가장 중요 → 양쪽빈도·가중치를 최우선.
+    const setSupport: Record<number, number> = {};
+    for (const s of [...crossSetPatterns.pairs, ...crossSetPatterns.triples])
+      for (const n of s.numbers) setSupport[n] = (setSupport[n] ?? 0) + s.support;
     const consensus: Record<number, number> = {};
     for (const n of freqTable.map((f) => f.number)) consensus[n] = Math.log2((af[n] ?? 0) + 1) * Math.log2((sf[n] ?? 0) + 1);
+    const ensembleNums = Array.from(new Set([
+      ...Object.keys(consensus),
+      ...Object.keys(wscore),
+      ...Object.keys(deg),
+      ...Object.keys(setSupport),
+    ].map(Number)));
+    // 정규화(0~1) 선형 합성 — 순위합산(borda)은 {6,24} 처럼 '양쪽 다 강하지만 비당첨'인
+    // 번호를 과대평가해 검증에서 오히려 나빴다. 크기(magnitude) 기반 선형이 강한 합의를
+    // 더 잘 보존. 가중: 양쪽빈도 0.50(1:1 최우선)+가중치 0.30+세트 0.10+허브 0.10.
+    const norm = (rec: Record<number, number>) => {
+      const mx = Math.max(1, ...ensembleNums.map((n) => rec[n] ?? 0));
+      return (n: number) => (rec[n] ?? 0) / mx;
+    };
     const nC = norm(consensus);
     const nW = norm(wscore);
     const nD = norm(deg);
-    const composite = Array.from(new Set([...Object.keys(consensus), ...Object.keys(wscore), ...Object.keys(deg)].map(Number)))
+    const nS = norm(setSupport);
+    const composite = ensembleNums
       .map((n) => ({
         number: n,
-        score: Math.round((nC(n) * 0.45 + nW(n) * 0.35 + nD(n) * 0.2) * 1000),
+        score: Math.round((nC(n) * 0.5 + nW(n) * 0.3 + nS(n) * 0.1 + nD(n) * 0.1) * 1000),
         cFreq: Math.round(nC(n) * 100),
         cWeight: Math.round(nW(n) * 100),
         cHub: Math.round(nD(n) * 100),

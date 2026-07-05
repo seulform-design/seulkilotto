@@ -2259,7 +2259,65 @@ export default function SemiAutoComparePanel({
       ? { top6: composite.slice(0, 6).filter((c) => c.winning).length, top15: composite.slice(0, 15).filter((c) => c.winning).length }
       : null;
 
-    return { freqTable, weightedRank, hubRank, both, autoOnly, semiOnly, sets4, hidden, composite, winCheck };
+    // (A) 유의성 backtest (복기 전용) — 각 랭킹의 TOP-K 가 실제 당첨을 '우연 이상'으로
+    // 담았는지 초기하분포(hypergeometric)로 p값 계산. p<0.05 면 우연 대비 유의.
+    const backtest = winningSet != null && winningSet.size > 0
+      ? (() => {
+          const W = winningSet.size;
+          const comb = (n: number, r: number): number => {
+            if (r < 0 || r > n) return 0;
+            const rr = Math.min(r, n - r);
+            let c = 1;
+            for (let i = 0; i < rr; i += 1) c = (c * (n - i)) / (i + 1);
+            return c;
+          };
+          const pAtLeast = (k: number, K: number): number => {
+            const denom = comb(45, K);
+            if (denom === 0) return 1;
+            let p = 0;
+            for (let x = k; x <= Math.min(W, K); x += 1) p += (comb(W, x) * comb(45 - W, K - x)) / denom;
+            return Math.min(1, Math.max(0, p));
+          };
+          const evalK = (ranked: number[], K: number) => {
+            const hit = ranked.slice(0, K).filter((n) => winningSet.has(n)).length;
+            const exp = (W * K) / 45;
+            return { K, hit, exp: Math.round(exp * 100) / 100, lift: exp > 0 ? Math.round((hit / exp) * 100) / 100 : 0, p: Math.round(pAtLeast(hit, K) * 1000) / 1000 };
+          };
+          const methods: { key: string; ranked: number[] }[] = [
+            { key: '종합', ranked: composite.map((c) => c.number) },
+            { key: '가중치', ranked: weightedRank.map((w) => w.number) },
+            { key: '허브', ranked: hubRank.map((h) => h.number) },
+            { key: '빈도', ranked: freqTable.map((f) => f.number) },
+          ];
+          return { W, methods: methods.map((m) => ({ key: m.key, k6: evalK(m.ranked, 6), k15: evalK(m.ranked, 15) })) };
+        })()
+      : null;
+
+    // (B) 안정성 backtest (양 탭) — 티켓을 짝/홀 줄로 갈라 각 절반의 양쪽합의 TOP12 가
+    // 얼마나 겹치나(Jaccard). 높으면 패턴이 견고, 낮으면 표본 노이즈(예측력 약함).
+    const stability = (() => {
+      const halfFreq = (lines: number[][], parity: number) => {
+        const f: Record<number, number> = {};
+        lines.forEach((l, i) => {
+          if (i % 2 === parity) for (const n of new Set(l)) if (n >= 1 && n <= 45) f[n] = (f[n] ?? 0) + 1;
+        });
+        return f;
+      };
+      const topK = (afh: Record<number, number>, sfh: Record<number, number>, K: number) => {
+        const cons: Record<number, number> = {};
+        for (const n of new Set([...Object.keys(afh), ...Object.keys(sfh)].map(Number)))
+          cons[n] = Math.log2((afh[n] ?? 0) + 1) * Math.log2((sfh[n] ?? 0) + 1);
+        return new Set(Object.entries(cons).sort((a, b) => b[1] - a[1]).slice(0, K).map(([n]) => Number(n)));
+      };
+      const A = topK(halfFreq(auto, 0), halfFreq(semi, 0), 12);
+      const B = topK(halfFreq(auto, 1), halfFreq(semi, 1), 12);
+      if (A.size === 0 || B.size === 0) return null;
+      const inter = [...A].filter((n) => B.has(n)).length;
+      const uni = new Set([...A, ...B]).size;
+      return { overlap: inter, jaccard: uni > 0 ? Math.round((inter / uni) * 100) : 0 };
+    })();
+
+    return { freqTable, weightedRank, hubRank, both, autoOnly, semiOnly, sets4, hidden, composite, winCheck, backtest, stability };
   }, [
     groupLineMatching.groups6,
     groupLineMatching.groups5,
@@ -3747,6 +3805,49 @@ export default function SemiAutoComparePanel({
                   label={`복기 검증 — 핵심 TOP6 중 당첨 ${deepAnalysis.winCheck.top6}개 · TOP15 중 ${deepAnalysis.winCheck.top15}개 (무작위 기대 TOP6≈0.8·TOP15≈2)`}
                   sx={{ fontWeight: 700, mb: 1, height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.25 } }}
                 />
+              )}
+
+              <Divider sx={{ my: 1 }} />
+              {/* 🧪 백테스트 검증 — 유의성(초기하분포 p값) + 안정성(분할 겹침) */}
+              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                🧪 백테스트 검증 (방법이 우연보다 나은가)
+              </Typography>
+              {deepAnalysis.stability && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                  안정성(짝/홀 줄 분할 TOP12 겹침): <strong style={{ color: deepAnalysis.stability.jaccard >= 50 ? '#66bb6a' : deepAnalysis.stability.jaccard >= 30 ? '#ffa726' : '#bbb' }}>{deepAnalysis.stability.jaccard}%</strong>{' '}
+                  {deepAnalysis.stability.jaccard >= 50 ? '— 패턴이 견고(표본 절반이 바뀌어도 상위가 유지)' : deepAnalysis.stability.jaccard >= 30 ? '— 중간(부분적으로만 안정)' : '— 낮음(표본 노이즈 가능성, 예측력 약함)'}
+                </Typography>
+              )}
+              {deepAnalysis.backtest ? (
+                <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, p: 0.5, mb: 0.5 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.25 }}>
+                    당첨 {deepAnalysis.backtest.W}개 대비 각 랭킹 TOP-K 적중 — <strong>lift</strong>=적중/기대, <strong>p</strong>&lt;0.05 면 우연 대비 유의(★)
+                  </Typography>
+                  <Stack direction="row" sx={{ fontSize: 10, fontWeight: 700, color: 'text.secondary', px: 0.5 }}>
+                    <Box sx={{ width: 44 }}>랭킹</Box>
+                    <Box sx={{ flex: 1, textAlign: 'right' }}>TOP6 적중/기대·lift·p</Box>
+                    <Box sx={{ flex: 1, textAlign: 'right' }}>TOP15 적중/기대·lift·p</Box>
+                  </Stack>
+                  {deepAnalysis.backtest.methods.map((m) => {
+                    const fmt = (r: { hit: number; exp: number; lift: number; p: number }) =>
+                      `${r.hit}/${r.exp}·×${r.lift}·p${r.p}${r.p < 0.05 ? '★' : ''}`;
+                    return (
+                      <Stack key={`bt-${m.key}`} direction="row" alignItems="center" sx={{ fontSize: 10, px: 0.5, py: 0.1 }}>
+                        <Box sx={{ width: 44, fontWeight: 700 }}>{m.key}</Box>
+                        <Box sx={{ flex: 1, textAlign: 'right', color: m.k6.p < 0.05 ? 'success.light' : 'text.secondary', fontWeight: m.k6.p < 0.05 ? 700 : 400 }}>{fmt(m.k6)}</Box>
+                        <Box sx={{ flex: 1, textAlign: 'right', color: m.k15.p < 0.05 ? 'success.light' : 'text.secondary', fontWeight: m.k15.p < 0.05 ? 700 : 400 }}>{fmt(m.k15)}</Box>
+                      </Stack>
+                    );
+                  })}
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.25 }}>
+                    ※ 이건 1231회 <strong>1회차</strong> 검증입니다. ★가 떠도 여러 방법을 동시에 본 탓일 수 있어(다중비교),
+                    회차를 누적해 매번 lift&gt;1·p&lt;0.05 가 <strong>꾸준</strong>해야 진짜 신호입니다. 1회 유의는 우연일 수 있음.
+                  </Typography>
+                </Box>
+              ) : (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                  ※ 이번회차 탭은 당첨 미정이라 유의성 검증 불가 — 안정성(위)만 참고. 복기 탭에서 회차별로 검증하세요.
+                </Typography>
               )}
 
               <Divider sx={{ my: 1 }} />

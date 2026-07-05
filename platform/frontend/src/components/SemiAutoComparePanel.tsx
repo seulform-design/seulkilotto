@@ -2150,6 +2150,127 @@ export default function SemiAutoComparePanel({
     winningSet,
   ]);
 
+  // 🧠 심층 역산 분석 — 빈도·일치개수 가중치·자동반자동 교집합·세트반복·허브(응집도)·
+  // 네트워크 중심성·숨은 강수·종합 핵심을 한 번에 계산한다. 단순 빈도가 아니라 '번호
+  // 간 연결성'으로 당첨 구조를 역산한다. 당첨(winningSet)은 계산에 안 쓰고 대조만.
+  const deepAnalysis = useMemo(() => {
+    const groups = [
+      ...groupLineMatching.groups6,
+      ...groupLineMatching.groups5,
+      ...groupLineMatching.groups4,
+      ...groupLineMatching.groups3,
+      ...groupLineMatching.groups2,
+    ];
+    const auto = groupLineMatching.allAutoNumbers;
+    const semi = groupLineMatching.allSemiNumbers;
+    if (auto.length === 0 && semi.length === 0) return null;
+    const LW: Record<number, number> = { 6: 10, 5: 8, 4: 6, 3: 4, 2: 2 };
+    const win = (n: number) => (winningSet != null && winningSet.size > 0 ? winningSet.has(n) : false);
+
+    // (1) 등장 빈도 — 자동/반자동/전체 (줄 단위 distinct)
+    const af: Record<number, number> = {};
+    const sf: Record<number, number> = {};
+    for (const l of auto) for (const n of new Set(l)) if (n >= 1 && n <= 45) af[n] = (af[n] ?? 0) + 1;
+    for (const l of semi) for (const n of new Set(l)) if (n >= 1 && n <= 45) sf[n] = (sf[n] ?? 0) + 1;
+
+    // (2) 일치개수 가중치 점수 + (5/6) 공출현 네트워크(허브/중심성)
+    const wscore: Record<number, number> = {};
+    const maxMatch: Record<number, number> = {};
+    const grpCnt: Record<number, number> = {};
+    const deg: Record<number, number> = {};
+    const partners: Record<number, Record<number, number>> = {};
+    for (const g of groups) {
+      const gw = (LW[g.matchCount] ?? 1) * (1 + Math.log2(Math.min(g.autoList.length, g.semiList.length) + 1));
+      for (const n of g.matchedNumbers) {
+        wscore[n] = (wscore[n] ?? 0) + gw;
+        maxMatch[n] = Math.max(maxMatch[n] ?? 0, g.matchCount);
+        grpCnt[n] = (grpCnt[n] ?? 0) + 1;
+      }
+      const ns = g.matchedNumbers;
+      for (let i = 0; i < ns.length; i += 1)
+        for (let j = i + 1; j < ns.length; j += 1) {
+          const a = ns[i];
+          const b = ns[j];
+          deg[a] = (deg[a] ?? 0) + gw;
+          deg[b] = (deg[b] ?? 0) + gw;
+          (partners[a] ??= {})[b] = (partners[a][b] ?? 0) + gw;
+          (partners[b] ??= {})[a] = (partners[b][a] ?? 0) + gw;
+        }
+    }
+
+    const freqTable = Array.from(new Set([...Object.keys(af), ...Object.keys(sf)].map(Number)))
+      .map((n) => ({ number: n, auto: af[n] ?? 0, semi: sf[n] ?? 0, total: (af[n] ?? 0) + (sf[n] ?? 0), winning: win(n) }))
+      .sort((a, b) => b.total - a.total || a.number - b.number);
+    const weightedRank = Object.keys(wscore).map(Number)
+      .map((n) => ({ number: n, wscore: Math.round(wscore[n]), maxMatch: maxMatch[n] ?? 0, groups: grpCnt[n] ?? 0, winning: win(n) }))
+      .sort((a, b) => b.wscore - a.wscore || a.number - b.number);
+    const hubRank = Object.keys(deg).map(Number)
+      .map((n) => {
+        const ps = Object.entries(partners[n] ?? {}).sort((x, y) => y[1] - x[1]);
+        return { number: n, degree: Math.round(deg[n]), links: ps.length, topPartners: ps.slice(0, 4).map(([m]) => Number(m)), winning: win(n) };
+      })
+      .sort((a, b) => b.degree - a.degree || a.number - b.number);
+
+    // (3) 자동·반자동 교집합 분류 (각 사이드 상위 12위 기준)
+    const autoTop = new Set(Object.entries(af).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([n]) => Number(n)));
+    const semiTop = new Set(Object.entries(sf).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([n]) => Number(n)));
+    const both = [...autoTop].filter((n) => semiTop.has(n)).sort((a, b) => (af[b] + sf[b]) - (af[a] + sf[a]));
+    const autoOnly = [...autoTop].filter((n) => !semiTop.has(n)).sort((a, b) => af[b] - af[a]);
+    const semiOnly = [...semiTop].filter((n) => !autoTop.has(n)).sort((a, b) => sf[b] - sf[a]);
+
+    // (4) 4번호 세트 반복
+    const quad = new Map<string, { numbers: number[]; groupCount: number; support: number; winning: boolean }>();
+    for (const g of groups) if (g.matchCount >= 4) {
+      const ns2 = g.matchedNumbers;
+      const supp = g.autoList.length + g.semiList.length;
+      for (let i = 0; i < ns2.length; i += 1)
+        for (let j = i + 1; j < ns2.length; j += 1)
+          for (let k = j + 1; k < ns2.length; k += 1)
+            for (let l = k + 1; l < ns2.length; l += 1) {
+              const combo = [ns2[i], ns2[j], ns2[k], ns2[l]];
+              const key = combo.join('-');
+              const e = quad.get(key);
+              if (e) { e.groupCount += 1; e.support += supp; }
+              else quad.set(key, { numbers: combo, groupCount: 1, support: supp, winning: combo.every(win) });
+            }
+    }
+    const sets4 = Array.from(quad.values()).sort((a, b) => b.support - a.support || b.groupCount - a.groupCount).slice(0, 6);
+
+    // (7) 숨은 강수 — 총 등장은 중앙값 이하지만 큰 매치(4+)에서만 반복
+    const totalsArr = freqTable.map((f) => f.total).sort((a, b) => a - b);
+    const medianTotal = totalsArr[Math.floor(totalsArr.length / 2)] ?? 0;
+    const hidden = weightedRank.filter((x) => x.maxMatch >= 4 && ((af[x.number] ?? 0) + (sf[x.number] ?? 0)) <= medianTotal).slice(0, 8);
+
+    // (8/10) 종합 핵심 — 정규화 합성: 양쪽 빈도합의(0.45)+가중치(0.35)+허브(0.2)
+    const norm = (rec: Record<number, number>) => {
+      const mx = Math.max(1, ...Object.values(rec));
+      return (n: number) => (rec[n] ?? 0) / mx;
+    };
+    const consensus: Record<number, number> = {};
+    for (const n of freqTable.map((f) => f.number)) consensus[n] = Math.log2((af[n] ?? 0) + 1) * Math.log2((sf[n] ?? 0) + 1);
+    const nC = norm(consensus);
+    const nW = norm(wscore);
+    const nD = norm(deg);
+    const composite = Array.from(new Set([...Object.keys(consensus), ...Object.keys(wscore), ...Object.keys(deg)].map(Number)))
+      .map((n) => ({ number: n, score: Math.round((nC(n) * 0.45 + nW(n) * 0.35 + nD(n) * 0.2) * 1000), winning: win(n), auto: af[n] ?? 0, semi: sf[n] ?? 0, maxMatch: maxMatch[n] ?? 0, hub: Math.round(deg[n] ?? 0) }))
+      .sort((a, b) => b.score - a.score || a.number - b.number);
+
+    const winCheck = winningSet != null && winningSet.size > 0
+      ? { top6: composite.slice(0, 6).filter((c) => c.winning).length, top15: composite.slice(0, 15).filter((c) => c.winning).length }
+      : null;
+
+    return { freqTable, weightedRank, hubRank, both, autoOnly, semiOnly, sets4, hidden, composite, winCheck };
+  }, [
+    groupLineMatching.groups6,
+    groupLineMatching.groups5,
+    groupLineMatching.groups4,
+    groupLineMatching.groups3,
+    groupLineMatching.groups2,
+    groupLineMatching.allAutoNumbers,
+    groupLineMatching.allSemiNumbers,
+    winningSet,
+  ]);
+
   const lineMatchNumber = lineMatchNumberFilter ? Number(lineMatchNumberFilter) : null;
   const filterLineMatchGroups = <T extends { matchCount: number; matchedNumbers: number[] }>(groups: T[]): T[] =>
     groups.filter((g) => {
@@ -3590,6 +3711,150 @@ export default function SemiAutoComparePanel({
                   )}
                 </Box>
               )}
+            </Paper>
+          )}
+
+          {/* 🧠 심층 역산 분석 — 네트워크·허브·가중치·구조 */}
+          {deepAnalysis && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'info.main' }}>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+                🧠 심층 역산 분석 (빈도·가중치·허브·네트워크·구조)
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                단순 빈도가 아니라 <strong>일치개수 가중치</strong>(6개×10·5×8·4×6·3×4·2×2) · <strong>공출현 네트워크
+                허브(중심성)</strong> · <strong>세트 반복</strong> · <strong>숨은 강수</strong>를 합성해 당첨 구조를 역산합니다.
+                당첨번호는 계산에 넣지 않습니다(복기는 초록 대조만).
+              </Typography>
+
+              {/* ⑩ 최종 핵심 TOP15 (종합 합성) */}
+              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                ① 핵심번호 TOP15 (양쪽빈도 0.45 + 가중치 0.35 + 허브 0.2)
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                {deepAnalysis.composite.slice(0, 15).map((c, i) => (
+                  <Box key={`comp-${c.number}`} sx={{ textAlign: 'center', minWidth: 34 }}>
+                    <LottoBall number={c.number} size={30} dimmed={compareWinning && winningSet ? !c.winning : false} />
+                    <Typography variant="caption" sx={{ display: 'block', fontSize: 8, color: 'text.disabled', lineHeight: 1 }}>
+                      {i + 1}위·{c.score}
+                    </Typography>
+                  </Box>
+                ))}
+              </Stack>
+              {deepAnalysis.winCheck && (
+                <Chip
+                  size="small"
+                  color={deepAnalysis.winCheck.top6 >= 3 ? 'success' : deepAnalysis.winCheck.top6 >= 2 ? 'warning' : 'default'}
+                  label={`복기 검증 — 핵심 TOP6 중 당첨 ${deepAnalysis.winCheck.top6}개 · TOP15 중 ${deepAnalysis.winCheck.top15}개 (무작위 기대 TOP6≈0.8·TOP15≈2)`}
+                  sx={{ fontWeight: 700, mb: 1, height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.25 } }}
+                />
+              )}
+
+              <Divider sx={{ my: 1 }} />
+              {/* ② 허브 TOP10 (네트워크 중심성) */}
+              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                ② 허브번호 TOP10 (공출현 연결강도 = 중심성)
+              </Typography>
+              <Stack spacing={0.3} sx={{ mb: 1 }}>
+                {deepAnalysis.hubRank.slice(0, 10).map((h, i) => (
+                  <Stack key={`hub-${h.number}`} direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                    <Typography variant="caption" sx={{ fontSize: 10, minWidth: 16, color: 'text.disabled' }}>{i + 1}</Typography>
+                    <LottoBall number={h.number} size={22} dimmed={compareWinning && winningSet ? !h.winning : false} />
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                      연결강도 {h.degree} · {h.links}개 연결 · 허브세트 →{' '}
+                      {h.topPartners.map((p) => (
+                        <Box component="span" key={p} sx={{ color: compareWinning && winningSet?.has(p) ? 'success.light' : 'inherit', fontWeight: compareWinning && winningSet?.has(p) ? 700 : 400 }}>{p} </Box>
+                      ))}
+                    </Typography>
+                  </Stack>
+                ))}
+              </Stack>
+
+              <Divider sx={{ my: 1 }} />
+              {/* ③④⑤ 강한 세트 */}
+              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                ③ 가장 강한 세트 (2·3·4번호 반복){compareWinning ? ' — 초록: 전부 당첨' : ''}
+              </Typography>
+              {([
+                { label: '2번호', items: crossSetPatterns.pairs.slice(0, 4) },
+                { label: '3번호', items: crossSetPatterns.triples.slice(0, 4) },
+                { label: '4번호', items: deepAnalysis.sets4.slice(0, 4) },
+              ] as const).map(({ label, items }) =>
+                items.length > 0 ? (
+                  <Stack key={label} direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.3 }}>
+                    <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700, minWidth: 34 }}>{label}</Typography>
+                    {items.map((s, idx) => (
+                      <Box key={`${label}-${idx}`} component="span"
+                        sx={{ px: 0.5, py: 0.1, borderRadius: 0.5, bgcolor: s.winning ? 'success.main' : 'action.hover', fontSize: 10 }}>
+                        {s.numbers.join('·')} <Box component="span" sx={{ color: 'text.disabled' }}>×{s.groupCount}</Box>
+                      </Box>
+                    ))}
+                  </Stack>
+                ) : null,
+              )}
+
+              <Divider sx={{ my: 1 }} />
+              {/* ⑥ 자동·반자동 공통 + ⑦ 숨은 강수 */}
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>④ 자동·반자동 공통 핵심</Typography>
+                  <Stack direction="row" spacing={0.3} flexWrap="wrap" useFlexGap>
+                    {deepAnalysis.both.slice(0, 10).map((n) => (
+                      <LottoBall key={`both-${n}`} number={n} size={20} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
+                    ))}
+                    {deepAnalysis.both.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>없음</Typography>}
+                  </Stack>
+                </Box>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>⑤ 숨은 강수 (등장↓·큰매치↑)</Typography>
+                  <Stack direction="row" spacing={0.3} flexWrap="wrap" useFlexGap>
+                    {deepAnalysis.hidden.map((h) => (
+                      <Box key={`hid-${h.number}`} sx={{ textAlign: 'center', minWidth: 22 }}>
+                        <LottoBall number={h.number} size={20} dimmed={compareWinning && winningSet ? !h.winning : false} />
+                        <Typography variant="caption" sx={{ display: 'block', fontSize: 8, color: 'text.disabled', lineHeight: 1 }}>최대{h.maxMatch}</Typography>
+                      </Box>
+                    ))}
+                    {deepAnalysis.hidden.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>없음</Typography>}
+                  </Stack>
+                </Box>
+              </Stack>
+
+              <Divider sx={{ my: 1 }} />
+              {/* ① 빈도표 + ② 가중치표 */}
+              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>⑥ 빈도·가중치 TOP12 (번호 · 자동 · 반자동 · 전체 · 가중치)</Typography>
+              <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, p: 0.5, mb: 1 }}>
+                <Stack direction="row" sx={{ fontSize: 10, fontWeight: 700, color: 'text.secondary', px: 0.5, mb: 0.25 }}>
+                  <Box sx={{ width: 42 }}>번호</Box>
+                  <Box sx={{ width: 40, textAlign: 'right' }}>자동</Box>
+                  <Box sx={{ width: 48, textAlign: 'right' }}>반자동</Box>
+                  <Box sx={{ width: 40, textAlign: 'right' }}>전체</Box>
+                  <Box sx={{ flex: 1, textAlign: 'right' }}>가중치</Box>
+                </Stack>
+                {deepAnalysis.freqTable.slice(0, 12).map((f) => {
+                  const w = deepAnalysis.weightedRank.find((x) => x.number === f.number);
+                  return (
+                    <Stack
+                      key={`ft-${f.number}`}
+                      direction="row"
+                      alignItems="center"
+                      sx={{ fontSize: 11, px: 0.5, py: 0.1, borderRadius: 0.5, bgcolor: compareWinning && f.winning ? 'success.main' : undefined }}
+                    >
+                      <Box sx={{ width: 42, display: 'flex', alignItems: 'center' }}>
+                        <LottoBall number={f.number} size={18} dimmed={compareWinning && winningSet ? !f.winning : false} />
+                      </Box>
+                      <Box sx={{ width: 40, textAlign: 'right' }}>{f.auto}</Box>
+                      <Box sx={{ width: 48, textAlign: 'right' }}>{f.semi}</Box>
+                      <Box sx={{ width: 40, textAlign: 'right', fontWeight: 700 }}>{f.total}</Box>
+                      <Box sx={{ flex: 1, textAlign: 'right', color: 'text.secondary' }}>
+                        {w ? w.wscore : 0}{w && w.maxMatch >= 3 ? ` (최대${w.maxMatch})` : ''}
+                      </Box>
+                    </Stack>
+                  );
+                })}
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10 }}>
+                ※ 네트워크 요약: 허브(중심)번호를 축으로 강한 세트가 뭉치고, 숨은 강수가 큰 매치에서만 연결됩니다.
+                이 구조가 다음 회차에도 반복되면 신호, 회차마다 흔들리면 우연입니다. 로또는 무작위라 확률 자체는 불변.
+              </Typography>
             </Paper>
           )}
 

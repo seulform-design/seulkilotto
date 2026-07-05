@@ -2401,7 +2401,51 @@ export default function SemiAutoComparePanel({
       return { overlap: inter, jaccard: uni > 0 ? Math.round((inter / uni) * 100) : 0 };
     })();
 
-    return { freqTable, weightedRank, hubRank, both, autoOnly, semiOnly, sets4, hidden, composite, winCheck, backtest, stability, finalPick, reserve, finalWin, exclude, decadeDist };
+    // 🔬 번호 추출 역산 — 대상(복기=실제 당첨, 이번회차=예상 상위6)이 각 1:1 신호에서
+    // '몇 위'였는지 역산해, 그 번호가 데이터에서 어떻게(어느 신호로) 추출될 수 있었는지
+    // 보여준다. 복기: "1231 당첨이 추출 가능했나". 이번회차: "예상번호의 추출 근거".
+    const rankMapOf = (arr: number[]) => {
+      const m: Record<number, number> = {};
+      arr.forEach((n, i) => { m[n] = i + 1; });
+      return m;
+    };
+    const rFreq = rankMapOf([...ensembleNums].sort((a, b) => (consensus[b] ?? 0) - (consensus[a] ?? 0) || a - b));
+    const rWeight = rankMapOf([...ensembleNums].sort((a, b) => (wscore[b] ?? 0) - (wscore[a] ?? 0) || a - b));
+    const rHub = rankMapOf([...ensembleNums].sort((a, b) => (deg[b] ?? 0) - (deg[a] ?? 0) || a - b));
+    const rSet = rankMapOf([...ensembleNums].sort((a, b) => (setSupport[b] ?? 0) - (setSupport[a] ?? 0) || a - b));
+    const rComp = rankMapOf(composite.map((c) => c.number));
+    const isReviewTarget = winningSet != null && winningSet.size > 0;
+    const targetNumbers = isReviewTarget
+      ? Array.from(winningSet).sort((a, b) => a - b)
+      : finalPick.slice();
+    const extraction = targetNumbers.map((n) => {
+      const present = rFreq[n] != null;
+      const rk = { freq: rFreq[n] ?? null, weight: rWeight[n] ?? null, hub: rHub[n] ?? null, set: rSet[n] ?? null, comp: rComp[n] ?? null };
+      const cands = [
+        { k: '양쪽빈도', r: rk.freq },
+        { k: '가중치', r: rk.weight },
+        { k: '허브', r: rk.hub },
+        { k: '세트', r: rk.set },
+      ].filter((x) => x.r != null) as { k: string; r: number }[];
+      const bestObj = cands.length ? cands.reduce((a, b) => (b.r < a.r ? b : a)) : null;
+      return {
+        number: n,
+        present,
+        ranks: rk,
+        best: bestObj?.r ?? null,
+        bestSignal: bestObj?.k ?? '없음',
+        extractable: present && (bestObj?.r ?? 999) <= 15,
+      };
+    });
+    const extractSummary = {
+      total: targetNumbers.length,
+      present: extraction.filter((e) => e.present).length,
+      extractable: extraction.filter((e) => e.extractable).length,
+      inCompTop15: extraction.filter((e) => (e.ranks.comp ?? 999) <= 15).length,
+      inCompTop6: extraction.filter((e) => (e.ranks.comp ?? 999) <= 6).length,
+    };
+
+    return { freqTable, weightedRank, hubRank, both, autoOnly, semiOnly, sets4, hidden, composite, winCheck, backtest, stability, finalPick, reserve, finalWin, exclude, decadeDist, extraction, extractSummary, isReviewTarget };
   }, [
     groupLineMatching.groups6,
     groupLineMatching.groups5,
@@ -3968,6 +4012,66 @@ export default function SemiAutoComparePanel({
                   ※ 이번회차 탭은 당첨 미정이라 유의성 검증 불가 — 안정성(위)만 참고. 복기 탭에서 회차별로 검증하세요.
                 </Typography>
               )}
+
+              <Divider sx={{ my: 1 }} />
+              {/* 🔬 번호 추출 역산 — 대상(복기=당첨/이번회차=예상)이 각 신호에서 몇 위였나 */}
+              <Box sx={{ p: 1, mb: 1, borderRadius: 1, border: '1px dashed', borderColor: 'warning.main' }}>
+                <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                  🔬 번호 추출 역산 —{' '}
+                  {deepAnalysis.isReviewTarget
+                    ? `${effectiveRound ?? '?'}회 당첨번호가 1:1 데이터에서 어떻게 추출될 수 있었나`
+                    : '예상번호가 어느 신호로 추출됐나 (당첨 역산 예측)'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                  {deepAnalysis.isReviewTarget
+                    ? '실제 당첨번호'
+                    : '예상 6개'}
+                  가 각 1:1 신호(양쪽빈도·가중치·허브·세트)에서 몇 위였는지 — <strong>상위 15위 안이면 그 신호로 추출 가능</strong>.
+                  {deepAnalysis.isReviewTarget
+                    ? ' 이걸로 "1231을 데이터로 예측할 수 있었나"를 판정합니다.'
+                    : ' 예상번호도 복기와 동일한 추출 논리로 만들어졌음을 보여줍니다.'}
+                </Typography>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                  <Chip
+                    size="small"
+                    color={deepAnalysis.extractSummary.inCompTop15 >= Math.ceil(deepAnalysis.extractSummary.total * 0.6) ? 'success' : deepAnalysis.extractSummary.inCompTop15 >= 2 ? 'warning' : 'default'}
+                    label={`${deepAnalysis.isReviewTarget ? '당첨' : '예상'} ${deepAnalysis.extractSummary.total}개 중 · 종합 상위15 ${deepAnalysis.extractSummary.inCompTop15}개(상위6 ${deepAnalysis.extractSummary.inCompTop6}개) · 어느 신호로든 추출가능 ${deepAnalysis.extractSummary.extractable}개 · 데이터 등장 ${deepAnalysis.extractSummary.present}개`}
+                    sx={{ fontWeight: 700, height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.25 } }}
+                  />
+                </Stack>
+                <Stack direction="row" sx={{ fontSize: 9, fontWeight: 700, color: 'text.secondary', px: 0.5 }}>
+                  <Box sx={{ width: 30 }}>번호</Box>
+                  <Box sx={{ width: 52, textAlign: 'right' }}>양쪽빈도</Box>
+                  <Box sx={{ width: 44, textAlign: 'right' }}>가중치</Box>
+                  <Box sx={{ width: 40, textAlign: 'right' }}>허브</Box>
+                  <Box sx={{ width: 40, textAlign: 'right' }}>세트</Box>
+                  <Box sx={{ width: 44, textAlign: 'right' }}>종합</Box>
+                  <Box sx={{ flex: 1, textAlign: 'right' }}>추출</Box>
+                </Stack>
+                {deepAnalysis.extraction.map((e) => {
+                  const cell = (r: number | null) => (r == null ? '—' : r <= 15 ? `${r}★` : `${r}`);
+                  return (
+                    <Stack key={`ext-${e.number}`} direction="row" alignItems="center" sx={{ fontSize: 10, px: 0.5, py: 0.1 }}>
+                      <Box sx={{ width: 30 }}>
+                        <LottoBall number={e.number} size={18} />
+                      </Box>
+                      <Box sx={{ width: 52, textAlign: 'right', color: (e.ranks.freq ?? 999) <= 15 ? 'success.light' : 'text.secondary' }}>{cell(e.ranks.freq)}</Box>
+                      <Box sx={{ width: 44, textAlign: 'right', color: (e.ranks.weight ?? 999) <= 15 ? 'success.light' : 'text.secondary' }}>{cell(e.ranks.weight)}</Box>
+                      <Box sx={{ width: 40, textAlign: 'right', color: (e.ranks.hub ?? 999) <= 15 ? 'success.light' : 'text.secondary' }}>{cell(e.ranks.hub)}</Box>
+                      <Box sx={{ width: 40, textAlign: 'right', color: (e.ranks.set ?? 999) <= 15 ? 'success.light' : 'text.secondary' }}>{cell(e.ranks.set)}</Box>
+                      <Box sx={{ width: 44, textAlign: 'right', fontWeight: 700, color: (e.ranks.comp ?? 999) <= 15 ? 'success.light' : 'text.secondary' }}>{cell(e.ranks.comp)}</Box>
+                      <Box sx={{ flex: 1, textAlign: 'right', fontSize: 9, color: e.extractable ? 'success.light' : 'text.disabled' }}>
+                        {e.present ? (e.extractable ? `가능(${e.bestSignal})` : '상위밖') : '미등장'}
+                      </Box>
+                    </Stack>
+                  );
+                })}
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.25 }}>
+                  ★=상위15위 안. {deepAnalysis.isReviewTarget
+                    ? '‘미등장/상위밖’ 당첨번호는 내 티켓에 거의 없어(우연) 어떤 방법으로도 데이터에서 못 뽑았다는 뜻 — 예측 한계를 정직하게 보여줌.'
+                    : '예상번호는 정의상 종합 상위라 대부분 ★. 참고: 이건 예측 근거일 뿐 당첨 보장 아님.'}
+                </Typography>
+              </Box>
 
               <Divider sx={{ my: 1 }} />
               {/* ② 허브 TOP10 (네트워크 중심성) */}

@@ -97,6 +97,27 @@ const HEAVY_COMPARISON_TICKET_LIMIT = 1_200;
 const HEAVY_LINE_PAIR_LIMIT = 200_000;
 /** 보류 상태에서 [상세 비교 보기] 강제 시 경량 비교에 사용할 상위 줄 수 캡. */
 const FORCE_DETAILED_TICKET_CAP = 200;
+
+// 모바일/저사양 기기 감지 — 무거운 1:1 전수비교·심층분석(수만~십수만 페어)이 메인
+// 스레드를 수 초 점유하면 모바일 브라우저가 탭을 강제 종료(재부팅 루프)한다. 이런
+// 기기에선 임계값을 크게 낮춰 상세 계산을 자동 보류하고, 데이터(누적 줄·카운트)는
+// 그대로 보여준다. 상세 분석이 필요하면 PC에서 열거나 [상세 보기]로 경량 실행.
+const IS_CONSTRAINED_DEVICE = (() => {
+  try {
+    if (typeof navigator === 'undefined') return false;
+    const nav = navigator as Navigator & { deviceMemory?: number };
+    const smallVp = typeof window !== 'undefined' && window.innerWidth > 0 && window.innerWidth < 820;
+    const coarse = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)')?.matches;
+    const lowMem = typeof nav.deviceMemory === 'number' && nav.deviceMemory <= 4;
+    const lowCpu = typeof nav.hardwareConcurrency === 'number' && nav.hardwareConcurrency <= 4;
+    return smallVp || coarse || lowMem || lowCpu;
+  } catch {
+    return false;
+  }
+})();
+/** 저사양 기기에서 상세 계산을 자동 보류하는 임계값(페어/줄 수). */
+const CONSTRAINED_TICKET_LIMIT = 500;
+const CONSTRAINED_LINE_PAIR_LIMIT = 15_000;
 /** 1:1 매칭 그룹 카드에서 한쪽(자동/반자동) 일치 줄을 최대 몇 개까지 렌더할지. */
 const GROUP_LINE_RENDER_CAP = 40;
 
@@ -1172,9 +1193,12 @@ export default function SemiAutoComparePanel({
     bulkTickets.length;
   const combinedTicketEstimate = autoLineCountEstimate + semiLineCountEstimate;
   const estimatedLinePairCount = autoLineCountEstimate * semiLineCountEstimate;
+  // 저사양(모바일) 기기에선 훨씬 낮은 상한을 적용해 상세 계산을 자동 보류 → 재부팅 방지.
+  const heavyTicketLimit = IS_CONSTRAINED_DEVICE ? CONSTRAINED_TICKET_LIMIT : HEAVY_COMPARISON_TICKET_LIMIT;
+  const heavyPairLimit = IS_CONSTRAINED_DEVICE ? CONSTRAINED_LINE_PAIR_LIMIT : HEAVY_LINE_PAIR_LIMIT;
   const suspendHeavyComparison =
-    combinedTicketEstimate > HEAVY_COMPARISON_TICKET_LIMIT ||
-    estimatedLinePairCount > HEAVY_LINE_PAIR_LIMIT;
+    combinedTicketEstimate > heavyTicketLimit ||
+    estimatedLinePairCount > heavyPairLimit;
 
   const strongCandidateResolution = useMemo(
     () => resolveStrongCandidates(accumulated, sheetIntent, autoOnlyLines, winningNumbers),
@@ -2786,6 +2810,13 @@ export default function SemiAutoComparePanel({
             <>
               상위 {FORCE_DETAILED_TICKET_CAP}장만으로 <strong>상세 교집합·요약 비교</strong>를 표시 중입니다.
               (무거운 1:1 전수비교는 브라우저 보호를 위해 보류 — 줄 수를 줄이면 전체가 표시됩니다.)
+            </>
+          ) : IS_CONSTRAINED_DEVICE ? (
+            <>
+              📱 <strong>모바일에서는 상세 분석(1:1 전수비교·심층 역산)을 자동 보류</strong>합니다 — 데이터가 많으면 이 계산이
+              휴대폰을 멈추게 해(재부팅) 화면이 안 열리기 때문입니다. <strong>내가 넣은 데이터는 서버에 안전하게 저장</strong>돼
+              있어 그대로 보이고, 저장·삭제도 정상 동작합니다. <strong>정밀 분석은 PC에서</strong> 열면 전체가 표시됩니다.
+              (가벼운 요약만 보려면 <strong>[상세 비교 보기]</strong>.)
             </>
           ) : (
             <>

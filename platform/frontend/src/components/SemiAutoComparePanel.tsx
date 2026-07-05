@@ -2252,8 +2252,50 @@ export default function SemiAutoComparePanel({
     const nW = norm(wscore);
     const nD = norm(deg);
     const composite = Array.from(new Set([...Object.keys(consensus), ...Object.keys(wscore), ...Object.keys(deg)].map(Number)))
-      .map((n) => ({ number: n, score: Math.round((nC(n) * 0.45 + nW(n) * 0.35 + nD(n) * 0.2) * 1000), winning: win(n), auto: af[n] ?? 0, semi: sf[n] ?? 0, maxMatch: maxMatch[n] ?? 0, hub: Math.round(deg[n] ?? 0) }))
+      .map((n) => ({
+        number: n,
+        score: Math.round((nC(n) * 0.45 + nW(n) * 0.35 + nD(n) * 0.2) * 1000),
+        cFreq: Math.round(nC(n) * 100),
+        cWeight: Math.round(nW(n) * 100),
+        cHub: Math.round(nD(n) * 100),
+        winning: win(n),
+        auto: af[n] ?? 0,
+        semi: sf[n] ?? 0,
+        maxMatch: maxMatch[n] ?? 0,
+        hub: Math.round(deg[n] ?? 0),
+      }))
       .sort((a, b) => b.score - a.score || a.number - b.number);
+
+    // ⑧ 최종 예측 조합 — composite 상위에서 '구간(10단위) 최대 2개' 로 균형 잡아 6개.
+    const decadeOf = (n: number) => Math.min(4, Math.floor((n - 1) / 10));
+    const finalPick: number[] = [];
+    const decCnt: Record<number, number> = {};
+    for (const c of composite) {
+      if (finalPick.length >= 6) break;
+      const d = decadeOf(c.number);
+      if ((decCnt[d] ?? 0) >= 2) continue;
+      finalPick.push(c.number);
+      decCnt[d] = (decCnt[d] ?? 0) + 1;
+    }
+    for (const c of composite) {
+      if (finalPick.length >= 6) break;
+      if (!finalPick.includes(c.number)) finalPick.push(c.number);
+    }
+    finalPick.sort((a, b) => a - b);
+    const reserve = composite.map((c) => c.number).filter((n) => !finalPick.includes(n)).slice(0, 3);
+    const finalWin = winningSet != null && winningSet.size > 0 ? finalPick.filter((n) => winningSet.has(n)).length : null;
+
+    // ⑨ 제외 후보 — 한쪽만 강한(양쪽 합의 약함) 번호.
+    const exclude = [
+      ...autoOnly.slice(0, 3).map((n) => ({ number: n, side: '자동만', winning: win(n) })),
+      ...semiOnly.slice(0, 3).map((n) => ({ number: n, side: '반자동만', winning: win(n) })),
+    ];
+
+    // 구간 분산 (TOP15 이 1~45 구간에 어떻게 퍼졌나) — 조합 균형 참고.
+    const decadeDist = [0, 1, 2, 3, 4].map((d) => ({
+      label: d < 4 ? `${d * 10 + 1}-${d * 10 + 10}` : '41-45',
+      count: composite.slice(0, 15).filter((c) => decadeOf(c.number) === d).length,
+    }));
 
     const winCheck = winningSet != null && winningSet.size > 0
       ? { top6: composite.slice(0, 6).filter((c) => c.winning).length, top15: composite.slice(0, 15).filter((c) => c.winning).length }
@@ -2317,7 +2359,7 @@ export default function SemiAutoComparePanel({
       return { overlap: inter, jaccard: uni > 0 ? Math.round((inter / uni) * 100) : 0 };
     })();
 
-    return { freqTable, weightedRank, hubRank, both, autoOnly, semiOnly, sets4, hidden, composite, winCheck, backtest, stability };
+    return { freqTable, weightedRank, hubRank, both, autoOnly, semiOnly, sets4, hidden, composite, winCheck, backtest, stability, finalPick, reserve, finalWin, exclude, decadeDist };
   }, [
     groupLineMatching.groups6,
     groupLineMatching.groups5,
@@ -3784,6 +3826,38 @@ export default function SemiAutoComparePanel({
                 당첨번호는 계산에 넣지 않습니다(복기는 초록 대조만).
               </Typography>
 
+              {/* 🎯 최종 예측 조합 (구간 균형) + 구조 서술 — 이 섹션의 결론 */}
+              <Box sx={{ p: 1, mb: 1, borderRadius: 1, border: '2px solid', borderColor: 'warning.main' }}>
+                <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                  🎯 최종 예측 조합 6개 (핵심 상위 + 구간 10단위 최대 2개 균형)
+                </Typography>
+                <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
+                  {deepAnalysis.finalPick.map((n) => (
+                    <LottoBall key={`fp-${n}`} number={n} size={34} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
+                  ))}
+                  {deepAnalysis.finalWin != null && (
+                    <Chip
+                      size="small"
+                      color={deepAnalysis.finalWin >= 3 ? 'success' : deepAnalysis.finalWin >= 2 ? 'warning' : 'default'}
+                      label={`당첨 ${deepAnalysis.finalWin}/6`}
+                      sx={{ fontWeight: 700 }}
+                    />
+                  )}
+                </Stack>
+                {deepAnalysis.reserve.length > 0 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10 }}>
+                    예비 교체 후보: {deepAnalysis.reserve.join(', ')} · 구간분산(TOP15) {deepAnalysis.decadeDist.map((d) => `${d.label}:${d.count}`).join('·')}
+                  </Typography>
+                )}
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mt: 0.25 }}>
+                  <strong>구조</strong>: 중심 허브 <strong>{deepAnalysis.hubRank[0]?.number ?? '-'}</strong>
+                  {deepAnalysis.hubRank[0]?.topPartners.length ? `(→${deepAnalysis.hubRank[0].topPartners.slice(0, 3).join('·')})` : ''} 축 ·{' '}
+                  핵심세트 {(crossSetPatterns.triples[0]?.numbers ?? crossSetPatterns.pairs[0]?.numbers ?? []).join('·') || '-'} ·{' '}
+                  보조 {deepAnalysis.composite.slice(3, 8).map((c) => c.number).join('·')} ·{' '}
+                  제외 {deepAnalysis.exclude.map((e) => e.number).join('·') || '-'}
+                </Typography>
+              </Box>
+
               {/* ⑩ 최종 핵심 TOP15 (종합 합성) */}
               <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
                 ① 핵심번호 TOP15 (양쪽빈도 0.45 + 가중치 0.35 + 허브 0.2)
@@ -3798,6 +3872,9 @@ export default function SemiAutoComparePanel({
                   </Box>
                 ))}
               </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mb: 0.5 }}>
+                근거 분해(상위 6, 0~100): {deepAnalysis.composite.slice(0, 6).map((c) => `${c.number}[빈${c.cFreq}·가${c.cWeight}·허${c.cHub}]`).join(' ')}
+              </Typography>
               {deepAnalysis.winCheck && (
                 <Chip
                   size="small"
@@ -3918,6 +3995,24 @@ export default function SemiAutoComparePanel({
                   </Stack>
                 </Box>
               </Stack>
+
+              {deepAnalysis.exclude.length > 0 && (
+                <Box sx={{ mt: 0.75 }}>
+                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                    ⑦ 제외 후보 (한쪽만 강함 — 양쪽 합의 약함){compareWinning ? ' · 주황=실제론 당첨(제외 주의)' : ''}
+                  </Typography>
+                  <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                    {deepAnalysis.exclude.map((e) => (
+                      <Box key={`exc-${e.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                        <LottoBall number={e.number} size={20} dimmed />
+                        <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: compareWinning && e.winning ? 'warning.light' : 'text.disabled' }}>
+                          {e.side}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
 
               <Divider sx={{ my: 1 }} />
               {/* ① 빈도표 + ② 가중치표 */}

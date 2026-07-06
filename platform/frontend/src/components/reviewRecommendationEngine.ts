@@ -67,6 +67,8 @@ export interface RecommendationContext {
   machineStrong?: number[];
   /** 🧬 학습된 당첨 프로파일 매칭 결과 (유사도순) — 복기 당첨 프로파일을 현재 데이터에 전이. */
   profileMatched?: { number: number; sim: number }[];
+  /** 🧬 학습된 당첨 '조합' 구조 (복기 당첨 6개의 합계·홀수·구간분산·최장연속). */
+  learnedStructure?: { sum: number; odd: number; decades: number; consec: number };
   /** [추천 생성] 클릭마다 증가 — 같은 데이터에서도 매번 다른 5세트를 낸다. */
   regenNonce?: number;
 }
@@ -165,6 +167,29 @@ function scoreCombo(
   if (profHit >= 2) {
     total += profHit * 3;
     signals.push(`학습${profHit}`);
+  }
+
+  // 🧬 학습 구조 정합 — 조합의 형태(합계·홀수·구간분산·연속)가 복기 당첨 조합과
+  // 가까울수록 가산. 3개 이상 근접하면 '구조' 신호 표시.
+  if (ctx.learnedStructure) {
+    const ls = ctx.learnedStructure;
+    const sorted = [...combo].sort((a, b) => a - b);
+    let maxConsec = 1;
+    let run = 1;
+    for (let i = 1; i < sorted.length; i += 1) {
+      run = sorted[i] === sorted[i - 1] + 1 ? run + 1 : 1;
+      maxConsec = Math.max(maxConsec, run);
+    }
+    const sum = sorted.reduce((s, n) => s + n, 0);
+    const odd = sorted.filter((n) => n % 2 === 1).length;
+    const decades = new Set(sorted.map((n) => Math.min(4, Math.floor((n - 1) / 10)))).size;
+    let structHits = 0;
+    if (Math.abs(sum - ls.sum) <= 20) structHits += 1;
+    if (Math.abs(odd - ls.odd) <= 1) structHits += 1;
+    if (Math.abs(decades - ls.decades) <= 1) structHits += 1;
+    if (Math.abs(maxConsec - ls.consec) <= 1) structHits += 1;
+    total += structHits * 2;
+    if (structHits >= 3) signals.push(`구조${structHits}`);
   }
 
   // 복기 당첨 일치는 점수에 더하지 않는다(사후 편향 방지). winMatch 는 결과

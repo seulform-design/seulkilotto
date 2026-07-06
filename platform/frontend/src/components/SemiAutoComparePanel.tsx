@@ -2191,7 +2191,22 @@ export default function SemiAutoComparePanel({
     }));
     const mean = (k: 'pct' | 'aShare' | 'sShare' | 'deep') => feats.reduce((s, f) => s + f[k], 0) / feats.length;
     const centroid = { pct: mean('pct'), aShare: mean('aShare'), sShare: mean('sShare'), deep: mean('deep') };
-    return { round, centroid, feats, totalNums: ranked.length, autoCount: autoL.length, semiCount: semiL.length };
+    // 당첨 '조합' 구조 학습 — 합계·홀수 개수·구간(10단위) 분산·최장 연속.
+    // 번호 단위 프로파일과 별개로 6개 묶음의 형태를 통계화해 추천 조합 스코어에 전이.
+    const sorted = [...winNums].sort((a, b) => a - b);
+    let maxConsec = 1;
+    let run = 1;
+    for (let i = 1; i < sorted.length; i += 1) {
+      run = sorted[i] === sorted[i - 1] + 1 ? run + 1 : 1;
+      maxConsec = Math.max(maxConsec, run);
+    }
+    const structure = {
+      sum: sorted.reduce((s, n) => s + n, 0),
+      odd: sorted.filter((n) => n % 2 === 1).length,
+      decades: new Set(sorted.map((n) => Math.min(4, Math.floor((n - 1) / 10)))).size,
+      consec: maxConsec,
+    };
+    return { round, centroid, feats, structure, totalNums: ranked.length, autoCount: autoL.length, semiCount: semiL.length };
   }, [accumulated]);
 
   // 🧬 프로파일 매칭 예상 — 현재 탭의 각 번호 프로파일이 '학습된 1231 당첨 프로파일'
@@ -2749,6 +2764,8 @@ export default function SemiAutoComparePanel({
         machineStrong,
         // 🧬 학습된 당첨 프로파일 매칭(복기 당첨 구조 → 현재 데이터 전이) — 핵심 축.
         profileMatched: patternMatched?.list.map((m) => ({ number: m.number, sim: m.sim })),
+        // 🧬 학습된 당첨 조합 구조(합계·홀수·구간분산·연속) — 조합 형태 정합 가산.
+        learnedStructure: learnedPattern?.structure,
         regenNonce: nonce,
       },
       5
@@ -2776,6 +2793,7 @@ export default function SemiAutoComparePanel({
     parallelExpected,
     machineStrong,
     patternMatched,
+    learnedPattern,
   ]);
 
   /**
@@ -3516,18 +3534,18 @@ export default function SemiAutoComparePanel({
               <Chip
                 size="small"
                 color="success"
-                label={`3등이상 ${(activeComparison.hitRates.threePlus * 100).toFixed(2)}%`}
+                label={`3개+ 일치(5등↑) ${(activeComparison.hitRates.threePlus * 100).toFixed(2)}%`}
                 sx={{ fontWeight: 700 }}
               />
               <Chip
                 size="small"
                 color="warning"
-                label={`4등이상 ${(activeComparison.hitRates.fourPlus * 100).toFixed(2)}%`}
+                label={`4개+ 일치(4등↑) ${(activeComparison.hitRates.fourPlus * 100).toFixed(2)}%`}
               />
               <Chip
                 size="small"
                 color="error"
-                label={`1등 ${(activeComparison.hitRates.six * 100).toFixed(4)}%`}
+                label={`6개 일치(1등) ${(activeComparison.hitRates.six * 100).toFixed(4)}%`}
               />
               {activeComparison.excludedWarningCount > 0 && (
                 <Chip
@@ -3975,8 +3993,10 @@ export default function SemiAutoComparePanel({
                     자동 {learnedPattern.autoCount}줄↔반자동 {learnedPattern.semiCount}줄에서 가진 통계):{' '}
                     반복도 백분위 평균 <strong>상위 {Math.round((1 - learnedPattern.centroid.pct) * 100)}%</strong> ·{' '}
                     자동 등장률 {Math.round(learnedPattern.centroid.aShare * 100)}% · 반자동 등장률 {Math.round(learnedPattern.centroid.sShare * 100)}% ·{' '}
-                    3+일치 보유 {Math.round(learnedPattern.centroid.deep * 6)}/6개.
-                    이 프로파일과 가장 닮은 번호순으로 정렬합니다.
+                    3+일치 보유 {Math.round(learnedPattern.centroid.deep * 6)}/6개 ·{' '}
+                    <strong>조합 구조</strong>: 합계 {learnedPattern.structure.sum} · 홀수 {learnedPattern.structure.odd}개 ·
+                    구간 {learnedPattern.structure.decades}개 분산 · 최장연속 {learnedPattern.structure.consec}.
+                    이 프로파일과 가장 닮은 번호순으로 정렬하고, 추천 조합은 이 구조에 가까울수록 '구조' 신호를 받습니다.
                   </Typography>
                   <Stack direction="row" spacing={0.6} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
                     {patternMatched.list.map((m, i) => (

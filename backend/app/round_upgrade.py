@@ -193,15 +193,38 @@ def _upgrade_rounds_locked(force: bool = False) -> Dict[str, Any]:
 
 
 def _sync_v2_database() -> Optional[Dict[str, Any]]:
-    """platform v2 DB에 신규 회차 반영 (있을 때만)."""
+    """platform v2 DB에 신규 회차 반영 (있을 때만).
+
+    v1(backend/app)과 v2(platform/backend/app)가 같은 최상위 패키지명 'app' 을 쓰기
+    때문에 실행 중인 v1 프로세스 안에서 v2 의 app.scheduler.jobs 를 import 하면
+    v1 의 app.scheduler(모듈)로 해석돼 "'app.scheduler' is not a package" 로 실패했다.
+    → 서브프로세스(cwd=platform/backend)로 격리 실행해 네임스페이스 충돌을 없앤다.
+    """
     platform_root = Path(__file__).resolve().parent.parent.parent / "platform" / "backend"
     if not platform_root.is_dir():
         return None
-    try:
-        if str(platform_root) not in sys.path:
-            sys.path.insert(0, str(platform_root))
-        from app.scheduler.jobs import sync_csv_incremental  # type: ignore[import-untyped]
+    import json as _json
+    import subprocess
 
-        return sync_csv_incremental()
+    code = (
+        "import json\n"
+        "from app.scheduler.jobs import sync_csv_incremental\n"
+        "print('__V2SYNC__' + json.dumps(sync_csv_incremental(), ensure_ascii=False, default=str))\n"
+    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=str(platform_root),
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip()[-500:]
+            return {"ok": False, "error": f"v2 sync subprocess exit {proc.returncode}: {tail}"}
+        for line in reversed((proc.stdout or "").strip().splitlines()):
+            if line.startswith("__V2SYNC__"):
+                return _json.loads(line[len("__V2SYNC__"):])
+        return {"ok": False, "error": "v2 sync output marker not found"}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}

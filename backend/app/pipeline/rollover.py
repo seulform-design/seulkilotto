@@ -61,6 +61,24 @@ def execute_saturday_rollover(
             idempotent=True,
         )
 
+    # 멱등성 2: 샌드박스가 이미 차기 회차로 넘어간 상태(과거 부분 롤오버·수동 초기화)
+    # 면 closed_round 의 보관 대상 데이터가 샌드박스에 남아있지 않다. 종전엔 무결성
+    # 게이트(sandbox_round != expected)로 '실패' 처리돼 매주 업그레이드 응답에 에러가
+    # 남았다 — 실패가 아니라 멱등 완료로 마킹해 파이프라인을 통과시킨다.
+    sb_round = int(getattr(sb.get_state(), "round_no", 0) or 0)
+    if sb_round > rnd:
+        hist._mark_rollover_complete(
+            rnd,
+            backtest_summary={"evaluated_at": None, "best_hit": None, "note": "sandbox already advanced"},
+        )
+        logger.info("Rollover idempotent: sandbox already at %s (closed=%s)", sb_round, rnd)
+        return RolloverResult(
+            ok=True,
+            closed_round=rnd,
+            next_round=sb_round,
+            idempotent=True,
+        )
+
     df = load_history()
     winning = _winning_numbers(df, rnd)
     if not winning:

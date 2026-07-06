@@ -3601,19 +3601,32 @@ export default function SemiAutoComparePanel({
           {/* 🎯 당첨 예상번호 — 전수비교 심층 역산(주) + 평행회차(보조). 호기 제외. */}
           {predictedNumbers.length > 0 && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main' }}>
-              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-                🎯 {effectiveRound ?? '?'}회 당첨 예상번호 (전수비교 심층 역산)
-              </Typography>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                <Typography variant="body2" fontWeight={700}>
+                  🎯 {effectiveRound ?? '?'}회 당첨 예상번호 — {compareWinning ? '복기 검증' : '예측'} (전수비교 심층 역산)
+                </Typography>
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={`자동 ${groupLineMatching.autoLineCount}줄 ↔ 반자동 ${groupLineMatching.semiLineCount}줄 · 매치그룹 ${groupLineMatching.groupCount}건`}
+                  sx={{ fontWeight: 700, height: 20, fontSize: 10 }}
+                />
+              </Stack>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 <strong>자동↔반자동 1:1 전수비교</strong>를 전수 분석 — 두 줄의 공통 번호 개수(matchCount)가
                 클수록(무작위 기대≈0.8개 → 3개+ 는 유의) 강하게, <strong>여러 그룹에 반복</strong> 등장할수록
                 강하게 가중해 <strong>자동·반자동이 함께 계속 가리킨 번호</strong>를 상위로 올립니다. 평행회차·세트 중복도 반영.
                 <strong>당첨번호를 전혀 쓰지 않으므로</strong>(순수 반복도), 당첨을 모르는 <strong>이번회차 탭에서도 동일</strong>하게
-                반복 출현 번호를 찾습니다. 복기 탭은 아래에서 실제 당첨과 '대조'만 합니다.
+                반복 출현 번호를 찾습니다. {compareWinning
+                  ? '복기 탭은 아래에서 실제 당첨과 ‘대조’만 합니다.'
+                  : `이 순위가 ${effectiveRound ?? '?'}회 예측입니다 — 복기 탭에서 검증된 same 로직.`}
               </Typography>
-              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-                {predictedNumbers.slice(0, 8).map((p) => (
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+                {predictedNumbers.slice(0, 10).map((p, i) => (
                   <Box key={`pred-${p.number}`} sx={{ textAlign: 'center', minWidth: 44 }}>
+                    <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: i < 6 ? 'warning.light' : 'text.disabled', fontWeight: 700 }}>
+                      {i + 1}위
+                    </Typography>
                     <LottoBall
                       number={p.number}
                       size={36}
@@ -3622,12 +3635,48 @@ export default function SemiAutoComparePanel({
                     <Typography variant="caption" sx={{ display: 'block', fontSize: 9, lineHeight: 1.2, color: 'text.secondary', mt: 0.25 }}>
                       {p.sources.join('·')}
                     </Typography>
-                    <Typography variant="caption" sx={{ display: 'block', fontSize: 9, lineHeight: 1.1, color: 'text.disabled' }}>
-                      {p.confidence}%{p.maxMatch >= 3 ? ` · 최대${p.maxMatch}일치` : ''}
+                    <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
+                      {p.confidence}% · 자{p.auto}·반{p.semi}{p.maxMatch >= 3 ? ` · 최대${p.maxMatch}` : ''}
                     </Typography>
                   </Box>
                 ))}
               </Stack>
+              {/* 예상 조합 6개 — 상위 순위에서 구간(10단위) 최대 2개 균형. 양 탭 공통. */}
+              {(() => {
+                const decadeOf = (n: number) => Math.min(4, Math.floor((n - 1) / 10));
+                const pick: number[] = [];
+                const dc: Record<number, number> = {};
+                for (const p of predictedNumbers) {
+                  if (pick.length >= 6) break;
+                  const d = decadeOf(p.number);
+                  if ((dc[d] ?? 0) >= 2) continue;
+                  pick.push(p.number);
+                  dc[d] = (dc[d] ?? 0) + 1;
+                }
+                for (const p of predictedNumbers) {
+                  if (pick.length >= 6) break;
+                  if (!pick.includes(p.number)) pick.push(p.number);
+                }
+                if (pick.length < 6) return null;
+                pick.sort((a, b) => a - b);
+                const hit = compareWinning && winningSet ? pick.filter((n) => winningSet.has(n)).length : null;
+                return (
+                  <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1, p: 0.75, borderRadius: 1, bgcolor: 'action.hover' }}>
+                    <Typography variant="caption" fontWeight={700} sx={{ fontSize: 10 }}>
+                      {compareWinning ? '검증용 조합' : `${effectiveRound ?? '?'}회 예상 조합`}:
+                    </Typography>
+                    {pick.map((n) => (
+                      <LottoBall key={`pk-${n}`} number={n} size={26} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
+                    ))}
+                    {hit != null && (
+                      <Chip size="small" color={hit >= 3 ? 'success' : hit >= 2 ? 'warning' : 'default'} label={`당첨 ${hit}/6`} sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />
+                    )}
+                    <Typography variant="caption" color="text.disabled" sx={{ fontSize: 9 }}>
+                      (구간 10단위 최대 2개 균형)
+                    </Typography>
+                  </Stack>
+                );
+              })()}
               {compareWinning && winningSet && winningSet.size > 0 ? (
                 (() => {
                   const top8 = predictedNumbers.slice(0, 8).map((p) => p.number);

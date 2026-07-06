@@ -2709,6 +2709,8 @@ export default function SemiAutoComparePanel({
         parallelStrong,
         parallelExpected,
         machineStrong,
+        // 🧬 학습된 당첨 프로파일 매칭(복기 당첨 구조 → 현재 데이터 전이) — 핵심 축.
+        profileMatched: patternMatched?.list.map((m) => ({ number: m.number, sim: m.sim })),
         regenNonce: nonce,
       },
       5
@@ -2735,6 +2737,7 @@ export default function SemiAutoComparePanel({
     parallelStrong,
     parallelExpected,
     machineStrong,
+    patternMatched,
   ]);
 
   /**
@@ -4482,7 +4485,7 @@ export default function SemiAutoComparePanel({
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
               <Typography variant="body2" fontWeight={700}>
-                🎲 {compareWinning ? '복기 통계 종합' : '반자동+자동 누적'} 추천 조합
+                🎲 용지 통계 종합 추천 조합{compareWinning ? ' (복기 검증)' : ` (${effectiveRound ?? '?'}회 예상)`}
               </Typography>
               <Button
                 type="button"
@@ -4500,8 +4503,9 @@ export default function SemiAutoComparePanel({
               </Button>
             </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차(강수·기대수)</strong> —
-              이 두 축을 핵심으로 6번호 5세트를 생성합니다.
+              <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차(강수·기대수)</strong> ·{' '}
+              <strong>🧬 학습된 당첨 프로파일 매칭</strong>({learnedPattern?.round ?? '복기'}회 당첨 구조 학습·전이) —
+              이 세 축을 핵심으로 6번호 5세트를 생성합니다.
               (강한 후보·호기 추정값은 사용하지 않습니다.)
               {compareWinning
                 ? ' 당첨 일치 개수는 점수에 넣지 않고 결과 카드에 표시만 합니다(예측 정합성 평가용).'

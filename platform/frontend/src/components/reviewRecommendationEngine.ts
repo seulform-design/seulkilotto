@@ -65,6 +65,8 @@ export interface RecommendationContext {
   parallelExpected?: number[];
   /** 호기(추첨기) 상위 신호 번호 (순위순) — /api/v1/recommend/round */
   machineStrong?: number[];
+  /** 🧬 학습된 당첨 프로파일 매칭 결과 (유사도순) — 복기 당첨 프로파일을 현재 데이터에 전이. */
+  profileMatched?: { number: number; sim: number }[];
   /** [추천 생성] 클릭마다 증가 — 같은 데이터에서도 매번 다른 5세트를 낸다. */
   regenNonce?: number;
 }
@@ -103,6 +105,9 @@ function buildNumberScores(ctx: RecommendationContext): Record<number, number> {
   // ② 평행회차 — 강수(상위 가중) + 기대수(보조).
   ctx.parallelStrong?.forEach((n, idx) => bump(scores, n, 26 - idx * 1.0));
   ctx.parallelExpected?.forEach((n, idx) => bump(scores, n, 12 - idx * 0.4));
+  // ③ 🧬 학습 프로파일 매칭 — 복기 당첨 프로파일과 닮은 번호(유사%)를 강하게 가중.
+  //    '학습된 데이터 기반 예상'의 핵심 축(사용자 요청).
+  ctx.profileMatched?.forEach((m) => bump(scores, m.number, (m.sim / 100) * 30));
 
   // 강한후보·빈도·교집합·콤보패턴은 종합 추천 점수에 반영하지 않는다(3축 전용).
   // 복기 모드라도 실제 당첨번호(winningNumbers)는 점수에 주입하지 않는다.
@@ -153,6 +158,13 @@ function scoreCombo(
   if (parHit >= 2) {
     total += parHit * 2;
     signals.push(`평행${parHit}`);
+  }
+  // 🧬 학습 프로파일 정합 — 매칭 상위 10 에 든 번호가 2개+ 면 가산·표시.
+  const profileSet = new Set((ctx.profileMatched ?? []).slice(0, 10).map((m) => m.number));
+  const profHit = combo.filter((n) => profileSet.has(n)).length;
+  if (profHit >= 2) {
+    total += profHit * 3;
+    signals.push(`학습${profHit}`);
   }
 
   // 복기 당첨 일치는 점수에 더하지 않는다(사후 편향 방지). winMatch 는 결과
@@ -216,6 +228,8 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
   };
   for (const g of ctx.lineMatchGroups) addCon(g.matchedNumbers, g.matchCount ** 3 * Math.log2(g.cardWeight + 2));
   (ctx.parallelStrong ?? []).forEach((n, idx) => addCon([n], Math.max(4, 16 - idx)));
+  // 🧬 학습 프로파일 매칭 상위도 합의 코어에 포함(유사도 비례 가중).
+  (ctx.profileMatched ?? []).forEach((m) => addCon([m.number], Math.max(4, (m.sim / 100) * 18)));
   const consensusPool = Object.entries(consensusScore)
     .sort(([, a], [, b]) => b - a)
     .map(([n]) => Number(n));
@@ -235,10 +249,12 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
   // C1) 합의 상위 6 — 가장 많은 자동·반자동이 동의한 번호 묶음
   if (consensusPool.length >= 6) push(fillConsensus(consensusPool.slice(0, 6)));
 
-  // C2) 1:1 매칭(2개 이상 공통) + 평행회차 강수 상위를 코어로 한 조합
+  // C2) 1:1 매칭(2개 이상 공통) + 평행회차 강수 + 🧬 학습 프로파일 상위를 코어로 한 조합
+  const profileTop = (ctx.profileMatched ?? []).slice(0, 4).map((m) => m.number);
   const cores: number[][] = [
     ...ctx.lineMatchGroups.filter((g) => g.matchCount >= 2).map((g) => g.matchedNumbers),
     ...((ctx.parallelStrong ?? []).length >= 3 ? [(ctx.parallelStrong ?? []).slice(0, 4)] : []),
+    ...(profileTop.length >= 3 ? [profileTop] : []),
   ];
   for (const core of cores) push(fillConsensus(core));
 

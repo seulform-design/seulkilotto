@@ -2114,6 +2114,82 @@ export default function SemiAutoComparePanel({
     return { byBand, endingTop, strongCount: allStrong.length, strongWinHit };
   }, [predictedNumbers, winningSet]);
 
+  // 🧬 당첨 패턴 학습 — 복기(1231) 서버 데이터로 '당첨번호가 1:1 데이터에서 갖던
+  // 프로파일'(반복도 백분위·자동/반자동 등장 비율·3+일치 여부)을 통계화한다.
+  // 복기 슬라이스는 양 탭에서 접근 가능하므로 이번회차 탭에서도 같은 학습값을 쓴다.
+  const learnedPattern = useMemo(() => {
+    const rev = accumulated?.by_intent?.review;
+    const autoL = (rev?.saved_auto_lines ?? []).map((l) => l.filter((n) => Number.isInteger(n) && n >= 1 && n <= 45));
+    const semiL = (rev?.saved_semi_lines ?? []).map((l) => l.filter((n) => Number.isInteger(n) && n >= 1 && n <= 45));
+    const winNums = (rev?.draw_template?.winning_numbers ?? []).filter((n) => n >= 1 && n <= 45);
+    const round = rev?.draw_template?.ticket_round ?? rev?.ticket_round ?? null;
+    if (autoL.length < 5 || semiL.length < 5 || winNums.length !== 6) return null;
+    if (autoL.length * semiL.length > 250_000) return null; // 모바일 안전 상한
+    const af: Record<number, number> = {};
+    const sf: Record<number, number> = {};
+    for (const l of autoL) for (const n of new Set(l)) af[n] = (af[n] ?? 0) + 1;
+    for (const l of semiL) for (const n of new Set(l)) sf[n] = (sf[n] ?? 0) + 1;
+    // 3+일치 여부 — 복기 데이터의 자동×반자동 페어 전수 매칭.
+    const mm: Record<number, number> = {};
+    const semiSets = semiL.map((l) => new Set(l));
+    for (const a of autoL) {
+      const aset = new Set(a);
+      for (const s of semiSets) {
+        let cnt = 0;
+        const matched: number[] = [];
+        for (const n of s) if (aset.has(n)) { cnt += 1; matched.push(n); }
+        if (cnt >= 2) for (const n of matched) mm[n] = Math.max(mm[n] ?? 0, cnt);
+      }
+    }
+    const nums = Array.from(new Set([...Object.keys(af), ...Object.keys(sf)].map(Number)));
+    const score = (n: number) => Math.log2((af[n] ?? 0) + 1) * Math.log2((sf[n] ?? 0) + 1);
+    const ranked = [...nums].sort((a, b) => score(b) - score(a) || a - b);
+    const pct: Record<number, number> = {};
+    ranked.forEach((n, i) => { pct[n] = ranked.length > 1 ? 1 - i / (ranked.length - 1) : 1; });
+    const feats = winNums.map((n) => ({
+      number: n,
+      pct: pct[n] ?? 0,
+      aShare: (af[n] ?? 0) / autoL.length,
+      sShare: (sf[n] ?? 0) / semiL.length,
+      deep: (mm[n] ?? 0) >= 3 ? 1 : 0,
+      rank: ranked.indexOf(n) + 1 || null,
+    }));
+    const mean = (k: 'pct' | 'aShare' | 'sShare' | 'deep') => feats.reduce((s, f) => s + f[k], 0) / feats.length;
+    const centroid = { pct: mean('pct'), aShare: mean('aShare'), sShare: mean('sShare'), deep: mean('deep') };
+    return { round, centroid, feats, totalNums: ranked.length, autoCount: autoL.length, semiCount: semiL.length };
+  }, [accumulated]);
+
+  // 🧬 프로파일 매칭 예상 — 현재 탭의 각 번호 프로파일이 '학습된 1231 당첨 프로파일'
+  // 과 얼마나 가까운지(거리 역수)로 정렬. 복기 탭=적합도 자기확인(같은 회차 학습이라
+  // 낙관적), 이번회차 탭=학습 전이 예측(1232). 당첨번호는 현재 탭 계산에 미사용.
+  const patternMatched = useMemo(() => {
+    if (!learnedPattern || predictedNumbers.length === 0) return null;
+    const A = Math.max(1, groupLineMatching.autoLineCount);
+    const S = Math.max(1, groupLineMatching.semiLineCount);
+    const c = learnedPattern.centroid;
+    const list = predictedNumbers
+      .map((p, i) => {
+        const pctRank = predictedNumbers.length > 1 ? 1 - i / (predictedNumbers.length - 1) : 1;
+        const dist =
+          Math.abs(pctRank - c.pct) * 1.5 +
+          Math.abs(p.auto / A - c.aShare) * 2 +
+          Math.abs(p.semi / S - c.sShare) * 2 +
+          Math.abs((p.maxMatch >= 3 ? 1 : 0) - c.deep) * 0.5;
+        return {
+          number: p.number,
+          sim: Math.round((1 / (1 + dist * 4)) * 100),
+          deep: p.maxMatch >= 3,
+          winning: winningSet != null && winningSet.size > 0 ? winningSet.has(p.number) : false,
+        };
+      })
+      .sort((a, b) => b.sim - a.sim || a.number - b.number)
+      .slice(0, 10);
+    const hit = compareWinning && winningSet && winningSet.size > 0
+      ? list.slice(0, 6).filter((x) => x.winning).length
+      : null;
+    return { list, hit };
+  }, [learnedPattern, predictedNumbers, groupLineMatching.autoLineCount, groupLineMatching.semiLineCount, winningSet, compareWinning]);
+
   // 전수비교 '강한 패턴' — matchCount 3+ 그룹(우연 초과의 실제 겹침)을 크기·지지순.
   // 정렬은 '당첨 무관'(matchCount·지지) — 당첨 여부로 정렬하면 사후에 당첨을 끌어올려
   // 착시가 생긴다. 복기 탭은 초록으로 '대조'만 하고 순서엔 영향 주지 않는다.
@@ -3809,6 +3885,50 @@ export default function SemiAutoComparePanel({
                       ))}
                     </Stack>
                   </Stack>
+                </Box>
+              )}
+
+              {/* 🧬 당첨 패턴 학습 → 프로파일 매칭 — 1231 프로파일 통계화 후 현재 탭에 적용 */}
+              {learnedPattern && patternMatched && (
+                <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'info.main' }}>
+                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                    🧬 {learnedPattern.round ?? '복기'}회 당첨 패턴 학습 → {compareWinning ? '적합도 확인' : `${effectiveRound ?? '?'}회 프로파일 매칭 예상`}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                    <strong>학습된 당첨 프로파일</strong> ({learnedPattern.round ?? '복기'}회 당첨 6개가 1:1 데이터{' '}
+                    자동 {learnedPattern.autoCount}줄↔반자동 {learnedPattern.semiCount}줄에서 가진 통계):{' '}
+                    반복도 백분위 평균 <strong>상위 {Math.round((1 - learnedPattern.centroid.pct) * 100)}%</strong> ·{' '}
+                    자동 등장률 {Math.round(learnedPattern.centroid.aShare * 100)}% · 반자동 등장률 {Math.round(learnedPattern.centroid.sShare * 100)}% ·{' '}
+                    3+일치 보유 {Math.round(learnedPattern.centroid.deep * 6)}/6개.
+                    이 프로파일과 가장 닮은 번호순으로 정렬합니다.
+                  </Typography>
+                  <Stack direction="row" spacing={0.6} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                    {patternMatched.list.map((m, i) => (
+                      <Box key={`pm-${m.number}`} sx={{ textAlign: 'center', minWidth: 34 }}>
+                        <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: i < 6 ? 'info.light' : 'text.disabled', fontWeight: 700 }}>
+                          {i + 1}위
+                        </Typography>
+                        <LottoBall number={m.number} size={30} dimmed={compareWinning && winningSet ? !m.winning : false} />
+                        <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
+                          유사 {m.sim}%{m.deep ? '·3+' : ''}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                  {patternMatched.hit != null ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                      적합도 — 매칭 상위 6개 중 당첨 <strong>{patternMatched.hit}개</strong>{' '}
+                      (※ 같은 회차에서 학습·확인한 값이라 낙관적 — 진짜 검증은 다음 회차 이월 적중)
+                    </Typography>
+                  ) : (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                      ※ {learnedPattern.round ?? '복기'}회에서 학습한 프로파일을 {effectiveRound ?? '?'}회 데이터에 전이한 예측 —
+                      복기 탭 적합도와 함께 회차별로 기록해 꾸준한지 확인하세요.
+                    </Typography>
+                  )}
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.25 }}>
+                    학습 근거(당첨 6개 순위): {learnedPattern.feats.map((f) => `${f.number}=${f.rank ?? '미등장'}위`).join(' · ')} / 전체 {learnedPattern.totalNums}개
+                  </Typography>
                 </Box>
               )}
 

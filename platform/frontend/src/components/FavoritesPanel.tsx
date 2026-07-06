@@ -20,6 +20,7 @@ const SOURCE_LABELS: Record<FavoriteSource, string> = {
   epo: 'EPO',
   classic: '클래식',
   recommend: '추첨기',
+  fortune: '할매',
   manual: '수동',
   unknown: '기타',
 };

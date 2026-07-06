@@ -2082,8 +2082,12 @@ export default function SemiAutoComparePanel({
       { label: '40번대', lo: 40, hi: 45 },
     ];
     const isWin = (n: number) => (winningSet != null && winningSet.size > 0 ? winningSet.has(n) : false);
+    // 미출수 — 자동·반자동 어느 줄에도 등장하지 않은 번호(양쪽 등장 0).
+    // 티켓 기반 방법으론 절대 추출 불가한 영역 — 당첨이 여기서 나오면 그 회차는
+    // 데이터로 못 잡는다는 정직한 지표가 된다.
+    const presentSet = new Set(predictedNumbers.filter((p) => p.auto + p.semi > 0).map((p) => p.number));
     const byBand = bands.map((b) => {
-      const inBand = predictedNumbers.filter((p) => p.number >= b.lo && p.number <= b.hi);
+      const inBand = predictedNumbers.filter((p) => p.number >= b.lo && p.number <= b.hi && p.auto + p.semi > 0);
       const mk = (p: (typeof predictedNumbers)[number]) => ({
         number: p.number,
         auto: p.auto,
@@ -2091,10 +2095,15 @@ export default function SemiAutoComparePanel({
         maxMatch: p.maxMatch,
         winning: isWin(p.number),
       });
+      const missing: { number: number; winning: boolean }[] = [];
+      for (let n = b.lo; n <= b.hi; n += 1) {
+        if (!presentSet.has(n)) missing.push({ number: n, winning: isWin(n) });
+      }
       return {
         label: b.label,
         strong: inBand.slice(0, 3).map(mk),
         expected: inBand.slice(3, 6).map(mk),
+        missing,
       };
     });
     // 끝수 — 끝자리(0~9)별 양쪽 등장 줄 수 합(자동+반자동), 상위 5.
@@ -2108,10 +2117,36 @@ export default function SemiAutoComparePanel({
       .sort((a, b) => b.count - a.count || a.digit - b.digit)
       .slice(0, 5);
     const allStrong = byBand.flatMap((b) => b.strong.map((s) => s.number));
+    const allExpected = byBand.flatMap((b) => b.expected.map((s) => s.number));
+    const allMissing = byBand.flatMap((b) => b.missing.map((m) => m.number));
     const strongWinHit = winningSet != null && winningSet.size > 0
       ? allStrong.filter((n) => winningSet.has(n)).length
       : null;
-    return { byBand, endingTop, strongCount: allStrong.length, strongWinHit };
+    // 강수/기대/그외/미출 당첨 분포 비교(복기) — 당첨이 어느 계층에서 나왔는지.
+    const distribution = winningSet != null && winningSet.size > 0
+      ? (() => {
+          const strongSet = new Set(allStrong);
+          const expectedSet = new Set(allExpected);
+          const missingSet = new Set(allMissing);
+          let s = 0; let e = 0; let m = 0; let etc = 0;
+          for (const n of winningSet) {
+            if (strongSet.has(n)) s += 1;
+            else if (expectedSet.has(n)) e += 1;
+            else if (missingSet.has(n)) m += 1;
+            else etc += 1;
+          }
+          return { strong: s, expected: e, missing: m, etc };
+        })()
+      : null;
+    return {
+      byBand,
+      endingTop,
+      strongCount: allStrong.length,
+      expectedCount: allExpected.length,
+      missingCount: allMissing.length,
+      strongWinHit,
+      distribution,
+    };
   }, [predictedNumbers, winningSet]);
 
   // 🧬 당첨 패턴 학습 — 복기(1231) 서버 데이터로 '당첨번호가 1:1 데이터에서 갖던
@@ -3879,6 +3914,29 @@ export default function SemiAutoComparePanel({
                             </Typography>
                           </Box>
                         ))}
+                        {b.missing.length > 0 && (
+                          <>
+                            <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5, color: 'warning.light' }}>미출</Typography>
+                            {b.missing.map((m) => (
+                              <Box
+                                key={`ms-${m.number}`}
+                                component="span"
+                                sx={{
+                                  fontSize: 10,
+                                  px: 0.4,
+                                  py: 0.1,
+                                  borderRadius: 0.5,
+                                  border: '1px dashed',
+                                  borderColor: compareWinning && m.winning ? 'success.main' : 'divider',
+                                  color: compareWinning && m.winning ? 'success.light' : 'text.disabled',
+                                  fontWeight: compareWinning && m.winning ? 700 : 400,
+                                }}
+                              >
+                                {m.number}
+                              </Box>
+                            ))}
+                          </>
+                        )}
                       </Stack>
                     ))}
                     <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
@@ -3888,6 +3946,18 @@ export default function SemiAutoComparePanel({
                       ))}
                     </Stack>
                   </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5 }}>
+                    미출 = 자동·반자동 어느 줄에도 없는 번호 {decadePattern.missingCount}개 — 티켓 기반으론 추출 불가 영역.
+                    {compareWinning && decadePattern.distribution ? (
+                      <>
+                        {' '}<strong>당첨 분포 비교</strong>: 강수 {decadePattern.distribution.strong}개 · 기대 {decadePattern.distribution.expected}개 ·
+                        그외 등장 {decadePattern.distribution.etc}개 · <strong style={{ color: decadePattern.distribution.missing > 0 ? '#ffa726' : 'inherit' }}>미출 {decadePattern.distribution.missing}개</strong>
+                        {decadePattern.distribution.missing > 0 ? ' (미출에서 나온 당첨은 어떤 티켓 분석으로도 못 잡음)' : ' (전부 데이터 안에서 나옴 — 추출 가능 회차)'}
+                      </>
+                    ) : (
+                      ' 미출수가 많을수록 이번 회차를 티켓 데이터로 커버 못 하는 범위가 큽니다.'
+                    )}
+                  </Typography>
                 </Box>
               )}
 

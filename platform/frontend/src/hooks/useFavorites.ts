@@ -20,6 +20,7 @@ export type FavoriteSource =
   | 'epo'
   | 'classic'
   | 'recommend'
+  | 'fortune'
   | 'manual'
   | 'unknown';
 

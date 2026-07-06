@@ -2068,6 +2068,52 @@ export default function SemiAutoComparePanel({
     crossSetPatterns,
   ]);
 
+  // ★ 1:1 강수·기대수 (구간별) — 평행회차 패널과 같은 레이아웃을 1:1 전수비교
+  // 반복도(predictedNumbers 순위)로 생성. 강수=구간(단/10/20/30/40번대) 내 반복도
+  // 상위 3, 기대수=다음 3. 끝수=끝자리별 양쪽(자동+반자동) 등장 줄 수 합.
+  // 복기 탭은 당첨번호를 초록으로 대조(계산엔 미사용).
+  const decadePattern = useMemo(() => {
+    if (predictedNumbers.length === 0) return null;
+    const bands = [
+      { label: '단번대', lo: 1, hi: 9 },
+      { label: '10번대', lo: 10, hi: 19 },
+      { label: '20번대', lo: 20, hi: 29 },
+      { label: '30번대', lo: 30, hi: 39 },
+      { label: '40번대', lo: 40, hi: 45 },
+    ];
+    const isWin = (n: number) => (winningSet != null && winningSet.size > 0 ? winningSet.has(n) : false);
+    const byBand = bands.map((b) => {
+      const inBand = predictedNumbers.filter((p) => p.number >= b.lo && p.number <= b.hi);
+      const mk = (p: (typeof predictedNumbers)[number]) => ({
+        number: p.number,
+        auto: p.auto,
+        semi: p.semi,
+        maxMatch: p.maxMatch,
+        winning: isWin(p.number),
+      });
+      return {
+        label: b.label,
+        strong: inBand.slice(0, 3).map(mk),
+        expected: inBand.slice(3, 6).map(mk),
+      };
+    });
+    // 끝수 — 끝자리(0~9)별 양쪽 등장 줄 수 합(자동+반자동), 상위 5.
+    const ending: Record<number, number> = {};
+    for (const p of predictedNumbers) {
+      const d = p.number % 10;
+      ending[d] = (ending[d] ?? 0) + p.auto + p.semi;
+    }
+    const endingTop = Object.entries(ending)
+      .map(([d, c]) => ({ digit: Number(d), count: c }))
+      .sort((a, b) => b.count - a.count || a.digit - b.digit)
+      .slice(0, 5);
+    const allStrong = byBand.flatMap((b) => b.strong.map((s) => s.number));
+    const strongWinHit = winningSet != null && winningSet.size > 0
+      ? allStrong.filter((n) => winningSet.has(n)).length
+      : null;
+    return { byBand, endingTop, strongCount: allStrong.length, strongWinHit };
+  }, [predictedNumbers, winningSet]);
+
   // 전수비교 '강한 패턴' — matchCount 3+ 그룹(우연 초과의 실제 겹침)을 크기·지지순.
   // 정렬은 '당첨 무관'(matchCount·지지) — 당첨 여부로 정렬하면 사후에 당첨을 끌어올려
   // 착시가 생긴다. 복기 탭은 초록으로 '대조'만 하고 순서엔 영향 주지 않는다.
@@ -3708,6 +3754,62 @@ export default function SemiAutoComparePanel({
                 <Typography variant="caption" color="text.secondary">
                   ※ 상위 6~8개 중 6개를 골라 조합하세요. 로또는 무작위라 확률 자체는 오르지 않습니다.
                 </Typography>
+              )}
+
+              {/* ★ 1:1 강수 & 기대수 (구간별) — 평행회차와 동일 레이아웃, 1:1 반복도 기반 */}
+              {decadePattern && (
+                <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
+                    <Typography variant="caption" fontWeight={700}>
+                      ★ 1:1 강수 & 기대수 (구간별) — 전수비교 반복도 기준
+                    </Typography>
+                    {decadePattern.strongWinHit != null && (
+                      <Chip
+                        size="small"
+                        color={decadePattern.strongWinHit >= 4 ? 'success' : decadePattern.strongWinHit >= 2 ? 'warning' : 'default'}
+                        label={`강수 ${decadePattern.strongCount}개 중 당첨 ${decadePattern.strongWinHit}개 (무작위 기대≈${Math.round(decadePattern.strongCount * 6 / 45 * 10) / 10}개)`}
+                        sx={{ fontWeight: 700, height: 20, fontSize: 10 }}
+                      />
+                    )}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                    강수 = 구간별 1:1 반복도 상위 3 · 기대 = 다음 3. 숫자 아래 = 자동/반자동 등장 줄 수.
+                    {compareWinning ? ' 초록 = 실제 당첨.' : ' 반자동 고정 후보 참고용.'}
+                  </Typography>
+                  <Stack spacing={0.5}>
+                    {decadePattern.byBand.map((b) => (
+                      <Stack key={b.label} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
+                        <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>{b.label}</Typography>
+                        <Typography variant="caption" color="error.light" sx={{ fontSize: 10, fontWeight: 700 }}>강수</Typography>
+                        {b.strong.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
+                        {b.strong.map((s) => (
+                          <Box key={`st-${s.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
+                            <LottoBall number={s.number} size={24} dimmed={compareWinning && winningSet ? !s.winning : false} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
+                              {s.auto}/{s.semi}{s.maxMatch >= 3 ? `·${s.maxMatch}일치` : ''}
+                            </Typography>
+                          </Box>
+                        ))}
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5 }}>기대</Typography>
+                        {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
+                        {b.expected.map((s) => (
+                          <Box key={`ex-${s.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
+                            <LottoBall number={s.number} size={20} dimmed={compareWinning && winningSet ? !s.winning : true} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
+                              {s.auto}/{s.semi}
+                            </Typography>
+                          </Box>
+                        ))}
+                      </Stack>
+                    ))}
+                    <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>끝수</Typography>
+                      {decadePattern.endingTop.map((e) => (
+                        <Chip key={`ed-${e.digit}`} size="small" variant="outlined" label={`${e.digit} (${e.count})`} sx={{ height: 18, fontSize: 10 }} />
+                      ))}
+                    </Stack>
+                  </Stack>
+                </Box>
               )}
 
               {/* 📌 당첨번호 출현 패턴 (복기 전용, 당첨번호로 역산) */}

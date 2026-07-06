@@ -1350,13 +1350,56 @@ export default function PhotoAnalysisPage() {
           {lastSavedAt ? ` · 마지막 저장: ${new Date(lastSavedAt).toLocaleString('ko-KR', { hour: '2-digit', minute: '2-digit', month: 'numeric', day: 'numeric' })}` : ' · 아직 저장 안 됨'}
           {unsavedLocalCount > 0 ? ` · 미저장 로컬 ${unsavedLocalCount}줄` : ' · 모두 저장됨'}
         </Typography>
-        {/* 미저장 로컬 줄이 실제로 남아 있을 때만 경고 */}
-        {unsavedLocalCount > 0 && (
-          <Alert severity="info" sx={{ mt: 1 }}>
-            📋 아직 서버에 반영 안 된 줄 {unsavedLocalCount}개가 있습니다.
-            위 <strong>[💾 누적·저장]</strong> 버튼을 눌러야 통계에 반영됩니다.
-          </Alert>
-        )}
+        {/* 미저장 로컬 줄이 실제로 남아 있을 때만 경고 — 로컬↔서버 일치/불일치 상세 표시 */}
+        {unsavedLocalCount > 0 && (() => {
+          // 로컬 고유 키 대비 서버 일치 수 — '전부 미저장'인지 '일부 드리프트'인지 구분.
+          const localKeys = new Set<string>();
+          for (const t of bulkAutoTickets) localKeys.add(lineKey(t));
+          for (const slip of slipQueue) for (const l of slip.lines) localKeys.add(lineKey(l.numbers));
+          for (const l of currentSlipLines) localKeys.add(lineKey(l.numbers));
+          const matched = [...localKeys].filter((k) => savedAutoKeySet.has(k)).length;
+          return (
+            <Alert
+              severity={savedAutoKeySet.size > 0 && matched === 0 ? 'warning' : 'info'}
+              sx={{ mt: 1 }}
+              action={
+                savedAutoKeySet.size > 0 ? (
+                  <Button
+                    color="inherit"
+                    size="small"
+                    variant="outlined"
+                    onClick={async () => {
+                      const serverLines = activeSlice?.saved_auto_lines ?? [];
+                      if (!serverLines.length) return;
+                      if (!(await confirm({
+                        message: `로컬 자동 누적(${localKeys.size}줄)을 버리고 서버 저장분(${serverLines.length}줄)으로 맞출까요? 서버에 없는 로컬 줄은 사라집니다. (반대로 로컬을 서버에 올리려면 [누적·저장])`,
+                        destructive: true,
+                        confirmText: '서버 기준으로 동기화',
+                      }))) return;
+                      patchManual({
+                        bulkAutoTickets: serverLines.map((l) => [...l]),
+                        slipQueue: [],
+                        currentSlipLines: [],
+                        picked: [],
+                      });
+                      setNotice(`서버 저장분 ${serverLines.length}줄로 로컬 자동 누적을 동기화했습니다.`);
+                    }}
+                  >
+                    서버 기준 동기화
+                  </Button>
+                ) : undefined
+              }
+            >
+              📋 로컬 {localKeys.size}줄 중 서버 일치 <strong>{matched}줄</strong> · 미반영 <strong>{unsavedLocalCount}줄</strong>.
+              {savedAutoKeySet.size > 0 && matched === 0 ? (
+                <> 서버({savedAutoKeySet.size}줄)와 로컬이 <strong>완전히 다릅니다</strong> — 이전에 저장한 세트와 지금 로컬 세트가 다른 데이터입니다.
+                로컬을 서버에 올리려면 <strong>[💾 누적·저장]</strong>, 서버 저장분을 그대로 쓰려면 <strong>[서버 기준 동기화]</strong>.</>
+              ) : (
+                <> 위 <strong>[💾 누적·저장]</strong> 버튼을 눌러야 통계에 반영됩니다.</>
+              )}
+            </Alert>
+          );
+        })()}
         <Divider sx={{ my: 2 }} />
         <Typography variant="subtitle2" fontWeight={700} gutterBottom>
           저장 누적

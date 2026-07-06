@@ -1414,7 +1414,7 @@ export default function PhotoAnalysisPage() {
                 {' '}(서버 저장 자동 {activeSlice?.saved_auto_lines?.length ?? 0}줄)
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                아래 목록의 [×] 로 개별 줄 삭제. 하단 [이 탭 자동 서버 데이터 삭제] 는 현재 탭의 서버 저장분 중 <strong>자동만</strong> 지웁니다(반자동 저장분은 유지). 로컬 자동 누적도 초기화됩니다.
+                아래 목록의 [×] 로 개별 줄 삭제. 하단 [자동 누적 전체 삭제] 는 현재 탭의 서버 저장분 중 <strong>자동만</strong> 지웁니다(반자동 저장분은 유지). 로컬 자동 누적도 초기화됩니다.
               </Typography>
               {ticketLines.length === 0 ? (
                 <Alert severity="info" sx={{ mb: 1.5 }}>
@@ -1476,7 +1476,7 @@ export default function PhotoAnalysisPage() {
                     (!accumulated || accumulated.total_analyses === 0)
                   }
                 >
-                  이 탭 자동 서버 데이터 삭제
+                  자동 누적 전체 삭제
                 </Button>
               </Stack>
             </>

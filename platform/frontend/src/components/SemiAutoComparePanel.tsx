@@ -1412,11 +1412,15 @@ export default function SemiAutoComparePanel({
     const savedTotalLines =
       semiCurrentLines.length + semiSlipQueue.reduce((s, sl) => s + sl.lines.length, 0);
     const bulkCount = bulkTickets.length;
-    if (savedTotalLines === 0 && bulkCount === 0) return;
+    // 서버 저장분도 확인 — 로컬이 비어 있어도(새 기기·동기화 실패) 서버 반자동은
+    // 지울 수 있어야 한다. 로컬·서버 모두 없을 때만 조기 종료.
+    const serverSemiCount = accumulated?.by_intent?.[sheetIntent]?.saved_semi_lines?.length ?? 0;
+    if (savedTotalLines === 0 && bulkCount === 0 && serverSemiCount === 0) return;
     const parts: string[] = [];
     if (semiSlipQueue.length > 0) parts.push(`저장 ${semiSlipQueue.length}장`);
     if (semiCurrentLines.length > 0) parts.push(`입력 중 ${semiCurrentLines.length}줄`);
     if (bulkCount > 0) parts.push(`대량 ${bulkCount}장`);
+    if (parts.length === 0 && serverSemiCount > 0) parts.push(`서버 저장 ${serverSemiCount}줄`);
     const ok = await confirm({
       message: `반자동 누적 (${parts.join(' + ')}) 을 서버·로컬에서 모두 삭제할까요? (자동 저장분은 유지)`,
       destructive: true,
@@ -3034,7 +3038,10 @@ export default function SemiAutoComparePanel({
                 color="error"
                 variant="outlined"
                 onClick={clearAllSaved}
-                disabled={ticketLines.length === 0}
+                disabled={
+                  ticketLines.length === 0 &&
+                  (accumulated?.by_intent?.[sheetIntent]?.saved_semi_lines?.length ?? 0) === 0
+                }
               >
                 반자동 누적 전체 삭제
               </Button>

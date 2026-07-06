@@ -247,7 +247,8 @@ export default function ComposedAnalysisPage() {
         <Box
           sx={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(15, minmax(0, 1fr))',
+            // 모바일(~380px)에서 15열이면 셀이 ~20px 로 뭉개짐 → 9열로 완화.
+            gridTemplateColumns: { xs: 'repeat(9, minmax(0, 1fr))', sm: 'repeat(15, minmax(0, 1fr))' },
             gap: 0.5,
             p: 1,
             borderRadius: 1.5,

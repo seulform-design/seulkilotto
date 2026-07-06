@@ -24,6 +24,9 @@ export default function RoundsPage() {
   const qc = useQueryClient();
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
   const [jumpRound, setJumpRound] = useState('');
+  // 목록 렌더 상한 — '전체 불러오기'로 1231개를 한 번에 DOM 에 올리면 모바일이
+  // 버벅/강제종료된다. 데이터는 전부 로드하되 렌더만 페이지네이션([더 보기]).
+  const [listShowLimit, setListShowLimit] = useState(200);
 
   const status = useQuery({
     queryKey: ['v1-upgrade-status'],
@@ -225,7 +228,7 @@ export default function RoundsPage() {
               borderRadius: 1,
             }}
           >
-            {allItems.map((item) => (
+            {allItems.slice(0, listShowLimit).map((item) => (
               <ListItemButton
                 key={item.round}
                 selected={selectedRound === item.round}
@@ -237,6 +240,14 @@ export default function RoundsPage() {
                 />
               </ListItemButton>
             ))}
+            {allItems.length > listShowLimit && (
+              <ListItemButton onClick={() => setListShowLimit((v) => v + 200)}>
+                <ListItemText
+                  primary={`더 보기 (+${Math.min(200, allItems.length - listShowLimit)} · 남은 ${allItems.length - listShowLimit}회)`}
+                  sx={{ textAlign: 'center', color: 'primary.main' }}
+                />
+              </ListItemButton>
+            )}
           </List>
 
           <Box sx={{ flex: 1 }}>

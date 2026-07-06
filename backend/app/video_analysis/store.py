@@ -635,6 +635,11 @@ def append_analysis(
 
     # 같은 intent + 같은 픽 타입의 이전 수기 세트만 교체한다.
     # (자동/반자동은 서로 독립 세트 — 반자동 저장이 자동 저장을 지우지 않게 한다.)
+    # 트랜잭션 안전성: 종전엔 '먼저 삭제 → 나중 추가' 순서라 추가가 실패(검증 예외·
+    # 프로세스 중단)하면 이전 저장분까지 사라졌다. → id 만 수집해 두고, 새 엔트리
+    # 추가가 성공한 뒤에 삭제한다(아래 return 직전). 동일 내용 재저장은 중복 검사에서
+    # 걸려 이전 저장분이 그대로 보존된다(올바른 멱등 동작).
+    _prior_manual_ids: List[str] = []
     if replace_prior_manual and _mode0 == "manual":
         for prior in list(_live_entries()):
             if (
@@ -642,7 +647,7 @@ def append_analysis(
                 and str(prior.get("video_intent") or "") == _intent0
                 and _entry_pick_type(prior) == _pick0
             ):
-                delete_entry(str(prior.get("id")))
+                _prior_manual_ids.append(str(prior.get("id")))
 
     existing = check_stored_duplicate(source_id, result, allow_duplicate=allow_duplicate)
     if existing:
@@ -722,6 +727,10 @@ def append_analysis(
         data["entries"].append(entry)
         data["entries"] = _dedupe_entries_by_content(data["entries"])
         _save_historical_raw(data)
+    # 새 엔트리 저장 성공 후에야 이전 수기 세트를 제거(위 트랜잭션 안전성 주석 참조).
+    for _pid in _prior_manual_ids:
+        if _pid and _pid != entry["id"]:
+            delete_entry(_pid)
     return entry
 
 

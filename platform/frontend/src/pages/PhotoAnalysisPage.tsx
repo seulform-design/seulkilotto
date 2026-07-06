@@ -1450,6 +1450,12 @@ export default function PhotoAnalysisPage() {
             })),
           ];
           const winSet = activeTab === 'review' ? activeReviewWinningSet : null;
+          // 'N/6' 카운트는 메인 6개만 — winSet 은 보너스를 포함(볼 색칠용)하므로
+          // 그대로 세면 보너스 일치가 메인 일치처럼 부풀려진다. 보너스는 '+보'로 따로.
+          const reviewBonus =
+            activeTab === 'review'
+              ? (activeSlice?.draw_template?.bonus ?? reviewDrawQuery.data?.bonus ?? null)
+              : null;
           return (
             <>
               <Typography variant="body2" sx={{ mb: 0.5 }}>
@@ -1467,7 +1473,10 @@ export default function PhotoAnalysisPage() {
                 <Box sx={{ maxHeight: 320, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
                   <Stack spacing={0.5}>
                     {ticketLines.map((line, idx) => {
-                      const matchCount = winSet ? line.numbers.filter((n) => winSet.has(n)).length : 0;
+                      const matchCount = winSet
+                        ? line.numbers.filter((n) => winSet.has(n) && n !== reviewBonus).length
+                        : 0;
+                      const bonusHit = reviewBonus != null && line.numbers.includes(reviewBonus);
                       return (
                         <Stack
                           key={line.key}
@@ -1495,7 +1504,7 @@ export default function PhotoAnalysisPage() {
                             <Chip
                               size="small"
                               color={matchCount >= 3 ? 'success' : 'default'}
-                              label={`${matchCount}/6`}
+                              label={`${matchCount}/6${bonusHit ? '+보' : ''}`}
                               sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
                             />
                           )}

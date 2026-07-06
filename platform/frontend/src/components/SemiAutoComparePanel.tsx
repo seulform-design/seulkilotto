@@ -2199,6 +2199,9 @@ export default function SemiAutoComparePanel({
   // 낙관적), 이번회차 탭=학습 전이 예측(1232). 당첨번호는 현재 탭 계산에 미사용.
   const patternMatched = useMemo(() => {
     if (!learnedPattern || predictedNumbers.length === 0) return null;
+    // 현재 탭에 1:1 데이터(자동·반자동 줄)가 없으면 프로파일 비교 자체가 무의미 —
+    // A/S 를 1로 클램프하면 평행회차-단독 번호에 오해적 유사도가 붙는다 → 표시 안 함.
+    if (groupLineMatching.autoLineCount === 0 || groupLineMatching.semiLineCount === 0) return null;
     const A = Math.max(1, groupLineMatching.autoLineCount);
     const S = Math.max(1, groupLineMatching.semiLineCount);
     const c = learnedPattern.centroid;

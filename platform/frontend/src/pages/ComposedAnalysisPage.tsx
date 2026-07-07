@@ -45,13 +45,13 @@ export default function ComposedAnalysisPage() {
         staleTime: 60_000,
       },
       {
-        queryKey: ['composite', 'post'],
-        queryFn: () => v1Api.getPostOccurrenceAnalysis(),
+        queryKey: ['composite', 'parallel'],
+        queryFn: () => v1Api.getParallelRoundAnalysis(),
         staleTime: 60_000,
       },
       {
-        queryKey: ['composite', 'classic'],
-        queryFn: () => v1Api.getClassicRecommend('blend'),
+        queryKey: ['composite', 'temperature'],
+        queryFn: () => v1Api.getTemperature(30),
         staleTime: 60_000,
       },
       {
@@ -68,7 +68,7 @@ export default function ComposedAnalysisPage() {
     ],
   });
 
-  const [machineQuery, postQuery, classicQuery, photoQuery] = queries;
+  const [machineQuery, parallelQuery, temperatureQuery, photoQuery] = queries;
 
   const isLoading = queries.some((q) => q.isLoading);
   const isError = queries.every((q) => q.isError);
@@ -77,12 +77,12 @@ export default function ComposedAnalysisPage() {
     () =>
       buildComposite(
         machineQuery.data ?? null,
-        postQuery.data ?? null,
+        parallelQuery.data ?? null,
+        temperatureQuery.data ?? null,
         photoQuery.data ?? null,
-        classicQuery.data ?? null,
         'current_round'
       ),
-    [machineQuery.data, postQuery.data, photoQuery.data, classicQuery.data]
+    [machineQuery.data, parallelQuery.data, temperatureQuery.data, photoQuery.data]
   );
 
   const [machineSeed, setMachineSeed] = useState(1);
@@ -114,7 +114,7 @@ export default function ComposedAnalysisPage() {
         </Button>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        추첨기 + 후속 출현 + 클래식 + 용지 분석 — 4개 독립 신호의 교집합 + 🎰 학습 추첨기 시뮬레이션
+        용지 1:1 전수비교 + 평행회차(강수·기대) + 미출수(강수·기대) — 3축 합의 + 🎰 1호기 학습 추첨기
       </Typography>
 
       <Alert severity="warning" sx={{ mb: 2 }} icon={false}>
@@ -124,68 +124,69 @@ export default function ComposedAnalysisPage() {
       {/* 데이터 소스 상태 */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
-          📡 데이터 소스 상태 ({composite.sourceCount}/4)
+          📡 데이터 소스 상태 (합의 {composite.sourceCount}/3)
         </Typography>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
           <Chip
             size="small"
-            color={composite.sourcesAvailable.machine ? 'success' : 'default'}
-            variant={composite.sourcesAvailable.machine ? 'filled' : 'outlined'}
-            label={
-              machineQuery.isLoading
-                ? '추첨기 분석 (로딩)'
-                : composite.sourcesAvailable.machine
-                  ? `추첨기 분석 (${machineQuery.data?.machine_id}호기)`
-                  : '추첨기 분석 (실패)'
-            }
-          />
-          <Chip
-            size="small"
-            color={composite.sourcesAvailable.post ? 'success' : 'default'}
-            variant={composite.sourcesAvailable.post ? 'filled' : 'outlined'}
-            label={
-              postQuery.isLoading
-                ? '후속 출현 통계 (로딩)'
-                : composite.sourcesAvailable.post
-                  ? `후속 출현 통계 (${postQuery.data?.meta?.trigger_round ?? '?'}회 기준)`
-                  : '후속 출현 통계 (실패)'
-            }
-          />
-          <Chip
-            size="small"
-            color={composite.sourcesAvailable.classic ? 'success' : 'default'}
-            variant={composite.sourcesAvailable.classic ? 'filled' : 'outlined'}
-            label={
-              classicQuery.isLoading
-                ? '클래식 분석 (로딩)'
-                : composite.sourcesAvailable.classic
-                  ? '클래식 분석 (윌슨·blend)'
-                  : '클래식 분석 (실패)'
-            }
-          />
-          <Chip
-            size="small"
-            color={composite.sourcesAvailable.photo ? 'success' : 'warning'}
-            variant={composite.sourcesAvailable.photo ? 'filled' : 'outlined'}
+            color={composite.sourcesAvailable.oneToOne ? 'success' : 'warning'}
+            variant={composite.sourcesAvailable.oneToOne ? 'filled' : 'outlined'}
             label={
               photoQuery.isLoading
-                ? '용지 분석 (로딩)'
-                : composite.sourcesAvailable.photo
-                  ? `용지 분석 (${photoQuery.data?.total_analyses ?? 0}건 누적)`
-                  : '용지 분석 (없음 — 등록하면 합쳐짐)'
+                ? '용지 1:1 전수비교 (로딩)'
+                : composite.sourcesAvailable.oneToOne
+                  ? `용지 1:1 전수비교 (${photoQuery.data?.total_analyses ?? 0}건)`
+                  : '용지 1:1 (없음 — 이번회차 등록 시 합쳐짐)'
+            }
+          />
+          <Chip
+            size="small"
+            color={composite.sourcesAvailable.parallel ? 'success' : 'default'}
+            variant={composite.sourcesAvailable.parallel ? 'filled' : 'outlined'}
+            label={
+              parallelQuery.isLoading
+                ? '평행회차 강수·기대 (로딩)'
+                : composite.sourcesAvailable.parallel
+                  ? `평행회차 강수·기대 (${parallelQuery.data?.suffix_label ?? '?'})`
+                  : '평행회차 (실패)'
+            }
+          />
+          <Chip
+            size="small"
+            color={composite.sourcesAvailable.missing ? 'success' : 'default'}
+            variant={composite.sourcesAvailable.missing ? 'filled' : 'outlined'}
+            label={
+              temperatureQuery.isLoading
+                ? '미출수 강수·기대 (로딩)'
+                : composite.sourcesAvailable.missing
+                  ? '미출수 강수·기대 (gap 기준)'
+                  : '미출수 (실패)'
+            }
+          />
+          <Chip
+            size="small"
+            color="info"
+            variant="outlined"
+            label={
+              machineQuery.isLoading
+                ? '추첨 엔진 (로딩)'
+                : composite.sourcesAvailable.machine
+                  ? `추첨 엔진 ${machineQuery.data?.machine_id ?? '?'}호기`
+                  : '추첨 엔진 (실패)'
             }
           />
         </Stack>
-        {composite.sourceCount < 4 && (
+        {composite.sourceCount < 3 && (
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            ※ {4 - composite.sourceCount}개 소스 미가용 — 합의 등급이 낮게 산정될 수 있습니다.
+            ※ {3 - composite.sourceCount}개 합의 소스 미가용 — 합의 등급이 낮게 산정될 수 있습니다.
+            {!composite.sourcesAvailable.oneToOne ? ' (용지분석 이번회차 탭에서 자동/반자동을 등록·저장하면 1:1 전수비교가 합쳐집니다.)' : ''}
           </Typography>
         )}
       </Paper>
 
       {isError && !isLoading && (
         <Alert severity="error" sx={{ mb: 2 }}>
-          3개 소스 모두 로드 실패 — 백엔드 연결을 확인하거나 새로고침 해 주세요.
+          소스 모두 로드 실패 — 백엔드 연결을 확인하거나 새로고침 해 주세요.
         </Alert>
       )}
 
@@ -247,14 +248,14 @@ export default function ComposedAnalysisPage() {
         <Paper sx={{ p: 2, mb: 2, border: '1px solid', borderColor: 'warning.main' }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant="subtitle1" fontWeight={700}>
-              🎰 학습 추첨기 시뮬레이터
+              🎰 {drawMachine.machineId ?? '1'}호기 학습 추첨기
             </Typography>
             <Button size="small" variant="outlined" onClick={() => setMachineSeed((s) => s + 1)}>
               ↻ 다시 추첨
             </Button>
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            용지분석(이번회차) 합의 등급 + 예상 추첨기 고빈도를 <strong>공 무게</strong>로 반영해{' '}
+            <strong>용지 1:1 전수비교 · 평행회차(강수/기대) · 미출수(강수/기대)</strong>를 <strong>공 무게</strong>로 반영해{' '}
             {drawMachine.iterations.toLocaleString()}회 몬테카를로 추첨한 결과입니다.{' '}
             <strong>
               {drawMachine.nextRound ?? '?'}회

@@ -26,10 +26,10 @@ import {
   sumTotal,
 } from './comboMetrics';
 import type {
-  ClassicRecommendResponse,
+  ParallelRoundAnalysisResponse,
   PhotoAnalysisAccumulated,
-  PostOccurrenceResponse,
   RoundRecommendResponse,
+  TemperatureResponse,
 } from '../api/v1Api';
 
 export type ConsensusGrade = 'S' | 'A' | 'B' | 'C' | 'X';
@@ -48,10 +48,14 @@ export interface ConsensusNumber {
 }
 
 export interface SourceAvailability {
+  /** 용지 1:1 자동↔반자동 전수비교 (강한 후보) */
+  oneToOne: boolean;
+  /** 평행회차 강수/기대수 */
+  parallel: boolean;
+  /** 미출수(gap) 강수/기대수 */
+  missing: boolean;
+  /** 추첨 엔진(1호기) — 등급 패밀리엔 미포함, 시뮬레이터 가중용 */
   machine: boolean;
-  post: boolean;
-  classic: boolean;
-  photo: boolean;
 }
 
 export interface CompositeAnalysisResult {
@@ -67,17 +71,14 @@ export interface CompositeAnalysisResult {
 }
 
 const SOURCE_IDS = {
-  machineHot: 'machine-hot',
-  postS: 'post-S',
-  postTop10: 'post-top10',
-  classicWilson: 'classic-wilson',
-  classicBlend: 'classic-blend',
-  photoStrong: 'photo-strong',
+  oneToOne: 'photo-1to1',
+  parallelStrong: 'parallel-strong',
+  parallelExpected: 'parallel-expected',
+  missingStrong: 'missing-strong',
+  missingExpected: 'missing-expected',
   photoExcluded: 'photo-excluded',
 } as const;
 
-const MACHINE_TOP_COUNT = 5;
-const POST_TOP_COUNT = 10;
 const PHOTO_TOP_COUNT = 10;
 
 function emptyConsensus(): Record<number, ConsensusNumber> {
@@ -98,12 +99,11 @@ function emptyConsensus(): Record<number, ConsensusNumber> {
 // 소스 ID → 분석 '패밀리'. score 는 sourceId 개수가 아니라 '서로 다른 분석 패밀리'
 // 개수여야 한다(클래식 wilson+blend 가 한 번호를 2표로 부풀리던 버그 방지).
 const FAMILY_OF: Record<string, string> = {
-  [SOURCE_IDS.machineHot]: 'machine',
-  [SOURCE_IDS.postS]: 'post',
-  [SOURCE_IDS.postTop10]: 'post',
-  [SOURCE_IDS.classicWilson]: 'classic',
-  [SOURCE_IDS.classicBlend]: 'classic',
-  [SOURCE_IDS.photoStrong]: 'photo',
+  [SOURCE_IDS.oneToOne]: 'oneToOne',
+  [SOURCE_IDS.parallelStrong]: 'parallel',
+  [SOURCE_IDS.parallelExpected]: 'parallel',
+  [SOURCE_IDS.missingStrong]: 'missing',
+  [SOURCE_IDS.missingExpected]: 'missing',
 };
 
 function addSignal(item: ConsensusNumber, sourceId: string): void {
@@ -220,68 +220,46 @@ function generateConsensusSets(
 
 export function buildComposite(
   machine: RoundRecommendResponse | null | undefined,
-  post: PostOccurrenceResponse | null | undefined,
+  parallel: ParallelRoundAnalysisResponse | null | undefined,
+  temperature: TemperatureResponse | null | undefined,
   photo: PhotoAnalysisAccumulated | null | undefined,
-  classic?: ClassicRecommendResponse | null,
   photoIntent: 'review' | 'current_round' = 'current_round'
 ): CompositeAnalysisResult {
   const perNumber = emptyConsensus();
 
   const sourcesAvailable: SourceAvailability = {
-    machine: !!machine,
-    post: !!post,
-    classic: !!classic,
-    photo: !!photo,
+    oneToOne: false, // 아래 photoStrong 유무로 확정
+    parallel: !!parallel && !parallel.error && (parallel.parallel_strong?.length ?? 0) > 0,
+    missing: !!temperature && (temperature.items?.length ?? 0) > 0,
+    machine: !!machine, // 추첨 엔진(1호기) — 등급 패밀리엔 미포함, 시뮬레이터용.
   };
-  const sourceCount = (Object.values(sourcesAvailable) as boolean[]).filter(Boolean).length;
 
-  // ── 1) 추첨기 hot_top5 → favor ────────────────────────────────
-  if (machine?.stats?.hot_top5?.length) {
-    machine.stats.hot_top5.slice(0, MACHINE_TOP_COUNT).forEach(({ number }) => {
+  // ── 1) 평행회차 강수/기대수 ──────────────────────────────────
+  if (parallel && !parallel.error) {
+    (parallel.parallel_strong ?? []).slice(0, 8).forEach((number) => {
       const item = perNumber[number];
-      if (item) addSignal(item, SOURCE_IDS.machineHot);
+      if (item) addSignal(item, SOURCE_IDS.parallelStrong);
+    });
+    (parallel.parallel_expected ?? []).slice(0, 8).forEach((number) => {
+      const item = perNumber[number];
+      if (item) addSignal(item, SOURCE_IDS.parallelExpected);
     });
   }
 
-  // ── 2) 후속 출현 grades.S 우선, 없으면 top20_numbers top 10 ──
-  if (post?.grades?.S?.length) {
-    post.grades.S.forEach((number) => {
+  // ── 2) 미출수 강수/기대수 — gap(미출현 회차) 큰 순. tier cold/frozen 우선 ──
+  if (temperature?.items?.length) {
+    const byGap = [...temperature.items].sort((a, b) => b.gap - a.gap || a.number - b.number);
+    byGap.slice(0, 6).forEach(({ number }) => {
       const item = perNumber[number];
-      if (item) addSignal(item, SOURCE_IDS.postS);
+      if (item) addSignal(item, SOURCE_IDS.missingStrong);
     });
-  } else if (post?.top20_numbers?.length) {
-    post.top20_numbers.slice(0, POST_TOP_COUNT).forEach(({ number }) => {
+    byGap.slice(6, 12).forEach(({ number }) => {
       const item = perNumber[number];
-      if (item) addSignal(item, SOURCE_IDS.postTop10);
+      if (item) addSignal(item, SOURCE_IDS.missingExpected);
     });
   }
 
-  // ── 3) 클래식 wilson top + blend 조합 번호 ──
-  const wilsonTop = (classic?.pattern_analysis?.wilson as { top10?: { number: number }[] } | undefined)
-    ?.top10;
-  if (wilsonTop?.length) {
-    wilsonTop.slice(0, 8).forEach(({ number }) => {
-      const item = perNumber[number];
-      if (item) addSignal(item, SOURCE_IDS.classicWilson);
-    });
-  }
-  if (classic?.combinations?.length) {
-    const freq: Record<number, number> = {};
-    classic.combinations.forEach((c) => {
-      c.numbers.forEach((n) => {
-        freq[n] = (freq[n] ?? 0) + 1;
-      });
-    });
-    Object.entries(freq)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 10)
-      .forEach(([n]) => {
-        const item = perNumber[Number(n)];
-        if (item) addSignal(item, SOURCE_IDS.classicBlend);
-      });
-  }
-
-  // ── 4) 용지 분석 — intent 슬라이스 우선 (데이터 격리) ──
+  // ── 3) 용지 1:1 자동↔반자동 전수비교 (강한 후보) — intent 슬라이스 우선 ──
   const photoStrong =
     photo?.by_intent?.[photoIntent]?.final_predictions?.strong_candidates ??
     photo?.by_intent?.[photoIntent]?.accumulated_combo_patterns?.strong_candidates ??
@@ -293,9 +271,10 @@ export function buildComposite(
     [];
 
   if (photoStrong.length) {
+    sourcesAvailable.oneToOne = true;
     photoStrong.slice(0, PHOTO_TOP_COUNT).forEach((number) => {
       const item = perNumber[number];
-      if (item) addSignal(item, SOURCE_IDS.photoStrong);
+      if (item) addSignal(item, SOURCE_IDS.oneToOne);
     });
   }
 
@@ -306,11 +285,13 @@ export function buildComposite(
     });
   }
 
-  // score = 서로 다른 분석 패밀리(machine/post/classic/photo) 개수 — 최대 4.
+  // score = 서로 다른 분석 패밀리(oneToOne/parallel/missing) 개수 — 최대 3.
   for (let n = 1; n <= 45; n += 1) {
     const item = perNumber[n];
     item.score = new Set(item.sources.map((s) => FAMILY_OF[s] ?? s)).size;
   }
+  // 등급 산정 패밀리 = 3개(용지1:1·평행·미출). 추첨 엔진(machine)은 별도.
+  const sourceCount = [sourcesAvailable.oneToOne, sourcesAvailable.parallel, sourcesAvailable.missing].filter(Boolean).length;
 
   // 등급 부여
   for (let n = 1; n <= 45; n += 1) {
@@ -437,16 +418,20 @@ export function simulateDrawMachine(
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+  // 1호기 학습 추첨기 공 무게 — 세 축을 강수>기대 로 반영. 용지 1:1 최우선.
   const hot = new Set((machine?.stats?.hot_top5 ?? []).map((h) => h.number));
   const weight: number[] = new Array(46).fill(1);
   for (let n = 1; n <= 45; n += 1) {
     const item = composite.perNumber[n];
+    const has = (id: string) => item.sources.includes(id);
     let wv = 1;
-    if (item.grade === 'S') wv += 6;
-    else if (item.grade === 'A') wv += 3;
-    else if (item.grade === 'B') wv += 1.5;
-    if (item.excluded) wv = 0.2; // 배제 — 거의 안 뽑힘
-    if (hot.has(n)) wv += 2; // 예상 추첨기 고빈도
+    if (has('photo-1to1')) wv += 3.5; // 용지 1:1 전수비교 (핵심)
+    if (has('parallel-strong')) wv += 2.5;
+    if (has('parallel-expected')) wv += 1.2;
+    if (has('missing-strong')) wv += 2.0;
+    if (has('missing-expected')) wv += 1.0;
+    if (hot.has(n)) wv += 1.0; // 1호기 자체 고빈도(엔진 성향)
+    if (item.excluded) wv = 0.2; // 용지 배제 — 거의 안 뽑힘
     weight[n] = wv;
   }
   const count = new Array(46).fill(0);
@@ -496,11 +481,10 @@ export function simulateDrawMachine(
 }
 
 export const SOURCE_LABELS: Record<string, string> = {
-  [SOURCE_IDS.machineHot]: '추첨기 hot',
-  [SOURCE_IDS.postS]: '후속출현 grade-S',
-  [SOURCE_IDS.postTop10]: '후속출현 top10',
-  [SOURCE_IDS.classicWilson]: '클래식 윌슨',
-  [SOURCE_IDS.classicBlend]: '클래식 blend',
-  [SOURCE_IDS.photoStrong]: '용지 strong',
-  [SOURCE_IDS.photoExcluded]: '용지 excluded',
+  [SOURCE_IDS.oneToOne]: '용지 1:1 전수비교',
+  [SOURCE_IDS.parallelStrong]: '평행 강수',
+  [SOURCE_IDS.parallelExpected]: '평행 기대',
+  [SOURCE_IDS.missingStrong]: '미출 강수',
+  [SOURCE_IDS.missingExpected]: '미출 기대',
+  [SOURCE_IDS.photoExcluded]: '용지 배제',
 };

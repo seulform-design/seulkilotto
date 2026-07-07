@@ -1,17 +1,18 @@
 /**
- * 종합 분석 (Composite Analysis) — 3개 독립 신호의 교집합 산출.
+ * 종합 분석 (Composite Analysis) — 3축 독립 신호의 교집합 산출.
  *
- * 신호 (출처):
- *   1. 추첨기 분석 (machine) → RoundRecommendResponse.stats.hot_top5
- *   2. 후속 출현 통계 (post) → PostOccurrenceResponse.grades.S 또는 top20_numbers
- *   3. 용지 분석 누적 (photo) → PhotoAnalysisAccumulated.final_predictions
+ * 합의 패밀리 (등급 산정, 최대 3):
+ *   1. 용지 1:1 (oneToOne) → PhotoAnalysisAccumulated.by_intent[intent].final_predictions.strong_candidates
+ *   2. 평행회차 (parallel) → ParallelRoundAnalysisResponse.parallel_strong / parallel_expected
+ *   3. 미출수 (missing)  → TemperatureResponse.items 의 gap(미출현 회차) 상위
+ *   ※ 추첨기(machine)는 등급 패밀리가 아니라 '추첨 엔진'(시뮬레이터 가중·호기 표시)용.
  *
- * 등급 (per-number):
- *   S = 3개 신호 모두 favor       (최대 합의)
- *   A = 2개 신호 favor
- *   B = 1개 신호 favor
- *   C = 어떤 신호도 안 함         (중립)
- *   X = 어느 신호든 excluded      (배제)
+ * 등급 (per-number, score = 서로 다른 패밀리 수):
+ *   S = 3축 모두 favor           (최대 합의)
+ *   A = 2축 favor
+ *   B = 1축 favor
+ *   C = 어떤 축도 안 함           (중립)
+ *   X = 용지 배제                 (배제)
  *
  * 정직성 선언:
  *   본 모듈은 어떤 번호의 다음 회차 출현 확률도 변경하지 않는다.
@@ -96,8 +97,8 @@ function emptyConsensus(): Record<number, ConsensusNumber> {
   return out;
 }
 
-// 소스 ID → 분석 '패밀리'. score 는 sourceId 개수가 아니라 '서로 다른 분석 패밀리'
-// 개수여야 한다(클래식 wilson+blend 가 한 번호를 2표로 부풀리던 버그 방지).
+// 소스 ID → 분석 '패밀리'. score 는 sourceId 개수가 아니라 '서로 다른 패밀리(축)' 개수.
+// (한 축의 강수+기대가 같은 번호를 2표로 부풀리지 않도록 — 최대 3축.)
 const FAMILY_OF: Record<string, string> = {
   [SOURCE_IDS.oneToOne]: 'oneToOne',
   [SOURCE_IDS.parallelStrong]: 'parallel',

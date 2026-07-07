@@ -27,8 +27,8 @@ import {
 import { v1Api } from '../api/v1Api';
 
 const HONESTY_HEADER =
-  '🟡 정직성 선언: 3개 신호의 교집합도 당첨 확률(1/8,145,060)을 변경하지 않습니다. ' +
-  '본 페이지는 패턴 관찰 도구이며, 합의 점수가 높은 6-튜플도 균등 무작위와 동일한 확률입니다.';
+  '🟡 정직성 선언: 3축(용지 1:1 전수비교·평행회차·미출수) 합의도 당첨 확률(1/8,145,060)을 변경하지 않습니다. ' +
+  '물리 추첨기는 균등 물리이며(시각용), 합의 점수가 높은 6-튜플도 균등 무작위와 동일한 확률입니다.';
 
 const HONESTY_FOOTER =
   '※ 위 5게임은 EPO 필터(합/AC/홀짝/연속)를 통과한 조합이며, 합의 등급을 가중치로 사용합니다. ' +
@@ -73,6 +73,14 @@ export default function ComposedAnalysisPage() {
   const isLoading = queries.some((q) => q.isLoading);
   const isError = queries.every((q) => q.isError);
 
+  // 용지 1:1 소스는 이번회차(current_round) 데이터를 우선하되, 없고 복기(review) 데이터가
+  // 있으면 그걸 쓴다(예전엔 current_round 고정이라 복기만 있는 사용자는 소스가 침묵 누락).
+  const photoIntentUsed: 'review' | 'current_round' = useMemo(() => {
+    const cr = photoQuery.data?.by_intent?.current_round?.final_predictions?.strong_candidates?.length ?? 0;
+    const rv = photoQuery.data?.by_intent?.review?.final_predictions?.strong_candidates?.length ?? 0;
+    return cr === 0 && rv > 0 ? 'review' : 'current_round';
+  }, [photoQuery.data]);
+
   const composite = useMemo(
     () =>
       buildComposite(
@@ -80,9 +88,9 @@ export default function ComposedAnalysisPage() {
         parallelQuery.data ?? null,
         temperatureQuery.data ?? null,
         photoQuery.data ?? null,
-        'current_round'
+        photoIntentUsed
       ),
-    [machineQuery.data, parallelQuery.data, temperatureQuery.data, photoQuery.data]
+    [machineQuery.data, parallelQuery.data, temperatureQuery.data, photoQuery.data, photoIntentUsed]
   );
 
   const [machineSeed, setMachineSeed] = useState(1);
@@ -135,7 +143,7 @@ export default function ComposedAnalysisPage() {
               photoQuery.isLoading
                 ? '용지 1:1 전수비교 (로딩)'
                 : composite.sourcesAvailable.oneToOne
-                  ? `용지 1:1 전수비교 (${photoQuery.data?.total_analyses ?? 0}건)`
+                  ? `용지 1:1 전수비교 (${photoIntentUsed === 'review' ? '복기 대체' : '이번회차'})`
                   : '용지 1:1 (없음 — 이번회차 등록 시 합쳐짐)'
             }
           />

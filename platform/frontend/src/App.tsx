@@ -26,6 +26,7 @@ const RoundsPage = lazy(() => import('./pages/RoundsPage'));
 const RoundRecommendPage = lazy(() => import('./pages/RoundRecommendPage'));
 const PhotoAnalysisPage = lazy(() => import('./pages/PhotoAnalysisPage'));
 const ComposedAnalysisPage = lazy(() => import('./pages/ComposedAnalysisPage'));
+const FortunePickPage = lazy(() => import('./pages/FortunePickPage'));
 
 function PageFallback() {
   return (
@@ -50,6 +51,7 @@ const TABS = [
   { id: 'recommend', label: '추첨기 추천' },
   { id: 'post', label: '후속 출현 통계' },
   { id: 'photo', label: '용지 분석' },
+  { id: 'fortune', label: '👵 할매 예상' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -110,6 +112,7 @@ export default function App() {
           {tab === 'post' && <PostOccurrencePage />}
           {tab === 'photo' && <PhotoAnalysisPage />}
           {tab === 'recommend' && <RoundRecommendPage />}
+          {tab === 'fortune' && <FortunePickPage />}
         </Suspense>
       </Container>
     </Box>

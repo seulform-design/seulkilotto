@@ -100,7 +100,7 @@ export default function MachineDrawSimulator() {
       >
         <iframe
           title="동행복권 로또 추첨기 (1/2/3호기)"
-          src="/venus-machine.html?v=19"
+          src="/venus-machine.html?v=20"
           style={{ display: 'block', width: '100%', height: 800, border: 0 }}
           scrolling="no"
         />

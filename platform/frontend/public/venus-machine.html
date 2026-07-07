@@ -374,6 +374,8 @@
     render(engine); requestAnimationFrame(loop); }
 
   document.querySelectorAll('.mbtn').forEach(el=>el.addEventListener('click',()=>selectMachine(+el.dataset.m)));
+  // URL 파라미터 ?m=1|2|3 로 초기 호기 지정(종합분석에서 예상 호기로 프리셋). 물리는 균등.
+  try{ var _pm=parseInt(new URLSearchParams(location.search).get('m'),10); if(_pm===1||_pm===2||_pm===3) selectMachine(_pm); }catch(e){}
   btnStart.addEventListener('click', startDraw);
   document.getElementById('btnReset').addEventListener('click', reset);
   document.getElementById('sndBtn').addEventListener('click', function(){ Sound.ensure(); Sound.on=!Sound.on; this.textContent=Sound.on?'🔊':'🔇'; if(!Sound.on)Sound.blower(0); else if(engine.blowing)Sound.blower(0.17); });

@@ -243,12 +243,47 @@ export default function ComposedAnalysisPage() {
         )}
       </Paper>
 
+      {/* 🎡 물리 추첨기(예상 호기) — 실제 추첨 재현(균등 물리). 학습 예상은 아래. */}
+      {drawMachine && (
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
+            🎡 물리 추첨기 — {drawMachine.nextRound ?? '?'}회 예상 {drawMachine.machineId ?? 1}호기
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            동행복권 추첨기(Editec Venus VIII) 물리 재현 — {drawMachine.machineId ?? 1}호기로 프리셋됨.
+            실제 추첨은 모든 공이 균등하므로 이 물리 추첨은 <strong>무작위 재현(시각용)</strong>이고,
+            <strong> 용지분석 학습 예상은 바로 아래 🎰 학습 추첨</strong>에서 확인하세요.
+          </Typography>
+          <Box sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider', bgcolor: '#111622' }}>
+            <iframe
+              title="종합분석 물리 추첨기"
+              src={`/venus-machine.html?v=20&m=${drawMachine.machineId ?? 1}`}
+              style={{ display: 'block', width: '100%', height: 720, border: 0 }}
+              scrolling="no"
+            />
+          </Box>
+          {drawMachine.representative.length === 6 && (
+            <Box sx={{ mt: 1, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                🎯 이 회차 용지분석 학습 예상 (물리 추첨과 대조용) — {drawMachine.machineId ?? 1}호기
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
+                {drawMachine.representative.map((n) => (
+                  <LottoBall key={`pw-${n}`} number={n} size={30} />
+                ))}
+                <ComboActions numbers={drawMachine.representative} source="unknown" label="종합 학습 추첨 예상" />
+              </Stack>
+            </Box>
+          )}
+        </Paper>
+      )}
+
       {/* 🎰 학습 추첨기 시뮬레이터 */}
       {drawMachine && (
         <Paper sx={{ p: 2, mb: 2, border: '1px solid', borderColor: 'warning.main' }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant="subtitle1" fontWeight={700}>
-              🎰 {drawMachine.machineId ?? '1'}호기 학습 추첨기
+              🎰 {drawMachine.machineId ?? '1'}호기 학습 추첨 (용지분석 가중)
             </Typography>
             <Button size="small" variant="outlined" onClick={() => setMachineSeed((s) => s + 1)}>
               ↻ 다시 추첨

@@ -11,13 +11,14 @@ import {
   Typography,
 } from '@mui/material';
 import { useQueries } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import ComboActions from '../components/ComboActions';
 import LottoBall from '../components/LottoBall';
 import MetricChips from '../components/MetricChips';
 import WalkForwardPanel from '../components/WalkForwardPanel';
 import {
   buildComposite,
+  simulateDrawMachine,
   GRADE_COLORS,
   GRADE_LABELS,
   SOURCE_LABELS,
@@ -84,6 +85,12 @@ export default function ComposedAnalysisPage() {
     [machineQuery.data, postQuery.data, photoQuery.data, classicQuery.data]
   );
 
+  const [machineSeed, setMachineSeed] = useState(1);
+  const drawMachine = useMemo(
+    () => simulateDrawMachine(composite, machineQuery.data ?? null, { iterations: 6000, seed: machineSeed }),
+    [composite, machineQuery.data, machineSeed]
+  );
+
   const handleRefresh = () => {
     queries.forEach((q) => q.refetch());
   };
@@ -107,7 +114,7 @@ export default function ComposedAnalysisPage() {
         </Button>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        추첨기 + 후속 출현 + 용지 분석 — 3개 독립 신호의 교집합 시각화
+        추첨기 + 후속 출현 + 클래식 + 용지 분석 — 4개 독립 신호의 교집합 + 🎰 학습 추첨기 시뮬레이션
       </Typography>
 
       <Alert severity="warning" sx={{ mb: 2 }} icon={false}>
@@ -117,7 +124,7 @@ export default function ComposedAnalysisPage() {
       {/* 데이터 소스 상태 */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
-          📡 데이터 소스 상태 ({composite.sourceCount}/3)
+          📡 데이터 소스 상태 ({composite.sourceCount}/4)
         </Typography>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
           <Chip
@@ -146,6 +153,18 @@ export default function ComposedAnalysisPage() {
           />
           <Chip
             size="small"
+            color={composite.sourcesAvailable.classic ? 'success' : 'default'}
+            variant={composite.sourcesAvailable.classic ? 'filled' : 'outlined'}
+            label={
+              classicQuery.isLoading
+                ? '클래식 분석 (로딩)'
+                : composite.sourcesAvailable.classic
+                  ? '클래식 분석 (윌슨·blend)'
+                  : '클래식 분석 (실패)'
+            }
+          />
+          <Chip
+            size="small"
             color={composite.sourcesAvailable.photo ? 'success' : 'warning'}
             variant={composite.sourcesAvailable.photo ? 'filled' : 'outlined'}
             label={
@@ -157,9 +176,9 @@ export default function ComposedAnalysisPage() {
             }
           />
         </Stack>
-        {composite.sourceCount < 3 && (
+        {composite.sourceCount < 4 && (
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            ※ {3 - composite.sourceCount}개 소스 미가용 — 합의 등급이 낮게 산정될 수 있습니다.
+            ※ {4 - composite.sourceCount}개 소스 미가용 — 합의 등급이 낮게 산정될 수 있습니다.
           </Typography>
         )}
       </Paper>
@@ -179,7 +198,7 @@ export default function ComposedAnalysisPage() {
         {sStrongNumbers.length > 0 && (
           <Box sx={{ mb: 1.5 }}>
             <Typography variant="caption" color="error.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-              S · 3개 신호 모두 추천 ({sStrongNumbers.length}개)
+              S · 3+ 소스 합의 ({sStrongNumbers.length}개)
             </Typography>
             <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
               {sStrongNumbers.map((n) => (
@@ -199,7 +218,7 @@ export default function ComposedAnalysisPage() {
         {aStrongNumbers.length > 0 && (
           <Box sx={{ mb: 1 }}>
             <Typography variant="caption" color="warning.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-              A · 2개 신호 합의 ({aStrongNumbers.length}개)
+              A · 2개 소스 합의 ({aStrongNumbers.length}개)
             </Typography>
             <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
               {aStrongNumbers.map((n) => (
@@ -222,6 +241,75 @@ export default function ComposedAnalysisPage() {
           </Typography>
         )}
       </Paper>
+
+      {/* 🎰 학습 추첨기 시뮬레이터 */}
+      {drawMachine && (
+        <Paper sx={{ p: 2, mb: 2, border: '1px solid', borderColor: 'warning.main' }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+            <Typography variant="subtitle1" fontWeight={700}>
+              🎰 학습 추첨기 시뮬레이터
+            </Typography>
+            <Button size="small" variant="outlined" onClick={() => setMachineSeed((s) => s + 1)}>
+              ↻ 다시 추첨
+            </Button>
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            용지분석(이번회차) 합의 등급 + 예상 추첨기 고빈도를 <strong>공 무게</strong>로 반영해{' '}
+            {drawMachine.iterations.toLocaleString()}회 몬테카를로 추첨한 결과입니다.{' '}
+            <strong>
+              {drawMachine.nextRound ?? '?'}회
+              {drawMachine.drawDate ? ` (${drawMachine.drawDate})` : ''}
+              {drawMachine.machineId ? ` · 예상 ${drawMachine.machineId}호기${drawMachine.machineSource === 'estimated' ? '(추정)' : ''}` : ''}
+            </strong>{' '}
+            기준. 무게가 큰 번호가 더 자주 뽑히지만, 실제 추첨은 균등이라 확률은 변하지 않습니다.
+          </Typography>
+
+          <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+            🎯 대표 추첨 조합 (가장 자주 뽑힌 6개 · 구간 균형)
+          </Typography>
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+            {drawMachine.representative.map((n) => (
+              <LottoBall key={`rep-${n}`} number={n} size={36} />
+            ))}
+            <ComboActions numbers={drawMachine.representative} source="unknown" label="추첨기 대표 조합" />
+          </Stack>
+
+          <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+            번호별 추첨 빈도 TOP 12 (등장률 · 균등 대비 배수)
+          </Typography>
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+            {drawMachine.ranked.slice(0, 12).map((r) => (
+              <Box key={`dm-${r.number}`} sx={{ textAlign: 'center', minWidth: 40 }}>
+                <LottoBall number={r.number} size={30} />
+                <Typography variant="caption" sx={{ display: 'block', fontSize: 9, lineHeight: 1.1, color: 'text.disabled' }}>
+                  {r.pct}%
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', fontSize: 9, lineHeight: 1, color: r.lift >= 1.3 ? 'warning.light' : 'text.disabled' }}>
+                  ×{r.lift}
+                </Typography>
+              </Box>
+            ))}
+          </Stack>
+
+          {drawMachine.samples.length > 0 && (
+            <>
+              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                이번 추첨 표본 ({drawMachine.samples.length}게임 · [다시 추첨]으로 갱신)
+              </Typography>
+              <Stack spacing={0.4}>
+                {drawMachine.samples.map((s, i) => (
+                  <Stack key={`smp-${i}`} direction="row" spacing={0.4} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Typography variant="caption" sx={{ minWidth: 16, color: 'text.disabled', fontSize: 10 }}>{i + 1}</Typography>
+                    {s.map((n) => (
+                      <LottoBall key={`smp-${i}-${n}`} number={n} size={22} />
+                    ))}
+                  </Stack>
+                ))}
+              </Stack>
+            </>
+          )}
+        </Paper>
+      )}
 
       {/* 1~45 합의 맵 */}
       <Paper sx={{ p: 2, mb: 2 }}>

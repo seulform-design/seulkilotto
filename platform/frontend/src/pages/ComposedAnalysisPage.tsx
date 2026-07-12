@@ -14,6 +14,8 @@ import { useQueries } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useVenusMachineHeight } from '../hooks/useVenusMachineHeight';
 import ComboActions from '../components/ComboActions';
+import SharingBadge from '../components/SharingBadge';
+import { optimizeForSharing } from '../utils/jackpotSharing';
 import LottoBall from '../components/LottoBall';
 import MetricChips from '../components/MetricChips';
 import WalkForwardPanel from '../components/WalkForwardPanel';
@@ -313,12 +315,41 @@ export default function ComposedAnalysisPage() {
           <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
             🎯 대표 추첨 조합 (가장 자주 뽑힌 6개 · 구간 균형)
           </Typography>
-          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mb: 1 }}>
             {drawMachine.representative.map((n) => (
               <LottoBall key={`rep-${n}`} number={n} size={36} />
             ))}
+            <SharingBadge numbers={drawMachine.representative} />
             <ComboActions numbers={drawMachine.representative} source="unknown" label="추첨기 대표 조합" />
           </Stack>
+
+          {/* 💰 분산(EV) 최적화 조합 — 확률은 불변, 당첨 시 공동분배 회피로 실수령 기대만 개선. */}
+          {(() => {
+            const opt = optimizeForSharing(drawMachine.ranked.map((r) => r.number), 12);
+            if (!opt) return null;
+            const same =
+              opt.numbers.join(',') === [...drawMachine.representative].sort((a, b) => a - b).join(',');
+            return (
+              <Box sx={{ mt: 0.5, mb: 1, p: 1, borderRadius: 1, border: '1px dashed', borderColor: 'success.light', bgcolor: 'action.hover' }}>
+                <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+                  💰 분산 최적화 조합 (상위 후보 중 공동당첨 위험 최소)
+                </Typography>
+                <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
+                  {opt.numbers.map((n) => (
+                    <LottoBall key={`opt-${n}`} number={n} size={32} />
+                  ))}
+                  <SharingBadge numbers={opt.numbers} />
+                  <ComboActions numbers={opt.numbers} source="unknown" label="분산 최적화 조합" />
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, fontSize: 11 }}>
+                  {same
+                    ? '대표 조합이 이미 분산 최적입니다.'
+                    : '예측 상위 후보를 유지하면서, 남들이 잘 안 고르는(생일·연속·규칙 패턴 회피) 6개를 골랐습니다.'}{' '}
+                  <strong>당첨 확률은 대표 조합과 동일(불변)</strong>하며, 당첨 시 공동분배 인원이 적어 실수령 기대가 큽니다.
+                </Typography>
+              </Box>
+            );
+          })()}
 
           <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
             번호별 추첨 빈도 TOP 12 (등장률 · 균등 대비 배수)

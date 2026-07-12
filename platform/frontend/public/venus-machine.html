@@ -384,6 +384,19 @@
 
   if(!hasMatter) setStatus('물리엔진 로드 실패 — 폴백 물리로 동작합니다');
   requestAnimationFrame(loop);
+
+  // 부모(iframe)에 실제 콘텐츠 높이를 보고 — 부모가 고정 높이를 잘못 잡아 하단
+  // [추첨 시작] 컨트롤이 잘리던 문제(종합분석 720px < 실제 ~780px)를 자동 해소.
+  function reportHeight(){
+    try{
+      var wrap=document.getElementById('wrap');
+      var h=Math.ceil(wrap.getBoundingClientRect().height);
+      if(h>0) parent.postMessage({ type:'venus-machine-height', height:h }, '*');
+    }catch(e){}
+  }
+  window.addEventListener('load', reportHeight);
+  window.addEventListener('resize', reportHeight);
+  reportHeight();
 })();
 </script>
 </body>

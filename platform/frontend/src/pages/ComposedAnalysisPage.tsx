@@ -12,6 +12,7 @@ import {
 } from '@mui/material';
 import { useQueries } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
+import { useVenusMachineHeight } from '../hooks/useVenusMachineHeight';
 import ComboActions from '../components/ComboActions';
 import LottoBall from '../components/LottoBall';
 import MetricChips from '../components/MetricChips';
@@ -94,6 +95,7 @@ export default function ComposedAnalysisPage() {
   );
 
   const [machineSeed, setMachineSeed] = useState(1);
+  const venusHeight = useVenusMachineHeight();
   const drawMachine = useMemo(
     () => simulateDrawMachine(composite, machineQuery.data ?? null, { iterations: 6000, seed: machineSeed }),
     [composite, machineQuery.data, machineSeed]
@@ -265,8 +267,8 @@ export default function ComposedAnalysisPage() {
           <Box sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider', bgcolor: '#111622' }}>
             <iframe
               title="종합분석 물리 추첨기"
-              src={`/venus-machine.html?v=20&m=${drawMachine.machineId ?? 1}`}
-              style={{ display: 'block', width: '100%', height: 720, border: 0 }}
+              src={`/venus-machine.html?v=21&m=${drawMachine.machineId ?? 1}`}
+              style={{ display: 'block', width: '100%', height: venusHeight, border: 0 }}
               scrolling="no"
             />
           </Box>

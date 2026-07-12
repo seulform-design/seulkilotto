@@ -11,6 +11,7 @@ import {
   Typography,
 } from '@mui/material';
 import LottoBall from './LottoBall';
+import { useVenusMachineHeight } from '../hooks/useVenusMachineHeight';
 import { v1Api, type MachineDrawResult, type MachineProfile } from '../api/v1Api';
 
 const MACHINE_ACCENT: Record<number, string> = {
@@ -28,6 +29,7 @@ export default function MachineDrawSimulator() {
   const [drawing, setDrawing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<MachineProfile | null>(null);
+  const venusHeight = useVenusMachineHeight();
 
   const accent = MACHINE_ACCENT[machine];
 
@@ -100,8 +102,8 @@ export default function MachineDrawSimulator() {
       >
         <iframe
           title="동행복권 로또 추첨기 (1/2/3호기)"
-          src="/venus-machine.html?v=20"
-          style={{ display: 'block', width: '100%', height: 800, border: 0 }}
+          src="/venus-machine.html?v=21"
+          style={{ display: 'block', width: '100%', height: venusHeight, border: 0 }}
           scrolling="no"
         />
       </Box>

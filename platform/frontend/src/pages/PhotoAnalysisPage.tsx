@@ -557,6 +557,13 @@ type ManualDraft = {
   bulkAutoTickets: number[][];
   /** 마지막으로 [분석·저장] 을 성공한 시각 (ISO). 반자동 lastSavedAt 과 동일 개념. */
   lastSavedAt: string | null;
+  /**
+   * 이 드래프트가 입력된 회차. 저장 시점의 이번회차(current_round)로 스탬프한다.
+   * 회차가 추첨되면 서버는 해당 이번회차 데이터를 복기로 이동시키지만, 로컬 드래프트는
+   * intent 로만 키잉돼 회차 스탬프가 없으면 지난 회차 입력이 이번회차 탭에 영구히 남는다.
+   * roundNo < 현재 이번회차 이면 롤오버된 것으로 보고 자동 정리한다.
+   */
+  roundNo: number | null;
 };
 
 const emptyManualDraft = (): ManualDraft => ({
@@ -565,6 +572,7 @@ const emptyManualDraft = (): ManualDraft => ({
   slipQueue: [],
   bulkAutoTickets: [],
   lastSavedAt: null,
+  roundNo: null,
 });
 
 const emptyManualByIntent = (): Record<SheetIntent, ManualDraft> => ({
@@ -589,7 +597,11 @@ function loadManualByIntent(): Record<SheetIntent, ManualDraft> {
         Array.isArray((d as ManualDraft).currentSlipLines) &&
         Array.isArray((d as ManualDraft).slipQueue)
       ) {
-        const draft = d as ManualDraft & { bulkAutoTickets?: unknown; lastSavedAt?: unknown };
+        const draft = d as ManualDraft & {
+          bulkAutoTickets?: unknown;
+          lastSavedAt?: unknown;
+          roundNo?: unknown;
+        };
         const bulkAutoTickets: number[][] = Array.isArray(draft.bulkAutoTickets)
           ? (draft.bulkAutoTickets as unknown[])
               .filter((t): t is number[] => Array.isArray(t))
@@ -604,6 +616,8 @@ function loadManualByIntent(): Record<SheetIntent, ManualDraft> {
           slipQueue: draft.slipQueue,
           bulkAutoTickets,
           lastSavedAt: typeof draft.lastSavedAt === 'string' ? draft.lastSavedAt : null,
+          roundNo:
+            typeof draft.roundNo === 'number' && draft.roundNo > 0 ? draft.roundNo : null,
         };
       }
     }
@@ -842,14 +856,58 @@ export default function PhotoAnalysisPage() {
     if (localAutoEmpty) {
       hydratedAutoRef.current[activeTab] = true;
       // 서버 복원분은 '이미 저장된' 데이터 → lastSavedAt 도 함께 세팅해 '아직 저장 안 됨' 오표기 방지.
+      // 회차 스탬프도 서버 슬라이스 기준으로 세팅(이번회차=currentRound, 복기=latestRound).
       patchManual({
         bulkAutoTickets: serverAutoLines.map((a) => [...a]),
         lastSavedAt: lastSavedAt ?? new Date().toISOString(),
+        roundNo: (activeTab === 'current_round' ? currentRound : latestRound) ?? null,
       });
       setNotice(`☁ 다른 기기에서 저장한 자동 누적 ${serverAutoLines.length}줄을 불러왔습니다.`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accumulated, activeTab, bulkAutoTickets.length, currentSlipLines.length, slipQueue.length]);
+
+  // 회차 롤오버 자동 정리 — 이번회차 로컬 입력이 지난 회차 것이면 정리한다.
+  // 이번회차 데이터를 저장한 뒤 그 회차가 추첨되면 서버는 데이터를 복기로 옮기고
+  // 이번회차 샌드박스를 비운다. 하지만 localStorage 드래프트는 intent 로만 키잉돼
+  // 회차가 바뀌어도 지난 회차 입력이 이번회차 탭에 남는다(= '회차 업그레이드됐는데
+  // 안 넘어감'). 이미 서버에 저장된(=복기로 이동된) 데이터에 한해 자동 정리한다.
+  const rolloverClearedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (currentRound == null) return;
+    const draft = manualByIntent.current_round;
+    const hasContent =
+      draft.bulkAutoTickets.length + draft.currentSlipLines.length + draft.slipQueue.length > 0;
+    // 미저장 데이터(lastSavedAt 없음)는 사용자의 작업 중 입력일 수 있어 건드리지 않는다.
+    if (!hasContent || draft.lastSavedAt == null) return;
+
+    // (1) 회차 스탬프가 있고 현재 이번회차보다 과거 → 확실히 롤오버됨.
+    const stampStale = draft.roundNo != null && draft.roundNo < currentRound;
+
+    // (2) 스탬프 없는 레거시 드래프트 → 서버 이번회차가 비었고 복기에 데이터가 있으면
+    //     이미 서버에서 롤오버가 끝난 것으로 판단(안전: lastSavedAt 있으므로 서버 반영됨).
+    const serverCur = accumulated?.by_intent?.current_round;
+    const serverRev = accumulated?.by_intent?.review;
+    const legacyRolled =
+      draft.roundNo == null &&
+      (serverCur?.saved_auto_lines?.length ?? 0) === 0 &&
+      (serverCur?.total_analyses ?? 0) === 0 &&
+      ((serverRev?.saved_auto_lines?.length ?? 0) > 0 ||
+        (serverRev?.total_analyses ?? 0) > 0);
+
+    if ((stampStale || legacyRolled) && rolloverClearedRef.current !== currentRound) {
+      rolloverClearedRef.current = currentRound;
+      const staleLabel = draft.roundNo != null ? `${draft.roundNo}회` : '지난 회차';
+      setManualByIntent((prev) => ({ ...prev, current_round: emptyManualDraft() }));
+      // 복기 재하이드레이션 유도 — 방금 이동된 데이터가 복기 탭에 채워지도록.
+      hydratedAutoRef.current.review = false;
+      setNotice(
+        `🔄 ${staleLabel}가 추첨 완료되어 이번회차 입력이 복기로 이동했습니다. ` +
+          `이번회차를 ${currentRound}회 기준으로 새로 시작합니다.`
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentRound, manualByIntent, accumulated]);
 
   const currentLabel = GAME_LABELS[currentSlipLines.length] ?? 'A';
 
@@ -1115,12 +1173,27 @@ export default function PhotoAnalysisPage() {
       // POST 응답에 이미 최신 accumulated 가 포함됨 — 추가 GET 은 레이스만 유발하므로 제거.
       if (data.accumulated) setAccumulated(data.accumulated);
       const nowIso = new Date().toISOString();
+      // 저장 시점의 대상 회차를 스탬프 — 이번회차는 currentRound, 복기는 latestRound.
+      // 회차 롤오버 후 지난 회차 입력을 자동 정리하는 기준이 된다.
+      const savedRound = activeTab === 'current_round' ? currentRound : latestRound;
       if (data.duplicate_skipped) {
         // 중복은 오류가 아니라 '이미 저장된 상태' — 시간도 갱신하고 완료된 입력을 정리.
-        patchManual({ slipQueue: [], currentSlipLines: [], picked: [], lastSavedAt: nowIso });
+        patchManual({
+          slipQueue: [],
+          currentSlipLines: [],
+          picked: [],
+          lastSavedAt: nowIso,
+          roundNo: savedRound ?? null,
+        });
         setNotice(data.duplicate_message || '이미 최신 상태로 저장되어 있습니다.');
       } else {
-        patchManual({ slipQueue: [], currentSlipLines: [], picked: [], lastSavedAt: nowIso });
+        patchManual({
+          slipQueue: [],
+          currentSlipLines: [],
+          picked: [],
+          lastSavedAt: nowIso,
+          roundNo: savedRound ?? null,
+        });
         setNotice(`✅ ${slips.length}장 분석·저장 완료 — 결과는 페이지 하단`);
       }
       // 저장은 경량 응답(누적 미포함). 저장 성공 후 별도 GET 으로 누적 갱신.

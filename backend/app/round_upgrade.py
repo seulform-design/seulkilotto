@@ -11,8 +11,11 @@ from typing import Any, Dict, List, Optional
 
 from .config import settings
 from .data_meta import effective_current_round, get_history_meta
-from .database import CSV_DATA_PATH, invalidate_history_cache, load_history
-from .video_analysis.store import get_current_dataset_state, rollover_current_dataset
+from .database import CSV_DATA_PATH, invalidate_history_cache
+from .video_analysis.store import (
+    align_current_sandbox_to_round,
+    get_current_dataset_state,
+)
 
 _CRAWL_MOD = None
 _API_LATEST_CACHE: tuple[float, int] | None = None
@@ -142,24 +145,20 @@ def _upgrade_rounds_locked(force: bool = False) -> Dict[str, Any]:
     after_latest = int(after_meta.get("latest_round") or 0)
     synced = list(range(latest_csv + 1, after_latest + 1)) if after_latest > latest_csv else []
 
+    # 이번회차 샌드박스 자기치유 롤오버.
+    # 예전 로직은 '이번 업그레이드 호출에서 막 동기화된 회차'(synced)에만, 그것도
+    # 샌드박스가 정확히 그 회차일 때만 롤오버했다. 그래서 GitHub Actions 크론이 먼저
+    # 회차를 올려버리면 다음 수동 업그레이드에서는 synced 가 비어 롤오버가 스킵되고,
+    # 이번회차에 저장된 지난 회차 데이터가 복기로 넘어가지 못한 채 영구히 뒤처졌다.
+    # → '샌드박스가 추첨 완료된 회차에 머물러 있으면(원인 무관) 최신 이번회차까지
+    #    전진'하는 멱등·자기치유 정렬로 교체한다.
     photo_rollover = None
     try:
-        if synced:
-            current_state = get_current_dataset_state()
-            sandbox_round = int(current_state.get("current_round") or 0)
-            if sandbox_round in synced:
-                df_after = load_history()
-                row = df_after[df_after["round"].astype(int) == sandbox_round]
-                if not row.empty:
-                    row0 = row.sort_values("round").iloc[-1]
-                    winning_numbers = [int(row0[f"num{i}"]) for i in range(1, 7)]
-                    bonus = int(row0["bonus"])
-                    photo_rollover = rollover_current_dataset(
-                        drawn_round=sandbox_round,
-                        next_round=sandbox_round + 1,
-                        winning_numbers=winning_numbers,
-                        bonus=bonus,
-                    )
+        target_current = after_latest + 1  # 최신 추첨 회차 다음 = 새 이번회차
+        current_state = get_current_dataset_state()
+        sandbox_round = int(current_state.get("current_round") or 0)
+        if after_latest > 0 and 0 < sandbox_round < target_current:
+            photo_rollover = align_current_sandbox_to_round(target_current)
     except Exception as exc:  # noqa: BLE001
         photo_rollover = {"ok": False, "error": str(exc)}
 

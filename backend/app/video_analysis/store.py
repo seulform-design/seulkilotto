@@ -800,6 +800,38 @@ def _auto_align_current_sandbox_round(target_round: int) -> Dict[str, Any]:
     return current_data
 
 
+@_synchronized
+def align_current_sandbox_to_round(target_round: int) -> Dict[str, Any]:
+    """이번회차 샌드박스를 target_round 까지 자동 전진(롤오버)시킨다.
+
+    이미 추첨된 회차의 이번회차 데이터를 복기로 이동시키며 current_round 를
+    target_round 로 맞춘다. 회차 업그레이드 직후 호출하면, 그 회차가 '같은 요청에서
+    막 수집됐는지'와 무관하게 샌드박스가 항상 최신 이번회차를 가리키도록 자기치유한다.
+    (기존 업그레이드 경로는 '이번 호출에서 동기화된 회차'에만 롤오버해, 크론이 먼저
+    회차를 올려버리면 샌드박스가 지난 회차에 영구히 뒤처지는 결함이 있었다.)
+    idempotent — 이미 정렬돼 있으면 즉시 반환한다.
+    """
+    before = _load_current_raw()
+    before_round = int(before.get("current_round") or 0)
+    target = int(target_round)
+    if before_round >= target:
+        return {
+            "ok": True,
+            "before_round": before_round,
+            "after_round": before_round,
+            "advanced": 0,
+            "reason": "already_aligned",
+        }
+    data = _auto_align_current_sandbox_round(target)
+    after_round = int(data.get("current_round") or 0)
+    return {
+        "ok": True,
+        "before_round": before_round,
+        "after_round": after_round,
+        "advanced": after_round - before_round,
+    }
+
+
 def _current_rule_snapshot(current_data: Dict[str, Any], summary: Dict[str, Any]) -> Dict[str, Any]:
     combo = summary.get("accumulated_combo_patterns") or {}
     verification = combo.get("combo_verification") or {}

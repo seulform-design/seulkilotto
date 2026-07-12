@@ -807,6 +807,17 @@ export default function PhotoAnalysisPage() {
     return null;
   }, [roundStatusQuery.data, metaQuery.data, accumulated, latestRound]);
 
+  // 복기 회차 — 백엔드가 복기 엔트리 기준으로 stamp 한 슬라이스/템플릿 회차를 최우선.
+  // live latest_round 는 새 추첨 발표 후 복기 용지의 실제 회차와 어긋날 수 있어(예:
+  // 1231 용지인데 latest 1232) 당첨 대조·표시가 틀리므로 후순위 폴백으로만 쓴다.
+  const reviewRound = useMemo(() => {
+    const fromSlice = parseRoundNo(accumulated?.by_intent?.review?.ticket_round);
+    if (fromSlice) return fromSlice;
+    const fromTemplate = parseRoundNo(accumulated?.by_intent?.review?.draw_template?.ticket_round);
+    if (fromTemplate) return fromTemplate;
+    return latestRound;
+  }, [accumulated, latestRound]);
+
   const roundDrawn = roundStatusQuery.data?.drawn ?? false;
 
   const reviewWinningSet = useMemo(() => {
@@ -815,9 +826,9 @@ export default function PhotoAnalysisPage() {
   }, [activeTab, activeSlice?.draw_template]);
 
   const reviewDrawQuery = useQuery({
-    queryKey: ['v1-round-draw', latestRound],
-    queryFn: () => v1Api.getRound(latestRound as number),
-    enabled: activeTab === 'review' && latestRound != null && !reviewWinningSet,
+    queryKey: ['v1-round-draw', reviewRound],
+    queryFn: () => v1Api.getRound(reviewRound as number),
+    enabled: activeTab === 'review' && reviewRound != null && !reviewWinningSet,
     staleTime: 300_000,
   });
 
@@ -831,7 +842,7 @@ export default function PhotoAnalysisPage() {
     return set;
   }, [activeTab, reviewWinningSet, reviewDrawQuery.data]);
 
-  const displayReviewRound = latestRound ?? '…';
+  const displayReviewRound = reviewRound ?? '…';
   const displayCurrentRound = currentRound ?? '…';
   const manualDraft = manualByIntent[activeTab];
   const { picked, currentSlipLines, slipQueue, bulkAutoTickets, lastSavedAt } = manualDraft;

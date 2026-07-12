@@ -356,6 +356,27 @@ def _entry_round(entry: Dict[str, Any]) -> str:
     return str(vva.get("ticket_round") or vva.get("detected_round") or "미확인")
 
 
+def _review_round_from_entries(group: List[Dict[str, Any]]) -> int | None:
+    """복기 엔트리들이 실제로 가리키는 대상 회차(당첨 대조 기준).
+
+    각 엔트리에 분석 시점 stamp 된 ticket_round 를 신뢰한다. 복수 회차가 섞이면
+    가장 최근(최대) 회차를 대표로 본다. 유효 회차가 없으면 None.
+
+    ⚠️ 슬라이스 헤더/당첨 템플릿을 live latest_round 로 재계산하면, 저장 이후 새
+    추첨이 발표됐을 때 지난 회차 복기 용지를 '다른 회차' 당첨번호와 대조하는
+    치명적 오류가 난다(예: 1231 용지를 1232 당첨과 비교). 반드시 엔트리 기준으로.
+    """
+    rounds: List[int] = []
+    for e in group:
+        try:
+            ri = int(str(_entry_round(e)))
+        except (TypeError, ValueError):
+            continue
+        if ri > 0:
+            rounds.append(ri)
+    return max(rounds) if rounds else None
+
+
 def _deep_copy(data: Any) -> Any:
     return json.loads(json.dumps(data, ensure_ascii=False))
 
@@ -1100,7 +1121,9 @@ def _accumulate_combo_patterns(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
         review_details.extend(_entry_sheet_details(entry))
     review_sheets = _collect_deduped_sheet_sets(review_entries)
     if review_details or review_sheets:
-        official = build_draw_review_template()
+        # 복기 엔트리의 실제 회차 당첨번호로 대조(회차 정합성).
+        _rr = _review_round_from_entries(review_entries)
+        official = build_draw_review_template(_rr) if _rr is not None else build_draw_review_template()
         review_out = _winning_combo_hits(
             official.get("winning_numbers") or [],
             review_sheets,
@@ -1604,7 +1627,9 @@ def _recompute_intent_combo(
             details.extend(_entry_sheet_details(entry))
         details = _dedupe_sheet_details(details)
         sheets = _collect_deduped_sheet_sets(group)
-        official = build_draw_review_template()
+        # 당첨 조합 대조는 반드시 복기 엔트리의 실제 회차 당첨번호로(회차 정합성).
+        _rr = _review_round_from_entries(group)
+        official = build_draw_review_template(_rr) if _rr is not None else build_draw_review_template()
         out = _winning_combo_hits(
             official.get("winning_numbers") or [],
             sheets,
@@ -1661,7 +1686,14 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
 
     group = [e for e in entries if e.get("video_intent") == intent]
     label = "복기" if intent == "review" else "이번회차"
-    round_no = str(get_review_round_no()) if intent == "review" else str(get_current_round_no())
+    if intent == "review":
+        # 복기 회차는 엔트리에 stamp 된 실제 대상 회차 기준(당첨 대조 정합성).
+        # live latest_round 로 재계산하면 새 추첨 발표 후 지난 용지를 다른 회차
+        # 당첨번호와 대조하게 된다. 엔트리 없을 때만 최신 추첨 회차로 폴백.
+        review_round = _review_round_from_entries(group)
+        round_no = str(review_round if review_round is not None else get_review_round_no())
+    else:
+        round_no = str(get_current_round_no())
     intent_acc = _accumulate_entries(group) if group else None
     # 누적 조합 분석은 '자동 누적'만 대상으로 한다 (자동 탭 표시 + 반자동 탭의
     # 자동↔반자동 비교 기준 + 백테스트 모두 '자동 누적'을 기대). 반자동 등록분은
@@ -1699,7 +1731,9 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         "app_ui_message": " · ".join(p for p in parts if p),
     }
     if intent == "review":
-        official = build_draw_review_template()
+        # 당첨 템플릿도 반드시 엔트리 회차 기준으로 로드(round_no 명시).
+        review_round = _review_round_from_entries(group)
+        official = build_draw_review_template(review_round) if review_round is not None else build_draw_review_template()
         photo = get_photo_review_template()
         slice_out["draw_template"] = official
         slice_out["saved_review_template"] = photo if photo.get("marked_numbers") else None

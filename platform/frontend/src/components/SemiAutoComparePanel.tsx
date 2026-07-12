@@ -1162,21 +1162,33 @@ export default function SemiAutoComparePanel({
   });
   const latestRound = latestRoundProp ?? meta.data?.latest_round ?? null;
 
+  // 복기 비교 기준 회차 — 백엔드가 복기 엔트리 기준으로 stamp 한 회차(정합성).
+  // 사용자가 '비교 회차'를 직접 지정하지 않았을 때, 복기 용지는 '최신 추첨 회차'가
+  // 아니라 '그 용지가 속한 회차'의 당첨번호와 대조해야 한다(예: 1231 용지는 1231 당첨).
+  const reviewDataRound = useMemo(() => {
+    const raw = accumulated?.by_intent?.review?.ticket_round;
+    const n = raw != null ? parseInt(String(raw), 10) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [accumulated]);
+
+  // 명시 지정(compareRound) > 복기 데이터 회차 > (폴백) 최신 추첨.
+  const effectiveCompareRound = compareRound ?? (compareWinning ? reviewDataRound : null);
+
   const selectedRoundQuery = useQuery({
-    queryKey: ['v1-round-for-semi-auto', compareRound],
-    queryFn: () => v1Api.getRound(compareRound as number),
-    enabled: compareWinning && !!compareRound,
+    queryKey: ['v1-round-for-semi-auto', effectiveCompareRound],
+    queryFn: () => v1Api.getRound(effectiveCompareRound as number),
+    enabled: compareWinning && !!effectiveCompareRound,
     staleTime: 60_000,
     retry: false,
   });
 
   const comparisonRoundData = compareWinning
-    ? compareRound != null
+    ? effectiveCompareRound != null
       ? selectedRoundQuery.data
       : latest.data
     : null;
   const effectiveRound = compareWinning
-    ? compareRound ?? latest.data?.round ?? latestRound
+    ? effectiveCompareRound ?? latest.data?.round ?? latestRound
     : currentRound;
 
   const winningNumbers = compareWinning ? (comparisonRoundData?.numbers ?? []) : [];
@@ -2369,7 +2381,10 @@ export default function SemiAutoComparePanel({
     ];
     const auto = groupLineMatching.allAutoNumbers;
     const semi = groupLineMatching.allSemiNumbers;
-    if (auto.length === 0 && semi.length === 0) return null;
+    // 심층 역산은 자동↔반자동 '교차' 분석이다. 한쪽이라도 비면 consensus=
+    // log2(af+1)*log2(sf+1) 가 전 번호 0 이 되어 composite/finalPick 이 번호
+    // 오름차순(무의미)으로 붕괴한다 → 오해를 부르는 조합 대신 섹션을 숨긴다.
+    if (auto.length === 0 || semi.length === 0) return null;
     const LW: Record<number, number> = { 6: 10, 5: 8, 4: 6, 3: 4, 2: 2 };
     const win = (n: number) => (winningSet != null && winningSet.size > 0 ? winningSet.has(n) : false);
 
@@ -2542,9 +2557,14 @@ export default function SemiAutoComparePanel({
             return Math.min(1, Math.max(0, p));
           };
           const evalK = (ranked: number[], K: number) => {
-            const hit = ranked.slice(0, K).filter((n) => winningSet.has(n)).length;
-            const exp = (W * K) / 45;
-            return { K, hit, exp: Math.round(exp * 100) / 100, lift: exp > 0 ? Math.round((hit / exp) * 100) / 100 : 0, p: Math.round(pAtLeast(hit, K) * 1000) / 1000 };
+            // 후보 풀이 K 보다 작으면 실제 예측 개수(kEff)로 기대값·p값을 계산해야
+            // 한다. K 를 그대로 쓰면 희소 데이터에서 exp 과대·p값이 틀린 추첨크기로
+            // 산출된다(예: 10개뿐인데 TOP15 로 계산). 충분하면 kEff===K 라 무변화.
+            const picks = ranked.slice(0, K);
+            const kEff = picks.length;
+            const hit = picks.filter((n) => winningSet.has(n)).length;
+            const exp = (W * kEff) / 45;
+            return { K: kEff, hit, exp: Math.round(exp * 100) / 100, lift: exp > 0 ? Math.round((hit / exp) * 100) / 100 : 0, p: Math.round(pAtLeast(hit, kEff) * 1000) / 1000 };
           };
           const methods: { key: string; ranked: number[] }[] = [
             { key: '종합', ranked: composite.map((c) => c.number) },
@@ -3834,14 +3854,22 @@ export default function SemiAutoComparePanel({
                 const decadeOf = (n: number) => Math.min(4, Math.floor((n - 1) / 10));
                 const pick: number[] = [];
                 const dc: Record<number, number> = {};
-                for (const p of predictedNumbers) {
+                // '용지 기반' 예측 정합성 — 자동/반자동 티켓에 실제 등장한 번호 우선.
+                // 평행회차-only(티켓 0줄) 번호는 티켓 번호가 6개 미만일 때만 채운다.
+                // (강수/기대 섹션 decadePattern 의 auto+semi>0 게이팅과 일관.)
+                const ticketPresent = predictedNumbers.filter((p) => p.auto + p.semi > 0);
+                const fillPool = [
+                  ...ticketPresent,
+                  ...predictedNumbers.filter((p) => p.auto + p.semi === 0),
+                ];
+                for (const p of ticketPresent) {
                   if (pick.length >= 6) break;
                   const d = decadeOf(p.number);
                   if ((dc[d] ?? 0) >= 2) continue;
                   pick.push(p.number);
                   dc[d] = (dc[d] ?? 0) + 1;
                 }
-                for (const p of predictedNumbers) {
+                for (const p of fillPool) {
                   if (pick.length >= 6) break;
                   if (!pick.includes(p.number)) pick.push(p.number);
                 }

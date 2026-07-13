@@ -1374,6 +1374,11 @@ def _latest_archived_current_snapshot(historical: Dict[str, Any]) -> Dict[str, A
             "excluded_candidates": [],
         }
     )
+    # 통합 신호(6소스) 강한후보 — 롤오버 시점에 아카이브된 '라이브로 보여준 18'.
+    # 백테스트가 용지 전용 대신 이 통합 후보로 평가하도록 별도 노출(구버전 보관본엔 없음).
+    _unified = (derived.get("prediction_signals_current_round") or {}).get("payload") or {}
+    unified_strong = _unified.get("strong_candidates") or []
+    unified_excluded = _unified.get("excluded_candidates") or []
     combo_patterns = photo_summary.get("accumulated_combo_patterns") or (
         _recompute_intent_combo(entries, "current_round")
         if entries
@@ -1386,6 +1391,8 @@ def _latest_archived_current_snapshot(historical: Dict[str, Any]) -> Dict[str, A
         "round_no": round_no,
         "total_analyses": len(entries),
         "final_predictions": final_predictions,
+        "unified_strong_candidates": unified_strong,
+        "unified_excluded_candidates": unified_excluded,
         "accumulated_combo_patterns": combo_patterns,
         "entries_summary": _entries_summary_for(entries),
         "app_ui_message": (

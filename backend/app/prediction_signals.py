@@ -563,6 +563,28 @@ def build_prediction_signals(
     if intent == "review":
         out["signal_accuracy"] = backtest_signal_accuracy(df, latest_round)
 
+    # 통합 신호(6소스 가중합)를 이번회차 파생 데이터로 영속화 → 롤오버 시 스냅숏에
+    # 아카이브된다. 그래야 추후 백테스트가 '용지 전용 votes' 가 아니라 '라이브로 보여준
+    # 통합 18' 을 그대로 평가한다(라이브=백테스트 일원화, 강한후보 불일치 해소).
+    if intent == "current_round":
+        try:
+            from .video_analysis.store import record_current_rule_engine_output
+
+            record_current_rule_engine_output(
+                "prediction_signals_current_round",
+                round_no=int(next_round),
+                latest_round=int(latest_round),
+                payload={
+                    "strong_candidates": list(strong_candidates),
+                    "excluded_candidates": list(excluded_candidates),
+                    "by_grade": by_grade,
+                    "rules_version": RULES_VERSION,
+                },
+                rule_snapshot={"rules_version": RULES_VERSION, "source": "prediction_signals"},
+            )
+        except Exception:  # noqa: BLE001 — 영속화 실패해도 신호 응답은 계속
+            pass
+
     # 캐시 저장 (크기 제한 — 가장 오래된 항목 제거)
     _SIGNAL_CACHE[cache_key] = (now, out)
     if len(_SIGNAL_CACHE) > _SIGNAL_CACHE_MAX:

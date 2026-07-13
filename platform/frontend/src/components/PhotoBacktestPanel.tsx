@@ -233,6 +233,15 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
     staleTime: 60_000,
   });
 
+  // 이번회차(미추첨) 통합 예측 후보 미리보기 — 추첨 후 백테스트될 '바로 그 18개'.
+  // 라이브 통합 예측 신호와 동일 소스라 백테스트와 일원화된다.
+  const currentSignals = useQuery({
+    queryKey: ['v1-prediction-signals-backtest', 'current_round'],
+    queryFn: () => v1Api.getPredictionSignals('current_round'),
+    staleTime: 120_000,
+    retry: 1,
+  });
+
   const upgrade = useMutation({
     mutationFn: () => v1Api.runUpgrade(),
     onSuccess: () => {
@@ -309,8 +318,17 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
     const winning: number[] = round.data.numbers;
     const bonus: number = round.data.bonus;
     const winningSet = new Set<number>(winning);
-    const strongCandidates: number[] = slice?.final_predictions?.strong_candidates ?? [];
-    const excludedCandidates: number[] = slice?.final_predictions?.excluded_candidates ?? [];
+    // 통합 신호(6소스) 강한후보를 우선 — 라이브 '통합 예측 신호' 와 동일 소스로 평가해
+    // 불일치를 없앤다. 구버전 보관본(통합 미아카이브)만 용지 전용으로 폴백.
+    const archivedUnified = (slice as ArchivedCurrentRoundSnapshot)?.unified_strong_candidates;
+    const usedUnified = Array.isArray(archivedUnified) && archivedUnified.length > 0;
+    const strongCandidates: number[] = usedUnified
+      ? (archivedUnified as number[])
+      : (slice?.final_predictions?.strong_candidates ?? []);
+    const excludedCandidates: number[] =
+      (slice as ArchivedCurrentRoundSnapshot)?.unified_excluded_candidates?.length
+        ? ((slice as ArchivedCurrentRoundSnapshot).unified_excluded_candidates as number[])
+        : (slice?.final_predictions?.excluded_candidates ?? []);
 
     const strongHits = strongCandidates.filter((n: number) => winningSet.has(n));
     const strongMisses = strongCandidates.filter((n: number) => !winningSet.has(n));
@@ -361,6 +379,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
       winningCoverage,
       excludedFalsePositiveRate,
       grade,
+      usedUnified,
     };
   }, [hasSlice, roundDrawn, round.data, slice, accumulated]);
 
@@ -574,6 +593,28 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
         </Alert>
       )}
 
+      {/* 이번회차(미추첨) 통합 예측 후보 미리보기 — 추첨 후 백테스트될 '바로 그 후보' */}
+      {!roundDrawn && (currentSignals.data?.strong_candidates?.length ?? 0) > 0 && (
+        <Paper variant="outlined" sx={{ p: 1.5, mt: 1.5, borderColor: 'info.main' }}>
+          <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+            🔮 이번회차({currentSignals.data?.target_round}회) 예측 후보{' '}
+            {currentSignals.data?.strong_candidates.length}개 — 추첨 후 백테스트 예정
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            라이브 &lt;통합 예측 신호(6소스)&gt; 와 동일한 후보입니다. 추첨이 완료되면 이 후보들이
+            그대로 채점됩니다 — 라이브와 백테스트가 일원화되어 강한후보가 어긋나지 않습니다.
+          </Typography>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+            {currentSignals.data?.strong_candidates.map((n) => (
+              <LottoBall key={`pv-${n}`} number={n} size={28} />
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 0.75, fontStyle: 'italic' }}>
+            ※ 1등 확률(1/8,145,060)은 불변 — 후보 표시는 분석 일관성일 뿐입니다.
+          </Typography>
+        </Paper>
+      )}
+
       {/* 백테스트 결과 */}
       {analysis && (
         <>
@@ -626,6 +667,11 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
                 )}
               </Stack>
             </Stack>
+            <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mb: 0.5 }}>
+              {analysis.usedUnified
+                ? '기준: 통합 예측 신호(6소스) — 라이브 강한후보와 동일'
+                : '기준: 용지 전용(구버전 보관본) — 이후 회차부터 통합 신호로 일원화 채점'}
+            </Typography>
             {analysis.strongHits.length > 0 && (
               <Box sx={{ mb: 0.5 }}>
                 <Typography variant="caption" color="success.light" sx={{ fontWeight: 600, display: 'block', mb: 0.5 }}>

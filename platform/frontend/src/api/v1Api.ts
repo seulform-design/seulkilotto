@@ -919,6 +919,9 @@ export interface ArchivedCurrentRoundSnapshot {
     strong_candidates: number[];
     excluded_candidates: number[];
   };
+  /** 통합 신호(6소스) 강한후보 — 라이브=백테스트 일원화. 구버전 보관본엔 없음. */
+  unified_strong_candidates?: number[];
+  unified_excluded_candidates?: number[];
   accumulated_combo_patterns?: ComboDuplicatePatterns;
   entries_summary: PhotoAnalysisAccumulated['entries_summary'];
   app_ui_message: string;

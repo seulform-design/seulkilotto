@@ -1175,13 +1175,19 @@ def _entry_photo_review_template(entry: Dict[str, Any]) -> Dict[str, Any] | None
     sheet_sets = _entry_sheet_sets(entry)
     if not sheet_sets:
         return None
-    all_nums: set[int] = set()
+    # ⚠️ 모든 sheet 번호를 union 하면 '표시번호' 가 아니라 '플레이한 전 번호' 가 돼
+    # (대량 줄이면 1~45 전부) 복기 템플릿 의미가 사라진다. 2개 이상 sheet 에 반복
+    # 등장한 번호만 '표시'로 본다. 반복 번호가 없으면(단일 sheet 등) 템플릿 없음.
+    from collections import Counter as _Counter
+    freq: _Counter = _Counter()
     for s in sheet_sets:
-        all_nums |= s
-    if len(all_nums) < 2:
+        for n in s:
+            freq[n] += 1
+    marked = sorted(n for n, c in freq.items() if c >= 2)
+    if len(marked) < 2:
         return None
     return build_sheet_template(
-        numbers=all_nums,
+        numbers=set(marked),
         positions={},
         ticket_round=entry.get("ticket_round"),
         intent="review",
@@ -1721,6 +1727,20 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
 
 
 def build_accumulated() -> Dict[str, Any]:
+    # 읽기 경로 자기치유 — 외부 크론이 CSV 를 올려 이번회차 샌드박스 회차가 이미
+    # 추첨 완료됐는데 아직 롤오버되지 않았으면(이번회차 라벨이 실제 회차와 어긋나고
+    # 이미 추첨된 티켓이 '다음 회차'로 오표기되는 문제), 최신 이번회차까지 정렬해
+    # 이번회차 → 복기 롤오버를 마친다. 이미 정렬돼 있으면 비용 거의 없이 즉시 통과.
+    try:
+        from .draw_template import get_current_round_no
+
+        _target = int(get_current_round_no())
+        _cur = _load_current_raw()
+        if _cur.get("entries") and int(_cur.get("current_round") or 0) < _target:
+            _auto_align_current_sandbox_round(_target)
+    except Exception:  # noqa: BLE001 — 읽기 경로 방어(정렬 실패해도 조회는 계속)
+        pass
+
     historical = _load_historical_raw()
     current = _load_current_raw()
     entries: List[Dict[str, Any]] = _live_entries()

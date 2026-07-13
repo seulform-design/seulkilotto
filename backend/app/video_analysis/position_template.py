@@ -108,9 +108,15 @@ def merge_review_templates(templates: List[Dict[str, Any]]) -> Dict[str, Any]:
                 pos_votes.setdefault(ni, Counter())[pos_key] += 1
 
     merged_positions: Dict[str, GridPos] = {}
-    merged_numbers: List[int] = []
-    for n, votes in sorted(number_votes.items()):
-        merged_numbers.append(n)
+    # ⚠️ 임계 없이 전 번호를 union 하면(구버전 버그) 복기 용지가 쌓일수록
+    # marked_numbers 가 1~45 전부로 부풀어(오염) 이번회차 적용 시 모든 조합이
+    # 매칭돼 무의미해진다. build_photo_review_template_from_sheets 와 동일하게
+    # '2개 이상 템플릿에 등장' 우선, 너무 적으면(<4) 상위 12개로 캡한다.
+    vote_of: Dict[int, int] = {n: cnt[n] for n, cnt in number_votes.items()}
+    merged_numbers = sorted(n for n, v in vote_of.items() if v >= 2)
+    if len(merged_numbers) < 4:
+        merged_numbers = sorted(n for n, _ in Counter(vote_of).most_common(12))
+    for n in merged_numbers:
         if n in pos_votes and pos_votes[n]:
             row, col = pos_votes[n].most_common(1)[0][0]
             merged_positions[str(n)] = {"row": row, "col": col}
@@ -123,9 +129,14 @@ def merge_review_templates(templates: List[Dict[str, Any]]) -> Dict[str, Any]:
         "min_repeat": 2,
     }
 
+    rounds_sorted = sorted(set(rounds), reverse=True)
     return {
+        "source": "photo_review",
+        "intent": "review",
         "source_count": len(templates),
-        "ticket_rounds": sorted(set(rounds), reverse=True),
+        # 단수 ticket_round 도 채운다(구버전은 ticket_rounds 만 반환해 소비처에서 빈 회차).
+        "ticket_round": rounds_sorted[0] if rounds_sorted else None,
+        "ticket_rounds": rounds_sorted,
         "marked_numbers": merged_numbers,
         "positions": merged_positions,
         "combo_patterns": combo,

@@ -1183,7 +1183,9 @@ def _entry_photo_review_template(entry: Dict[str, Any]) -> Dict[str, Any] | None
     for s in sheet_sets:
         for n in s:
             freq[n] += 1
-    marked = sorted(n for n, c in freq.items() if c >= 2)
+    # 상위 빈도 번호만(최대 10) — 대량 줄이면 대부분 번호가 2 sheet 이상 등장하므로
+    # 캡 없이는 여전히 전 번호가 '표시'로 잡힌다. 2회 미만은 제외.
+    marked = sorted(n for n, _ in freq.most_common(10) if freq[n] >= 2)
     if len(marked) < 2:
         return None
     return build_sheet_template(

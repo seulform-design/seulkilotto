@@ -42,5 +42,14 @@ def test_merge_two_vote_threshold():
     assert set(out["marked_numbers"]) == {5, 10, 15, 20, 25, 30}
 
 
+def test_merge_hard_caps_even_when_all_numbers_pass_threshold():
+    # 대량 줄 시나리오 — 여러 용지가 1~45 를 여러 번씩 담아 '모든 번호가 2표 이상'
+    # 이어도 하드캡(<=12)으로 폭주하지 않아야 한다(구버전 all-45 재발 방지).
+    full = list(range(1, 46))
+    templates = [_tpl(full, "1232") for _ in range(4)]
+    out = merge_review_templates(templates)
+    assert len(out["marked_numbers"]) <= 12, "하드캡 실패 — all-45 재발 위험"
+
+
 def test_merge_empty():
     assert merge_review_templates([]) == {}

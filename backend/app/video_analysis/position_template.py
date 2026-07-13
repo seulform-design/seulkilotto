@@ -113,9 +113,12 @@ def merge_review_templates(templates: List[Dict[str, Any]]) -> Dict[str, Any]:
     # 매칭돼 무의미해진다. build_photo_review_template_from_sheets 와 동일하게
     # '2개 이상 템플릿에 등장' 우선, 너무 적으면(<4) 상위 12개로 캡한다.
     vote_of: Dict[int, int] = {n: cnt[n] for n, cnt in number_votes.items()}
-    merged_numbers = sorted(n for n, v in vote_of.items() if v >= 2)
+    # 득표 내림차순 정렬 후 '2표 이상' 상위만, 최대 12개로 하드캡(대량 줄이면
+    # 대부분 번호가 임계를 넘어 캡 없이는 여전히 1~45 로 부푼다).
+    ranked = sorted(vote_of.items(), key=lambda kv: (-kv[1], kv[0]))
+    merged_numbers = sorted(n for n, v in ranked if v >= 2)[:12]
     if len(merged_numbers) < 4:
-        merged_numbers = sorted(n for n, _ in Counter(vote_of).most_common(12))
+        merged_numbers = sorted(n for n, _ in ranked[:12])
     for n in merged_numbers:
         if n in pos_votes and pos_votes[n]:
             row, col = pos_votes[n].most_common(1)[0][0]

@@ -25,6 +25,7 @@ import LottoBall from '../components/LottoBall';
 import NumberFrequencyPanel from '../components/NumberFrequencyPanel';
 import ParallelRoundPanel from '../components/ParallelRoundPanel';
 import PhotoBacktestPanel from '../components/PhotoBacktestPanel';
+import OverlapPatternLearnPanel from '../components/OverlapPatternLearnPanel';
 import SavedLinesPanel, {
   GAME_LABELS,
   slipFromLines,
@@ -1678,6 +1679,9 @@ export default function PhotoAnalysisPage() {
         }
         onRefreshAccumulated={refreshAccumulated}
       />
+
+      {/* 🔎 줄겹침 패턴 역산 학습 — 복기 당첨일치 겹침 구조로 이번회차 후보 채점 */}
+      <OverlapPatternLearnPanel accumulated={accumulated} />
 
       {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
 

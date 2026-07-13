@@ -1137,8 +1137,12 @@ export default function SemiAutoComparePanel({
     if (localEmpty) {
       hydratedIntentRef.current[sheetIntent] = true;
       setBulkTickets(serverLines.map((a) => [...a]));
+      // 서버 복원분은 '이미 저장된' 데이터 → lastSavedAt 도 세팅해 '미저장' 오표기
+      // 방지(자동 하이드레이션과 대칭). 이게 없으면 새 기기에서 반자동만 '미저장'
+      // 으로 보여 '동기화 안 됨'처럼 오해되고, 재저장을 유발했다.
+      setLastSavedAt((prev) => prev ?? new Date().toISOString());
       setSaveNotice(
-        `☁ 다른 기기에서 저장한 ${serverLines.length}줄을 서버에서 불러왔습니다.`
+        `☁ 다른 기기에서 저장한 반자동 누적 ${serverLines.length}줄을 서버에서 불러왔습니다.`
       );
     }
   }, [accumulated, sheetIntent, bulkTickets.length, semiSlipQueue.length, semiCurrentLines.length]);
@@ -2834,6 +2838,26 @@ export default function SemiAutoComparePanel({
     return keys;
   }, [accumulated, sheetIntent, bulkTickets, semiSlipQueue, semiCurrentLines]);
 
+  // 서버에 저장된 반자동 줄 키 (미저장 판정 기준) — 자동과 동일하게 '서버 기준'.
+  // lastSavedAt(시각) 만으로 판정하던 기존 방식은 하이드레이션·기기간 동기화 후
+  // '미저장' 오표기를 냈다. 실제 줄을 서버 saved_semi_lines 와 대조한다.
+  const savedSemiKeySet = useMemo(
+    () => new Set((accumulated?.by_intent?.[sheetIntent]?.saved_semi_lines ?? []).map(lineKey)),
+    [accumulated, sheetIntent]
+  );
+  const serverSemiSavedCount = accumulated?.by_intent?.[sheetIntent]?.saved_semi_lines?.length ?? 0;
+  // 진짜 '미저장' 로컬 줄 수 — 서버에 아직 없는 줄만 (중복 제외).
+  const unsavedSemiCount = useMemo(() => {
+    const seen = new Set<string>();
+    const consider = (k: string) => {
+      if (!savedSemiKeySet.has(k)) seen.add(k);
+    };
+    for (const t of bulkTickets) consider(lineKey(t));
+    for (const slip of semiSlipQueue) for (const l of slip.lines) consider(lineKey(l.numbers));
+    for (const l of semiCurrentLines) consider(lineKey(l.numbers));
+    return seen.size;
+  }, [savedSemiKeySet, bulkTickets, semiSlipQueue, semiCurrentLines]);
+
   const handleBulkInsert = (lines: number[][]) => {
     if (!lines.length) return;
     let addedCount = 0;
@@ -3167,13 +3191,17 @@ export default function SemiAutoComparePanel({
           <>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5, flexWrap: 'wrap' }}>
               <Typography variant="body2">
-                반자동 누적: {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkTickets.length}장 · 총 {ticketLines.length}줄
+                반자동 누적: {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkTickets.length}장 · 총 {ticketLines.length}줄 (서버 저장 반자동 {serverSemiSavedCount}줄)
               </Typography>
               {ticketLines.length > 0 && (
                 <Chip
                   size="small"
-                  color={lastSavedAt ? 'success' : 'warning'}
-                  label={lastSavedAt ? `마지막 저장: ${new Date(lastSavedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}` : '미저장 — [💾 누적·저장] 클릭'}
+                  color={unsavedSemiCount === 0 ? 'success' : 'warning'}
+                  label={
+                    unsavedSemiCount === 0
+                      ? `모두 저장됨 (서버 반자동 ${serverSemiSavedCount}줄)`
+                      : `미저장 ${unsavedSemiCount}줄 — [💾 누적·저장] 클릭`
+                  }
                   sx={{ fontSize: 11 }}
                 />
               )}
@@ -3182,6 +3210,54 @@ export default function SemiAutoComparePanel({
               ※ [💾 누적·저장] 클릭 시 백엔드에 저장되어 통계에 반영됩니다. 새로고침 전에 반드시 저장하세요.
               아래 목록의 [×] 로 개별 줄 삭제.
             </Typography>
+
+            {/* 로컬↔서버 드리프트 경고 + [서버 기준 동기화] — 자동 탭과 대칭.
+                로컬(이 기기)이 서버 저장분과 다를 때 서버 기준으로 맞춘다. */}
+            {unsavedSemiCount > 0 && serverSemiSavedCount > 0 && (() => {
+              const localKeys = new Set<string>();
+              for (const t of bulkTickets) localKeys.add(lineKey(t));
+              for (const slip of semiSlipQueue) for (const l of slip.lines) localKeys.add(lineKey(l.numbers));
+              for (const l of semiCurrentLines) localKeys.add(lineKey(l.numbers));
+              const matched = [...localKeys].filter((k) => savedSemiKeySet.has(k)).length;
+              return (
+                <Alert
+                  severity={matched === 0 ? 'warning' : 'info'}
+                  sx={{ mb: 1.5 }}
+                  action={
+                    <Button
+                      color="inherit"
+                      size="small"
+                      variant="outlined"
+                      onClick={async () => {
+                        const serverLines = accumulated?.by_intent?.[sheetIntent]?.saved_semi_lines ?? [];
+                        if (!serverLines.length) return;
+                        const ok = await confirm({
+                          message: `로컬 반자동 누적(${localKeys.size}줄)을 버리고 서버 저장분(${serverLines.length}줄)으로 맞출까요? 서버에 없는 로컬 줄은 사라집니다. (반대로 로컬을 올리려면 [💾 누적·저장])`,
+                          destructive: true,
+                          confirmText: '서버 기준으로 동기화',
+                        });
+                        if (!ok) return;
+                        setBulkTickets(serverLines.map((l) => [...l]));
+                        setSemiSlipQueue([]);
+                        setSemiCurrentLines([]);
+                        setLastSavedAt(new Date().toISOString());
+                        setSaveNotice(`서버 저장분 ${serverLines.length}줄로 로컬 반자동 누적을 동기화했습니다.`);
+                      }}
+                    >
+                      서버 기준 동기화
+                    </Button>
+                  }
+                >
+                  📋 로컬 {localKeys.size}줄 중 서버 일치 <strong>{matched}줄</strong> · 미반영 <strong>{unsavedSemiCount}줄</strong>.
+                  {matched === 0 ? (
+                    <> 서버({serverSemiSavedCount}줄)와 로컬이 <strong>완전히 다릅니다</strong>. 로컬을 서버에 올리려면{' '}
+                    <strong>[💾 누적·저장]</strong>, 서버 저장분을 그대로 쓰려면 <strong>[서버 기준 동기화]</strong>.</>
+                  ) : (
+                    <> 위 <strong>[💾 누적·저장]</strong> 버튼을 눌러야 통계에 반영됩니다.</>
+                  )}
+                </Alert>
+              );
+            })()}
             {ticketLines.length === 0 ? (
               <Alert severity="info" sx={{ mb: 1.5 }}>
                 반자동 누적이 없습니다. 그리드에서 6개 선택 후 [줄 저장] 하거나 [⬆ 대량 입력] 으로 추가하세요.

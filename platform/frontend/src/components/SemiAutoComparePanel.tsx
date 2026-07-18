@@ -31,6 +31,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BulkLineInputDialog, { lineKey } from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
+import ComboActions from './ComboActions';
+import SharingBadge from './SharingBadge';
+import { optimizeForSharing } from '../utils/jackpotSharing';
 import NumberFrequencyPanel from './NumberFrequencyPanel';
 import {
   generateScoredRecommendations,
@@ -2130,6 +2133,71 @@ export default function SemiAutoComparePanel({
     return { scored: scored.slice(0, 12), total: scored.length, backtest };
   }, [predictedNumbers, winningSet, compareWinning]);
 
+  // 🎯 이번회차 종합 예측 대시보드 (이번회차 탭 전용) — 이번회차에서 사용 가능한
+  // 모든 신호를 하나로 종합한다: ①용지 교차검증(티켓 기반) ②통합 예측신호(6소스)
+  // ③평행회차 강수/기대. 티켓이 없어도 ②③로 예측이 나오고, 티켓을 올리면 ①이
+  // 주 신호로 가세한다. 번호별 기여 신호(출처)와 대표조합·분산 최적 대안을 노출.
+  const currentRoundForecast = useMemo(() => {
+    if (compareWinning) return null; // 복기(추첨완료) 탭에는 표시하지 않음
+    const r2 = (x: number) => Math.round(x * 100) / 100;
+    const score: Record<number, number> = {};
+    const srcMap: Record<number, Set<string>> = {};
+    const add = (n: number, w: number, s: string) => {
+      if (!Number.isInteger(n) || n < 1 || n > 45 || w <= 0) return;
+      score[n] = (score[n] ?? 0) + w;
+      (srcMap[n] ??= new Set<string>()).add(s);
+    };
+    // ① 용지 교차검증(자동↔반자동 1:1 × 심층역산) — 티켓 기반 주 신호.
+    (crossValidation?.scored ?? []).forEach((x, i) => add(x.number, Math.max(3, 12 - i), '용지교차'));
+    // ② 통합 예측신호(추첨기+후속+클래식+용지+평행+미출 6소스) — 티켓 없어도 산출.
+    const unified = predictionSignals?.strong_candidates ?? resolvedStrongCandidates ?? [];
+    unified.forEach((n, i) => add(n, Math.max(2, 10 - i * 0.5), '통합신호'));
+    // ③ 평행회차 강수/기대 — 보조.
+    parallelStrong.forEach((n, i) => add(n, Math.max(1.5, 6 - i * 0.4), '평행강수'));
+    parallelExpected.forEach((n, i) => add(n, Math.max(1, 4 - i * 0.3), '평행기대'));
+
+    const ranked = Object.keys(score)
+      .map(Number)
+      .map((n) => ({ number: n, score: r2(score[n]), sources: [...(srcMap[n] ?? [])] }))
+      .sort((a, b) => b.score - a.score || a.number - b.number);
+    if (ranked.length < 6) return null;
+    const maxScore = ranked[0].score || 1;
+    const withPct = ranked.map((r) => ({ ...r, pct: Math.round((r.score / maxScore) * 100) }));
+
+    // 대표 조합 — 상위에서 구간(10단위) 최대 2개 균형으로 6개.
+    const decadeOf = (n: number) => Math.min(4, Math.floor((n - 1) / 10));
+    const pick: number[] = [];
+    const dc: Record<number, number> = {};
+    for (const r of withPct) {
+      if (pick.length >= 6) break;
+      const d = decadeOf(r.number);
+      if ((dc[d] ?? 0) >= 2) continue;
+      pick.push(r.number);
+      dc[d] = (dc[d] ?? 0) + 1;
+    }
+    for (const r of withPct) {
+      if (pick.length >= 6) break;
+      if (!pick.includes(r.number)) pick.push(r.number);
+    }
+    const representative = pick.slice(0, 6).sort((a, b) => a - b);
+    // 분산 최적 대안(확률 불변, 공동당첨 회피).
+    const shareOpt = optimizeForSharing(withPct.map((r) => r.number), 12);
+
+    const ticketCount = crossValidation?.scored.length ?? 0;
+    const signalTiers = {
+      용지교차: ticketCount > 0,
+      통합신호: unified.length > 0,
+      평행: parallelStrong.length > 0 || parallelExpected.length > 0,
+    };
+    return {
+      ranked: withPct.slice(0, 15),
+      representative,
+      shareOpt,
+      hasTickets: ticketCount > 0,
+      signalTiers,
+    };
+  }, [compareWinning, crossValidation, predictionSignals, resolvedStrongCandidates, parallelStrong, parallelExpected]);
+
   // ★ 1:1 강수·기대수 (구간별) — 평행회차 패널과 같은 레이아웃을 1:1 전수비교
   // 반복도(predictedNumbers 순위)로 생성. 강수=구간(단/10/20/30/40번대) 내 반복도
   // 상위 3, 기대수=다음 3. 끝수=끝자리별 양쪽(자동+반자동) 등장 줄 수 합.
@@ -3530,6 +3598,72 @@ export default function SemiAutoComparePanel({
             )}
           </Paper>
         </>
+      )}
+
+      {/* 🎯 이번회차 종합 예측 대시보드 — 이번회차 탭 전용. 티켓 없어도 통합·평행
+          신호로 예측이 나오고, 이번회차 용지를 올리면 용지 교차검증이 주 축으로 가세. */}
+      {currentRoundForecast && (
+        <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'primary.main', borderWidth: 2 }}>
+          <Stack direction="row" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+            <Typography variant="body2" fontWeight={800}>
+              🎯 {effectiveRound ?? currentRound ?? '?'}회 이번회차 종합 예측
+            </Typography>
+            {Object.entries(currentRoundForecast.signalTiers).map(([k, on]) => (
+              <Chip
+                key={k}
+                size="small"
+                variant={on ? 'filled' : 'outlined'}
+                color={on ? 'primary' : 'default'}
+                label={`${k} ${on ? '✓' : '—'}`}
+                sx={{ height: 18, fontSize: 10 }}
+              />
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            이번회차에서 사용 가능한 신호를 종합했습니다 — <strong>용지 교차검증(자동↔반자동 1:1 × 심층역산)</strong>
+            {' '}+ <strong>통합 예측신호(6소스)</strong> + <strong>평행회차</strong>.{' '}
+            {currentRoundForecast.hasTickets
+              ? '이번회차 용지가 있어 용지 신호가 주 축입니다.'
+              : '이번회차 용지가 없어 통계 신호(통합·평행)만 반영됐습니다. 용지를 등록하면 용지 교차검증이 가세합니다.'}
+          </Typography>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+            {currentRoundForecast.ranked.map((r, i) => (
+              <Box key={`crf-${r.number}`} sx={{ textAlign: 'center', minWidth: 40 }}>
+                <Typography sx={{ fontSize: 8, color: i < 6 ? 'primary.light' : 'text.disabled', fontWeight: 700, lineHeight: 1 }}>
+                  {i + 1}위
+                </Typography>
+                <LottoBall number={r.number} size={i < 6 ? 34 : 28} />
+                <Typography sx={{ fontSize: 8, color: 'text.disabled', lineHeight: 1.1 }}>{r.pct}%</Typography>
+                <Typography sx={{ fontSize: 7.5, color: 'text.disabled', lineHeight: 1 }}>{r.sources.join('·')}</Typography>
+              </Box>
+            ))}
+          </Stack>
+          <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+            <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+              <Typography variant="caption" fontWeight={700}>대표 조합:</Typography>
+              {currentRoundForecast.representative.map((n) => (
+                <LottoBall key={`crfr-${n}`} number={n} size={28} />
+              ))}
+              <SharingBadge numbers={currentRoundForecast.representative} />
+              <ComboActions numbers={currentRoundForecast.representative} source="unknown" label="이번회차 종합 예측" />
+            </Stack>
+            {currentRoundForecast.shareOpt &&
+              currentRoundForecast.shareOpt.numbers.join(',') !==
+                currentRoundForecast.representative.join(',') && (
+                <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                  <Typography variant="caption" fontWeight={700}>💰 분산 최적:</Typography>
+                  {currentRoundForecast.shareOpt.numbers.map((n) => (
+                    <LottoBall key={`crfo-${n}`} number={n} size={24} />
+                  ))}
+                  <SharingBadge numbers={currentRoundForecast.shareOpt.numbers} />
+                  <ComboActions numbers={currentRoundForecast.shareOpt.numbers} source="unknown" label="이번회차 분산 최적" />
+                </Stack>
+              )}
+          </Box>
+          <Typography variant="caption" sx={{ display: 'block', mt: 0.75, fontStyle: 'italic', color: 'text.disabled', fontSize: 10 }}>
+            ⚠️ 종합은 신호 일관성 도구입니다. 1등 확률(1/8,145,060)은 불변이며, 분산 최적은 당첨 시 공동분배 회피(실수령 기대)만 개선합니다.
+          </Typography>
+        </Paper>
       )}
 
       {/* ─── 대량 비교 결과 ─────────────────────────────────────── */}

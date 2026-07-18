@@ -922,6 +922,9 @@ export interface ArchivedCurrentRoundSnapshot {
   /** 통합 신호(6소스) 강한후보 — 라이브=백테스트 일원화. 구버전 보관본엔 없음. */
   unified_strong_candidates?: number[];
   unified_excluded_candidates?: number[];
+  /** 롤오버로 보관된 '그 회차 이번회차 용지' 줄 — 추첨 후 복기에서 보기 위함. */
+  saved_auto_lines?: number[][];
+  saved_semi_lines?: number[][];
   accumulated_combo_patterns?: ComboDuplicatePatterns;
   entries_summary: PhotoAnalysisAccumulated['entries_summary'];
   app_ui_message: string;
@@ -944,6 +947,23 @@ export interface ArchivedCurrentRoundSnapshot {
   };
 }
 
+/** 회차별 용지 데이터 분리 — review(복기 저장분) / archived(롤오버 보관분). */
+export interface RoundBreakdownItem {
+  ticket_round: string;
+  review: {
+    entry_count: number;
+    auto_lines: number;
+    semi_lines: number;
+    analyzed_at?: string | null;
+  } | null;
+  archived: {
+    entry_count: number;
+    auto_lines: number;
+    semi_lines: number;
+    frozen_at?: string | null;
+  } | null;
+}
+
 export interface PhotoAnalysisAccumulated {
   total_analyses: number;
   unique_videos?: number;
@@ -954,6 +974,8 @@ export interface PhotoAnalysisAccumulated {
     archived_current_rounds: number;
     latest_archived_round?: number | null;
     latest_archived_current_snapshot?: ArchivedCurrentRoundSnapshot | null;
+    /** 회차별 분리 뷰 — 같은 회차에 '복기 저장분'과 '롤오버 보관분'이 공존할 수 있어 구분. */
+    rounds_breakdown?: RoundBreakdownItem[];
   };
   current_dataset?: {
     round_no: number;

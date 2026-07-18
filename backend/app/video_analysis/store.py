@@ -1362,6 +1362,54 @@ def get_historical_dataset_state() -> Dict[str, Any]:
     return _load_historical_raw()
 
 
+def _rounds_breakdown(
+    historical: Dict[str, Any], live_entries: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """회차별 용지 데이터 분리 뷰.
+
+    같은 회차 라벨에 서로 다른 출처가 공존할 수 있다:
+      - review  : 복기 탭으로 저장된 엔트리(저장 시점 최신 추첨 회차로 stamp 됨)
+      - archived: 그 회차가 추첨될 때 롤오버로 보관된 '이번회차' 용지 배치
+    둘을 합치면 어느 게 실제 그 회차에 산 용지인지 구분이 안 되므로 분리해 노출한다.
+    (예: 1233 에 '복기 저장분(실제로는 이전 회차 용지가 재stamp 된 것)' 과
+     '롤오버 보관분(진짜 1233 용지)' 이 함께 있는 상황.)
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+
+    def slot(rnd: str) -> Dict[str, Any]:
+        return out.setdefault(rnd, {"ticket_round": rnd, "review": None, "archived": None})
+
+    review_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for e in live_entries:
+        if e.get("video_intent") == "review":
+            review_groups[_entry_round(e)].append(e)
+    for rnd, group in review_groups.items():
+        slot(rnd)["review"] = {
+            "entry_count": len(group),
+            "auto_lines": len(_manual_saved_lines(group, "자동")),
+            "semi_lines": len(_manual_saved_lines(group, "반자동")),
+            "analyzed_at": max((e.get("analyzed_at") or "") for e in group) or None,
+        }
+
+    for batch in historical.get("archived_current_rounds") or []:
+        rnd_no = batch.get("round_no")
+        if rnd_no is None:
+            continue
+        entries = list(batch.get("entries") or [])
+        slot(str(rnd_no))["archived"] = {
+            "entry_count": len(entries),
+            "auto_lines": len(_manual_saved_lines(entries, "자동")),
+            "semi_lines": len(_manual_saved_lines(entries, "반자동")),
+            "frozen_at": batch.get("frozen_at"),
+        }
+
+    def _key(item: Dict[str, Any]) -> int:
+        r = str(item.get("ticket_round") or "")
+        return int(r) if r.isdigit() else 0
+
+    return sorted(out.values(), key=_key, reverse=True)
+
+
 def _latest_archived_current_snapshot(historical: Dict[str, Any]) -> Dict[str, Any] | None:
     batches = historical.get("archived_current_rounds") or []
     if not batches:
@@ -1395,6 +1443,10 @@ def _latest_archived_current_snapshot(historical: Dict[str, Any]) -> Dict[str, A
         "final_predictions": final_predictions,
         "unified_strong_candidates": unified_strong,
         "unified_excluded_candidates": unified_excluded,
+        # 롤오버로 보관된 '그 회차 이번회차 용지' 줄 — 이게 없으면 추첨 후 자신이
+        # 산 용지를 복기에서 전혀 볼 수 없다(아카이브는 _live_entries 에서 제외됨).
+        "saved_auto_lines": _manual_saved_lines(entries, "자동"),
+        "saved_semi_lines": _manual_saved_lines(entries, "반자동"),
         "accumulated_combo_patterns": combo_patterns,
         "entries_summary": _entries_summary_for(entries),
         "app_ui_message": (
@@ -1837,6 +1889,8 @@ def build_accumulated() -> Dict[str, Any]:
                 None,
             ),
             "latest_archived_current_snapshot": archived_current_snapshot,
+            # 회차별 분리 뷰 — 복기 저장분 vs 롤오버 보관분을 회차 기준으로 구분.
+            "rounds_breakdown": _rounds_breakdown(historical, entries),
         },
         "current_dataset": {
             "round_no": int(current.get("current_round") or 0),

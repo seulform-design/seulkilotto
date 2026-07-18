@@ -2084,6 +2084,52 @@ export default function SemiAutoComparePanel({
     crossSetPatterns,
   ]);
 
+  // 🔗 전수비교 × 심층역산 교차 검증 — 사용자 요청: '심층 역산 예측' 과 '1:1 전수비교'
+  // 데이터를 교차해 예상 가능한 번호를 도출하고, 복기(1232)로 백테스트 검증.
+  // 교차 consensus = 자동·반자동 양쪽 줄에 등장(1:1 전수비교 지지)하면서 심층역산
+  // 점수도 높은 번호. 각 번호의 근거(자동 N줄·반자동 M줄·최대일치 K)를 함께 노출.
+  const crossValidation = useMemo(() => {
+    if (predictedNumbers.length === 0) return null;
+    const maxAuto = Math.max(1, ...predictedNumbers.map((p) => p.auto));
+    const maxSemi = Math.max(1, ...predictedNumbers.map((p) => p.semi));
+    const r2 = (x: number) => Math.round(x * 100) / 100;
+    const scored = predictedNumbers
+      .map((p) => {
+        const oneToOne = p.auto > 0 && p.semi > 0; // 1:1 전수비교 양쪽 지지
+        const support = oneToOne ? Math.sqrt((p.auto / maxAuto) * (p.semi / maxSemi)) : 0;
+        const deep = p.confidence / 100; // 심층역산 정규화 점수(0~1)
+        const cross = oneToOne
+          ? (0.5 * deep + 0.5 * support) * (1 + 0.15 * Math.max(0, p.maxMatch - 2))
+          : 0;
+        return {
+          number: p.number,
+          auto: p.auto,
+          semi: p.semi,
+          maxMatch: p.maxMatch,
+          sources: p.sources,
+          deep: Math.round(deep * 100),
+          support: r2(support),
+          cross: r2(cross),
+          won: compareWinning && winningSet ? winningSet.has(p.number) : null,
+        };
+      })
+      .filter((x) => x.cross > 0)
+      .sort((a, b) => b.cross - a.cross);
+
+    const backtest =
+      compareWinning && winningSet && winningSet.size > 0
+        ? {
+            W: winningSet.size,
+            top6Hits: scored.slice(0, 6).filter((x) => x.won).length,
+            top10Hits: scored.slice(0, 10).filter((x) => x.won).length,
+            exp6: r2((winningSet.size * 6) / 45),
+            exp10: r2((winningSet.size * 10) / 45),
+          }
+        : null;
+
+    return { scored: scored.slice(0, 12), total: scored.length, backtest };
+  }, [predictedNumbers, winningSet, compareWinning]);
+
   // ★ 1:1 강수·기대수 (구간별) — 평행회차 패널과 같은 레이아웃을 1:1 전수비교
   // 반복도(predictedNumbers 순위)로 생성. 강수=구간(단/10/20/30/40번대) 내 반복도
   // 상위 3, 기대수=다음 3. 끝수=끝자리별 양쪽(자동+반자동) 등장 줄 수 합.
@@ -3925,6 +3971,55 @@ export default function SemiAutoComparePanel({
                   </Box>
                 ))}
               </Stack>
+
+              {/* 🔗 전수비교 × 심층역산 교차 검증 — 양쪽 신호가 함께 가리키는 번호 + 근거(몇 줄) */}
+              {crossValidation && crossValidation.scored.length > 0 && (
+                <Box sx={{ mt: 0.5, mb: 1, p: 1.25, borderRadius: 1, bgcolor: 'action.hover', border: '1px dashed', borderColor: 'info.main' }}>
+                  <Stack direction="row" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                    <Typography variant="caption" fontWeight={800}>
+                      🔗 전수비교 × 심층역산 교차 검증 (양쪽 합의 {crossValidation.total}개)
+                    </Typography>
+                    {compareWinning && crossValidation.backtest && (
+                      <Chip
+                        size="small"
+                        color={crossValidation.backtest.top6Hits >= 3 ? 'success' : crossValidation.backtest.top6Hits >= 2 ? 'warning' : 'default'}
+                        label={`상위6 당첨 ${crossValidation.backtest.top6Hits}개 · 상위10 ${crossValidation.backtest.top10Hits}개 (기대 ${crossValidation.backtest.exp6}/${crossValidation.backtest.exp10})`}
+                        sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                      />
+                    )}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+                    <strong>1:1 전수비교(자동·반자동 양쪽 줄 등장·최대일치)</strong> 지지와 <strong>심층역산 점수</strong>가
+                    함께 높은 번호만 추립니다. 각 번호가 <strong>몇 줄·어떤 데이터</strong>로 뒷받침되는지 표시.
+                    {compareWinning ? ' 복기(1232)는 실제 당첨과 대조(검증).' : ` ${effectiveRound ?? '?'}회 이번회차 데이터 기반 예측.`}
+                  </Typography>
+                  <Stack spacing={0.4}>
+                    {crossValidation.scored.map((x, i) => (
+                      <Stack
+                        key={`cv-${x.number}`}
+                        direction="row"
+                        spacing={0.75}
+                        alignItems="center"
+                        flexWrap="wrap"
+                        useFlexGap
+                        sx={{ p: 0.5, borderRadius: 0.5, bgcolor: x.won ? 'rgba(46,125,50,0.18)' : 'transparent' }}
+                      >
+                        <Typography sx={{ fontSize: 10, color: 'text.disabled', minWidth: 22, fontWeight: 700 }}>{i + 1}위</Typography>
+                        <LottoBall number={x.number} size={26} dimmed={compareWinning && x.won === false} />
+                        {x.won === true && <Chip size="small" color="success" label="당첨" sx={{ height: 16, fontSize: 9 }} />}
+                        <Typography variant="caption" sx={{ fontSize: 10.5 }}>
+                          교차 {x.cross} · 심층 {x.deep}% · <strong>자동 {x.auto}줄 · 반자동 {x.semi}줄</strong>
+                          {x.maxMatch >= 3 ? ` · 최대일치 ${x.maxMatch}` : ''} · {x.sources.join('·')}
+                        </Typography>
+                      </Stack>
+                    ))}
+                  </Stack>
+                  <Typography variant="caption" sx={{ display: 'block', mt: 0.5, fontStyle: 'italic', color: 'text.disabled', fontSize: 10 }}>
+                    ⚠️ {compareWinning ? '복기 검증은 같은 회차 대조라 낙관적입니다(일관성 확인용).' : '표본이 적으면 참고용입니다.'} 1등 확률(1/8,145,060)은 불변.
+                  </Typography>
+                </Box>
+              )}
+
               {/* 예상 조합 6개 — 상위 순위에서 구간(10단위) 최대 2개 균형. 양 탭 공통. */}
               {(() => {
                 const decadeOf = (n: number) => Math.min(4, Math.floor((n - 1) / 10));

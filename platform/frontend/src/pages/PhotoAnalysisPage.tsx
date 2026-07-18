@@ -27,6 +27,7 @@ import ParallelRoundPanel from '../components/ParallelRoundPanel';
 import PhotoBacktestPanel from '../components/PhotoBacktestPanel';
 import OverlapPatternLearnPanel from '../components/OverlapPatternLearnPanel';
 import RoundDataBreakdownPanel from '../components/RoundDataBreakdownPanel';
+import RoundLearningPanel from '../components/RoundLearningPanel';
 import SavedLinesPanel, {
   GAME_LABELS,
   slipFromLines,
@@ -1683,6 +1684,9 @@ export default function PhotoAnalysisPage() {
 
       {/* 🗂 회차별 용지 데이터 — 복기 저장분 vs 롤오버 보관분 분리 표시 */}
       <RoundDataBreakdownPanel accumulated={accumulated} />
+
+      {/* 🎓 다회차 용지 학습 — 보관 회차(누수 없음) 캘리브레이션 → 이번회차 적용 */}
+      <RoundLearningPanel />
 
       {/* 🔎 줄겹침 패턴 역산 학습 — 복기 당첨일치 겹침 구조로 이번회차 후보 채점 */}
       <OverlapPatternLearnPanel accumulated={accumulated} />

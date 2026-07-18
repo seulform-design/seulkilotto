@@ -563,6 +563,10 @@ export const v1Api = {
   getPhotoAnalysisAccumulated: () =>
     fetchJson<PhotoAnalysisAccumulated>('/api/v1/photo-analysis/accumulated'),
 
+  /** 다회차 학습 — 보관 회차 용지 + 실제 당첨으로 지지-적중 캘리브레이션. */
+  getRoundLearning: () =>
+    fetchJson<RoundLearningResponse>('/api/v1/photo-analysis/round-learning', { timeoutMs: 60_000 }),
+
   getPredictionSignals: (intent: 'review' | 'current_round' = 'current_round', seed?: number) => {
     const q = new URLSearchParams({ intent });
     if (seed != null) q.set('seed', String(seed));
@@ -945,6 +949,47 @@ export interface ArchivedCurrentRoundSnapshot {
       bonus_in_excluded?: boolean;
     }>;
   };
+}
+
+/** 다회차 학습 — 보관 회차 용지 + 실제 당첨 대조 캘리브레이션. */
+export interface RoundLearningResponse {
+  ok: boolean;
+  reason?: string;
+  round_count: number;
+  rounds?: {
+    round_no: number;
+    winning_numbers: number[];
+    auto_line_count: number;
+    semi_line_count: number;
+    top6_by_support: number[];
+    top6_hits: number;
+    frozen_at?: string | null;
+  }[];
+  calibration?: {
+    bucket: string;
+    played: number;
+    won: number;
+    hit_rate: number;
+    baseline: number;
+    lift: number;
+  }[];
+  current_round_no?: number;
+  current_scores?: {
+    number: number;
+    auto: number;
+    semi: number;
+    support: number;
+    bucket: string;
+    learned_lift: number;
+    score: number;
+  }[];
+  summary?: {
+    total_top6_hits: number;
+    expected_top6_hits: number;
+    rounds: number;
+    calibration_flat: boolean;
+  };
+  honesty?: string;
 }
 
 /** 회차별 용지 데이터 분리 — review(복기 저장분) / archived(롤오버 보관분). */

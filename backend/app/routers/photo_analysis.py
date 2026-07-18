@@ -362,6 +362,17 @@ def get_accumulated():
     return to_jsonable(_slim_accumulated())
 
 
+@router.get("/round-learning")
+def get_round_learning():
+    """다회차 학습 — 보관된 과거 회차 용지 + 실제 당첨번호로 지지-적중 캘리브레이션.
+
+    보관 용지는 추첨 전 등록분이라 예측 누수가 없다. 학습 결과를 이번회차 용지에 적용.
+    """
+    from ..video_analysis.round_learning import build_round_learning
+
+    return to_jsonable(build_round_learning())
+
+
 @router.get("/history")
 def get_history(limit: int = Query(50, ge=1, le=200)):
     return to_jsonable({"entries": list_entries(limit=limit), "accumulated": _slim_accumulated()})

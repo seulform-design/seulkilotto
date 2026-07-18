@@ -18,21 +18,24 @@ from typing import Any, Dict, List
 
 BASELINE_HIT_RATE = 6.0 / 45.0  # 임의 번호가 당첨 6개에 들 확률
 
-# 양쪽 지지(min(auto,semi)) 구간 — 내 용지에서 자동·반자동 양쪽에 얼마나 반복 등장했나.
-SUPPORT_BUCKETS: List[tuple[str, int, int]] = [
-    ("0 (한쪽만/미등장)", 0, 0),
-    ("1~4줄", 1, 4),
-    ("5~14줄", 5, 14),
-    ("15~29줄", 15, 29),
-    ("30줄+", 30, 10_000),
+# 양쪽 지지 '회차 내 순위' 구간.
+# ⚠️ 절대 줄 수(예: 30줄+)로 나누면 용지가 수백 줄일 때 거의 모든 번호가 한 구간에
+# 몰려 변별력이 사라진다(실측: 90개 중 78개가 '30줄+'). 회차마다 45개 번호를 지지
+# 순위로 세워 상대 구간으로 나눠야 데이터 규모와 무관하게 비교가 성립한다.
+RANK_BUCKETS: List[tuple[str, int, int]] = [
+    ("지지 1~6위", 1, 6),
+    ("지지 7~12위", 7, 12),
+    ("지지 13~20위", 13, 20),
+    ("지지 21~30위", 21, 30),
+    ("지지 31~45위", 31, 45),
 ]
 
 
-def _bucket_of(support: int) -> str:
-    for label, lo, hi in SUPPORT_BUCKETS:
-        if lo <= support <= hi:
+def _bucket_of_rank(rank: int) -> str:
+    for label, lo, hi in RANK_BUCKETS:
+        if lo <= rank <= hi:
             return label
-    return SUPPORT_BUCKETS[-1][0]
+    return RANK_BUCKETS[-1][0]
 
 
 def _number_support(auto_lines: List[List[int]], semi_lines: List[List[int]]) -> Dict[int, Dict[str, int]]:
@@ -81,7 +84,7 @@ def build_round_learning() -> Dict[str, Any]:
     rounds_out: List[Dict[str, Any]] = []
     # 구간별 누적 (played=그 구간에 든 번호 수, won=그중 실제 당첨된 수)
     bucket_stats: Dict[str, Dict[str, int]] = {
-        label: {"played": 0, "won": 0} for label, _, _ in SUPPORT_BUCKETS
+        label: {"played": 0, "won": 0} for label, _, _ in RANK_BUCKETS
     }
 
     for batch in batches:
@@ -99,18 +102,13 @@ def build_round_learning() -> Dict[str, Any]:
             continue
         sup = _number_support(auto_lines, semi_lines)
         win_set = set(winning)
-        per_bucket: Dict[str, Dict[str, int]] = {
-            label: {"played": 0, "won": 0} for label, _, _ in SUPPORT_BUCKETS
-        }
-        for n in range(1, 46):
-            b = _bucket_of(sup[n]["support"])
-            per_bucket[b]["played"] += 1
+        # 회차 내 지지 순위(1=가장 강함)로 상대 구간 부여.
+        ranked = sorted(range(1, 46), key=lambda n: (-sup[n]["support"], -sup[n]["auto"], n))
+        for idx, n in enumerate(ranked, start=1):
+            b = _bucket_of_rank(idx)
             bucket_stats[b]["played"] += 1
             if n in win_set:
-                per_bucket[b]["won"] += 1
                 bucket_stats[b]["won"] += 1
-        # 그 회차에서 '양쪽 지지 상위' 가 당첨을 얼마나 담았나
-        ranked = sorted(range(1, 46), key=lambda n: (-sup[n]["support"], -sup[n]["auto"], n))
         top6 = ranked[:6]
         rounds_out.append(
             {
@@ -132,7 +130,7 @@ def build_round_learning() -> Dict[str, Any]:
         }
 
     calibration: List[Dict[str, Any]] = []
-    for label, _, _ in SUPPORT_BUCKETS:
+    for label, _, _ in RANK_BUCKETS:
         st = bucket_stats[label]
         played = st["played"]
         won = st["won"]
@@ -157,23 +155,27 @@ def build_round_learning() -> Dict[str, Any]:
     current_scores: List[Dict[str, Any]] = []
     if cur_auto or cur_semi:
         cur_sup = _number_support(cur_auto, cur_semi)
-        for n in range(1, 46):
+        cur_ranked = sorted(range(1, 46), key=lambda n: (-cur_sup[n]["support"], -cur_sup[n]["auto"], n))
+        for idx, n in enumerate(cur_ranked, start=1):
             s = cur_sup[n]
             if s["support"] <= 0:
                 continue
-            b = _bucket_of(s["support"])
+            b = _bucket_of_rank(idx)
+            lift = lift_of.get(b, 1.0)
             current_scores.append(
                 {
                     "number": n,
                     "auto": s["auto"],
                     "semi": s["semi"],
                     "support": s["support"],
+                    "rank": idx,
                     "bucket": b,
-                    "learned_lift": lift_of.get(b, 1.0),
-                    "score": round(s["support"] * lift_of.get(b, 1.0), 2),
+                    "learned_lift": lift,
+                    # 학습 점수 = 지지 순위 역가중 × 그 구간의 실측 lift.
+                    "score": round((46 - idx) * lift, 2),
                 }
             )
-        current_scores.sort(key=lambda x: (-x["score"], -x["support"], x["number"]))
+        current_scores.sort(key=lambda x: (-x["score"], x["rank"], x["number"]))
         current_scores = current_scores[:15]
 
     total_top6_hits = sum(r["top6_hits"] for r in rounds_out)

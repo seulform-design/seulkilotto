@@ -979,6 +979,7 @@ export interface RoundLearningResponse {
     auto: number;
     semi: number;
     support: number;
+    rank?: number;
     bucket: string;
     learned_lift: number;
     score: number;

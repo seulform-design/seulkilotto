@@ -142,6 +142,13 @@ type PersistedSemiAutoState = {
   semiSlipQueue: ManualSlipInput[];
   /** 사용자가 [누적·저장] 으로 명시적으로 확정한 마지막 시각 (ISO). */
   lastSavedAt: string | null;
+  /**
+   * 이 로컬 누적이 '어느 회차 기준' 으로 만들어졌는지. 저장 시점의 대상 회차로 stamp.
+   * ⚠️ 이게 없으면 회차가 넘어간 뒤 지난 회차 로컬이 그대로 재저장돼 **새 회차로
+   * 재라벨링**된다(실제 오염 사고: 1232 용지 338/291 이 복기 1233 으로 저장됨).
+   * roundNo != 현재 대상 회차 이면 재저장을 막고 사용자에게 알린다.
+   */
+  roundNo: number | null;
 };
 
 function defaultPersistedState(): PersistedSemiAutoState {
@@ -152,6 +159,7 @@ function defaultPersistedState(): PersistedSemiAutoState {
     semiCurrentLines: [],
     semiSlipQueue: [],
     lastSavedAt: null,
+    roundNo: null,
   };
 }
 
@@ -260,6 +268,8 @@ function loadSemiAutoState(intent: SheetIntent): PersistedSemiAutoState {
       typeof obj.lastSavedAt === 'string' && obj.lastSavedAt.length > 0
         ? obj.lastSavedAt
         : null;
+    const roundNo: number | null =
+      typeof obj.roundNo === 'number' && obj.roundNo > 0 ? obj.roundNo : null;
 
     return {
       picked,
@@ -268,6 +278,7 @@ function loadSemiAutoState(intent: SheetIntent): PersistedSemiAutoState {
       semiCurrentLines,
       semiSlipQueue,
       lastSavedAt,
+      roundNo,
     };
   } catch {
     return defaultPersistedState();
@@ -1095,6 +1106,8 @@ export default function SemiAutoComparePanel({
   }, []);
   /** 사용자가 명시적으로 [누적·저장] 누른 마지막 시각 (ISO). */
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(initial.lastSavedAt);
+  /** 이 로컬 누적이 만들어진 대상 회차 — 회차 넘어간 뒤 재저장(재라벨링) 방지용. */
+  const [localRoundNo, setLocalRoundNo] = useState<number | null>(initial.roundNo);
   const [compareRound, setCompareRound] = useState<number | null>(null);
   /**
    * 대량 입력이 많아 자동 보류된 상태에서 사용자가 [상세 비교 보기] 를 누르면
@@ -1111,11 +1124,12 @@ export default function SemiAutoComparePanel({
     setSemiCurrentLines(st.semiCurrentLines);
     setSemiSlipQueue(st.semiSlipQueue);
     setLastSavedAt(st.lastSavedAt);
+    setLocalRoundNo(st.roundNo);
     setCompareRound(null);
     setForceDetailedComparison(false);
   }, [sheetIntent]);
 
-  // 영속 — picked / bulkTickets / semiCurrentLines / semiSlipQueue / lastSavedAt
+  // 영속 — picked / bulkTickets / semiCurrentLines / semiSlipQueue / lastSavedAt / roundNo
   useEffect(() => {
     saveSemiAutoState(sheetIntent, {
       picked,
@@ -1124,8 +1138,9 @@ export default function SemiAutoComparePanel({
       semiCurrentLines,
       semiSlipQueue,
       lastSavedAt,
+      roundNo: localRoundNo,
     });
-  }, [sheetIntent, picked, bulkTickets, semiCurrentLines, semiSlipQueue, lastSavedAt]);
+  }, [sheetIntent, picked, bulkTickets, semiCurrentLines, semiSlipQueue, lastSavedAt, localRoundNo]);
 
   // 기기 간 동기화 — 로컬(이 기기)이 비어 있으면 서버 저장분(saved_semi_lines)을
   // 반자동 누적으로 복원. 로컬에 데이터가 있으면 덮어쓰지 않는다. intent별 1회만.
@@ -1144,6 +1159,8 @@ export default function SemiAutoComparePanel({
       // 방지(자동 하이드레이션과 대칭). 이게 없으면 새 기기에서 반자동만 '미저장'
       // 으로 보여 '동기화 안 됨'처럼 오해되고, 재저장을 유발했다.
       setLastSavedAt((prev) => prev ?? new Date().toISOString());
+      // 서버 복원분은 그 슬라이스(=현재 대상 회차) 기준 데이터 → 회차 stamp 도 맞춘다.
+      setLocalRoundNo(effectiveRound ?? null);
       setSaveNotice(
         `☁ 다른 기기에서 저장한 반자동 누적 ${serverLines.length}줄을 서버에서 불러왔습니다.`
       );
@@ -1202,6 +1219,19 @@ export default function SemiAutoComparePanel({
   const winningBonus = compareWinning ? (comparisonRoundData?.bonus ?? null) : null;
 
   const intentSectionLabel = sheetIntent === 'review' ? '복기' : '이번회차';
+
+  // 로컬 누적이 '지난 회차 기준' 인지 판정 — 회차가 넘어간 뒤 그대로 재저장하면
+  // 서버에 **새 회차로 재라벨링**되어 데이터가 오염된다(실제 사고: 1232 용지가
+  // 복기 1233 으로 저장됨). stamp 된 회차와 현재 대상 회차가 다르면 저장을 막는다.
+  const localLineTotal =
+    bulkTickets.length +
+    semiSlipQueue.reduce((s, sl) => s + sl.lines.length, 0) +
+    semiCurrentLines.length;
+  const staleLocalRound =
+    localRoundNo != null &&
+    effectiveRound != null &&
+    localRoundNo !== effectiveRound &&
+    localLineTotal > 0;
 
   const autoOnlyLines = useMemo(
     () => collectAutoOnlyLines(currentSlipLines, slipQueue, bulkAutoTickets),
@@ -1478,6 +1508,26 @@ export default function SemiAutoComparePanel({
    * - accumulated 갱신 콜백으로 상위 컴포넌트에 결과 전달
    */
   const confirmAccumulate = useCallback(async () => {
+    // ⛔ 회차 오염 방지 — 로컬 누적이 지난 회차 기준인데 그대로 저장하면 서버에
+    // 현재 회차로 재라벨링된다(1232 용지가 복기 1233 으로 저장된 실제 사고).
+    // 사용자가 의도를 밝히도록 확인을 받고, 취소 시 저장하지 않는다.
+    if (staleLocalRound) {
+      const ok = await confirm({
+        message:
+          `이 로컬 누적은 ${localRoundNo}회 기준으로 저장된 데이터입니다. ` +
+          `지금 저장하면 ${effectiveRound}회 데이터로 기록되어 회차가 뒤섞입니다.\n\n` +
+          `정말 ${effectiveRound}회 용지로 저장할까요? ` +
+          `(${localRoundNo}회 데이터를 보존하려면 취소 후 [반자동 누적 전체 삭제] 로 정리하세요)`,
+        destructive: true,
+        confirmText: `${effectiveRound}회로 저장`,
+      });
+      if (!ok) {
+        setSaveNotice(
+          `↩ 저장을 취소했습니다. 이 누적은 ${localRoundNo}회 기준이며, 현재 탭은 ${effectiveRound}회입니다.`
+        );
+        return;
+      }
+    }
     // 저장 대상 집계
     let slips: ManualSlipInput[] = [...semiSlipQueue];
     if (semiCurrentLines.length > 0) {
@@ -1518,6 +1568,8 @@ export default function SemiAutoComparePanel({
       } else {
         const nowIso = new Date().toISOString();
         setLastSavedAt(nowIso);
+        // 저장된 대상 회차를 stamp — 이후 회차가 넘어가면 재저장을 막는 기준.
+        setLocalRoundNo(effectiveRound ?? null);
         // 저장 성공 시 '줄 저장' 누적(완성/부분 용지)만 비운다.
         // 대량 입력(bulkTickets)은 유지 — §1 자동(bulkAutoTickets)과 동일하게,
         // 저장 후에도 추가 세팅 목록·비교에 계속 표시돼 누적번호를 확인할 수 있다.
@@ -1541,7 +1593,19 @@ export default function SemiAutoComparePanel({
     } finally {
       if (mountedRef.current) setIsSaving(false);
     }
-  }, [semiSlipQueue, semiCurrentLines, bulkTickets, onAccumulatedChange, qc, sheetIntent]);
+  }, [
+    semiSlipQueue,
+    semiCurrentLines,
+    bulkTickets,
+    onAccumulatedChange,
+    qc,
+    sheetIntent,
+    staleLocalRound,
+    localRoundNo,
+    effectiveRound,
+    confirm,
+    onRefreshAccumulated,
+  ]);
 
   const comparison = useMemo(
     () =>
@@ -3324,6 +3388,16 @@ export default function SemiAutoComparePanel({
               ※ [💾 누적·저장] 클릭 시 백엔드에 저장되어 통계에 반영됩니다. 새로고침 전에 반드시 저장하세요.
               아래 목록의 [×] 로 개별 줄 삭제.
             </Typography>
+
+            {/* ⛔ 회차 불일치 경고 — 지난 회차 로컬을 현재 회차로 재저장하면 오염된다. */}
+            {staleLocalRound && (
+              <Alert severity="error" sx={{ mb: 1.5 }}>
+                이 로컬 누적은 <strong>{localRoundNo}회 기준</strong>인데 현재 탭은{' '}
+                <strong>{effectiveRound}회</strong>입니다. 이대로 [💾 누적·저장] 하면{' '}
+                <strong>{effectiveRound}회 데이터로 재라벨링</strong>되어 회차가 뒤섞입니다.
+                저장 시 확인창이 뜨며, 정리하려면 [반자동 누적 전체 삭제] 를 사용하세요.
+              </Alert>
+            )}
 
             {/* 로컬↔서버 드리프트 경고 + [서버 기준 동기화] — 자동 탭과 대칭.
                 로컬(이 기기)이 서버 저장분과 다를 때 서버 기준으로 맞춘다. */}

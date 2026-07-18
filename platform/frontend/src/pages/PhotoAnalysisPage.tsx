@@ -1174,6 +1174,30 @@ export default function PhotoAnalysisPage() {
       setError('저장된 줄이 없습니다. 번호 6개 선택 후 「줄 저장」을 누르세요.');
       return;
     }
+    // ⛔ 회차 오염 방지 — 로컬 누적이 지난 회차 기준이면 그대로 저장 시 현재 회차로
+    // 재라벨링된다(1232 용지가 복기 1233 으로 저장된 실제 사고). 의도를 확인받는다.
+    const targetRound = activeTab === 'current_round' ? currentRound : reviewRound;
+    if (
+      manualDraft.roundNo != null &&
+      targetRound != null &&
+      manualDraft.roundNo !== targetRound
+    ) {
+      const ok = await confirm({
+        message:
+          `이 자동 누적은 ${manualDraft.roundNo}회 기준으로 저장된 데이터입니다. ` +
+          `지금 저장하면 ${targetRound}회 데이터로 기록되어 회차가 뒤섞입니다.\n\n` +
+          `정말 ${targetRound}회 용지로 저장할까요? ` +
+          `(${manualDraft.roundNo}회 데이터를 보존하려면 취소 후 [자동 누적 전체 삭제] 로 정리하세요)`,
+        destructive: true,
+        confirmText: `${targetRound}회로 저장`,
+      });
+      if (!ok) {
+        setNotice(
+          `↩ 저장을 취소했습니다. 이 누적은 ${manualDraft.roundNo}회 기준이며, 현재 탭은 ${targetRound}회입니다.`
+        );
+        return;
+      }
+    }
     setManualLoading(true);
     setError(null);
     setNotice(null);

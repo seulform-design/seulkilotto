@@ -911,6 +911,19 @@ export interface PhotoAnalysisIntentSlice {
   saved_semi_lines?: number[][];
   /** 서버에 저장된 자동 게임 줄(번호배열) — 기기 간 동기화 복원용. */
   saved_auto_lines?: number[][];
+  /**
+   * 복기 전용 — 이 회차 데이터가 어느 출처에서 왔는지.
+   * archived=롤오버 보관 정본(추첨 전 등록, 소속 확실) / review_saved=복기 탭 저장분.
+   */
+  round_sources?: {
+    primary: 'archived' | 'review_saved' | 'legacy_all';
+    archived_entries: number;
+    archived_auto_lines: number;
+    archived_semi_lines: number;
+    review_saved_entries: number;
+    review_saved_auto_lines: number;
+    review_saved_semi_lines: number;
+  };
   app_ui_message: string;
 }
 

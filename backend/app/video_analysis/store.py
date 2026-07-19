@@ -1724,12 +1724,64 @@ def _manual_saved_lines(
     return out
 
 
+def _review_entries_for_round(round_no: int) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """복기 대상 회차의 용지 엔트리를 '소속 회차' 기준으로 엄격 수집.
+
+    반환: (archived, review_saved)
+      - archived     : 그 회차가 '이번회차' 였을 때 등록됐다가 추첨 시 롤오버로 보관된
+                       배치. **추첨 전 등록분이라 소속 회차가 확실한 정본.**
+      - review_saved : live 복기 엔트리 중 ticket_round 가 그 회차인 것. 저장 시점의
+                       최신 추첨 회차로 stamp 되므로 실제 구매 회차와 다를 수 있다.
+
+    ⚠️ 회차 필터 없이 모든 복기 엔트리를 병합하면 다른 회차 용지가 섞인다
+       (실제 사고: 1232 용지가 1233 stamp 로 저장돼 복기 1233 을 오염시킴).
+    """
+    historical = _load_historical_raw()
+    archived: List[Dict[str, Any]] = []
+    for batch in historical.get("archived_current_rounds") or []:
+        try:
+            if int(batch.get("round_no") or 0) == int(round_no):
+                archived.extend(batch.get("entries") or [])
+        except (TypeError, ValueError):
+            continue
+    review_saved = [
+        e
+        for e in (historical.get("entries") or [])
+        if e.get("video_intent") == "review" and str(_entry_round(e)) == str(round_no)
+    ]
+    return archived, review_saved
+
+
 def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str, Any]:
     """복기 / 이번회차 탭별 누적 데이터."""
     from .draw_template import build_draw_review_template, get_review_round_no, get_current_round_no
 
-    group = [e for e in entries if e.get("video_intent") == intent]
     label = "복기" if intent == "review" else "이번회차"
+    _archived_g: List[Dict[str, Any]] = []
+    _review_saved_g: List[Dict[str, Any]] = []
+    _primary_source = "review_saved"
+    if intent == "review":
+        # 대상 회차의 용지만 엄격 수집(회차 혼입 차단). 보관 정본이 있으면 그것을
+        # 우선 사용한다 — '추첨 전 등록' 이 보장돼 소속 회차가 확실하기 때문.
+        _archived_raw, _review_saved_g = _review_entries_for_round(int(get_review_round_no()))
+        # 보관 엔트리는 원래 video_intent='current_round' 로 저장돼 있다. 복기 뷰에서
+        # 쓰려면 intent 필터(_recompute_intent_combo 등)를 통과해야 하므로 **사본**에
+        # 한해 review 로 재태깅한다(저장소는 불변).
+        _archived_g = [{**e, "video_intent": "review"} for e in _archived_raw]
+        if _archived_g:
+            group = _dedupe_entries_by_content(list(_archived_g))
+            _primary_source = "archived"
+        elif _review_saved_g:
+            group = _dedupe_entries_by_content(list(_review_saved_g))
+            _primary_source = "review_saved"
+        else:
+            # ⚠️ 대상 회차에 해당하는 용지가 하나도 없으면 회차 필터를 풀어 전체 복기
+            # 엔트리를 쓴다. 엄격 필터만 적용하면 '최신 회차와 stamp 가 다른' 정상
+            # 복기 데이터(예: 1226 stamp)가 화면에서 통째로 사라진다(회귀 실증).
+            group = [e for e in entries if e.get("video_intent") == "review"]
+            _primary_source = "legacy_all"
+    else:
+        group = [e for e in entries if e.get("video_intent") == intent]
     # 복기 회차 = '가장 최근 추첨 완료 회차'(get_review_round_no = CSV latest).
     # 복기는 '최신 추첨 결과를 대조'하는 탭이므로 새 회차가 추첨되면 당첨번호가
     # 자동으로 최신 회차로 업그레이드돼야 한다(예: 1233 추첨 시 1233 당첨번호로).
@@ -1742,7 +1794,10 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     # 누적 조합 분석은 '자동 누적'만 대상으로 한다 (자동 탭 표시 + 반자동 탭의
     # 자동↔반자동 비교 기준 + 백테스트 모두 '자동 누적'을 기대). 반자동 등록분은
     # 각 탭이 자체 누적/비교로 처리한다.
-    combo = _recompute_intent_combo(entries, intent, pick_type="자동") if group else {
+    # 복기는 회차 엄격 수집된 group 을 그대로 쓴다(전체 entries 를 넘기면 다른 회차
+    # 용지가 다시 섞인다). 이번회차는 기존대로 live entries 기준.
+    _combo_source = group if intent == "review" else entries
+    combo = _recompute_intent_combo(_combo_source, intent, pick_type="자동") if group else {
         "summary": f"{label} 분석 없음",
         "pair_duplicates": [],
         "triple_duplicates": [],
@@ -1780,6 +1835,17 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         photo = get_photo_review_template()
         slice_out["draw_template"] = official
         slice_out["saved_review_template"] = photo if photo.get("marked_numbers") else None
+        # 어떤 출처가 쓰였는지 투명하게 노출 — 같은 회차 라벨에 두 출처가 있을 때
+        # 사용자가 '지금 보는 게 어느 데이터인지' 알 수 있어야 한다.
+        slice_out["round_sources"] = {
+            "primary": _primary_source,
+            "archived_entries": len(_archived_g),
+            "archived_auto_lines": len(_manual_saved_lines(_archived_g, "자동")),
+            "archived_semi_lines": len(_manual_saved_lines(_archived_g, "반자동")),
+            "review_saved_entries": len(_review_saved_g),
+            "review_saved_auto_lines": len(_manual_saved_lines(_review_saved_g, "자동")),
+            "review_saved_semi_lines": len(_manual_saved_lines(_review_saved_g, "반자동")),
+        }
     else:
         # 이번회차: 복기 saved_review_template 노출·참조 금지
         slice_out["saved_review_template"] = None

@@ -332,7 +332,35 @@ function IntentAccumulatedPanel({
           이 누적은 <strong>자동 등록분({slice.saved_auto_lines?.length ?? 0}줄)만</strong> 분석합니다.
           반자동({slice.saved_semi_lines?.length ?? 0}줄)은 §3 반자동 비교에서 별도로 다룹니다.
         </Typography>
-        <Chip label={`${slice.video_intent_label} ${slice.total_analyses}건`} size="small" color={intent === 'review' ? 'primary' : 'secondary'} />
+        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
+          <Chip label={`${slice.video_intent_label} ${slice.total_analyses}건`} size="small" color={intent === 'review' ? 'primary' : 'secondary'} />
+          {/* 어느 출처를 보고 있는지 명시 — 같은 회차에 두 출처가 있을 수 있다. */}
+          {intent === 'review' && slice.round_sources && (
+            <Chip
+              size="small"
+              color={slice.round_sources.primary === 'archived' ? 'success' : 'default'}
+              variant={slice.round_sources.primary === 'archived' ? 'filled' : 'outlined'}
+              label={
+                slice.round_sources.primary === 'archived'
+                  ? `출처: 롤오버 보관 정본 (자동 ${slice.round_sources.archived_auto_lines}·반자동 ${slice.round_sources.archived_semi_lines}줄)`
+                  : slice.round_sources.primary === 'review_saved'
+                    ? `출처: 복기 저장분 (자동 ${slice.round_sources.review_saved_auto_lines}·반자동 ${slice.round_sources.review_saved_semi_lines}줄)`
+                    : '출처: 전체 복기 엔트리(회차 미분류)'
+              }
+              sx={{ fontWeight: 700 }}
+            />
+          )}
+        </Stack>
+        {intent === 'review' &&
+          slice.round_sources &&
+          slice.round_sources.primary === 'archived' &&
+          slice.round_sources.review_saved_entries > 0 && (
+            <Alert severity="info" sx={{ mt: 1 }}>
+              이 회차에는 <strong>복기 저장분</strong>(자동 {slice.round_sources.review_saved_auto_lines}·반자동{' '}
+              {slice.round_sources.review_saved_semi_lines}줄)도 함께 있지만, 소속 회차가 확실한{' '}
+              <strong>롤오버 보관 정본</strong>을 기준으로 분석합니다. 저장분은 삭제되지 않고 보존됩니다.
+            </Alert>
+          )}
       </Paper>
       {(legacyCount ?? 0) > 0 && intent === 'review' && (
         <Alert severity="warning">구형 복기 데이터 {legacyCount}건 — 누적 삭제 후 다시 분석하세요.</Alert>

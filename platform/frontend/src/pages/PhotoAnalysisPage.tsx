@@ -351,6 +351,14 @@ function IntentAccumulatedPanel({
             />
           )}
         </Stack>
+        {intent === 'review' && slice.round_sources?.primary === 'legacy_all' && (
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            이 회차({slice.ticket_round}회)에 해당하는 용지가 없어 <strong>회차 구분 없이 전체 복기
+            엔트리</strong>를 표시합니다. 서로 다른 회차의 용지가 섞여 있을 수 있으며, 당첨 대조는{' '}
+            {slice.ticket_round}회 기준입니다. 위 <strong>회차별 용지 데이터</strong>에서 [회차 재귀속]으로
+            정리하면 정확해집니다.
+          </Alert>
+        )}
         {intent === 'review' &&
           slice.round_sources &&
           slice.round_sources.primary === 'archived' &&
@@ -1735,7 +1743,7 @@ export default function PhotoAnalysisPage() {
       />
 
       {/* 🗂 회차별 용지 데이터 — 복기 저장분 vs 롤오버 보관분 분리 표시 */}
-      <RoundDataBreakdownPanel accumulated={accumulated} />
+      <RoundDataBreakdownPanel accumulated={accumulated} onAccumulatedChange={setAccumulated} />
 
       {/* 🎓 다회차 용지 학습 — 보관 회차(누수 없음) 캘리브레이션 → 이번회차 적용 */}
       <RoundLearningPanel />

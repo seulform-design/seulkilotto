@@ -4,7 +4,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
@@ -371,6 +371,33 @@ def get_round_learning():
     from ..video_analysis.round_learning import build_round_learning
 
     return to_jsonable(build_round_learning())
+
+
+class ReattributeRequest(BaseModel):
+    from_round: int = Field(..., ge=1, description="현재 잘못 기록된 회차")
+    to_round: int = Field(..., ge=1, description="교정할 실제 회차")
+    entry_ids: Optional[List[str]] = Field(
+        default=None, description="지정 시 해당 엔트리만 교정 (미지정 시 from_round 전체)"
+    )
+
+
+@router.post("/reattribute")
+def reattribute_entries(body: ReattributeRequest):
+    """복기 엔트리 소속 회차 교정(재귀속) — 관리자 도구.
+
+    복기 엔트리의 회차 라벨만 바꾼다(삭제 없음). 롤오버 보관 정본은 건드리지 않으며,
+    원래 회차는 original_ticket_round 에 보존되어 되돌릴 수 있다.
+    """
+    from ..video_analysis.store import reattribute_review_entries
+
+    res = reattribute_review_entries(
+        from_round=body.from_round,
+        to_round=body.to_round,
+        entry_ids=body.entry_ids,
+    )
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error") or "재귀속 실패")
+    return to_jsonable({**res, "accumulated": _slim_accumulated()})
 
 
 @router.get("/history")

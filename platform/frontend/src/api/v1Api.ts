@@ -567,6 +567,22 @@ export const v1Api = {
   getRoundLearning: () =>
     fetchJson<RoundLearningResponse>('/api/v1/photo-analysis/round-learning', { timeoutMs: 60_000 }),
 
+  /** 복기 엔트리 회차 재귀속(관리자) — 라벨만 교정, 보관 정본 불변, 원본 회차 보존. */
+  reattributeEntries: (fromRound: number, toRound: number, entryIds?: string[]) =>
+    fetchJson<{
+      ok: boolean;
+      changed: number;
+      from_round: number;
+      to_round: number;
+      note?: string;
+      accumulated?: PhotoAnalysisAccumulated;
+    }>('/api/v1/photo-analysis/reattribute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from_round: fromRound, to_round: toRound, entry_ids: entryIds ?? null }),
+      timeoutMs: 60_000,
+    }),
+
   getPredictionSignals: (intent: 'review' | 'current_round' = 'current_round', seed?: number) => {
     const q = new URLSearchParams({ intent });
     if (seed != null) q.set('seed', String(seed));
@@ -987,6 +1003,10 @@ export interface RoundLearningResponse {
     lift: number;
   }[];
   current_round_no?: number;
+  /** 이번회차가 한쪽(자동만/반자동만)만 등록된 상태인지 — 양쪽 지지가 0이 되는 사유. */
+  current_one_sided?: boolean;
+  current_auto_lines?: number;
+  current_semi_lines?: number;
   current_scores?: {
     number: number;
     auto: number;

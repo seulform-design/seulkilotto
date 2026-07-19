@@ -1293,6 +1293,19 @@ def rollover_current_dataset(
     current = _load_current_raw()
     archived = historical.get("archived_current_rounds") or []
     if any(int(batch.get("round_no") or 0) == int(drawn_round) for batch in archived):
+        # ⚠️ 이미 보관된 회차 — 샌드박스에 엔트리가 남아 있으면 **절대 비우지 않는다**.
+        # 이 분기는 build_accumulated 의 자기치유 정렬을 통해 GET 경로에서도 실행되므로,
+        # 무조건 리셋하면 '조회만으로' 미보관 용지가 소실된다(무결성 검증보다 먼저 실행됨).
+        if current.get("entries"):
+            return {
+                "ok": False,
+                "rolled_over": False,
+                "reason": "already_archived_with_entries",
+                "error": (
+                    f"{drawn_round}회는 이미 보관됐는데 샌드박스에 엔트리가 남아 있습니다. "
+                    "데이터 보호를 위해 자동 정리하지 않았습니다."
+                ),
+            }
         if int(current.get("current_round") or 0) != int(next_round):
             current = _empty_current_raw(next_round)
             _save_current_raw(current)
@@ -1544,6 +1557,73 @@ def delete_entry(entry_id: str) -> bool:
     return True
 
 
+@_synchronized
+def reattribute_review_entries(
+    *,
+    from_round: int,
+    to_round: int,
+    entry_ids: List[str] | None = None,
+) -> Dict[str, Any]:
+    """복기 엔트리의 소속 회차 교정(재귀속) — 관리자 도구.
+
+    저장 시점의 '최신 추첨 회차' 로 잘못 stamp 된 복기 엔트리를 실제 회차로 되돌린다
+    (실제 사고: 1232 용지가 복기 1233 으로 저장됨).
+
+    안전 설계:
+      - **복기(live) 엔트리만** 대상. 롤오버 보관 배치는 '추첨 전 등록' 정본이므로
+        절대 건드리지 않는다(아카이브 불변).
+      - 원래 회차를 `original_ticket_round` 에 최초 1회 보존 → 감사·되돌리기 가능.
+      - 삭제 없음(회차 라벨만 교정). 내용·줄 데이터는 그대로 유지.
+      - 대상이 없으면 아무것도 저장하지 않는다(무해한 no-op).
+    """
+    if int(from_round) == int(to_round):
+        return {"ok": False, "error": "from_round 와 to_round 가 같습니다.", "changed": 0}
+
+    data = _load_historical_raw()
+    entries = data.get("entries") or []
+    id_filter = set(entry_ids or [])
+    changed: List[Dict[str, Any]] = []
+
+    for e in entries:
+        if e.get("video_intent") != "review":
+            continue
+        if str(_entry_round(e)) != str(from_round):
+            continue
+        if id_filter and e.get("id") not in id_filter:
+            continue
+        prev = str(_entry_round(e))
+        # 최초 교정 시점의 원본 회차만 보존(재교정해도 원본은 덮어쓰지 않음).
+        if not e.get("original_ticket_round"):
+            e["original_ticket_round"] = prev
+        e["ticket_round"] = str(int(to_round))
+        e["reattributed_at"] = _now_iso()
+        changed.append(
+            {"id": e.get("id"), "from": prev, "to": str(int(to_round))}
+        )
+
+    if not changed:
+        return {
+            "ok": False,
+            "error": f"{from_round}회로 기록된 복기 엔트리가 없습니다.",
+            "changed": 0,
+        }
+
+    data["entries"] = entries
+    _save_historical_raw(data)
+    return {
+        "ok": True,
+        "changed": len(changed),
+        "from_round": int(from_round),
+        "to_round": int(to_round),
+        "entries": changed,
+        "note": (
+            "복기 엔트리의 회차 라벨만 교정했습니다(삭제 없음). "
+            "원래 회차는 original_ticket_round 에 보존되어 되돌릴 수 있습니다. "
+            "롤오버 보관 정본은 변경하지 않았습니다."
+        ),
+    }
+
+
 def _vote_list(counter: Counter, limit: int = 20) -> List[Dict[str, Any]]:
     return [{"number": n, "votes": c, "video_count": c} for n, c in counter.most_common(limit)]
 
@@ -1767,7 +1847,11 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         # 보관 엔트리는 원래 video_intent='current_round' 로 저장돼 있다. 복기 뷰에서
         # 쓰려면 intent 필터(_recompute_intent_combo 등)를 통과해야 하므로 **사본**에
         # 한해 review 로 재태깅한다(저장소는 불변).
-        _archived_g = [{**e, "video_intent": "review"} for e in _archived_raw]
+        # ⚠️ 얕은 복사({**e})면 중첩 result 가 원본과 공유된다. 하류의
+        # _entry_sheet_details → extract_betting_lines(_assign_image_indices)가 그
+        # 중첩 dict 에 image_index/image_label 을 **써넣으므로**, 향후 _load_historical_raw
+        # 에 캐시가 들어가면 그대로 아카이브에 저장돼 정본이 오염된다. 깊은 복사로 차단.
+        _archived_g = [{**_deep_copy(e), "video_intent": "review"} for e in _archived_raw]
         if _archived_g:
             group = _dedupe_entries_by_content(list(_archived_g))
             _primary_source = "archived"

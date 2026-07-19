@@ -30,6 +30,19 @@ export default function RoundLearningPanel() {
       </Paper>
     );
   }
+  // 실패 시 조용히 사라지지 않도록 오류를 표면화(구버전은 null 반환으로 섹션이 증발).
+  if (q.isError) {
+    return (
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.5 }}>
+          🎓 다회차 용지 학습
+        </Typography>
+        <Alert severity="error">
+          학습 데이터를 불러오지 못했습니다: {q.error instanceof Error ? q.error.message : '서버 오류'}
+        </Alert>
+      </Paper>
+    );
+  }
   const d = q.data;
   if (!d) return null;
 
@@ -156,7 +169,17 @@ export default function RoundLearningPanel() {
         </Box>
       ) : (
         <Alert severity="info" sx={{ py: 0.25 }}>
-          이번회차 용지가 없어 학습을 적용할 대상이 없습니다. 이번회차 용지를 등록하면 위 캘리브레이션이 적용됩니다.
+          {(d.current_auto_lines ?? 0) + (d.current_semi_lines ?? 0) > 0 ? (
+            <>
+              이번회차 용지는 등록돼 있으나(자동 {d.current_auto_lines ?? 0}줄 · 반자동{' '}
+              {d.current_semi_lines ?? 0}줄) 학습 점수를 낼 수 없습니다.
+              {d.current_one_sided
+                ? ' 한쪽만 등록돼 양쪽 지지(자동∩반자동)가 0이기 때문입니다 — 나머지 한쪽도 등록하면 적용됩니다.'
+                : ''}
+            </>
+          ) : (
+            '이번회차 용지가 없어 학습을 적용할 대상이 없습니다. 이번회차 용지를 등록하면 위 캘리브레이션이 적용됩니다.'
+          )}
         </Alert>
       )}
 

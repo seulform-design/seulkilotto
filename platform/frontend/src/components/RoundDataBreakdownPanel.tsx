@@ -1,5 +1,7 @@
-import { Alert, Box, Chip, Paper, Stack, Typography } from '@mui/material';
-import type { PhotoAnalysisAccumulated } from '../api/v1Api';
+import { Alert, Box, Button, Chip, CircularProgress, Paper, Stack, TextField, Typography } from '@mui/material';
+import { useState } from 'react';
+import { v1Api, type PhotoAnalysisAccumulated } from '../api/v1Api';
+import { useConfirm } from './useConfirm';
 
 /**
  * 🗂 회차별 용지 데이터 — 같은 회차에 서로 다른 출처가 공존할 수 있어 분리 표시.
@@ -11,12 +13,54 @@ import type { PhotoAnalysisAccumulated } from '../api/v1Api';
  */
 export default function RoundDataBreakdownPanel({
   accumulated,
+  onAccumulatedChange,
 }: {
   accumulated: PhotoAnalysisAccumulated | null;
+  onAccumulatedChange?: (acc: PhotoAnalysisAccumulated) => void;
 }) {
+  const { confirm, ConfirmDialog } = useConfirm();
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  const [targetRound, setTargetRound] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
   const rows = accumulated?.historical_dataset?.rounds_breakdown ?? [];
   if (!rows.length) return null;
   const conflicted = rows.filter((r) => r.review && r.archived);
+
+  const runReattribute = async (fromRound: string) => {
+    const to = Number(targetRound);
+    if (!Number.isInteger(to) || to < 1) {
+      setNotice('교정할 회차 번호를 정확히 입력하세요.');
+      return;
+    }
+    if (String(to) === String(fromRound)) {
+      setNotice('현재 회차와 교정 회차가 같습니다.');
+      return;
+    }
+    const ok = await confirm({
+      message:
+        `${fromRound}회로 기록된 복기 저장분을 ${to}회로 재귀속할까요?\n\n` +
+        `• 회차 라벨만 교정되며 용지 줄은 삭제되지 않습니다.\n` +
+        `• 롤오버 보관 정본은 변경되지 않습니다.\n` +
+        `• 원래 회차(${fromRound})는 보존되어 되돌릴 수 있습니다.`,
+      confirmText: `${to}회로 재귀속`,
+    });
+    if (!ok) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const res = await v1Api.reattributeEntries(Number(fromRound), to);
+      if (res.accumulated) onAccumulatedChange?.(res.accumulated);
+      setNotice(`✅ ${res.changed}건을 ${fromRound}회 → ${to}회로 재귀속했습니다.`);
+      setOpenFor(null);
+      setTargetRound('');
+    } catch (e) {
+      setNotice(`❌ 재귀속 실패: ${e instanceof Error ? e.message : '서버 오류'}`);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
@@ -91,14 +135,58 @@ export default function RoundDataBreakdownPanel({
                   <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>
                     {r.review.entry_count}건
                   </Typography>
+                  <Button
+                    size="small"
+                    variant="text"
+                    disabled={busy}
+                    onClick={() => {
+                      setOpenFor(openFor === r.ticket_round ? null : r.ticket_round);
+                      setTargetRound('');
+                      setNotice(null);
+                    }}
+                    sx={{ minWidth: 0, px: 0.75, fontSize: 10 }}
+                  >
+                    회차 재귀속
+                  </Button>
                 </Stack>
               ) : (
                 <Typography sx={{ fontSize: 11, color: 'text.disabled' }}>—</Typography>
+              )}
+              {openFor === r.ticket_round && (
+                <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.75 }}>
+                  <TextField
+                    size="small"
+                    label="실제 회차"
+                    placeholder="예: 1232"
+                    value={targetRound}
+                    onChange={(e) => setTargetRound(e.target.value.replace(/\D/g, ''))}
+                    sx={{ width: 110 }}
+                  />
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="warning"
+                    disabled={busy || !targetRound}
+                    onClick={() => runReattribute(r.ticket_round)}
+                  >
+                    {busy ? <CircularProgress size={16} color="inherit" /> : '교정'}
+                  </Button>
+                  <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>
+                    복기 저장분만 교정 · 보관 정본 불변 · 되돌리기 가능
+                  </Typography>
+                </Stack>
               )}
             </Box>
           </Stack>
         ))}
       </Stack>
+
+      {notice && (
+        <Alert severity={notice.startsWith('❌') ? 'error' : 'success'} sx={{ mt: 1.5 }}>
+          {notice}
+        </Alert>
+      )}
+      {ConfirmDialog}
 
       <Typography variant="caption" sx={{ display: 'block', mt: 1, fontStyle: 'italic', color: 'text.disabled' }}>
         ※ 두 출처 모두 보존됩니다(삭제 없음). 학습·분석은 회차별로 구분해 사용합니다.

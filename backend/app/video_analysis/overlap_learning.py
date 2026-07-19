@@ -237,7 +237,11 @@ def build_overlap_learning() -> Dict[str, Any]:
         key=lambda x: (-x["score"], -x["combo_support"], x["number"]),
     )[:15]
 
-    flat = all(abs(b["lift_vs_chance"] - 1.0) < 0.3 for b in learned["by_lift_bucket"] if b["combos"] >= 30)
+    # '신호 없음(평탄)' 판정은 **표본이 큰 크기별 집계**로 한다.
+    # ⚠️ lift 구간별은 소표본 버킷(수십 건)이 쉽게 크게 흔들려, 그걸 기준으로 삼으면
+    # 우연한 편차 하나 때문에 '신호 있음' 으로 오판돼 사용자를 오도한다.
+    _sized = [s for s in learned["by_size"] if s["combos"] >= 100]
+    flat = bool(_sized) and all(abs(s["lift_vs_chance"] - 1.0) <= 0.25 for s in _sized)
 
     return {
         "ok": True,

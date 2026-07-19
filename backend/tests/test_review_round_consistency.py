@@ -45,7 +45,8 @@ def test_review_slice_tracks_latest_drawn_round_not_entry_stamp(monkeypatch):
     monkeypatch.setattr(store, "_recompute_intent_combo", lambda *a, **k: {"summary": "", "pair_duplicates": [], "triple_duplicates": []})
     monkeypatch.setattr(store, "_accumulate_entries", lambda g: {"final_predictions": {"strong_candidates": [], "excluded_candidates": []}})
     monkeypatch.setattr(store, "_entries_summary_for", lambda g: [])
-    monkeypatch.setattr(store, "_manual_saved_lines", lambda g, t: [])
+    # **kw 로 받아야 include_photo 등 키워드 인자 추가에도 스텁이 깨지지 않는다.
+    monkeypatch.setattr(store, "_manual_saved_lines", lambda g, t, **kw: [])
 
     # 엔트리는 과거 회차(1231) stamp — 지연으로 잘못 찍힌 경우를 모사.
     entries = [_mk_entry(1231), _mk_entry(1231)]

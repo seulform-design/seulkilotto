@@ -280,6 +280,16 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
 
   const targetRound = manualRound ?? autoSelectedRound;
 
+  // ⚠️ 백테스트는 '그 회차의 예측' 과 '그 회차의 당첨' 을 짝지어야 한다.
+  // archivedSlice 는 **가장 최근 보관 배치 하나**로 고정인데 targetRound 는 사용자가
+  // 임의 선택할 수 있어, 그대로 두면 1233 예측을 1230 당첨과 채점하고 그 결과를
+  // 이력에 영구 저장하는 오염이 생긴다. 회차가 일치할 때만 채점한다.
+  const sliceRoundNo =
+    (slice as ArchivedCurrentRoundSnapshot | null)?.round_no ??
+    (sliceTicketRoundStr && /^\d+$/.test(sliceTicketRoundStr) ? Number(sliceTicketRoundStr) : null);
+  const sliceMatchesTarget =
+    sliceRoundNo != null && targetRound != null && sliceRoundNo === targetRound;
+
   // 미래 회차 예측인지 표시 — UI에 명시
   const isPredictingFutureRound = useMemo(() => {
     if (!sliceTicketRoundStr || !latestRound) return false;
@@ -313,7 +323,8 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
 
   // 분석 계산
   const analysis = useMemo(() => {
-    if (!hasSlice || !roundDrawn || !round.data || !accumulated) return null;
+    // 회차 불일치 시 채점 금지 — 다른 회차 예측을 이 회차 당첨과 비교하면 안 된다.
+    if (!hasSlice || !roundDrawn || !sliceMatchesTarget || !round.data || !accumulated) return null;
 
     const winning: number[] = round.data.numbers;
     const bonus: number = round.data.bonus;
@@ -381,7 +392,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
       grade,
       usedUnified,
     };
-  }, [hasSlice, roundDrawn, round.data, slice, accumulated]);
+  }, [hasSlice, roundDrawn, sliceMatchesTarget, round.data, slice, accumulated]);
 
   // 반자동 게임 줄별 적중 분석 — 선택된 회차 vs 모든 bulkTickets
   const lineAnalysis = useMemo(() => {
@@ -590,6 +601,23 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
       {!round.isLoading && !roundDrawn && (
         <Alert severity="warning">
           {targetRound}회 데이터를 찾지 못했습니다. 회차 업데이트를 실행하거나, 추첨 후 다시 확인해 주세요.
+        </Alert>
+      )}
+
+      {/* 회차 불일치 — 보관된 예측 회차와 채점 대상 회차가 다르면 채점하지 않는다. */}
+      {hasSlice && roundDrawn && !sliceMatchesTarget && (
+        <Alert severity="warning" sx={{ mt: 1.5 }}>
+          보관된 예측은 <strong>{sliceRoundNo ?? '?'}회</strong> 것인데 채점 대상은{' '}
+          <strong>{targetRound}회</strong>입니다. 다른 회차의 예측을 이 회차 당첨번호로 채점하면
+          결과가 무의미해지므로 <strong>채점을 생략</strong>했습니다.
+          {sliceRoundNo != null && (
+            <>
+              {' '}
+              <Button size="small" variant="outlined" color="inherit" sx={{ ml: 1 }} onClick={() => setManualRound(sliceRoundNo)}>
+                {sliceRoundNo}회로 맞추기
+              </Button>
+            </>
+          )}
         </Alert>
       )}
 

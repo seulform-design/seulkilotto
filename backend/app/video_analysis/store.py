@@ -1399,8 +1399,8 @@ def _rounds_breakdown(
     for rnd, group in review_groups.items():
         slot(rnd)["review"] = {
             "entry_count": len(group),
-            "auto_lines": len(_manual_saved_lines(group, "자동")),
-            "semi_lines": len(_manual_saved_lines(group, "반자동")),
+            "auto_lines": len(_manual_saved_lines(group, "자동", include_photo=True)),
+            "semi_lines": len(_manual_saved_lines(group, "반자동", include_photo=True)),
             "analyzed_at": max((e.get("analyzed_at") or "") for e in group) or None,
         }
 
@@ -1411,8 +1411,8 @@ def _rounds_breakdown(
         entries = list(batch.get("entries") or [])
         slot(str(rnd_no))["archived"] = {
             "entry_count": len(entries),
-            "auto_lines": len(_manual_saved_lines(entries, "자동")),
-            "semi_lines": len(_manual_saved_lines(entries, "반자동")),
+            "auto_lines": len(_manual_saved_lines(entries, "자동", include_photo=True)),
+            "semi_lines": len(_manual_saved_lines(entries, "반자동", include_photo=True)),
             "frozen_at": batch.get("frozen_at"),
         }
 
@@ -1458,8 +1458,9 @@ def _latest_archived_current_snapshot(historical: Dict[str, Any]) -> Dict[str, A
         "unified_excluded_candidates": unified_excluded,
         # 롤오버로 보관된 '그 회차 이번회차 용지' 줄 — 이게 없으면 추첨 후 자신이
         # 산 용지를 복기에서 전혀 볼 수 없다(아카이브는 _live_entries 에서 제외됨).
-        "saved_auto_lines": _manual_saved_lines(entries, "자동"),
-        "saved_semi_lines": _manual_saved_lines(entries, "반자동"),
+        # 사진(OCR) 등록분도 그 회차 용지이므로 포함(미포함 시 줄 0 으로 표시됨).
+        "saved_auto_lines": _manual_saved_lines(entries, "자동", include_photo=True),
+        "saved_semi_lines": _manual_saved_lines(entries, "반자동", include_photo=True),
         "accumulated_combo_patterns": combo_patterns,
         "entries_summary": _entries_summary_for(entries),
         "app_ui_message": (
@@ -1492,11 +1493,21 @@ def clear_store() -> int:
 
 
 @_synchronized
-def clear_store_intent(intent: str, pick_type: str | None = None) -> int:
+def clear_store_intent(
+    intent: str,
+    pick_type: str | None = None,
+    *,
+    include_archived: bool = False,
+) -> int:
     """특정 intent 저장소를 비운다.
 
     pick_type('자동'/'반자동') 지정 시 해당 픽타입 엔트리만 삭제하고 나머지는
     보존한다(예: 자동 삭제 시 반자동 저장분 유지). 미지정 시 intent 전체 삭제.
+
+    include_archived=True(복기 한정) 면 롤오버 보관 배치의 엔트리도 함께 지운다.
+    ⚠️ 복기 탭은 보관 배치를 정본으로 '표시' 하므로, 이 옵션이 없으면 사용자가
+    화면에서 보고 있는 데이터를 삭제할 수 없다(삭제 성공 응답 후에도 그대로 남음).
+    기본값 False — 보관 정본은 명시적 요청 없이는 건드리지 않는다.
     """
     if intent == "review":
         historical = _load_historical_raw()
@@ -1510,6 +1521,22 @@ def clear_store_intent(intent: str, pick_type: str | None = None) -> int:
             kept_entries = [e for e in entries if e.get("video_intent") != "review"]
         removed = len(entries) - len(kept_entries)
         historical["entries"] = kept_entries
+
+        if include_archived:
+            batches = historical.get("archived_current_rounds") or []
+            new_batches: List[Dict[str, Any]] = []
+            for batch in batches:
+                b_entries = list(batch.get("entries") or [])
+                if pick_type:
+                    kept_b = [e for e in b_entries if _entry_pick_type(e) != pick_type]
+                else:
+                    kept_b = []
+                removed += len(b_entries) - len(kept_b)
+                if kept_b:
+                    new_batches.append({**batch, "entries": kept_b})
+                # 엔트리가 모두 지워진 배치는 배치째 제거(빈 껍데기 방지).
+            historical["archived_current_rounds"] = new_batches
+
         _save_historical_raw(historical)
         return removed
 
@@ -1545,6 +1572,21 @@ def delete_entry(entry_id: str) -> bool:
         historical["entries"] = new_entries
         _save_historical_raw(historical)
         return True
+
+    # 롤오버 보관 배치 안의 엔트리도 삭제 대상 — 복기 탭이 보관 배치를 정본으로
+    # 표시하므로, 여기를 훑지 않으면 **화면에 보이는 엔트리가 404 로 삭제 불가**해진다.
+    batches = historical.get("archived_current_rounds") or []
+    for idx, batch in enumerate(batches):
+        b_entries = list(batch.get("entries") or [])
+        kept = [e for e in b_entries if e.get("id") != entry_id]
+        if len(kept) != len(b_entries):
+            if kept:
+                batches[idx] = {**batch, "entries": kept}
+            else:
+                batches.pop(idx)  # 빈 배치는 제거
+            historical["archived_current_rounds"] = batches
+            _save_historical_raw(historical)
+            return True
 
     current = _load_current_raw()
     current_entries = current.get("entries") or []
@@ -1777,10 +1819,21 @@ def _recompute_intent_combo(
 
 
 def _manual_saved_lines(
-    group: List[Dict[str, Any]], want_pick_type: str = "반자동"
+    group: List[Dict[str, Any]],
+    want_pick_type: str = "반자동",
+    *,
+    include_photo: bool = False,
 ) -> List[List[int]]:
-    """수기/대량 엔트리의 게임 줄(번호배열) 목록 — 기기 간 동기화용.
-    want_pick_type(자동/반자동) 으로 필터해 프론트 자동·반자동 누적을 각각 복원한다."""
+    """엔트리의 게임 줄(번호배열) 목록.
+
+    기본은 수기/대량(entry_mode='manual') 엔트리만 — 프론트 자동·반자동 누적을
+    '사용자가 입력한 그대로' 복원하기 위한 기기 간 동기화 용도이기 때문이다.
+
+    include_photo=True 면 사진(OCR) 등록분도 포함한다. 보관 배치 표시·회차별 집계·
+    다회차 학습처럼 **'그 회차에 무슨 용지가 있었나' 를 보고할 때**는 사진 등록분도
+    엄연한 사용자 용지이므로 포함해야 한다(미포함 시 '8건 보관 · 자동 0줄' 처럼
+    엔트리는 있는데 줄이 0 으로 표시되는 모순이 생긴다).
+    """
     from .line_overlap_patterns import extract_betting_lines
 
     def _is_manual(e: Dict[str, Any]) -> bool:
@@ -1790,7 +1843,9 @@ def _manual_saved_lines(
 
     details: List[Dict[str, Any]] = []
     for e in group:
-        if _is_manual(e) and _entry_pick_type(e) == want_pick_type:
+        if not include_photo and not _is_manual(e):
+            continue
+        if _entry_pick_type(e) == want_pick_type:
             details.extend(_entry_sheet_details(e))
     if not details:
         return []
@@ -1921,14 +1976,18 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         slice_out["saved_review_template"] = photo if photo.get("marked_numbers") else None
         # 어떤 출처가 쓰였는지 투명하게 노출 — 같은 회차 라벨에 두 출처가 있을 때
         # 사용자가 '지금 보는 게 어느 데이터인지' 알 수 있어야 한다.
+        # 비주력 출처는 **카운트만** 노출한다. 원본 줄 배열까지 실으면 응답이 커져
+        # 게이트웨이 절단(502) 위험이 있고, _SLIM_KEEP_FULL 에 없으면 50개로 조용히
+        # 잘려 오히려 잘못된 수치를 보여준다. 비주력 데이터를 실제로 쓰려면
+        # [회차 재귀속] 으로 올바른 회차에 귀속시켜 primary 로 만드는 것이 정답이다.
         slice_out["round_sources"] = {
             "primary": _primary_source,
             "archived_entries": len(_archived_g),
-            "archived_auto_lines": len(_manual_saved_lines(_archived_g, "자동")),
-            "archived_semi_lines": len(_manual_saved_lines(_archived_g, "반자동")),
+            "archived_auto_lines": len(_manual_saved_lines(_archived_g, "자동", include_photo=True)),
+            "archived_semi_lines": len(_manual_saved_lines(_archived_g, "반자동", include_photo=True)),
             "review_saved_entries": len(_review_saved_g),
-            "review_saved_auto_lines": len(_manual_saved_lines(_review_saved_g, "자동")),
-            "review_saved_semi_lines": len(_manual_saved_lines(_review_saved_g, "반자동")),
+            "review_saved_auto_lines": len(_manual_saved_lines(_review_saved_g, "자동", include_photo=True)),
+            "review_saved_semi_lines": len(_manual_saved_lines(_review_saved_g, "반자동", include_photo=True)),
         }
     else:
         # 이번회차: 복기 saved_review_template 노출·참조 금지

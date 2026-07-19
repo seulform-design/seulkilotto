@@ -409,6 +409,10 @@ def get_history(limit: int = Query(50, ge=1, le=200)):
 def delete_store(
     intent: str | None = Query(default=None),
     pick_type: str | None = Query(default=None),
+    include_archived: bool = Query(
+        default=False,
+        description="복기 한정 — 롤오버 보관 배치도 함께 삭제(복기 탭이 표시하는 정본)",
+    ),
 ):
     if pick_type is not None and pick_type not in ("자동", "반자동"):
         raise HTTPException(status_code=400, detail="pick_type 은 자동 또는 반자동 이어야 합니다.")
@@ -416,7 +420,7 @@ def delete_store(
         if intent not in ("review", "current_round"):
             raise HTTPException(status_code=400, detail="intent 는 review 또는 current_round 이어야 합니다.")
         # pick_type 지정 시 해당 픽타입만 삭제(자동만/반자동만), 미지정 시 intent 전체.
-        removed = clear_store_intent(intent, pick_type=pick_type)
+        removed = clear_store_intent(intent, pick_type=pick_type, include_archived=include_archived)
     else:
         removed = clear_store()
     return {"ok": True, "removed": removed}

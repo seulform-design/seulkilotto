@@ -107,8 +107,9 @@ def build_round_learning() -> Dict[str, Any]:
         if not winning:
             continue  # 아직 추첨 결과가 없으면 학습 제외
         entries = list(batch.get("entries") or [])
-        auto_lines = _manual_saved_lines(entries, "자동")
-        semi_lines = _manual_saved_lines(entries, "반자동")
+        # 사진(OCR) 등록분도 그 회차 용지 → 포함해야 학습 대상 회차가 누락되지 않는다.
+        auto_lines = _manual_saved_lines(entries, "자동", include_photo=True)
+        semi_lines = _manual_saved_lines(entries, "반자동", include_photo=True)
         if not auto_lines and not semi_lines:
             continue
         sup = _number_support(auto_lines, semi_lines)
@@ -160,8 +161,8 @@ def build_round_learning() -> Dict[str, Any]:
     # 이번회차 적용 — 현재 샌드박스 용지의 지지 구간에 학습 lift 를 곱해 점수화.
     current = _load_current_raw()
     cur_entries = list(current.get("entries") or [])
-    cur_auto = _manual_saved_lines(cur_entries, "자동")
-    cur_semi = _manual_saved_lines(cur_entries, "반자동")
+    cur_auto = _manual_saved_lines(cur_entries, "자동", include_photo=True)
+    cur_semi = _manual_saved_lines(cur_entries, "반자동", include_photo=True)
     lift_of = {c["bucket"]: c["lift"] for c in calibration}
     current_scores: List[Dict[str, Any]] = []
     # 한쪽(자동만/반자동만)만 등록하면 support=min(auto,semi)=0 이라 전 번호가 걸러져

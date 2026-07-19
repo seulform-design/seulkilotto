@@ -19,6 +19,13 @@ export default function RoundLearningPanel() {
     staleTime: 300_000,
     retry: 1,
   });
+  // 줄겹침(2·3·4번호) 역산 학습 — 회차가 쌓이면 자동으로 표본이 늘어난다.
+  const ov = useQuery({
+    queryKey: ['v1-photo-overlap-learning'],
+    queryFn: v1Api.getOverlapLearning,
+    staleTime: 300_000,
+    retry: 1,
+  });
 
   if (q.isLoading) {
     return (
@@ -186,6 +193,96 @@ export default function RoundLearningPanel() {
       <Typography variant="caption" sx={{ display: 'block', mt: 1, fontStyle: 'italic', color: 'text.disabled' }}>
         ⚠️ {d.honesty}
       </Typography>
+
+      {/* ── 줄겹침(2·3·4번호) 역산 학습 ── */}
+      {ov.data?.ok && (
+        <Box sx={{ mt: 2, pt: 1.5, borderTop: '1px dashed', borderColor: 'divider' }}>
+          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+            <Typography variant="subtitle2" fontWeight={800}>
+              🔗 줄겹침(2·3·4번호) 역산 학습 — {ov.data.round_count}개 회차 · 조합 {ov.data.total_combos}건
+            </Typography>
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            '다른 줄에도 겹침' 조합이 <strong>실제 당첨번호를 얼마나 담았는지</strong> 회차마다 역산해
+            누적합니다. 기준선 = 조합 크기 × 6/45 (무작위 기대). <strong>lift 배수</strong>가 1.0 근처면
+            예측력이 없다는 뜻입니다.
+          </Typography>
+
+          {/* 크기별 */}
+          <Stack spacing={0.4} sx={{ mb: 1 }}>
+            {(ov.data.by_size ?? []).map((s) => (
+              <Stack key={`ovs-${s.size}`} direction="row" spacing={1} alignItems="center">
+                <Typography sx={{ width: 88, fontSize: 11, fontWeight: 700 }}>{s.size}번호 겹침</Typography>
+                <Chip
+                  size="small"
+                  color={s.lift_vs_chance >= 1.3 ? 'success' : s.lift_vs_chance >= 0.8 ? 'info' : 'default'}
+                  label={`×${s.lift_vs_chance}`}
+                  sx={{ height: 18, fontSize: 10, fontWeight: 700, minWidth: 52 }}
+                />
+                <Typography sx={{ fontSize: 10, color: 'text.secondary' }}>
+                  평균 당첨겹침 {s.mean_overlap} (기대 {s.expected}) · {s.combos}건 · 전부당첨 {s.fully_winning}건
+                </Typography>
+              </Stack>
+            ))}
+          </Stack>
+
+          {/* lift 구간별 */}
+          <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
+            겹침 강도(lift) 구간별 — 강하게 묶인 조합이 당첨을 더 담았나?
+          </Typography>
+          <Stack spacing={0.3} sx={{ mb: 1 }}>
+            {(ov.data.by_lift_bucket ?? [])
+              .filter((b) => b.combos >= 5)
+              .map((b) => (
+                <Stack key={`ovb-${b.size}-${b.bucket}`} direction="row" spacing={1} alignItems="center">
+                  <Typography sx={{ width: 150, fontSize: 10 }}>
+                    {b.size}번호 · {b.bucket}
+                  </Typography>
+                  <Typography sx={{ fontSize: 10, color: b.lift_vs_chance >= 1.3 ? 'success.light' : 'text.secondary' }}>
+                    ×{b.lift_vs_chance} (평균 {b.mean_overlap} / 기대 {b.expected}) · {b.combos}건
+                  </Typography>
+                </Stack>
+              ))}
+          </Stack>
+
+          {ov.data.calibration_flat && (
+            <Alert severity="info" sx={{ mb: 1, py: 0.25 }}>
+              구간별 배수가 <strong>1.0 근처로 평탄</strong>합니다 — 겹침 강도가 당첨을 예측한다는 근거는
+              아직 없습니다(무작위 게임의 정상 결과).
+            </Alert>
+          )}
+
+          {(ov.data.current_scores?.length ?? 0) > 0 ? (
+            <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
+                🎯 {ov.data.current_round_no}회 이번회차 겹침 조합에 학습 적용 (조합 {ov.data.current_combo_count}건)
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                {ov.data.current_scores!.map((s) => (
+                  <Box key={`ovc-${s.number}`} sx={{ textAlign: 'center', minWidth: 36 }}>
+                    <LottoBall number={s.number} size={26} />
+                    <Typography sx={{ fontSize: 8, color: 'text.disabled', lineHeight: 1.1 }}>{s.score}</Typography>
+                    <Typography sx={{ fontSize: 7.5, color: 'text.disabled', lineHeight: 1 }}>{s.combo_support}조합</Typography>
+                  </Box>
+                ))}
+              </Stack>
+            </Box>
+          ) : (
+            <Alert severity="info" sx={{ py: 0.25 }}>
+              이번회차 자동 누적에 겹침 조합이 없어 적용 대상이 없습니다(자동 용지 2줄 이상 필요).
+            </Alert>
+          )}
+
+          <Typography variant="caption" sx={{ display: 'block', mt: 0.75, fontStyle: 'italic', color: 'text.disabled' }}>
+            ⚠️ {ov.data.honesty}
+          </Typography>
+        </Box>
+      )}
+      {ov.data && !ov.data.ok && (
+        <Alert severity="info" sx={{ mt: 1.5 }}>
+          🔗 줄겹침 학습: {ov.data.reason}
+        </Alert>
+      )}
     </Paper>
   );
 }

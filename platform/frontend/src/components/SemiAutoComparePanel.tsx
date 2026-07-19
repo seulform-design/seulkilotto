@@ -66,6 +66,22 @@ function semiAutoStorageKey(intent: SheetIntent): string {
   return `${SEMI_AUTO_STORAGE_PREFIX}:${intent}`;
 }
 
+/**
+ * 해당 intent 의 반자동 로컬 누적을 비운다 — 회차 롤오버 정리용.
+ *
+ * ⚠️ 자동만 지우고 반자동을 남기면 이번회차가 '반자동만 있는' 비대칭 상태가 되어
+ * 자동↔반자동 1:1 전수비교에 기반한 모든 섹션(예상번호·심층역산·종합추천·1:1매칭)이
+ * 통째로 죽는다. 롤오버 시 반드시 양쪽을 함께 정리해야 한다.
+ */
+export function clearSemiAutoLocal(intent: SheetIntent): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(semiAutoStorageKey(intent));
+  } catch {
+    /* quota / private mode — silent */
+  }
+}
+
 type SheetIntent = 'review' | 'current_round';
 
 const SIGNAL_SOURCE_LABELS: Record<string, string> = {
@@ -4136,12 +4152,25 @@ export default function SemiAutoComparePanel({
             );
           })()}
 
+          {/* 자동/반자동 한쪽만 있으면 1:1 축이 죽는다 — 조용히 사라지지 않게 사유를 알린다. */}
+          {!canRenderLineMatching && hasLineMatchingInputs && (
+            <Alert severity="warning" sx={{ mb: 1.5 }}>
+              현재 <strong>자동 {groupLineMatching.autoLineCount}줄 · 반자동{' '}
+              {groupLineMatching.semiLineCount}줄</strong>입니다. 아래{' '}
+              <strong>당첨 예상번호 · 심층 역산 분석 · 1:1 매칭</strong>은 자동↔반자동 <strong>양쪽</strong>이
+              있어야 동작합니다. 비어 있는 쪽을 등록하면 활성화됩니다.
+              {predictedNumbers.length > 0 && ' (지금 보이는 예상번호는 평행회차 신호 위주입니다.)'}
+            </Alert>
+          )}
+
           {/* 🎯 당첨 예상번호 — 전수비교 심층 역산(주) + 평행회차(보조). 호기 제외. */}
           {predictedNumbers.length > 0 && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main' }}>
               <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
                 <Typography variant="body2" fontWeight={700}>
-                  🎯 {effectiveRound ?? '?'}회 당첨 예상번호 — {compareWinning ? '복기 검증' : '예측'} (전수비교 심층 역산)
+                  {/* 1:1 축이 죽었으면 '전수비교' 라고 부르면 안 된다(평행회차 단독 결과). */}
+                  🎯 {effectiveRound ?? '?'}회 당첨 예상번호 — {compareWinning ? '복기 검증' : '예측'}{' '}
+                  ({canRenderLineMatching ? '전수비교 심층 역산' : '⚠ 평행회차 단독 — 1:1 미적용'})
                 </Typography>
                 <Chip
                   size="small"
@@ -5010,11 +5039,16 @@ export default function SemiAutoComparePanel({
               {compareWinning
                 ? ' 당첨 일치 개수는 점수에 넣지 않고 결과 카드에 표시만 합니다(예측 정합성 평가용).'
                 : ''}
+              {/* ⚠️ combinedTickets 만 보면 '반자동만 있는' 상태에서도 '분석 대상 N줄'
+                  이라고 표시돼, 1:1 축과 학습 프로파일 축이 죽은 사실이 감춰진다.
+                  실제로 3축이 살아있는지는 canRenderLineMatching(자동>0 && 반자동>0)로 판정. */}
               {combinedTickets.length === 0
                 ? (parallelStrong.length > 0
                     ? ' ※ 입력 줄이 없어 평행회차 신호만으로 생성합니다.'
                     : ' ※ [재분석]으로 평행회차 신호를 먼저 불러오세요.')
-                : ` 분석 대상 ${combinedTickets.length}줄.`}
+                : !canRenderLineMatching
+                  ? ` ⚠️ 자동 ${groupLineMatching.autoLineCount}줄 · 반자동 ${groupLineMatching.semiLineCount}줄 — 한쪽이 비어 1:1 전수비교와 학습 프로파일 축이 동작하지 않습니다. 현재는 평행회차 신호만 반영됩니다.`
+                  : ` 분석 대상 ${combinedTickets.length}줄 (자동 ${groupLineMatching.autoLineCount}·반자동 ${groupLineMatching.semiLineCount} — 3축 정상).`}
               {' '}정직성: 수학적 당첨 확률(1/8,145,060)은 동일하며, 통계적으로 1등에 거의 없는
               조합(합 극단·전부 홀짝·4연속 등)을 제외합니다.
             </Typography>

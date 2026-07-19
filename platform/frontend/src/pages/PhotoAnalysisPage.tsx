@@ -34,7 +34,7 @@ import SavedLinesPanel, {
   type GameLabel,
   type SavedLine,
 } from '../components/SavedLinesPanel';
-import SemiAutoComparePanel from '../components/SemiAutoComparePanel';
+import SemiAutoComparePanel, { clearSemiAutoLocal } from '../components/SemiAutoComparePanel';
 import { useConfirm } from '../components/useConfirm';
 import {
   v1Api,
@@ -949,11 +949,16 @@ export default function PhotoAnalysisPage() {
       rolloverClearedRef.current = currentRound;
       const staleLabel = draft.roundNo != null ? `${draft.roundNo}회` : '지난 회차';
       setManualByIntent((prev) => ({ ...prev, current_round: emptyManualDraft() }));
+      // ⚠️ 반자동 로컬도 반드시 함께 정리한다. 자동만 비우면 이번회차가 '반자동만
+      // 남은' 비대칭 상태가 되어, 자동↔반자동 1:1 전수비교에 의존하는 섹션
+      // (예상번호·심층역산·종합추천·1:1매칭)이 전부 죽는다 — 이번회차가 '제 기능을
+      // 못하던' 실제 원인.
+      clearSemiAutoLocal('current_round');
       // 복기 재하이드레이션 유도 — 방금 이동된 데이터가 복기 탭에 채워지도록.
       hydratedAutoRef.current.review = false;
       setNotice(
         `🔄 ${staleLabel}가 추첨 완료되어 이번회차 입력이 복기로 이동했습니다. ` +
-          `이번회차를 ${currentRound}회 기준으로 새로 시작합니다.`
+          `이번회차(자동·반자동)를 ${currentRound}회 기준으로 새로 시작합니다.`
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

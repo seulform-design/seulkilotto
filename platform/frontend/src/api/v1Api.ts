@@ -567,6 +567,10 @@ export const v1Api = {
   getRoundLearning: () =>
     fetchJson<RoundLearningResponse>('/api/v1/photo-analysis/round-learning', { timeoutMs: 60_000 }),
 
+  /** 줄겹침(2·3·4번호) 패턴 역산 학습 — 보관 회차 겹침 조합 vs 실제 당첨. */
+  getOverlapLearning: () =>
+    fetchJson<OverlapLearningResponse>('/api/v1/photo-analysis/overlap-learning', { timeoutMs: 90_000 }),
+
   /** 복기 엔트리 회차 재귀속(관리자) — 라벨만 교정, 보관 정본 불변, 원본 회차 보존. */
   reattributeEntries: (fromRound: number, toRound: number, entryIds?: string[]) =>
     fetchJson<{
@@ -978,6 +982,28 @@ export interface ArchivedCurrentRoundSnapshot {
       bonus_in_excluded?: boolean;
     }>;
   };
+}
+
+/** 줄겹침(2·3·4번호) 역산 학습 — 겹침 조합이 실제 당첨을 얼마나 담았는지. */
+export interface OverlapLearningResponse {
+  ok: boolean;
+  reason?: string;
+  round_count: number;
+  total_combos?: number;
+  rounds?: {
+    round_no: number;
+    winning_numbers: number[];
+    auto_line_count: number;
+    combo_count: number;
+    by_size: { size: number; combos: number; mean_overlap: number; expected: number; lift_vs_chance: number; fully_winning: number }[];
+  }[];
+  by_size?: { size: number; combos: number; mean_overlap: number; expected: number; lift_vs_chance: number; fully_winning: number }[];
+  by_lift_bucket?: { size: number; bucket: string; combos: number; mean_overlap: number; expected: number; lift_vs_chance: number }[];
+  current_round_no?: number;
+  current_combo_count?: number;
+  current_scores?: { number: number; score: number; combo_support: number }[];
+  calibration_flat?: boolean;
+  honesty?: string;
 }
 
 /** 다회차 학습 — 보관 회차 용지 + 실제 당첨 대조 캘리브레이션. */

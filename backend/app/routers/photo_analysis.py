@@ -373,6 +373,17 @@ def get_round_learning():
     return to_jsonable(build_round_learning())
 
 
+@router.get("/overlap-learning")
+def get_overlap_learning():
+    """줄겹침(2·3·4번호) 패턴 역산 학습 — 보관 회차 겹침 조합 vs 실제 당첨 대조.
+
+    회차가 쌓이면 호출 시마다 전체 보관 배치를 재집계하므로 자동으로 표본이 늘어난다.
+    """
+    from ..video_analysis.overlap_learning import build_overlap_learning
+
+    return to_jsonable(build_overlap_learning())
+
+
 class ReattributeRequest(BaseModel):
     from_round: int = Field(..., ge=1, description="현재 잘못 기록된 회차")
     to_round: int = Field(..., ge=1, description="교정할 실제 회차")

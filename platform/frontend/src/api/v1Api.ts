@@ -582,6 +582,13 @@ export const v1Api = {
       { timeoutMs: 180_000 },
     ),
 
+  /** 복기 Pattern Mining — 전수 학습·검증·Cluster·설명가능 추천. */
+  getPatternMining: (seed = 42) =>
+    fetchJson<PatternMiningResponse>(
+      `/api/v1/photo-analysis/pattern-mining?seed=${seed}`,
+      { timeoutMs: 180_000 },
+    ),
+
   /** 복기 엔트리 회차 재귀속(관리자) — 라벨만 교정, 보관 정본 불변, 원본 회차 보존. */
   reattributeEntries: (fromRound: number, toRound: number, entryIds?: string[]) =>
     fetchJson<{
@@ -1124,6 +1131,105 @@ export interface FeatureLearningResponse {
   };
   baselines?: { uniform_top6_hits: number; uniform_hit_rate: number };
   pipeline?: string[];
+  honesty?: string;
+}
+
+/** 복기 Pattern Mining 엔진 응답. */
+export interface PatternMiningPattern {
+  id: string;
+  kind: string;
+  label: string;
+  numbers: number[];
+  meta?: Record<string, unknown>;
+  appear_rounds: number;
+  win_include_rate: number;
+  reproduce_rate: number;
+  stability: number;
+  recent_retention: number;
+  continuity: number;
+  diversity: number;
+  strong_include: number;
+  auto_include: number;
+  semi_include: number;
+  match_retention: number;
+  wf_mean_hits: number;
+  lift_vs_baseline: number;
+  permutation_p: number;
+  adopted: boolean;
+  use_reasons: string[];
+  exclude_reasons: string[];
+  per_round?: { round_no: number; fired: boolean; win_overlap: number | null; top_hits: number | null }[];
+}
+
+export interface PatternMiningResponse {
+  ok: boolean;
+  reason?: string;
+  round_count: number;
+  current_round_no?: number;
+  pattern_count?: number;
+  adopted_count?: number;
+  rejected_count?: number;
+  dataset?: {
+    rounds: {
+      round_no: number;
+      auto_lines: number;
+      semi_lines: number;
+      strong18: number[];
+      match_cards: Record<string, number>;
+      winning: number[];
+    }[];
+    sources: string[];
+    note?: string;
+  };
+  patterns?: PatternMiningPattern[];
+  adopted_patterns?: PatternMiningPattern[];
+  clusters?: {
+    cluster_id: string;
+    key: string;
+    size: number;
+    adopted_count: number;
+    mean_lift: number;
+    pattern_ids: string[];
+    kinds: string[];
+  }[];
+  feature_selection?: {
+    ok: boolean;
+    reason?: string;
+    kept: string[];
+    dropped: string[];
+    reports?: { feature: string; kept: boolean; reason?: string; corr?: number }[];
+  };
+  recommendation?: {
+    ok: boolean;
+    reason?: string;
+    source?: string;
+    adopted_pattern_count?: number;
+    kept_features?: string[];
+    numbers?: {
+      number: number;
+      score: number;
+      features?: Record<string, number>;
+      reasons?: {
+        pattern_id: string;
+        pattern_label: string;
+        kind: string;
+        stability: number;
+        lift: number;
+        appear_rounds: number;
+        wf_mean_hits: number;
+        cluster_id: string | null;
+        contribution: number;
+      }[];
+      in_strong18?: boolean;
+      auto_lines?: number;
+      semi_lines?: number;
+    }[];
+    top6?: number[];
+    strong18?: number[];
+    honesty?: string;
+  };
+  pipeline?: string[];
+  baselines?: { uniform_top6_hits: number };
   honesty?: string;
 }
 

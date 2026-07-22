@@ -408,6 +408,19 @@ def get_feature_learning(seed: int = Query(42, ge=0, le=999_999)):
     return to_jsonable(build_feature_learning(seed=seed))
 
 
+@router.get("/pattern-mining")
+def get_pattern_mining(seed: int = Query(42, ge=0, le=999_999)):
+    """복기 Pattern Mining · Validation · Cluster · 설명가능 추천.
+
+    자동/반자동/매치카드/강한후보/구조(거리·구간·배치)를 전수 학습해 Pattern 을
+    자동 생성하고, Walk-Forward/Rolling/Time-Split/Backtest 로 검증한 뒤
+    통과 Pattern 만 추천·근거에 반영한다. 호출 시마다 전체 재탐색(자동 학습).
+    """
+    from ..video_analysis.pattern_mining_engine import build_pattern_mining
+
+    return to_jsonable(build_pattern_mining(seed=seed))
+
+
 class ReattributeRequest(BaseModel):
     from_round: int = Field(..., ge=1, description="현재 잘못 기록된 회차")
     to_round: int = Field(..., ge=1, description="교정할 실제 회차")

@@ -1325,6 +1325,12 @@ export default function SemiAutoComparePanel({
     staleTime: 300_000,
     retry: 1,
   });
+  const patternMiningQuery = useQuery({
+    queryKey: ['v1-photo-pattern-mining', 'semi-auto'],
+    queryFn: () => v1Api.getPatternMining(42),
+    staleTime: 300_000,
+    retry: 1,
+  });
 
   const validatedLearning = useMemo((): ValidatedLearningSignal[] => {
     const out: ValidatedLearningSignal[] = [];
@@ -1372,12 +1378,22 @@ export default function SemiAutoComparePanel({
       }
     }
 
+    const pm = patternMiningQuery.data;
+    if (pm?.ok && pm.recommendation?.ok) {
+      const nums = pm.recommendation.numbers ?? [];
+      const maxScore = Math.max(0.01, ...nums.map((x) => Math.abs(x.score)));
+      for (const row of nums.slice(0, 15)) {
+        push(row.number, 0.4 + 0.6 * (Math.abs(row.score) / maxScore), 'pattern', '검증Pattern');
+      }
+    }
+
     return out.sort((a, b) => b.weight - a.weight);
   }, [
     featureLearningQuery.data,
     roundLearningQuery.data,
     overlapLearningQuery.data,
     reviewVerificationQuery.data,
+    patternMiningQuery.data,
   ]);
 
   const learningBridgeStatus = useMemo(
@@ -4312,7 +4328,8 @@ export default function SemiAutoComparePanel({
                   · 다회차 {learningBridgeStatus.roundLearningRounds}회
                   · 겹침 {learningBridgeStatus.overlapRounds}회
                   · 커버리지 {learningBridgeStatus.coverageWired ? 'ON' : 'OFF'}
-                  — 미검증 Feature는 추천·순위에 넣지 않습니다. 1등 확률은 불변이며,
+                  · Pattern Mining 연동
+                  — 미검증 Feature/Pattern은 추천·순위에 넣지 않습니다. 1등 확률은 불변이며,
                   <strong> 커버리지(넓은 그물) + 구간 분산</strong>으로 top-6 과적합을 완화합니다.
                 </Typography>
               </Alert>

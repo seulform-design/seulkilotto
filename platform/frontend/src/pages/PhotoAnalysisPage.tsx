@@ -30,6 +30,7 @@ import RoundDataBreakdownPanel from '../components/RoundDataBreakdownPanel';
 import RoundLearningPanel from '../components/RoundLearningPanel';
 import ReviewVerificationPanel from '../components/ReviewVerificationPanel';
 import FeatureLearningPanel from '../components/FeatureLearningPanel';
+import PatternMiningPanel from '../components/PatternMiningPanel';
 import SavedLinesPanel, {
   GAME_LABELS,
   slipFromLines,
@@ -1757,6 +1758,9 @@ export default function PhotoAnalysisPage() {
 
       {/* 🧠 복기 Feature 자동 생성·검증·학습 — WF/Random 통과분만 추천·기여도 */}
       <FeatureLearningPanel />
+
+      {/* 🔍 복기 Pattern Mining — 전수 학습·Cluster·설명가능 추천 */}
+      <PatternMiningPanel />
 
       {/* 🎓 다회차 용지 학습 — 보관 회차(누수 없음) 캘리브레이션 → 이번회차 적용 */}
       <RoundLearningPanel />

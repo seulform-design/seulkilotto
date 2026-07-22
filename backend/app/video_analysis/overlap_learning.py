@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any, Dict, List
 
 BASE_RATE = 6.0 / 45.0  # 임의 번호가 당첨 6개에 속할 확률
@@ -26,6 +27,20 @@ LIFT_BUCKETS: List[tuple[str, float, float]] = [
     ("lift 1.5~2.5", 1.5, 2.5),
     ("lift 2.5+", 2.5, 1e9),
 ]
+
+
+def _line_freq(lines: List[List[int]]) -> Counter:
+    """번호별 등장 줄 수(줄 단위 distinct)."""
+    c: Counter = Counter()
+    for ln in lines:
+        for n in {int(x) for x in ln if 1 <= int(x) <= 45}:
+            c[n] += 1
+    return c
+
+
+def _rank_signal(values: Dict[int, float]) -> List[int]:
+    """값 내림차순(동률은 번호 오름차순) 랭킹."""
+    return sorted(range(1, 46), key=lambda n: (-values.get(n, 0.0), n))
 
 
 def _bucket_of_lift(lift: float) -> str:

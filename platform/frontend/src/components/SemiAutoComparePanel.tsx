@@ -38,6 +38,7 @@ import NumberFrequencyPanel from './NumberFrequencyPanel';
 import {
   generateScoredRecommendations,
   type ScoredRecommendation,
+  type ValidatedLearningSignal,
 } from './reviewRecommendationEngine';
 import SavedLinesPanel, {
   GAME_LABELS,
@@ -1208,7 +1209,11 @@ export default function SemiAutoComparePanel({
   const reviewDataRound = useMemo(() => {
     const raw = accumulated?.by_intent?.review?.ticket_round;
     const n = raw != null ? parseInt(String(raw), 10) : NaN;
-    return Number.isFinite(n) && n > 0 ? n : null;
+    if (Number.isFinite(n) && n > 0) return n;
+    // 고아 복기 삭제 후 live 복기가 비면 최신 보관 회차를 대조 기준으로 사용.
+    const archived = accumulated?.historical_dataset?.latest_archived_round;
+    const a = archived != null ? parseInt(String(archived), 10) : NaN;
+    return Number.isFinite(a) && a > 0 ? a : null;
   }, [accumulated]);
 
   // 명시 지정(compareRound) > 복기 데이터 회차 > (폴백) 최신 추첨.
@@ -1293,6 +1298,104 @@ export default function SemiAutoComparePanel({
   // 호기(추첨기) 축은 '추정값' 신뢰도 문제로 제외(사용자 요청). 예측은 자동↔반자동
   // 1:1 전수비교 + 평행회차 두 축으로만 진행한다. (안정 참조로 빈 배열 고정.)
   const machineStrong = useMemo<number[]>(() => [], []);
+
+  // ✅ 복기 학습 패널(Feature/Round/Overlap/ReviewVerification) → 예상·추천에 반영.
+  // 검증 통과·기준선 이상만 validatedLearning 으로 주입한다.
+  const featureLearningQuery = useQuery({
+    queryKey: ['v1-photo-feature-learning', 'semi-auto'],
+    queryFn: () => v1Api.getFeatureLearning(42),
+    staleTime: 300_000,
+    retry: 1,
+  });
+  const roundLearningQuery = useQuery({
+    queryKey: ['v1-photo-round-learning', 'semi-auto'],
+    queryFn: v1Api.getRoundLearning,
+    staleTime: 300_000,
+    retry: 1,
+  });
+  const reviewVerificationQuery = useQuery({
+    queryKey: ['v1-photo-review-verification', 'semi-auto'],
+    queryFn: v1Api.getReviewVerification,
+    staleTime: 300_000,
+    retry: 1,
+  });
+  const overlapLearningQuery = useQuery({
+    queryKey: ['v1-photo-overlap-learning', 'semi-auto'],
+    queryFn: v1Api.getOverlapLearning,
+    staleTime: 300_000,
+    retry: 1,
+  });
+
+  const validatedLearning = useMemo((): ValidatedLearningSignal[] => {
+    const out: ValidatedLearningSignal[] = [];
+    const seen = new Set<string>();
+    const push = (n: number, weight: number, source: ValidatedLearningSignal['source'], label: string) => {
+      if (!Number.isInteger(n) || n < 1 || n > 45 || weight <= 0) return;
+      const key = `${source}:${n}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ number: n, weight: Math.max(0, Math.min(1, weight)), source, label });
+    };
+
+    const feat = featureLearningQuery.data;
+    if (feat?.ok && feat.recommendation?.ok) {
+      const nums = feat.recommendation.numbers ?? [];
+      const maxAbs = Math.max(0.01, ...nums.map((x) => Math.abs(x.score)));
+      for (const row of nums.slice(0, 18)) {
+        push(row.number, 0.35 + 0.65 * (Math.abs(row.score) / maxAbs), 'feature', '검증Feature');
+      }
+    }
+
+    const rl = roundLearningQuery.data;
+    if (rl?.ok && (rl.current_scores?.length ?? 0) > 0) {
+      const maxScore = Math.max(1, ...rl.current_scores!.map((s) => s.score));
+      for (const s of rl.current_scores!.slice(0, 15)) {
+        if ((s.learned_lift ?? 1) < 1.05) continue;
+        push(s.number, 0.3 + 0.7 * (s.score / maxScore), 'round', '다회차학습');
+      }
+    }
+
+    const ov = overlapLearningQuery.data;
+    if (ov?.ok && (ov.current_scores?.length ?? 0) > 0) {
+      const maxScore = Math.max(1, ...ov.current_scores!.map((s) => s.score));
+      for (const s of ov.current_scores!.slice(0, 12)) {
+        push(s.number, 0.3 + 0.7 * (s.score / maxScore), 'overlap', '겹침학습');
+      }
+    }
+
+    const rv = reviewVerificationQuery.data;
+    const cov = rv?.current_coverage_set;
+    if (rv?.ok && cov) {
+      for (const n of cov.core6 ?? []) push(n, 0.85, 'coverage', '커버리지core');
+      for (const n of cov.expand18 ?? []) {
+        if (!(cov.core6 ?? []).includes(n)) push(n, 0.45, 'coverage', '커버리지18');
+      }
+    }
+
+    return out.sort((a, b) => b.weight - a.weight);
+  }, [
+    featureLearningQuery.data,
+    roundLearningQuery.data,
+    overlapLearningQuery.data,
+    reviewVerificationQuery.data,
+  ]);
+
+  const learningBridgeStatus = useMemo(
+    () => ({
+      validatedCount: validatedLearning.length,
+      adoptedFeatures: featureLearningQuery.data?.adopted_count ?? 0,
+      roundLearningRounds: roundLearningQuery.data?.ok ? (roundLearningQuery.data.round_count ?? 0) : 0,
+      overlapRounds: overlapLearningQuery.data?.ok ? (overlapLearningQuery.data.round_count ?? 0) : 0,
+      coverageWired: Boolean(reviewVerificationQuery.data?.current_coverage_set),
+    }),
+    [
+      validatedLearning.length,
+      featureLearningQuery.data,
+      roundLearningQuery.data,
+      overlapLearningQuery.data,
+      reviewVerificationQuery.data,
+    ],
+  );
 
   const resolvedStrongCandidates = useMemo(() => {
     if (predictionSignals?.strong_candidates?.length) {
@@ -2167,37 +2270,49 @@ export default function SemiAutoComparePanel({
     crossSetPatterns,
   ]);
 
-  // 🔗 전수비교 × 심층역산 교차 검증 — 사용자 요청: '심층 역산 예측' 과 '1:1 전수비교'
-  // 데이터를 교차해 예상 가능한 번호를 도출하고, 복기(1232)로 백테스트 검증.
-  // 교차 consensus = 자동·반자동 양쪽 줄에 등장(1:1 전수비교 지지)하면서 심층역산
-  // 점수도 높은 번호. 각 번호의 근거(자동 N줄·반자동 M줄·최대일치 K)를 함께 노출.
+  // 🔗 전수비교 × 심층역산 교차 검증 — 심층역산과 1:1 전수비교를 교차해
+  // 합의 번호를 도출하고, 복기(effectiveRound)로 백테스트 검증.
+  // 교차 consensus = 자동·반자동 양쪽 줄에 등장하면서 심층역산 점수도 높은 번호.
   const crossValidation = useMemo(() => {
     if (predictedNumbers.length === 0) return null;
     const maxAuto = Math.max(1, ...predictedNumbers.map((p) => p.auto));
     const maxSemi = Math.max(1, ...predictedNumbers.map((p) => p.semi));
     const r2 = (x: number) => Math.round(x * 100) / 100;
-    const scored = predictedNumbers
+    const byNumber = new Map<number, (typeof predictedNumbers)[number]>();
+    for (const p of predictedNumbers) {
+      if (!byNumber.has(p.number)) byNumber.set(p.number, p); // 번호당 1행 보장
+    }
+    const scored = Array.from(byNumber.values())
       .map((p) => {
-        const oneToOne = p.auto > 0 && p.semi > 0; // 1:1 전수비교 양쪽 지지
+        const oneToOne = p.auto > 0 && p.semi > 0;
         const support = oneToOne ? Math.sqrt((p.auto / maxAuto) * (p.semi / maxSemi)) : 0;
-        const deep = p.confidence / 100; // 심층역산 정규화 점수(0~1)
+        const deep = p.confidence / 100;
+        // 검증 학습 부스트 — 채택된 Feature/커버리지에 든 번호는 교차 점수에 소량 가산
+        const val = validatedLearning.find((v) => v.number === p.number);
+        const valBoost = val ? 0.08 * val.weight : 0;
         const cross = oneToOne
-          ? (0.5 * deep + 0.5 * support) * (1 + 0.15 * Math.max(0, p.maxMatch - 2))
-          : 0;
+          ? (0.5 * deep + 0.5 * support) * (1 + 0.15 * Math.max(0, p.maxMatch - 2)) + valBoost
+          : valBoost > 0
+            ? valBoost * 0.5
+            : 0;
         return {
           number: p.number,
           auto: p.auto,
           semi: p.semi,
           maxMatch: p.maxMatch,
-          sources: p.sources,
+          sources: [
+            ...p.sources,
+            ...(val ? [val.label] : []),
+          ],
           deep: Math.round(deep * 100),
           support: r2(support),
           cross: r2(cross),
           won: compareWinning && winningSet ? winningSet.has(p.number) : null,
+          validated: Boolean(val),
         };
       })
       .filter((x) => x.cross > 0)
-      .sort((a, b) => b.cross - a.cross);
+      .sort((a, b) => b.cross - a.cross || a.number - b.number);
 
     const backtest =
       compareWinning && winningSet && winningSet.size > 0
@@ -2205,13 +2320,13 @@ export default function SemiAutoComparePanel({
             W: winningSet.size,
             top6Hits: scored.slice(0, 6).filter((x) => x.won).length,
             top10Hits: scored.slice(0, 10).filter((x) => x.won).length,
-            exp6: r2((winningSet.size * 6) / 45),
-            exp10: r2((winningSet.size * 10) / 45),
+            exp6: Math.round((6 * 6) / 45 * 100) / 100,
+            exp10: Math.round((10 * 6) / 45 * 100) / 100,
           }
         : null;
 
     return { scored: scored.slice(0, 12), total: scored.length, backtest };
-  }, [predictedNumbers, winningSet, compareWinning]);
+  }, [predictedNumbers, winningSet, compareWinning, validatedLearning]);
 
   // 🎯 이번회차 종합 예측 대시보드 (이번회차 탭 전용) — 이번회차에서 사용 가능한
   // 모든 신호를 하나로 종합한다: ①용지 교차검증(티켓 기반) ②통합 예측신호(6소스)
@@ -2984,6 +3099,7 @@ export default function SemiAutoComparePanel({
         profileMatched: patternMatched?.list.map((m) => ({ number: m.number, sim: m.sim })),
         // 🧬 학습된 당첨 조합 구조(합계·홀수·구간분산·연속) — 조합 형태 정합 가산.
         learnedStructure: learnedPattern?.structure,
+        validatedLearning,
         regenNonce: nonce,
       },
       5
@@ -3012,6 +3128,7 @@ export default function SemiAutoComparePanel({
     machineStrong,
     patternMatched,
     learnedPattern,
+    validatedLearning,
   ]);
 
   /**
@@ -4188,6 +4305,17 @@ export default function SemiAutoComparePanel({
                   ? '복기 탭은 아래에서 실제 당첨과 ‘대조’만 합니다.'
                   : `이 순위가 ${effectiveRound ?? '?'}회 예측입니다 — 복기 탭에서 검증된 same 로직.`}
               </Typography>
+              <Alert severity="info" sx={{ mb: 1, py: 0.5 }}>
+                <Typography variant="caption">
+                  ✅ 복기 학습 연동: 검증신호 {learningBridgeStatus.validatedCount}개
+                  · Feature 채택 {learningBridgeStatus.adoptedFeatures}
+                  · 다회차 {learningBridgeStatus.roundLearningRounds}회
+                  · 겹침 {learningBridgeStatus.overlapRounds}회
+                  · 커버리지 {learningBridgeStatus.coverageWired ? 'ON' : 'OFF'}
+                  — 미검증 Feature는 추천·순위에 넣지 않습니다. 1등 확률은 불변이며,
+                  <strong> 커버리지(넓은 그물) + 구간 분산</strong>으로 top-6 과적합을 완화합니다.
+                </Typography>
+              </Alert>
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
                 {predictedNumbers.slice(0, 10).map((p, i) => (
                   <Box key={`pred-${p.number}`} sx={{ textAlign: 'center', minWidth: 44 }}>
@@ -4228,7 +4356,7 @@ export default function SemiAutoComparePanel({
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
                     <strong>1:1 전수비교(자동·반자동 양쪽 줄 등장·최대일치)</strong> 지지와 <strong>심층역산 점수</strong>가
                     함께 높은 번호만 추립니다. 각 번호가 <strong>몇 줄·어떤 데이터</strong>로 뒷받침되는지 표시.
-                    {compareWinning ? ' 복기(1232)는 실제 당첨과 대조(검증).' : ` ${effectiveRound ?? '?'}회 이번회차 데이터 기반 예측.`}
+                    {compareWinning ? ` 복기(${effectiveRound ?? '?'})는 실제 당첨과 대조(검증).` : ` ${effectiveRound ?? '?'}회 이번회차 데이터 기반 예측.`}
                   </Typography>
                   <Stack spacing={0.4}>
                     {crossValidation.scored.map((x, i) => (
@@ -4307,16 +4435,29 @@ export default function SemiAutoComparePanel({
                   const top6 = predictedNumbers.slice(0, 6).map((p) => p.number);
                   const hit8 = top8.filter((n) => winningSet.has(n)).length;
                   const hit6 = top6.filter((n) => winningSet.has(n)).length;
+                  const cross6 = crossValidation?.backtest?.top6Hits;
+                  const cross10 = crossValidation?.backtest?.top10Hits;
                   return (
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
-                      <Chip
-                        size="small"
-                        color={hit6 >= 3 ? 'success' : hit6 >= 2 ? 'warning' : 'default'}
-                        label={`역산 검증 — ${effectiveRound ?? '?'}회 실제 당첨 대조: 상위 6개 중 ${hit6}개 · 상위 8개 중 ${hit8}개 적중`}
-                        sx={{ fontWeight: 700 }}
-                      />
+                    <Stack spacing={0.5}>
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
+                        <Chip
+                          size="small"
+                          color={hit6 >= 3 ? 'success' : hit6 >= 2 ? 'warning' : 'default'}
+                          label={`반복도 기준 — ${effectiveRound ?? '?'}회: 상위6 ${hit6}개 · 상위8 ${hit8}개 적중`}
+                          sx={{ fontWeight: 700 }}
+                        />
+                        {cross6 != null && (
+                          <Chip
+                            size="small"
+                            color={cross6 >= 3 ? 'success' : cross6 >= 2 ? 'warning' : 'default'}
+                            label={`교차검증 기준 — 상위6 ${cross6}개 · 상위10 ${cross10}개`}
+                            sx={{ fontWeight: 700 }}
+                          />
+                        )}
+                      </Stack>
                       <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                        (무작위 기대 ≈ 상위 6개 중 0.8개 · 이 값보다 높아야 신호로 의미 있음)
+                        두 칩은 순위 기준이 다릅니다(반복도 vs 교차 점수). 기대≈상위6 중 0.8개.
+                        역산 결과상 top-6 집중보다 <strong>커버리지(상위15~18)</strong>가 당첨을 더 잘 담는 경우가 많습니다.
                       </Typography>
                     </Stack>
                   );
@@ -4345,7 +4486,7 @@ export default function SemiAutoComparePanel({
                   </Stack>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
                     강수 = 구간별 1:1 반복도 상위 3 · 기대 = 다음 3. 숫자 아래 = 자동/반자동 등장 줄 수.
-                    {compareWinning ? ' 초록 = 실제 당첨.' : ' 반자동 고정 후보 참고용.'}
+                    {compareWinning ? ' 밝은 공 = 실제 당첨 · 회색 = 비당첨.' : ' 반자동 고정 후보 참고용.'}
                   </Typography>
                   <Stack spacing={0.5}>
                     {decadePattern.byBand.map((b) => (
@@ -4459,7 +4600,9 @@ export default function SemiAutoComparePanel({
                     </Typography>
                   )}
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.25 }}>
-                    학습 근거(당첨 6개 순위): {learnedPattern.feats.map((f) => `${f.number}=${f.rank ?? '미등장'}위`).join(' · ')} / 전체 {learnedPattern.totalNums}개
+                    학습 근거(<strong>복기 빈도 순위</strong>): {learnedPattern.feats.map((f) => `${f.number}=${f.rank ?? '미등장'}위`).join(' · ')} / 전체 {learnedPattern.totalNums}개
+                    <br />
+                    ※ 위 Top10은 <strong>현재 유사도 순위</strong>이고, 이 줄은 학습 표본(당첨 6개)의 복기 빈도 순위입니다 — 서로 다른 축입니다.
                   </Typography>
                 </Box>
               )}
@@ -4472,7 +4615,7 @@ export default function SemiAutoComparePanel({
                   </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
                     실제 당첨번호가 전수비교에서 '어느 레벨에 얼마나 반복' 나왔는지 + <strong>순수 반복도 전체 {winningPatternAnalysis.totalNumbers}개 중 몇 위</strong>였는지.
-                    이 순위가 높을수록 → 반복도 방식이 당첨을 잘 포착 → 다음 회차(1232) 예상번호로 쓰는 근거.
+                    이 순위가 높을수록 → 반복도 방식이 당첨을 잘 포착 → 다음 회차 예상번호로 쓰는 근거.
                   </Typography>
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
                     <Chip
@@ -4520,7 +4663,7 @@ export default function SemiAutoComparePanel({
                 <Box sx={{ mt: 1.25 }}>
                   <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
                     🔬 번호별 반복 출현 정밀 역산 (당첨번호 무관 · 이번회차에도 동일)
-                    {compareWinning ? ' — 초록: 실제 당첨번호' : ''}
+                    {compareWinning ? ' — 밝은 공: 실제 당첨 · 회색: 비당첨' : ''}
                   </Typography>
                   <Box
                     sx={{
@@ -4562,7 +4705,7 @@ export default function SemiAutoComparePanel({
                 <Box sx={{ mt: 1.25 }}>
                   <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
                     🔎 전수비교 강한 패턴 (공통 3개+ 그룹 · 자동↔반자동 양쪽 겹침)
-                    {compareWinning ? ' — 초록: 전부 당첨번호였던 패턴' : ''}
+                    {compareWinning ? ' — 밝은 공: 전부 당첨번호였던 패턴' : ''}
                   </Typography>
                   <Box
                     sx={{
@@ -4616,7 +4759,7 @@ export default function SemiAutoComparePanel({
                 <Box sx={{ mt: 1.25 }}>
                   <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
                     📊 일치 개수별 겹침 번호 역산 (6·5·4·3·2개 각 레벨 · 숫자 아래 = 등장 그룹 수)
-                    {compareWinning ? ' — 초록: 실제 당첨번호' : ''}
+                    {compareWinning ? ' — 밝은 공: 실제 당첨 · 회색: 비당첨' : ''}
                   </Typography>
                   <Stack spacing={0.75}>
                     {levelBreakdown.map((lv) => (
@@ -4652,7 +4795,7 @@ export default function SemiAutoComparePanel({
                 <Box sx={{ mt: 1.25 }}>
                   <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
                     🔁 세트 중복 역산 (모든 일치 그룹 교차 — 2·3개 세트가 반복 등장)
-                    {compareWinning ? ' — 초록: 전부 당첨번호였던 세트' : ''}
+                    {compareWinning ? ' — 밝은 공: 전부 당첨번호였던 세트' : ''}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
                     여러 그룹(6·5·4·3·2일치)에 걸쳐 자동·반자동이 함께 가리킨 번호 세트 —
@@ -4719,7 +4862,7 @@ export default function SemiAutoComparePanel({
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 단순 빈도가 아니라 <strong>일치개수 가중치</strong>(6개×10·5×8·4×6·3×4·2×2) · <strong>공출현 네트워크
                 허브(중심성)</strong> · <strong>세트 반복</strong> · <strong>숨은 강수</strong>를 합성해 당첨 구조를 역산합니다.
-                당첨번호는 계산에 넣지 않습니다(복기는 초록 대조만).
+                당첨번호는 계산에 넣지 않습니다(복기는 밝은 공으로 대조만).
               </Typography>
 
               {/* 🎯 최종 예측 조합 (구간 균형) + 구조 서술 — 이 섹션의 결론 */}
@@ -4906,7 +5049,7 @@ export default function SemiAutoComparePanel({
               <Divider sx={{ my: 1 }} />
               {/* ③④⑤ 강한 세트 */}
               <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                ③ 가장 강한 세트 (2·3·4번호 반복){compareWinning ? ' — 초록: 전부 당첨' : ''}
+                ③ 가장 강한 세트 (2·3·4번호 반복){compareWinning ? ' — 밝은 공: 전부 당첨' : ''}
               </Typography>
               {([
                 { label: '2번호', items: crossSetPatterns.pairs.slice(0, 4) },
@@ -5034,6 +5177,8 @@ export default function SemiAutoComparePanel({
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
               <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차(강수·기대수)</strong> ·{' '}
               <strong>🧬 학습된 당첨 프로파일 매칭</strong>({learnedPattern?.round ?? '복기'}회 당첨 구조 학습·전이) —
+              <strong> ✅ 검증 학습 {learningBridgeStatus.validatedCount}개</strong>(Feature·다회차·겹침·커버리지) —
+              미검증 신호는 제외 · 구간 분산·커버리지로 top-6 과적합 완화.
               이 세 축을 핵심으로 6번호 5세트를 생성합니다.
               (강한 후보·호기 추정값은 사용하지 않습니다.)
               {compareWinning

@@ -10,7 +10,22 @@ import { useConfirm } from './useConfirm';
  *    (= 실제로 그 회차에 구매·등록한 용지)
  *  - 복기 저장분: 복기 탭으로 저장된 엔트리. 저장 시점의 '최신 추첨 회차'로
  *    라벨링되므로, 이전 회차 용지를 나중에 저장하면 실제 구매 회차와 달라질 수 있다.
+ *
+ * 고아(orphan) 복기: 보관 정본과 줄 수가 동일한 복기 저장분 → 중복·오염으로 보고
+ * 삭제 대상(보관 정본은 유지).
  */
+function isOrphanReview(r: {
+  review?: { auto_lines: number; semi_lines: number; entry_count: number } | null;
+  archived?: { auto_lines: number; semi_lines: number; entry_count: number } | null;
+}): boolean {
+  if (!r.review || !r.archived) return false;
+  return (
+    r.review.auto_lines === r.archived.auto_lines
+    && r.review.semi_lines === r.archived.semi_lines
+    && r.review.auto_lines + r.review.semi_lines > 0
+  );
+}
+
 export default function RoundDataBreakdownPanel({
   accumulated,
   onAccumulatedChange,
@@ -27,6 +42,7 @@ export default function RoundDataBreakdownPanel({
   const rows = accumulated?.historical_dataset?.rounds_breakdown ?? [];
   if (!rows.length) return null;
   const conflicted = rows.filter((r) => r.review && r.archived);
+  const orphans = rows.filter(isOrphanReview);
 
   const runReattribute = async (fromRound: string) => {
     const to = Number(targetRound);
@@ -62,26 +78,72 @@ export default function RoundDataBreakdownPanel({
     }
   };
 
+  const clearOrphanReviews = async () => {
+    const ok = await confirm({
+      message:
+        '보관 정본과 줄 수가 동일한 「고아 복기 저장분」을 삭제할까요?\n\n' +
+        `대상 회차: ${orphans.map((r) => r.ticket_round).join(', ')}\n` +
+        '• 롤오버 보관 정본은 절대 삭제하지 않습니다.\n' +
+        '• 복기 탭 live 저장분만 제거합니다.',
+      confirmText: '고아 복기 삭제',
+    });
+    if (!ok) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      // intent=review, include_archived=false (기본) → 보관 정본 유지
+      const res = await v1Api.clearPhotoAnalysisStore('review');
+      const acc = await v1Api.getPhotoAnalysisAccumulated();
+      onAccumulatedChange?.(acc);
+      setNotice(`✅ 고아 복기 정리 완료 (삭제 ${res.removed ?? '?'}건). 보관 정본은 유지됩니다.`);
+    } catch (e) {
+      setNotice(`❌ 고아 삭제 실패: ${e instanceof Error ? e.message : '서버 오류'}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
-      <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.5 }}>
-        🗂 회차별 용지 데이터 ({rows.length}개 회차)
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+        <Typography variant="subtitle1" fontWeight={800}>
+          🗂 회차별 용지 데이터 ({rows.length}개 회차)
+        </Typography>
+        {orphans.length > 0 && (
+          <Button
+            size="small"
+            color="warning"
+            variant="outlined"
+            disabled={busy}
+            onClick={clearOrphanReviews}
+            sx={{ fontSize: 11 }}
+          >
+            고아 복기 {orphans.length}건 삭제
+          </Button>
+        )}
+      </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
         <strong>롤오버 보관분</strong>이 그 회차에 실제로 등록한 이번회차 용지입니다(추첨 시 동결).
         <strong> 복기 저장분</strong>은 복기 탭 저장분으로, 저장 시점의 최신 추첨 회차로 라벨링되어
-        실제 구매 회차와 다를 수 있습니다.
+        실제 구매 회차와 다를 수 있습니다. 보관과 줄 수가 같은 복기는 <strong>고아(중복)</strong>로
+        학습·표시를 오염시키므로 삭제하세요.
       </Typography>
 
-      {conflicted.length > 0 && (
+      {orphans.length > 0 && (
+        <Alert severity="error" sx={{ mb: 1.5 }}>
+          고아 복기 감지: {orphans.map((r) => r.ticket_round).join(', ')}회 —
+          보관 정본과 동일 줄 수라 중복 저장으로 보입니다. 학습·예상번호 섹션이 왜곡될 수 있습니다.
+        </Alert>
+      )}
+
+      {conflicted.length > 0 && orphans.length === 0 && (
         <Alert severity="warning" sx={{ mb: 1.5 }}>
           {conflicted.map((r) => r.ticket_round).join(', ')}회에 <strong>두 출처가 공존</strong>합니다.
-          같은 회차 라벨이어도 내용이 다를 수 있으니 아래에서 구분해 확인하세요.
+          내용이 다르면 재귀속으로 교정하고, 동일하면 고아 복기를 삭제하세요.
         </Alert>
       )}
 
       <Stack spacing={0.75}>
-        {/* 헤더 */}
         <Stack direction="row" spacing={1} sx={{ px: 1, py: 0.5 }}>
           <Typography sx={{ width: 64, fontSize: 11, fontWeight: 800 }}>회차</Typography>
           <Typography sx={{ flex: 1, fontSize: 11, fontWeight: 800, color: 'success.light' }}>
@@ -101,7 +163,11 @@ export default function RoundDataBreakdownPanel({
               px: 1,
               py: 0.75,
               borderRadius: 1,
-              bgcolor: r.review && r.archived ? 'rgba(237,108,2,0.12)' : 'action.hover',
+              bgcolor: isOrphanReview(r)
+                ? 'rgba(211,47,47,0.12)'
+                : r.review && r.archived
+                  ? 'rgba(237,108,2,0.12)'
+                  : 'action.hover',
             }}
           >
             <Typography sx={{ width: 64, fontWeight: 800, fontSize: 13 }}>{r.ticket_round}회</Typography>
@@ -127,11 +193,14 @@ export default function RoundDataBreakdownPanel({
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
                   <Chip
                     size="small"
-                    color="info"
+                    color={isOrphanReview(r) ? 'error' : 'info'}
                     variant="outlined"
                     label={`자동 ${r.review.auto_lines}줄 · 반자동 ${r.review.semi_lines}줄`}
                     sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
                   />
+                  {isOrphanReview(r) && (
+                    <Chip size="small" color="error" label="고아" sx={{ height: 18, fontSize: 10 }} />
+                  )}
                   <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>
                     {r.review.entry_count}건
                   </Typography>
@@ -189,7 +258,7 @@ export default function RoundDataBreakdownPanel({
       {ConfirmDialog}
 
       <Typography variant="caption" sx={{ display: 'block', mt: 1, fontStyle: 'italic', color: 'text.disabled' }}>
-        ※ 두 출처 모두 보존됩니다(삭제 없음). 학습·분석은 회차별로 구분해 사용합니다.
+        ※ 보관 정본은 학습·분석의 기준입니다. 고아 복기만 삭제하며, 일반 공존은 재귀속으로 교정합니다.
       </Typography>
     </Paper>
   );

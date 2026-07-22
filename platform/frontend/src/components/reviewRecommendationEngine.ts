@@ -42,6 +42,15 @@ export interface UnifiedSignalInput {
   sources: string[];
 }
 
+/** 검증 통과 학습 신호 — Feature/Round/Overlap/ReviewVerification 에서만 주입. */
+export interface ValidatedLearningSignal {
+  number: number;
+  /** 0~1 정규화 가중 (검증 통과분만). */
+  weight: number;
+  source: 'feature' | 'round' | 'overlap' | 'coverage';
+  label: string;
+}
+
 export interface RecommendationContext {
   sheetIntent: 'review' | 'current_round';
   strongCandidates: number[];
@@ -69,6 +78,11 @@ export interface RecommendationContext {
   profileMatched?: { number: number; sim: number }[];
   /** 🧬 학습된 당첨 '조합' 구조 (복기 당첨 6개의 합계·홀수·구간분산·최장연속). */
   learnedStructure?: { sum: number; odd: number; decades: number; consec: number };
+  /**
+   * 검증 통과 학습만 주입 (Feature WF/Random 통과 · Round lift · Overlap ·
+   * ReviewVerification coverage). 미검증 신호는 넣지 않는다.
+   */
+  validatedLearning?: ValidatedLearningSignal[];
   /** [추천 생성] 클릭마다 증가 — 같은 데이터에서도 매번 다른 5세트를 낸다. */
   regenNonce?: number;
 }
@@ -111,7 +125,16 @@ function buildNumberScores(ctx: RecommendationContext): Record<number, number> {
   //    '학습된 데이터 기반 예상'의 핵심 축(사용자 요청).
   ctx.profileMatched?.forEach((m) => bump(scores, m.number, (m.sim / 100) * 30));
 
-  // 강한후보·빈도·교집합·콤보패턴은 종합 추천 점수에 반영하지 않는다(3축 전용).
+  // ④ ✅ 검증 통과 학습 — Feature/Round/Overlap/Coverage. 미검증은 주입되지 않음.
+  //    커버리지(넓은 그물)와 검증 Feature 를 점수에 소량 반영해 top-6 과적합을 완화.
+  for (const v of ctx.validatedLearning ?? []) {
+    const w = Math.max(0, Math.min(1, v.weight));
+    if (w <= 0) continue;
+    const scale = v.source === 'coverage' ? 14 : v.source === 'feature' ? 22 : 16;
+    bump(scores, v.number, w * scale);
+  }
+
+  // 강한후보·빈도·교집합·콤보패턴은 종합 추천 점수에 반영하지 않는다.
   // 복기 모드라도 실제 당첨번호(winningNumbers)는 점수에 주입하지 않는다.
   // (사후 편향 제거 — 그러면 추천이 곧 당첨번호가 되어 예측 정합성 평가가
   //  무의미해진다.) 당첨 일치 개수는 scoreCombo 의 winMatch 로 '표시'만 한다.
@@ -192,6 +215,30 @@ function scoreCombo(
     if (structHits >= 3) signals.push(`구조${structHits}`);
   }
 
+  // ✅ 검증 학습 정합 — 검증 통과 번호가 2개+ 포함되면 가산·표시.
+  const validatedTop = new Set(
+    (ctx.validatedLearning ?? [])
+      .filter((v) => v.weight >= 0.35)
+      .slice(0, 18)
+      .map((v) => v.number),
+  );
+  const valHit = combo.filter((n) => validatedTop.has(n)).length;
+  if (valHit >= 2) {
+    total += valHit * 2.5;
+    signals.push(`검증학습${valHit}`);
+  }
+
+  // 구간 분산 가산 — 한 구간에 3개 이상 몰리면 감점(커버리지 전략).
+  const decadeCounts = [0, 0, 0, 0, 0];
+  for (const n of combo) decadeCounts[Math.min(4, Math.floor((n - 1) / 10))] += 1;
+  if (decadeCounts.some((c) => c >= 3)) {
+    total -= 6;
+    signals.push('구간쏠림');
+  } else if (decadeCounts.filter((c) => c > 0).length >= 4) {
+    total += 3;
+    signals.push('구간분산');
+  }
+
   // 복기 당첨 일치는 점수에 더하지 않는다(사후 편향 방지). winMatch 는 결과
   // 카드에 '당첨 N개 일치'로 표시만 되어 예측 정합성을 정직하게 보여준다.
   if (ctx.sheetIntent === 'review' && winMatch >= 3) {
@@ -255,6 +302,8 @@ function generateCandidates(ctx: RecommendationContext, numberScores: Record<num
   (ctx.parallelStrong ?? []).forEach((n, idx) => addCon([n], Math.max(4, 16 - idx)));
   // 🧬 학습 프로파일 매칭 상위도 합의 코어에 포함(유사도 비례 가중).
   (ctx.profileMatched ?? []).forEach((m) => addCon([m.number], Math.max(4, (m.sim / 100) * 18)));
+  // ✅ 검증 통과 학습도 합의 코어에 포함.
+  (ctx.validatedLearning ?? []).forEach((v) => addCon([v.number], Math.max(3, v.weight * 14)));
   const consensusPool = Object.entries(consensusScore)
     .sort(([, a], [, b]) => b - a)
     .map(([n]) => Number(n));

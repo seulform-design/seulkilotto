@@ -1374,9 +1374,18 @@ export default function SemiAutoComparePanel({
     const rv = reviewVerificationQuery.data;
     const cov = rv?.current_coverage_set;
     if (rv?.ok && cov) {
-      for (const n of cov.core6 ?? []) push(n, 0.85, 'coverage', '커버리지core');
-      for (const n of cov.expand18 ?? []) {
-        if (!(cov.core6 ?? []).includes(n)) push(n, 0.45, 'coverage', '커버리지18');
+      // 커버리지 신뢰도 = 복기 회차에서 '넓은 그물(top-18)'이 무작위 기대(≈2.4)를 얼마나
+      // 초과해 당첨을 담았나. best_signal 은 1개 회차로 고른 값이므로, 그 신호가 무작위
+      // 수준이면 covConf≈0 → 커버리지 가산도 0. (근거 없는 단일회차 신호가 고정 최고가중
+      // 0.85 를 갖던 것을 '실제로 넓은 그물이 통한 정도'에 비례하도록 교정. 확률 불변.)
+      const bestTop18 = rv.summary?.best_top18 ?? 0;
+      const randomExp18 = (18 * 6) / 45; // ≈ 2.4
+      const covConf = Math.max(0, Math.min(1, (bestTop18 - randomExp18) / (6 - randomExp18)));
+      if (covConf > 0) {
+        for (const n of cov.core6 ?? []) push(n, 0.85 * covConf, 'coverage', '커버리지core');
+        for (const n of cov.expand18 ?? []) {
+          if (!(cov.core6 ?? []).includes(n)) push(n, 0.45 * covConf, 'coverage', '커버리지18');
+        }
       }
     }
 
@@ -1398,22 +1407,31 @@ export default function SemiAutoComparePanel({
     patternMiningQuery.data,
   ]);
 
-  const learningBridgeStatus = useMemo(
-    () => ({
+  const learningBridgeStatus = useMemo(() => {
+    const rv = reviewVerificationQuery.data;
+    const bestTop18 = rv?.ok ? (rv.summary?.best_top18 ?? 0) : 0;
+    const randomExp18 = (18 * 6) / 45;
+    const coverageConf = rv?.current_coverage_set
+      ? Math.round(Math.max(0, Math.min(1, (bestTop18 - randomExp18) / (6 - randomExp18))) * 100)
+      : 0;
+    return {
       validatedCount: validatedLearning.length,
       adoptedFeatures: featureLearningQuery.data?.adopted_count ?? 0,
+      adoptedPatterns: patternMiningQuery.data?.adopted_count ?? 0,
       roundLearningRounds: roundLearningQuery.data?.ok ? (roundLearningQuery.data.round_count ?? 0) : 0,
       overlapRounds: overlapLearningQuery.data?.ok ? (overlapLearningQuery.data.round_count ?? 0) : 0,
-      coverageWired: Boolean(reviewVerificationQuery.data?.current_coverage_set),
-    }),
-    [
-      validatedLearning.length,
-      featureLearningQuery.data,
-      roundLearningQuery.data,
-      overlapLearningQuery.data,
-      reviewVerificationQuery.data,
-    ],
-  );
+      overlapFlat: Boolean(overlapLearningQuery.data?.ok && overlapLearningQuery.data.calibration_flat),
+      coverageWired: Boolean(rv?.current_coverage_set),
+      coverageConf,
+    };
+  }, [
+    validatedLearning.length,
+    featureLearningQuery.data,
+    patternMiningQuery.data,
+    roundLearningQuery.data,
+    overlapLearningQuery.data,
+    reviewVerificationQuery.data,
+  ]);
 
   const resolvedStrongCandidates = useMemo(() => {
     if (predictionSignals?.strong_candidates?.length) {
@@ -4290,14 +4308,12 @@ export default function SemiAutoComparePanel({
               </Typography>
               <Alert severity="info" sx={{ mb: 1, py: 0.5 }}>
                 <Typography variant="caption">
-                  ✅ 복기 학습 연동: 검증신호 {learningBridgeStatus.validatedCount}개
-                  · Feature 채택 {learningBridgeStatus.adoptedFeatures}
-                  · 다회차 {learningBridgeStatus.roundLearningRounds}회
-                  · 겹침 {learningBridgeStatus.overlapRounds}회
-                  · 커버리지 {learningBridgeStatus.coverageWired ? 'ON' : 'OFF'}
-                  · Pattern Mining 연동
-                  — 미검증 Feature/Pattern은 추천·순위에 넣지 않습니다. 1등 확률은 불변이며,
-                  <strong> 커버리지(넓은 그물) + 구간 분산</strong>으로 top-6 과적합을 완화합니다.
+                  ✅ 복기 학습 연동 (Feature 채택 {learningBridgeStatus.adoptedFeatures} · Pattern 채택 {learningBridgeStatus.adoptedPatterns}
+                  · 다회차 {learningBridgeStatus.roundLearningRounds}회 · 겹침 {learningBridgeStatus.overlapRounds}회{learningBridgeStatus.overlapFlat ? '(평탄→미주입)' : ''}
+                  · 커버리지 {learningBridgeStatus.coverageWired ? `신뢰도 ${learningBridgeStatus.coverageConf}%` : 'OFF'})
+                  — 검증 통과분만 <strong>아래 ‘🔗 교차검증’에 가산</strong>됩니다(현재 {learningBridgeStatus.validatedCount}개 신호).
+                  위 <strong>예상번호 balls·복기 백테스트는 순수 반복도 그대로</strong> 두어 자기검증 순환을 막습니다.
+                  미검증 Feature/Pattern·평탄 신호는 넣지 않으며, <strong>3개 회차로는 채택이 거의 0</strong>이라 지금 영향은 작고 회차가 쌓일수록 커집니다. 1등 확률은 불변.
                 </Typography>
               </Alert>
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
@@ -4345,6 +4361,20 @@ export default function SemiAutoComparePanel({
                     내려가고, 균형·고일치 번호가 올라갑니다.
                     {compareWinning ? ` 복기(${effectiveRound ?? '?'})는 실제 당첨과 대조(검증).` : ` ${effectiveRound ?? '?'}회 이번회차 데이터 기반 예측.`}
                   </Typography>
+                  {(() => {
+                    const boosted = crossValidation.scored.filter((x) => x.validated);
+                    if (boosted.length === 0) return (
+                      <Typography variant="caption" sx={{ display: 'block', mb: 0.5, color: 'text.disabled', fontSize: 10 }}>
+                        🧠 이 순위에 가산된 검증 학습 없음 — 3개 회차로는 Feature/Pattern 채택이 거의 0이라 정상(회차 쌓이면 반영). 지금은 순수 전수비교 × 심층역산.
+                      </Typography>
+                    );
+                    return (
+                      <Typography variant="caption" sx={{ display: 'block', mb: 0.5, color: 'info.main', fontSize: 10, fontWeight: 700 }}>
+                        🧠 표시된 상위 중 {boosted.length}개에 검증 학습 가산 반영: {boosted.map((x) => x.number).join('·')}
+                        {' '}(🧠 표시 · 소스칩에 엔진 표기)
+                      </Typography>
+                    );
+                  })()}
                   <Stack spacing={0.4}>
                     {crossValidation.scored.map((x, i) => (
                       <Stack
@@ -4359,6 +4389,7 @@ export default function SemiAutoComparePanel({
                         <Typography sx={{ fontSize: 10, color: 'text.disabled', minWidth: 22, fontWeight: 700 }}>{i + 1}위</Typography>
                         <LottoBall number={x.number} size={26} dimmed={compareWinning && x.won === false} />
                         {x.won === true && <Chip size="small" color="success" label="당첨" sx={{ height: 16, fontSize: 9 }} />}
+                        {x.validated && <Chip size="small" color="info" label="🧠검증학습" sx={{ height: 16, fontSize: 9 }} />}
                         <Typography variant="caption" sx={{ fontSize: 10.5 }}>
                           교차 {x.cross} · 심층 {x.deep}% · <strong>자동 {x.auto}줄 · 반자동 {x.semi}줄</strong>
                           {x.maxMatch >= 3 ? ` · 최대일치 ${x.maxMatch}` : ''} · {x.sources.join('·')}

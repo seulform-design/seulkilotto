@@ -567,6 +567,10 @@ export const v1Api = {
   getRoundLearning: () =>
     fetchJson<RoundLearningResponse>('/api/v1/photo-analysis/round-learning', { timeoutMs: 60_000 }),
 
+  /** 복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였나 + 커버리지 곡선. */
+  getReviewVerification: () =>
+    fetchJson<ReviewVerificationResponse>('/api/v1/photo-analysis/review-verification', { timeoutMs: 90_000 }),
+
   /** 줄겹침(2·3·4번호) 패턴 역산 학습 — 보관 회차 겹침 조합 vs 실제 당첨. */
   getOverlapLearning: () =>
     fetchJson<OverlapLearningResponse>('/api/v1/photo-analysis/overlap-learning', { timeoutMs: 90_000 }),
@@ -982,6 +986,33 @@ export interface ArchivedCurrentRoundSnapshot {
       bonus_in_excluded?: boolean;
     }>;
   };
+}
+
+/** 복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였나 + 커버리지 곡선. */
+export interface ReviewVerificationResponse {
+  ok: boolean;
+  reason?: string;
+  round_no: number;
+  winning_numbers?: number[];
+  auto_line_count?: number;
+  semi_line_count?: number;
+  signals?: {
+    key: string;
+    label: string;
+    winner_ranks: { number: number; rank: number }[];
+    coverage: Record<string, number>;
+    top6_numbers: number[];
+  }[];
+  best_signal_key?: string;
+  current_round_no?: number;
+  current_coverage_set?: {
+    signal: string;
+    signal_label: string;
+    core6: number[];
+    expand18: number[];
+  };
+  summary?: { best_top6: number; best_top18: number; best_label: string | null };
+  honesty?: string;
 }
 
 /** 줄겹침(2·3·4번호) 역산 학습 — 겹침 조합이 실제 당첨을 얼마나 담았는지. */

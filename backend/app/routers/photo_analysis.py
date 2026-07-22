@@ -373,6 +373,17 @@ def get_round_learning():
     return to_jsonable(build_round_learning())
 
 
+@router.get("/review-verification")
+def get_review_verification():
+    """복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였는지 + 커버리지 곡선.
+
+    '집중 top-6' 이 왜 당첨을 놓치는지(넓은 그물은 담는데)를 데이터로 보여준다.
+    """
+    from ..video_analysis.review_verification import build_review_verification
+
+    return to_jsonable(build_review_verification())
+
+
 @router.get("/overlap-learning")
 def get_overlap_learning():
     """줄겹침(2·3·4번호) 패턴 역산 학습 — 보관 회차 겹침 조합 vs 실제 당첨 대조.

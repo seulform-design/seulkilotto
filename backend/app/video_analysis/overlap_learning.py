@@ -68,6 +68,30 @@ def _combos_for_lines(number_lines: List[List[int]], tag: str) -> List[Dict[str,
     return find_cross_line_combos(lines, sizes=(2, 3, 4), min_line_repeat=2)
 
 
+def combo_strength_by_number(number_lines: List[List[int]], tag: str = "s") -> Dict[int, float]:
+    """번호별 '조합 강도' — 사용자 가설 정량화.
+
+    '어떤 번호가 여러 줄에 반복 등장하고(line_count) 우연 이상으로 묶였을 때(lift)
+    당첨 후보인가?' 를 검증하기 위한 신호. 각 번호 n 에 대해, n 을 포함하고 우연을
+    초과(lift>1)하는 겹침 조합들의 (lift-1) × line_count 를 합산한다. 즉 '의도적으로
+    함께 묶인 정도 × 반복 줄 수' 의 총량이다. lift≤1(우연 이하)은 신호 0 으로 배제.
+    """
+    combos = _combos_for_lines(number_lines, tag)
+    score: Dict[int, float] = {n: 0.0 for n in range(1, 46)}
+    for c in combos:
+        lift = float(c.get("lift") or 0.0)
+        lc = int(c.get("line_count") or 0)
+        excess = max(0.0, lift - 1.0)
+        if excess <= 0 or lc <= 0:
+            continue
+        w = excess * lc
+        for n in c.get("numbers") or []:
+            ni = int(n)
+            if 1 <= ni <= 45:
+                score[ni] += w
+    return score
+
+
 def _summarize(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     """겹침 조합 기록 → 크기별·lift구간별 평균 당첨 겹침 집계."""
     by_size: Dict[str, Dict[str, Any]] = {}
@@ -123,6 +147,84 @@ def _summarize(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         )
     bucket_out.sort(key=lambda x: (x["size"], x["bucket"]))
     return {"by_size": size_out, "by_lift_bucket": bucket_out}
+
+
+def _compare_signals_across_rounds(
+    batches: List[Dict[str, Any]], win_by_round: Dict[int, List[int]]
+) -> Dict[str, Any]:
+    """번호 선정 신호들을 회차 평균 당첨 커버리지로 정면 비교.
+
+    비교 신호:
+      - support     : 양쪽 지지(min(자동줄,반자동줄))  — 단순 반복 빈도 기준선
+      - combo_strength: 반복줄 × lift(우연 초과)          — 사용자 가설
+      - random_expected: 무작위 기준선(top-K 에서 K×6/45)
+    """
+    from .store import _manual_saved_lines
+
+    KS = [6, 10, 18]
+    acc: Dict[str, Dict[int, float]] = {
+        "support": {k: 0.0 for k in KS},
+        "combo_strength": {k: 0.0 for k in KS},
+    }
+    rounds_used = 0
+    for batch in batches:
+        rnd = batch.get("round_no")
+        if rnd is None:
+            continue
+        rnd = int(rnd)
+        winning = win_by_round.get(rnd)
+        if not winning:
+            continue
+        win_set = set(winning)
+        entries = list(batch.get("entries") or [])
+        auto = _manual_saved_lines(entries, "자동", include_photo=True)
+        semi = _manual_saved_lines(entries, "반자동", include_photo=True)
+        if len(auto) < 2:
+            continue
+        ac = _line_freq(auto)
+        sc = _line_freq(semi)
+        support = {n: float(min(ac.get(n, 0), sc.get(n, 0))) for n in range(1, 46)}
+        combo = combo_strength_by_number(auto, f"cmp{rnd}")
+        rounds_used += 1
+        for key, vals in (("support", support), ("combo_strength", combo)):
+            ranked = _rank_signal(vals)
+            pos = {n: ranked.index(n) + 1 for n in range(1, 46)}
+            for k in KS:
+                acc[key][k] += sum(1 for n in winning if pos[n] <= k)
+        _ = win_set  # 명시적 사용(가독성)
+
+    if rounds_used == 0:
+        return {"rounds": 0}
+
+    out_signals = []
+    for key in ("support", "combo_strength"):
+        out_signals.append(
+            {
+                "key": key,
+                "label": _SIG_CMP_LABELS[key],
+                "mean_top6": round(acc[key][6] / rounds_used, 2),
+                "mean_top10": round(acc[key][10] / rounds_used, 2),
+                "mean_top18": round(acc[key][18] / rounds_used, 2),
+            }
+        )
+    baseline = {k: round(k * 6.0 / 45.0, 2) for k in KS}
+    # 가설이 기준선(support)보다 유의미하게 나은가? (표본이 작으니 '유의'는 큰 격차만)
+    supp = next(s for s in out_signals if s["key"] == "support")
+    cs = next(s for s in out_signals if s["key"] == "combo_strength")
+    verdict = (
+        "combo_strength 가 support 를 앞섬"
+        if cs["mean_top18"] > supp["mean_top18"] + 0.5
+        else "combo_strength 가 support 대비 우위 없음"
+    )
+    return {
+        "rounds": rounds_used,
+        "signals": out_signals,
+        "random_baseline": {"top6": baseline[6], "top10": baseline[10], "top18": baseline[18]},
+        "verdict": verdict,
+    }
+
+
+_SIG_CMP_LABELS = {"support": "양쪽 지지(반복 빈도)", "combo_strength": "조합 강도(반복줄×lift)"}
 
 
 def build_overlap_learning() -> Dict[str, Any]:
@@ -199,6 +301,11 @@ def build_overlap_learning() -> Dict[str, Any]:
             "round_count": 0,
         }
 
+    # ── 신호 정면 비교(회차 평균) ── 사용자 가설('조합강도')이 단순 빈도(support)를
+    # 이기는가? 각 회차마다 번호를 각 신호로 세워 당첨 top-K 커버리지를 재고, 회차
+    # 평균을 낸다. **단일 회차 우연을 배제하고 회차 평균으로 판정하는 것이 핵심.**
+    signal_comparison = _compare_signals_across_rounds(batches, win_by_round)
+
     learned = _summarize(all_records)
     lift_of: Dict[tuple[int, str], float] = {
         (b["size"], b["bucket"]): b["lift_vs_chance"] for b in learned["by_lift_bucket"]
@@ -254,6 +361,7 @@ def build_overlap_learning() -> Dict[str, Any]:
         "current_combo_count": len(cur_combos),
         "current_scores": current_scores,
         "calibration_flat": flat,
+        "signal_comparison": signal_comparison,
         "honesty": (
             "보관 회차 용지는 추첨 전 등록분이라 누수가 없습니다. "
             "무작위 게임에서는 모든 구간의 lift_vs_chance 가 1.0 근처(평탄)로 나오는 것이 정상이며, "

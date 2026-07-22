@@ -1034,6 +1034,13 @@ export interface OverlapLearningResponse {
   current_combo_count?: number;
   current_scores?: { number: number; score: number; combo_support: number }[];
   calibration_flat?: boolean;
+  /** 신호 정면비교(회차 평균) — 사용자 가설(조합강도)이 단순 빈도(support)를 이기나? */
+  signal_comparison?: {
+    rounds: number;
+    signals?: { key: string; label: string; mean_top6: number; mean_top10: number; mean_top18: number }[];
+    random_baseline?: { top6: number; top10: number; top18: number };
+    verdict?: string;
+  };
   honesty?: string;
 }
 

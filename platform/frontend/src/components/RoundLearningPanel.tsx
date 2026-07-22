@@ -252,6 +252,40 @@ export default function RoundLearningPanel() {
             </Alert>
           )}
 
+          {/* 신호 정면비교 — 사용자 가설(조합강도) vs 단순 빈도(support), 회차 평균 */}
+          {ov.data.signal_comparison?.signals && ov.data.signal_comparison.rounds > 0 && (
+            <Box sx={{ mb: 1, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+              <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
+                🥊 신호 정면비교 — '조합강도(반복줄×lift)' 가 단순 '빈도' 를 이기나? ({ov.data.signal_comparison.rounds}개 회차 평균)
+              </Typography>
+              {ov.data.signal_comparison.signals.map((s) => (
+                <Stack key={s.key} direction="row" spacing={1} alignItems="center" sx={{ mb: 0.25 }}>
+                  <Typography sx={{ width: 160, fontSize: 10.5, fontWeight: s.key === 'combo_strength' ? 700 : 400 }}>
+                    {s.label}
+                  </Typography>
+                  <Typography sx={{ fontSize: 10, color: 'text.secondary' }}>
+                    top6 {s.mean_top6} · top10 {s.mean_top10} · top18 {s.mean_top18}
+                  </Typography>
+                </Stack>
+              ))}
+              {ov.data.signal_comparison.random_baseline && (
+                <Typography sx={{ fontSize: 10, color: 'text.disabled', mt: 0.25 }}>
+                  무작위 기준선: top6 {ov.data.signal_comparison.random_baseline.top6} · top18{' '}
+                  {ov.data.signal_comparison.random_baseline.top18}
+                </Typography>
+              )}
+              <Alert
+                severity={ov.data.signal_comparison.verdict?.includes('앞섬') ? 'warning' : 'info'}
+                sx={{ mt: 0.75, py: 0.25 }}
+              >
+                판정: <strong>{ov.data.signal_comparison.verdict}</strong>.{' '}
+                {ov.data.signal_comparison.verdict?.includes('없음')
+                  ? '강하게 묶인 조합에 든 번호가 당첨과 무관하다는 뜻입니다(무작위).'
+                  : '표본이 작아 우연일 수 있으니 회차가 더 쌓인 뒤 재확인하세요.'}
+              </Alert>
+            </Box>
+          )}
+
           {(ov.data.current_scores?.length ?? 0) > 0 ? (
             <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
               <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>

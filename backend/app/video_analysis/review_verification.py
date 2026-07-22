@@ -47,11 +47,18 @@ def _signals(auto: List[List[int]], semi: List[List[int]]) -> Dict[str, Dict[int
         balanced_val[n] = score * pen
         dc[d] += 1
         score -= 1
+    # 사용자 가설 신호: 번호가 '반복 등장(line_count) × 우연 초과 묶임(lift)' 조합에
+    # 든 정도. 자동 줄 기준(용지 겹침 분석의 표시 기준과 동일).
+    from .overlap_learning import combo_strength_by_number
+
+    combo_strength = combo_strength_by_number(auto, "rv")
+
     return {
         "support": support,
         "auto_freq": {n: float(ac.get(n, 0)) for n in range(1, 46)},
         "total_freq": total,
         "balanced": balanced_val,
+        "combo_strength": combo_strength,
     }
 
 
@@ -60,6 +67,7 @@ _SIGNAL_LABELS = {
     "auto_freq": "자동 빈도",
     "total_freq": "전체 빈도(자동+반자동)",
     "balanced": "구간 균형 커버리지",
+    "combo_strength": "조합 강도(반복줄×lift)",
 }
 
 

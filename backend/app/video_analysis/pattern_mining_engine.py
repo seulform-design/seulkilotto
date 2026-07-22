@@ -351,29 +351,39 @@ def _pattern_win_overlap(p: Pattern, sheet: RoundSheet) -> float:
     return len(set(nums) & set(sheet.winning)) / max(1, len(nums))
 
 
-def _pattern_top_hits(p: Pattern, sheet: RoundSheet) -> float:
-    """Pattern 이 가리키는 번호 중 당첨 개수 (최대 6)."""
+def _pattern_pool(p: Pattern, sheet: RoundSheet) -> List[int]:
+    """이 Pattern 이 그 회차 용지에서 가리키는 후보 번호(최대 6).
+
+    구조 Pattern(gap/decade — candidate_numbers 가 빔)은 해당 구조를 가진 줄의 번호를
+    pooling 해 상위 6개를 후보로 본다. **관측 통계와 permutation 귀무분포가 반드시 이
+    함수를 공통으로 써야** 검증이 유효하다 — 과거엔 귀무를 빈 후보(항상 0)로 계산해
+    구조 Pattern 이 늘 유의(p≈0.008)하게 나오는 버그가 있었다.
+    """
     nums = p.candidate_numbers()
-    if not nums:
-        # 구조 Pattern → 해당 구조 줄 합집합에서 strong18 교집합 상위
-        pool: Counter = Counter()
-        if p.kind == "gap_structure":
-            gaps = tuple(p.meta.get("gaps", ()))
-            for ln in sheet.auto_lines + sheet.semi_lines:
-                s = _sanitize_line(ln)
-                if len(s) == 6 and _gaps(s) == gaps:
-                    for n in s:
-                        pool[n] += 1
-        elif p.kind == "decade_layout":
-            dec = tuple(p.meta.get("decade", ()))
-            for ln in sheet.auto_lines + sheet.semi_lines:
-                s = _sanitize_line(ln)
-                if len(s) == 6 and _decade_sig(s) == dec:
-                    for n in s:
-                        pool[n] += 1
-        nums = [n for n, _ in pool.most_common(6)]
+    if nums:
+        return nums[:6]
+    pool: Counter = Counter()
+    if p.kind == "gap_structure":
+        gaps = tuple(p.meta.get("gaps", ()))
+        for ln in sheet.auto_lines + sheet.semi_lines:
+            s = _sanitize_line(ln)
+            if len(s) == 6 and _gaps(s) == gaps:
+                for n in s:
+                    pool[n] += 1
+    elif p.kind == "decade_layout":
+        dec = tuple(p.meta.get("decade", ()))
+        for ln in sheet.auto_lines + sheet.semi_lines:
+            s = _sanitize_line(ln)
+            if len(s) == 6 and _decade_sig(s) == dec:
+                for n in s:
+                    pool[n] += 1
+    return [n for n, _ in pool.most_common(6)]
+
+
+def _pattern_top_hits(p: Pattern, sheet: RoundSheet) -> float:
+    """Pattern 후보(최대 6) 중 당첨 개수."""
     win = set(sheet.winning)
-    return float(sum(1 for n in nums[:6] if n in win))
+    return float(sum(1 for n in _pattern_pool(p, sheet) if n in win))
 
 
 def validate_pattern(p: Pattern, rounds: List[RoundSheet], rng: random.Random) -> PatternScore:
@@ -381,14 +391,17 @@ def validate_pattern(p: Pattern, rounds: List[RoundSheet], rng: random.Random) -
     appear = sum(1 for f in fire_flags if f)
     overlaps = []
     top_hits = []
+    pools: List[List[int]] = []  # fired 회차별 후보 풀 — 관측·permutation 공통 사용
     per_round = []
     for s, fired in zip(rounds, fire_flags):
         ov = _pattern_win_overlap(p, s) if fired else None
-        th = _pattern_top_hits(p, s) if fired else None
+        pool = _pattern_pool(p, s) if fired else None
+        th = float(sum(1 for n in pool if n in set(s.winning))) if pool is not None else None
         if ov is not None:
             overlaps.append(ov)
         if th is not None:
             top_hits.append(th)
+            pools.append(pool)
         per_round.append({
             "round_no": s.round_no,
             "fired": fired,
@@ -401,6 +414,12 @@ def validate_pattern(p: Pattern, rounds: List[RoundSheet], rng: random.Random) -
     # Walk-forward: 과거만으로 fire 관측 → 해당 회차 hit (누수 없음: fire는 용지만)
     wf_hits = [h for h in top_hits if h is not None]
     wf_mean = float(np.mean(wf_hits)) if wf_hits else 0.0
+    # 후보 집합 크기에 맞춘 기준선 — k개 후보가 당첨6과 겹칠 기댓값은 k·(6/45).
+    # 고정 0.8(=6개 기준)로 나누면 pair(2)/triple(3)/support_band(1) 같은 작은 Pattern 의
+    # lift 가 구조적으로 과소평가돼 절대 채택되지 못한다(overlap_learning 과 동일 원리).
+    pool_sizes = [len(pl) for pl in pools if pl]
+    eff_k = float(np.mean(pool_sizes)) if pool_sizes else 6.0
+    base_hits = max(1e-9, eff_k * BASELINE_HIT)
 
     # Rolling: 최근 WINDOW 평균
     recent = top_hits[-ROLLING_WINDOW:] if top_hits else []
@@ -410,7 +429,7 @@ def validate_pattern(p: Pattern, rounds: List[RoundSheet], rng: random.Random) -
     mid = max(1, len(wf_hits) // 2)
     early = float(np.mean(wf_hits[:mid])) if wf_hits else 0.0
     late = float(np.mean(wf_hits[mid:])) if len(wf_hits) > mid else early
-    stability = 1.0 - min(1.0, abs(early - late) / max(0.01, BASELINE_TOP6))
+    stability = 1.0 - min(1.0, abs(early - late) / max(0.01, base_hits))
     continuity = late / max(0.01, early) if early > 0 else (1.0 if late > 0 else 0.0)
     continuity = float(min(2.0, continuity))
 
@@ -444,22 +463,18 @@ def validate_pattern(p: Pattern, rounds: List[RoundSheet], rng: random.Random) -
     semi_include = float(np.mean(semi_hits)) if semi_hits else 0.0
     match_retention = float(np.mean(match_hits)) if match_hits else 0.0
 
-    # 기준선: 임의 k-set vs 당첨6 겹침 기댓 — top-hits 채택 기준은 BASELINE_TOP6 사용
-    lift = wf_mean / BASELINE_TOP6 if BASELINE_TOP6 else 0.0
+    # 후보 크기에 맞춘 기준선 대비 lift.
+    lift = wf_mean / base_hits if base_hits else 0.0
 
-    # Permutation: shuffle winning labels
+    # Permutation: 당첨 라벨을 무작위로 섞어 귀무분포 생성. **관측과 동일한 후보 풀(pools)**
+    # 로 계산해야 유효 — 구조 Pattern 을 빈 후보(항상 0)로 계산하던 버그를 제거해, 귀무
+    # 평균이 관측(wf_mean)과 같은 척도에서 비교된다.
     count_ge = 0
     for _ in range(N_PERM):
         fake_hits = []
-        for s, fired in zip(rounds, fire_flags):
-            if not fired:
-                continue
+        for pool in pools:
             fake_win = set(rng.sample(range(1, 46), 6))
-            cand = p.candidate_numbers()
-            if not cand:
-                fake_hits.append(0.0)
-                continue
-            fake_hits.append(float(sum(1 for n in cand[:6] if n in fake_win)))
+            fake_hits.append(float(sum(1 for n in pool if n in fake_win)))
         if fake_hits and float(np.mean(fake_hits)) >= wf_mean - 1e-12:
             count_ge += 1
     p_perm = (count_ge + 1) / (N_PERM + 1) if appear else 1.0
@@ -469,20 +484,20 @@ def validate_pattern(p: Pattern, rounds: List[RoundSheet], rng: random.Random) -
         appear >= MIN_SUPPORT_ROUNDS
         and lift >= LIFT_ADOPT
         and p_perm <= P_ADOPT
-        and late >= BASELINE_TOP6 * 0.95
+        and late >= base_hits * 0.95
     )
     if adopted:
-        use.append(f"WF 평균적중 {wf_mean:.2f} (기준 {BASELINE_TOP6:.2f})")
+        use.append(f"WF 평균적중 {wf_mean:.2f} (기준 {base_hits:.2f})")
         use.append(f"lift {lift:.2f}, perm p={p_perm:.3f}")
         use.append(f"출현 {appear}/{len(rounds)}회 · 재현률 {reproduce:.2f}")
     else:
         if appear < MIN_SUPPORT_ROUNDS:
             exclude.append(f"출현 회차 부족 ({appear})")
         if lift < LIFT_ADOPT:
-            exclude.append(f"lift {lift:.2f} < {LIFT_ADOPT}")
+            exclude.append(f"lift {lift:.2f} < {LIFT_ADOPT} (기준 {base_hits:.2f})")
         if p_perm > P_ADOPT:
             exclude.append(f"permutation p={p_perm:.3f}")
-        if late < BASELINE_TOP6 * 0.95:
+        if late < base_hits * 0.95:
             exclude.append("Time-split 후반 재현 부족")
 
     return PatternScore(
@@ -517,18 +532,16 @@ def cluster_patterns(scores: List[PatternScore]) -> List[Dict[str, Any]]:
     clusters: Dict[str, List[PatternScore]] = defaultdict(list)
     for sc in scores:
         p = sc.pattern
-        if p.kind in ("pair_repeat", "triple_repeat", "match_card", "strong_core", "auto_semi_core", "support_band"):
-            key = f"{p.kind}|nums:{','.join(map(str, sorted(p.numbers)[:3]))}"
+        # 번호 있는 Pattern 은 kind + 번호의 구간(decade) 시그니처로 묶고,
+        # 구조 Pattern(gap/decade — 번호 없음)은 그 구조 시그니처로 묶는다.
+        if p.numbers:
+            key = f"{p.kind}|dec{_decade_sig(p.numbers)}"
         elif p.kind == "gap_structure":
             key = f"gap|{p.meta.get('gaps')}"
         elif p.kind == "decade_layout":
             key = f"decade|{p.meta.get('decade')}"
         else:
             key = p.kind
-        # coarsen: by kind + decade signature of numbers
-        if p.numbers:
-            dec = _decade_sig(p.numbers)
-            key = f"{p.kind}|dec{dec}"
         clusters[key].append(sc)
 
     out = []
@@ -561,7 +574,6 @@ FEATURE_NAMES = [
     "cluster_score",
     "auto_similarity",
     "semi_similarity",
-    "winning_match_proxy",  # only from historical validated — applied carefully
     "candidate_match",
     "strong_candidate_density",
     "historical_pattern_score",
@@ -603,7 +615,8 @@ def build_number_pattern_features(
                     s = _sanitize_line(ln)
                     if len(s) == 6 and _decade_sig(s) == dec:
                         pool.extend(s)
-            nums = list({n for n in pool})
+            # 검증(_pattern_pool)과 동일하게 상위 6개로 캡 — 기여 대상과 검증 대상 일치.
+            nums = [n for n, _ in Counter(pool).most_common(6)]
         cl = cluster_by_pid.get(p.id)
         cl_score = float(cl["mean_lift"]) if cl else 1.0
         for n in nums:
@@ -684,12 +697,6 @@ def select_features(
         perm_imp = abs(corr) - abs(corr_p)
 
         keep = abs(corr) >= 0.02 or mi >= 0.001 or perm_imp >= 0.01
-        # winning_match_proxy is historical score — keep if useful
-        if k == "winning_match_proxy":
-            keep = False  # never use direct winning proxy as live feature name confusion
-            dropped.append(k)
-            reports.append({"feature": k, "kept": False, "reason": "excluded by design", "corr": round(corr, 4)})
-            continue
         if keep:
             kept.append(k)
         else:
@@ -744,7 +751,7 @@ def recommend_from_patterns(
     scored = []
     for n in range(1, 46):
         f = feats[n]
-        keys = kept_features or [k for k in FEATURE_NAMES if k != "winning_match_proxy"]
+        keys = kept_features or list(FEATURE_NAMES)
         score = sum(f.get(k, 0.0) for k in keys)
         # explanations from fired adopted patterns containing n
         reasons = []

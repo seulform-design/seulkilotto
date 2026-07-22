@@ -44,11 +44,6 @@ def _decade(n: int) -> int:
     return min(4, (n - 1) // 10)
 
 
-def _color_band(n: int) -> int:
-    """동행복권 공 색 대역 0~4 (1-10,11-20,21-30,31-40,41-45)."""
-    return _decade(n)
-
-
 def _ac_proxy(line: Sequence[int]) -> float:
     """줄 AC값 근사 — unique pairwise diffs / 조합 수."""
     nums = sorted({int(x) for x in line if 1 <= int(x) <= 45})
@@ -108,7 +103,6 @@ def build_number_features(
         for i in range(1, len(nums)):
             if nums[i] == nums[i - 1] + 1:
                 consec += 1.0
-        dens = 6.0 / max(1.0, span)
         for n in nums:
             line_sum[n].append(s)
             line_odd[n].append(odd)
@@ -125,6 +119,10 @@ def build_number_features(
     for n in range(1, 46):
         if ac.get(n, 0) + sc.get(n, 0) > 0:
             decade_freq[_decade(n)] += ac.get(n, 0) + sc.get(n, 0)
+
+    # 이웃수 밀도용 합산 빈도 — 루프 밖에서 한 번만 만든다(과거엔 45개 번호마다
+    # 45항 Counter 를 재생성해 O(45²) 였음).
+    combined_freq = Counter({k: ac.get(k, 0) + sc.get(k, 0) for k in range(1, 46)})
 
     out: Dict[int, Dict[str, float]] = {}
     for n in range(1, 46):
@@ -151,11 +149,10 @@ def build_number_features(
             "combo_strength_semi": float(combo_semi.get(n, 0.0)),
             "combo_strength": float(combo_all.get(n, 0.0)),
             "decade": float(_decade(n)),
-            "color_band": float(_color_band(n)),
             "odd": 1.0 if n % 2 else 0.0,
             "high_low": 1.0 if n >= 23 else 0.0,
             "end_digit": float(_end_digit(n)),
-            "neighbor_density": _neighbor_count(n, Counter({k: ac.get(k, 0) + sc.get(k, 0) for k in range(1, 46)})),
+            "neighbor_density": _neighbor_count(n, combined_freq),
             "decade_group_size": float(decade_freq.get(_decade(n), 0)),
             "avg_line_sum": float(np.mean(ls)) if ls else 0.0,
             "avg_line_odd": float(np.mean(line_odd[n])) if line_odd[n] else 0.0,
@@ -186,7 +183,6 @@ FEATURE_LABELS: Dict[str, str] = {
     "combo_strength_semi": "반자동 조합강도",
     "combo_strength": "그룹·매치 조합강도",
     "decade": "번호구간(decade)",
-    "color_band": "색상 대역",
     "odd": "홀짝",
     "high_low": "고저",
     "end_digit": "끝수",
@@ -510,15 +506,15 @@ def _try_sklearn_models(
         wf_hits: List[float] = []
         importances: Dict[str, float] = {k: 0.0 for k in adopted_keys}
         folds = 0
-        for i in range(1, len(samples)):
+        # 학습 회차가 1개뿐인 fold(i=1: 45행·양성6)는 퇴화 표본이라 건너뛴다 —
+        # 최소 2개 회차로 학습해야 walk-forward 가 의미 있다.
+        for i in range(2, len(samples)):
             train_s = samples[:i]
             test_s = samples[i]
             Xtr, ytr = matrix(train_s)
             if len(np.unique(ytr)) < 2:
                 continue
             try:
-                clf = model.__class__(**model.get_params()) if hasattr(model, "get_params") else model
-                # Pipeline / estimators: clone via sklearn
                 from sklearn.base import clone
 
                 clf = clone(model)
@@ -572,8 +568,8 @@ def _try_sklearn_models(
             }
         )
 
-    # Voting on last fold if ≥2 models
-    if len(model_specs) >= 2 and len(samples) >= 2:
+    # Voting on last fold if ≥2 models (학습 회차 ≥2 확보 위해 표본 ≥3 요구)
+    if len(model_specs) >= 2 and len(samples) >= 3:
         try:
             from sklearn.base import clone
 

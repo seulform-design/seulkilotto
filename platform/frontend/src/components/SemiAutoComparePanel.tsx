@@ -1362,7 +1362,9 @@ export default function SemiAutoComparePanel({
     }
 
     const ov = overlapLearningQuery.data;
-    if (ov?.ok && (ov.current_scores?.length ?? 0) > 0) {
+    // calibration_flat(신호 없음/표본 부족)이면 겹침학습을 주입하지 않는다 —
+    // round-learning 의 learned_lift 게이트와 대칭. 소표본 우연을 신호로 넣지 않기 위함.
+    if (ov?.ok && !ov.calibration_flat && (ov.current_scores?.length ?? 0) > 0) {
       const maxScore = Math.max(1, ...ov.current_scores!.map((s) => s.score));
       for (const s of ov.current_scores!.slice(0, 12)) {
         push(s.number, 0.3 + 0.7 * (s.score / maxScore), 'overlap', '겹침학습');
@@ -2306,11 +2308,12 @@ export default function SemiAutoComparePanel({
         // 검증 학습 부스트 — 채택된 Feature/커버리지에 든 번호는 교차 점수에 소량 가산
         const val = validatedLearning.find((v) => v.number === p.number);
         const valBoost = val ? 0.08 * val.weight : 0;
+        // '전수비교 × 심층역산' 은 자동·반자동 '양쪽 줄' 에 등장한 번호만 다룬다.
+        // 검증학습 부스트는 그 번호를 소폭 가산할 뿐, 한쪽에도 없는 번호를 '양쪽 합의'
+        // 목록에 올려선 안 된다(과거: valBoost 만으로 자동 0줄 번호가 '용지교차' 로 둔갑).
         const cross = oneToOne
           ? (0.5 * deep + 0.5 * support) * (1 + 0.15 * Math.max(0, p.maxMatch - 2)) + valBoost
-          : valBoost > 0
-            ? valBoost * 0.5
-            : 0;
+          : 0;
         return {
           number: p.number,
           auto: p.auto,
@@ -2791,9 +2794,9 @@ export default function SemiAutoComparePanel({
     const medianTotal = totalsArr[Math.floor(totalsArr.length / 2)] ?? 0;
     const hidden = weightedRank.filter((x) => x.maxMatch >= 4 && ((af[x.number] ?? 0) + (sf[x.number] ?? 0)) <= medianTotal).slice(0, 8);
 
-    // (8/10) 종합 핵심 — 4개 '1:1 전수비교' 신호를 순위합산(borda)한 앙상블. 스케일이
-    // 다른 신호를 공정하게 합치고, 여러 신호에서 '고루 상위'인 번호(견고한 합의)를 최상위로
-    // 올린다(한 신호만 튀는 번호는 밀림). 1:1 이 가장 중요 → 양쪽빈도·가중치를 최우선.
+    // (8/10) 종합 핵심 — 4개 '1:1 전수비교' 신호를 정규화(0~1) 선형 합성한 앙상블(아래
+    // 참고: 순위합산 borda 는 롤백됨). 스케일이 다른 신호를 공정하게 합치고, 여러 신호에서
+    // '고루 상위'인 번호(견고한 합의)를 최상위로 올린다. 1:1 이 가장 중요 → 양쪽빈도·가중치 최우선.
     const setSupport: Record<number, number> = {};
     for (const s of [...crossSetPatterns.pairs, ...crossSetPatterns.triples])
       for (const n of s.numbers) setSupport[n] = (setSupport[n] ?? 0) + s.support;
@@ -2822,6 +2825,7 @@ export default function SemiAutoComparePanel({
         score: Math.round((nC(n) * 0.5 + nW(n) * 0.3 + nS(n) * 0.1 + nD(n) * 0.1) * 1000),
         cFreq: Math.round(nC(n) * 100),
         cWeight: Math.round(nW(n) * 100),
+        cSet: Math.round(nS(n) * 100),
         cHub: Math.round(nD(n) * 100),
         winning: win(n),
         auto: af[n] ?? 0,
@@ -2982,6 +2986,7 @@ export default function SemiAutoComparePanel({
     groupLineMatching.groups2,
     groupLineMatching.allAutoNumbers,
     groupLineMatching.allSemiNumbers,
+    crossSetPatterns,
     winningSet,
   ]);
 
@@ -3038,49 +3043,11 @@ export default function SemiAutoComparePanel({
       cardWeight: g.autoList.length + g.semiList.length,
     }));
 
-    const seedTickets: {
-      ticket: number[];
-      weight: number;
-      label: string;
-    }[] = [];
-    if (cmp) {
-      for (const t of cmp.bestTickets) {
-        seedTickets.push({
-          ticket: t.ticket,
-          weight: 12 + t.vsLatestMatch.length * 3 + t.vsStrongMatch.length,
-          label: '당첨매치상위',
-        });
-      }
-      for (const t of cmp.bestComboTickets) {
-        seedTickets.push({
-          ticket: t.ticket,
-          weight: 10 + t.comboScore,
-          label: '콤보상위',
-        });
-      }
-      const ticketSeeds = [...cmp.perTicket]
-        .filter(
-          (t) =>
-            t.comboScore > 0 ||
-            t.vsStrongMatch.length >= 3 ||
-            (compareWinning && t.vsLatestMatch.length >= 3)
-        )
-        .sort(
-          (a, b) =>
-            b.comboScore +
-            b.vsStrongMatch.length * 2 +
-            b.vsLatestMatch.length * 3 -
-            (a.comboScore + a.vsStrongMatch.length * 2 + a.vsLatestMatch.length * 3)
-        )
-        .slice(0, 25);
-      for (const t of ticketSeeds) {
-        seedTickets.push({
-          ticket: t.ticket,
-          weight: 6 + t.comboScore + t.vsStrongMatch.length,
-          label: '통계상위티켓',
-        });
-      }
-    }
+    // seedTickets 는 reviewRecommendationEngine(3축: 1:1 전수비교·평행·프로파일)이
+    // 더 이상 소비하지 않는다(점수·후보생성에서 제거됨). 과거엔 복기 탭에서 당첨
+    // 일치수(vsLatestMatch)로 시드 가중을 매겨 '사후 편향(누수)' 처럼 보였지만, 실제로는
+    // 엔진이 이 값을 읽지 않았다. 혼선·헛계산을 없애기 위해 빈 배열로 전달한다.
+    const seedTickets: { ticket: number[]; weight: number; label: string }[] = [];
 
     const nonce = regenNonceRef.current;
     regenNonceRef.current = nonce + 1; // 다음 클릭은 다른 세트
@@ -4359,7 +4326,7 @@ export default function SemiAutoComparePanel({
                 <Box sx={{ mt: 0.5, mb: 1, p: 1.25, borderRadius: 1, bgcolor: 'action.hover', border: '1px dashed', borderColor: 'info.main' }}>
                   <Stack direction="row" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
                     <Typography variant="caption" fontWeight={800}>
-                      🔗 전수비교 × 심층역산 교차 검증 (양쪽 합의 {crossValidation.total}개)
+                      🔗 전수비교 × 심층역산 교차 검증 (양쪽 등장 {crossValidation.total}개 중 상위 {crossValidation.scored.length})
                     </Typography>
                     {compareWinning && crossValidation.backtest && (
                       <Chip
@@ -4373,6 +4340,9 @@ export default function SemiAutoComparePanel({
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
                     <strong>1:1 전수비교(자동·반자동 양쪽 줄 등장·최대일치)</strong> 지지와 <strong>심층역산 점수</strong>가
                     함께 높은 번호만 추립니다. 각 번호가 <strong>몇 줄·어떤 데이터</strong>로 뒷받침되는지 표시.
+                    <br />↔ <strong>위 심층역산 순위와 순서가 다를 수 있습니다</strong>: 심층역산은 반복도(자동·반자동 빈도 곱)를 그대로
+                    쓰지만, 여기선 <strong>양쪽 균형(√ 기하평균) + 최대일치</strong>를 더 반영해요 → 한쪽에 치우친 번호(예: 자동만 많음)는
+                    내려가고, 균형·고일치 번호가 올라갑니다.
                     {compareWinning ? ` 복기(${effectiveRound ?? '?'})는 실제 당첨과 대조(검증).` : ` ${effectiveRound ?? '?'}회 이번회차 데이터 기반 예측.`}
                   </Typography>
                   <Stack spacing={0.4}>
@@ -4916,7 +4886,7 @@ export default function SemiAutoComparePanel({
 
               {/* ⑩ 최종 핵심 TOP15 (종합 합성) */}
               <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                ① 핵심번호 TOP15 (양쪽빈도 0.45 + 가중치 0.35 + 허브 0.2)
+                ① 핵심번호 TOP15 (양쪽빈도 0.5 + 가중치 0.3 + 세트 0.1 + 허브 0.1)
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
                 {deepAnalysis.composite.slice(0, 15).map((c, i) => (
@@ -4929,7 +4899,7 @@ export default function SemiAutoComparePanel({
                 ))}
               </Stack>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mb: 0.5 }}>
-                근거 분해(상위 6, 0~100): {deepAnalysis.composite.slice(0, 6).map((c) => `${c.number}[빈${c.cFreq}·가${c.cWeight}·허${c.cHub}]`).join(' ')}
+                근거 분해(상위 6, 0~100): {deepAnalysis.composite.slice(0, 6).map((c) => `${c.number}[빈${c.cFreq}·가${c.cWeight}·세${c.cSet}·허${c.cHub}]`).join(' ')}
               </Typography>
               {deepAnalysis.winCheck && (
                 <Chip
@@ -4973,7 +4943,7 @@ export default function SemiAutoComparePanel({
                     );
                   })}
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.25 }}>
-                    ※ 이건 1231회 <strong>1회차</strong> 검증입니다. ★가 떠도 여러 방법을 동시에 본 탓일 수 있어(다중비교),
+                    ※ 이건 {effectiveRound ?? '?'}회 <strong>1회차</strong> 검증입니다. ★가 떠도 여러 방법을 동시에 본 탓일 수 있어(다중비교),
                     회차를 누적해 매번 lift&gt;1·p&lt;0.05 가 <strong>꾸준</strong>해야 진짜 신호입니다. 1회 유의는 우연일 수 있음.
                   </Typography>
                 </Box>
@@ -4998,7 +4968,7 @@ export default function SemiAutoComparePanel({
                     : '예상 6개'}
                   가 각 1:1 신호(양쪽빈도·가중치·허브·세트)에서 몇 위였는지 — <strong>상위 15위 안이면 그 신호로 추출 가능</strong>.
                   {deepAnalysis.isReviewTarget
-                    ? ' 이걸로 "1231을 데이터로 예측할 수 있었나"를 판정합니다.'
+                    ? ` 이걸로 "${effectiveRound ?? '?'}회를 데이터로 예측할 수 있었나"를 판정합니다.`
                     : ' 예상번호도 복기와 동일한 추출 논리로 만들어졌음을 보여줍니다.'}
                 </Typography>
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
@@ -5115,7 +5085,7 @@ export default function SemiAutoComparePanel({
               {deepAnalysis.exclude.length > 0 && (
                 <Box sx={{ mt: 0.75 }}>
                   <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                    ⑦ 제외 후보 (한쪽만 강함 — 양쪽 합의 약함){compareWinning ? ' · 주황=실제론 당첨(제외 주의)' : ''}
+                    ⑥ 제외 후보 (한쪽만 강함 — 양쪽 합의 약함){compareWinning ? ' · 주황=실제론 당첨(제외 주의)' : ''}
                   </Typography>
                   <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
                     {deepAnalysis.exclude.map((e) => (
@@ -5132,7 +5102,7 @@ export default function SemiAutoComparePanel({
 
               <Divider sx={{ my: 1 }} />
               {/* ① 빈도표 + ② 가중치표 */}
-              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>⑥ 빈도·가중치 TOP12 (번호 · 자동 · 반자동 · 전체 · 가중치)</Typography>
+              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>⑦ 빈도·가중치 TOP12 (번호 · 자동 · 반자동 · 전체 · 가중치)</Typography>
               <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, p: 0.5, mb: 1 }}>
                 <Stack direction="row" sx={{ fontSize: 10, fontWeight: 700, color: 'text.secondary', px: 0.5, mb: 0.25 }}>
                   <Box sx={{ width: 42 }}>번호</Box>

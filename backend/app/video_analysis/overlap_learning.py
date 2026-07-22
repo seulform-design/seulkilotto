@@ -363,7 +363,10 @@ def build_overlap_learning() -> Dict[str, Any]:
     # ⚠️ lift 구간별은 소표본 버킷(수십 건)이 쉽게 크게 흔들려, 그걸 기준으로 삼으면
     # 우연한 편차 하나 때문에 '신호 있음' 으로 오판돼 사용자를 오도한다.
     _sized = [s for s in learned["by_size"] if s["combos"] >= 100]
-    flat = bool(_sized) and all(abs(s["lift_vs_chance"] - 1.0) <= 0.25 for s in _sized)
+    # 표본이 충분한 크기 버킷이 없으면 '신호 없음(평탄)' 으로 **보수적으로** 판정한다.
+    # (과거: _sized 가 비면 flat=False → 표본이 너무 작을 때 오히려 '신호 있음' 으로
+    #  기울어 우연을 신호로 오도했다. round_learning 의 all([])==True 와 방향 일치.)
+    flat = (not _sized) or all(abs(s["lift_vs_chance"] - 1.0) <= 0.25 for s in _sized)
 
     return {
         "ok": True,

@@ -43,7 +43,6 @@ export default function ReviewVerificationPanel() {
     );
   }
 
-  const winSet = new Set(d.winning_numbers ?? []);
   const ks = ['top6', 'top10', 'top15', 'top18', 'top24', 'top30'];
 
   return (
@@ -121,21 +120,26 @@ export default function ReviewVerificationPanel() {
             🎯 {d.current_round_no}회 커버리지 세트 — {d.current_coverage_set.signal_label} 기준
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
-            top-6 '집중' 대신 <strong>핵심 6 + 확장 18</strong>로 제시합니다(복기 검증상 확장이 더 잡음).
+            top-6 '집중' 대신 <strong>핵심 6 + 확장 12(합 18)</strong>로 제시합니다(복기 검증상 확장이 더 잡음).
+            {' '}{d.current_round_no}회는 아직 추첨 전이라 대조하지 않습니다.
           </Typography>
           <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
             <Typography variant="caption" fontWeight={700} sx={{ fontSize: 11 }}>핵심 6:</Typography>
+            {/* 이번회차(미추첨) 픽이므로 지난(복기) 회차 당첨과 대조(dimmed)하지 않는다. */}
             {d.current_coverage_set.core6.map((n) => (
-              <LottoBall key={`c6-${n}`} number={n} size={26} dimmed={winSet.size > 0 && !winSet.has(n)} />
+              <LottoBall key={`c6-${n}`} number={n} size={26} />
             ))}
             <SharingBadge numbers={[...d.current_coverage_set.core6].sort((a, b) => a - b)} />
             <ComboActions numbers={[...d.current_coverage_set.core6].sort((a, b) => a - b)} source="unknown" label="복기검증 핵심6" />
           </Stack>
           <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="caption" fontWeight={700} sx={{ fontSize: 11 }}>확장 18:</Typography>
-            {d.current_coverage_set.expand18.map((n) => (
-              <LottoBall key={`e18-${n}`} number={n} size={20} />
-            ))}
+            {/* 확장은 핵심 6 을 제외한 나머지(7~18위)만 — '핵심 6 + 확장' 이 실제로 합 18 이 되게. */}
+            <Typography variant="caption" fontWeight={700} sx={{ fontSize: 11 }}>확장 +12:</Typography>
+            {d.current_coverage_set.expand18
+              .filter((n) => !d.current_coverage_set!.core6.includes(n))
+              .map((n) => (
+                <LottoBall key={`e18-${n}`} number={n} size={20} />
+              ))}
           </Stack>
         </Box>
       )}

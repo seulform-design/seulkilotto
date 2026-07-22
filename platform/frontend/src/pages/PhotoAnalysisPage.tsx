@@ -29,6 +29,7 @@ import OverlapPatternLearnPanel from '../components/OverlapPatternLearnPanel';
 import RoundDataBreakdownPanel from '../components/RoundDataBreakdownPanel';
 import RoundLearningPanel from '../components/RoundLearningPanel';
 import ReviewVerificationPanel from '../components/ReviewVerificationPanel';
+import FeatureLearningPanel from '../components/FeatureLearningPanel';
 import SavedLinesPanel, {
   GAME_LABELS,
   slipFromLines,
@@ -1753,6 +1754,9 @@ export default function PhotoAnalysisPage() {
 
       {/* 🔬 복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였나 + 커버리지 곡선 */}
       <ReviewVerificationPanel />
+
+      {/* 🧠 복기 Feature 자동 생성·검증·학습 — WF/Random 통과분만 추천·기여도 */}
+      <FeatureLearningPanel />
 
       {/* 🎓 다회차 용지 학습 — 보관 회차(누수 없음) 캘리브레이션 → 이번회차 적용 */}
       <RoundLearningPanel />

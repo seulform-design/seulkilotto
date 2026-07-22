@@ -24,14 +24,17 @@
 | **5×6 형식** | A~E 게임 줄 × 줄당 6번호 (7×7 OMR 마킹 격자와 별개) |
 | **수기 입력 (권장)** | 1~45 번호 그리드에서 6개 탭 → **줄 저장** (A→E) → 용지 누적 → **분석·저장** |
 | **복기 / 이번회차** | 탭별로 줄·용지 누적, 다른 줄·다른 용지 간 2·3·4번호 겹침 통계 |
+| **Feature 학습 엔진** | 보관 회차 용지로 Feature 자동 생성 → WF/Bootstrap/Permutation/MC 검증 → Random 통과분만 추천·기여도 표시 |
 | **사진 업로드 (선택)** | 영수증 OCR 또는 OMR 격자 인식 — 수기 입력이 기본 UX |
 
 ```bash
 # 수기 분석 API
 POST /api/v1/photo-analysis/manual
 # body: { "sheet_intent": "review"|"current_round", "slips": [{ "lines": [{ "label": "A", "numbers": [...] }] }] }
-```
 
+# Feature 학습·검증 (보관 회차 필요)
+GET /api/v1/photo-analysis/feature-learning?seed=42
+```
 ## 기술 스택
 
 | 영역 | 기술 |

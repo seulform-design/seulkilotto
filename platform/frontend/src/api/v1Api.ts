@@ -575,6 +575,13 @@ export const v1Api = {
   getOverlapLearning: () =>
     fetchJson<OverlapLearningResponse>('/api/v1/photo-analysis/overlap-learning', { timeoutMs: 90_000 }),
 
+  /** 복기 Feature 자동 생성·검증·학습 — WF/Bootstrap/Permutation/MC + 기여도 추천. */
+  getFeatureLearning: (seed = 42) =>
+    fetchJson<FeatureLearningResponse>(
+      `/api/v1/photo-analysis/feature-learning?seed=${seed}`,
+      { timeoutMs: 180_000 },
+    ),
+
   /** 복기 엔트리 회차 재귀속(관리자) — 라벨만 교정, 보관 정본 불변, 원본 회차 보존. */
   reattributeEntries: (fromRound: number, toRound: number, entryIds?: string[]) =>
     fetchJson<{
@@ -1041,6 +1048,82 @@ export interface OverlapLearningResponse {
     random_baseline?: { top6: number; top10: number; top18: number };
     verdict?: string;
   };
+  honesty?: string;
+}
+
+/** 복기 Feature 자동 생성·검증·학습 엔진 응답. */
+export interface FeatureLearningFeatureReport {
+  key: string;
+  label: string;
+  adopted: boolean;
+  reproducible: boolean;
+  walk_forward_mean_hits: number;
+  walk_forward_hits: number[];
+  bootstrap_mean: number;
+  bootstrap_ci95: [number, number];
+  permutation_p: number;
+  monte_carlo_baseline: { mean: number; ci95: [number, number] };
+  uniform_baseline: number;
+  lift_vs_uniform: number;
+  lift_vs_monte_carlo: number;
+  time_split: { early_mean: number; late_mean: number };
+  validation_passed: boolean;
+  use_reason: string[];
+  exclude_reason: string[];
+}
+
+export interface FeatureLearningResponse {
+  ok: boolean;
+  reason?: string;
+  round_count: number;
+  current_round_no?: number;
+  adopted_count?: number;
+  rejected_count?: number;
+  dataset?: {
+    rounds: { round_no: number; auto_lines: number; semi_lines: number; winning: number[] }[];
+    feature_count: number;
+    sample_rows: number;
+    sources: string[];
+    excluded_sources: string[];
+  };
+  features?: FeatureLearningFeatureReport[];
+  ensemble?: {
+    ok: boolean;
+    reason?: string;
+    models: {
+      name: string;
+      walk_forward_mean_hits: number;
+      walk_forward_hits: number[];
+      folds: number;
+      lift_vs_uniform: number;
+      permutation_importance: Record<string, number>;
+      stable: boolean;
+    }[];
+    selected: string | null;
+    note?: string;
+  };
+  recommendation?: {
+    ok: boolean;
+    reason?: string;
+    source?: string;
+    adopted_feature_count?: number;
+    adopted_features?: { key: string; label: string; lift: number }[];
+    numbers?: {
+      number: number;
+      score: number;
+      contributions: {
+        feature: string;
+        label: string;
+        contribution: number;
+        raw_value: number;
+        weight: number;
+      }[];
+    }[];
+    top6?: number[];
+    honesty?: string;
+  };
+  baselines?: { uniform_top6_hits: number; uniform_hit_rate: number };
+  pipeline?: string[];
   honesty?: string;
 }
 

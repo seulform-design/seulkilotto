@@ -395,6 +395,19 @@ def get_overlap_learning():
     return to_jsonable(build_overlap_learning())
 
 
+@router.get("/feature-learning")
+def get_feature_learning(seed: int = Query(42, ge=0, le=999_999)):
+    """복기 Feature 자동 생성·검증·학습 엔진.
+
+    보관 회차(추첨 전 용지)만으로 Feature Dataset 구축 → Walk-Forward/Bootstrap/
+    Permutation/Monte Carlo/Time-Split 검증 → Random 대비 통과 Feature 만 채택 →
+    앙상블 실험 → 추천 시 Feature 기여도 출력.
+    """
+    from ..video_analysis.feature_learning_engine import build_feature_learning
+
+    return to_jsonable(build_feature_learning(seed=seed))
+
+
 class ReattributeRequest(BaseModel):
     from_round: int = Field(..., ge=1, description="현재 잘못 기록된 회차")
     to_round: int = Field(..., ge=1, description="교정할 실제 회차")

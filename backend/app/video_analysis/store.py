@@ -1498,6 +1498,7 @@ def clear_store_intent(
     pick_type: str | None = None,
     *,
     include_archived: bool = False,
+    round_no: int | None = None,
 ) -> int:
     """특정 intent 저장소를 비운다.
 
@@ -1508,17 +1509,25 @@ def clear_store_intent(
     ⚠️ 복기 탭은 보관 배치를 정본으로 '표시' 하므로, 이 옵션이 없으면 사용자가
     화면에서 보고 있는 데이터를 삭제할 수 없다(삭제 성공 응답 후에도 그대로 남음).
     기본값 False — 보관 정본은 명시적 요청 없이는 건드리지 않는다.
+
+    round_no 지정(복기 한정) 시 그 회차 소속 엔트리만 삭제한다(_entry_round 기준,
+    _review_entries_for_round 와 동일). '고아 복기 정리'가 지정 회차만 지우고 다른
+    회차의 정상 복기 데이터를 통째로 날리지 않도록 하는 안전 필터.
     """
     if intent == "review":
         historical = _load_historical_raw()
         entries = historical.get("entries") or []
-        if pick_type:
-            kept_entries = [
-                e for e in entries
-                if not (e.get("video_intent") == "review" and _entry_pick_type(e) == pick_type)
-            ]
-        else:
-            kept_entries = [e for e in entries if e.get("video_intent") != "review"]
+
+        def _match_review(e: Dict[str, Any]) -> bool:
+            if e.get("video_intent") != "review":
+                return False
+            if pick_type and _entry_pick_type(e) != pick_type:
+                return False
+            if round_no is not None and str(_entry_round(e)) != str(round_no):
+                return False
+            return True
+
+        kept_entries = [e for e in entries if not _match_review(e)]
         removed = len(entries) - len(kept_entries)
         historical["entries"] = kept_entries
 
@@ -1526,6 +1535,10 @@ def clear_store_intent(
             batches = historical.get("archived_current_rounds") or []
             new_batches: List[Dict[str, Any]] = []
             for batch in batches:
+                # round_no 지정 시 해당 회차 보관 배치만 대상, 나머지는 그대로 보존.
+                if round_no is not None and str(batch.get("round_no")) != str(round_no):
+                    new_batches.append(batch)
+                    continue
                 b_entries = list(batch.get("entries") or [])
                 if pick_type:
                     kept_b = [e for e in b_entries if _entry_pick_type(e) != pick_type]

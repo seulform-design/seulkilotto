@@ -336,8 +336,6 @@ function collectAutoOnlyLines(
 /** 서버 누적 없을 때 자동 줄 빈도·줄간 겹침으로 강한 후보 추정 (백엔드 line_overlap 근사). */
 function deriveLocalStrongCandidates(
   autoLines: number[][],
-  winningNumbers: number[],
-  intent: SheetIntent,
   limit = 18
 ): number[] {
   if (autoLines.length === 0) return [];
@@ -385,15 +383,10 @@ function deriveLocalStrongCandidates(
     }
   }
 
-  if (intent === 'review' && winningNumbers.length > 0) {
-    const winSet = new Set(winningNumbers);
-    for (const nums of normalized) {
-      const overlap = nums.filter((n) => winSet.has(n));
-      const weight = overlap.length ** 2;
-      for (const n of overlap) bump(n, weight);
-    }
-  }
-
+  // ⚠️ 당첨번호로 강한후보를 가중하지 않는다 — 복기에서 '당첨을 맞힌 것처럼' 보이게
+  // 하는 누수(hindsight)였다. 강한후보는 오직 용지 구조(페어·트리플 반복 + 기본
+  // 빈도)로만 도출하고, 당첨은 사후 대조·표시에만 쓴다. 그래서 이 함수는 애초에
+  // winningNumbers 를 인자로 받지 않는다(재발 방지).
   for (const nums of normalized) {
     for (const n of nums) bump(n, 1);
   }
@@ -435,12 +428,11 @@ function getIntentStrongCandidates(
 function resolveStrongCandidates(
   accumulated: PhotoAnalysisAccumulated | null,
   intent: SheetIntent,
-  autoLines: number[][],
-  winningNumbers: number[]
+  autoLines: number[][]
 ): { candidates: number[]; source: 'backend' | 'local' | 'none' } {
   const backend = getIntentStrongCandidates(accumulated, intent);
   if (backend.length > 0) return { candidates: backend, source: 'backend' };
-  const local = deriveLocalStrongCandidates(autoLines, winningNumbers, intent);
+  const local = deriveLocalStrongCandidates(autoLines);
   if (local.length > 0) return { candidates: local, source: 'local' };
   return { candidates: [], source: 'none' };
 }
@@ -1144,6 +1136,9 @@ export default function SemiAutoComparePanel({
     setLocalRoundNo(st.roundNo);
     setCompareRound(null);
     setForceDetailedComparison(false);
+    // 탭 전환 시 이전 탭의 추천 조합을 비운다 — 남겨두면 winningSet 의미가 바뀐 채
+    // (복기↔이번회차) 옛 조합의 '당첨 N/6'·dim 이 오해를 부른다.
+    setRecommendations([]);
   }, [sheetIntent]);
 
   // 영속 — picked / bulkTickets / semiCurrentLines / semiSlipQueue / lastSavedAt / roundNo
@@ -1274,8 +1269,8 @@ export default function SemiAutoComparePanel({
     estimatedLinePairCount > HEAVY_LINE_PAIR_LIMIT;
 
   const strongCandidateResolution = useMemo(
-    () => resolveStrongCandidates(accumulated, sheetIntent, autoOnlyLines, winningNumbers),
-    [accumulated, sheetIntent, autoOnlyLines, winningNumbers]
+    () => resolveStrongCandidates(accumulated, sheetIntent, autoOnlyLines),
+    [accumulated, sheetIntent, autoOnlyLines]
   );
 
   const predictionSignalsQuery = useQuery({
@@ -2416,8 +2411,12 @@ export default function SemiAutoComparePanel({
     const shareOpt = optimizeForSharing(withPct.map((r) => r.number), 12);
 
     const ticketCount = crossValidation?.scored.length ?? 0;
+    // hasTickets 는 '용지가 있는가'(한쪽만 올려도 true)여야 한다. 교차검증 수(양쪽 모두
+    // 필요)로 판단하면 자동만/반자동만 올린 사용자에게 '용지 없음'으로 오표기된다.
+    const hasTickets =
+      groupLineMatching.autoLineCount + groupLineMatching.semiLineCount > 0;
     const signalTiers = {
-      용지교차: ticketCount > 0,
+      용지교차: ticketCount > 0, // 교차는 양쪽 줄이 모두 있어야 성립
       통합신호: unified.length > 0,
       평행: parallelStrong.length > 0 || parallelExpected.length > 0,
     };
@@ -2425,10 +2424,10 @@ export default function SemiAutoComparePanel({
       ranked: withPct.slice(0, 15),
       representative,
       shareOpt,
-      hasTickets: ticketCount > 0,
+      hasTickets,
       signalTiers,
     };
-  }, [compareWinning, crossValidation, predictionSignals, resolvedStrongCandidates, parallelStrong, parallelExpected]);
+  }, [compareWinning, crossValidation, predictionSignals, resolvedStrongCandidates, parallelStrong, parallelExpected, groupLineMatching.autoLineCount, groupLineMatching.semiLineCount]);
 
   // ★ 1:1 강수·기대수 (구간별) — 평행회차 패널과 같은 레이아웃을 1:1 전수비교
   // 반복도(predictedNumbers 순위)로 생성. 강수=구간(단/10/20/30/40번대) 내 반복도
@@ -3563,6 +3562,9 @@ export default function SemiAutoComparePanel({
                         setSemiSlipQueue([]);
                         setSemiCurrentLines([]);
                         setLastSavedAt(new Date().toISOString());
+                        // 서버 기준으로 맞췄으니 회차 stamp 도 현재 대상 회차로 갱신 —
+                        // 안 하면 낡은 localRoundNo 때문에 '회차 불일치' 경고가 계속 뜬다.
+                        setLocalRoundNo(effectiveRound ?? null);
                         setSaveNotice(`서버 저장분 ${serverLines.length}줄로 로컬 반자동 누적을 동기화했습니다.`);
                       }}
                     >
@@ -4103,10 +4105,14 @@ export default function SemiAutoComparePanel({
                   {comparisonRoundData.numbers.map((n) => (
                     <LottoBall key={n} number={n} size={32} />
                   ))}
-                  <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mx: 0.5 }}>
-                    + 보너스
-                  </Typography>
-                  <LottoBall number={comparisonRoundData.bonus} size={28} />
+                  {comparisonRoundData.bonus != null && (
+                    <>
+                      <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mx: 0.5 }}>
+                        + 보너스
+                      </Typography>
+                      <LottoBall number={comparisonRoundData.bonus} size={28} />
+                    </>
+                  )}
                 </Stack>
               </Stack>
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>

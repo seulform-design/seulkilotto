@@ -909,11 +909,13 @@ export default function PhotoAnalysisPage() {
     if (localAutoEmpty) {
       hydratedAutoRef.current[activeTab] = true;
       // 서버 복원분은 '이미 저장된' 데이터 → lastSavedAt 도 함께 세팅해 '아직 저장 안 됨' 오표기 방지.
-      // 회차 스탬프도 서버 슬라이스 기준으로 세팅(이번회차=currentRound, 복기=latestRound).
+      // 회차 스탬프는 저장 가드(runManualAnalyze)와 **같은 변수**로 세팅해야 한다
+      // (이번회차=currentRound, 복기=reviewRound). latestRound 를 쓰면 복기 회차가
+      // latest 와 어긋날 때(예: 복기 1231·latest 1232) 다음 저장마다 가짜 파괴 확인이 뜬다.
       patchManual({
         bulkAutoTickets: serverAutoLines.map((a) => [...a]),
         lastSavedAt: lastSavedAt ?? new Date().toISOString(),
-        roundNo: (activeTab === 'current_round' ? currentRound : latestRound) ?? null,
+        roundNo: (activeTab === 'current_round' ? currentRound : reviewRound) ?? null,
       });
       setNotice(`☁ 다른 기기에서 저장한 자동 누적 ${serverAutoLines.length}줄을 불러왔습니다.`);
     }
@@ -1252,12 +1254,14 @@ export default function PhotoAnalysisPage() {
         pickType: '자동',
       });
       if (!mountedRef.current) return;
-      // POST 응답에 이미 최신 accumulated 가 포함됨 — 추가 GET 은 레이스만 유발하므로 제거.
+      // 수동 저장 POST 는 경량 응답이라 accumulated 를 담지 않는다(항상 null) — 실제 누적
+      // 갱신은 아래 refreshAccumulated() GET 이 담당한다. 방어적으로만 확인.
       if (data.accumulated) setAccumulated(data.accumulated);
       const nowIso = new Date().toISOString();
-      // 저장 시점의 대상 회차를 스탬프 — 이번회차는 currentRound, 복기는 latestRound.
-      // 회차 롤오버 후 지난 회차 입력을 자동 정리하는 기준이 된다.
-      const savedRound = activeTab === 'current_round' ? currentRound : latestRound;
+      // 저장 시점의 대상 회차를 스탬프 — 저장 가드(targetRound)와 **같은 변수**여야 한다
+      // (이번회차=currentRound, 복기=reviewRound). latestRound 로 스탬프하면 복기 회차가
+      // latest 와 어긋날 때 다음 저장마다 가짜 '회차 뒤섞임' 파괴 확인이 뜬다.
+      const savedRound = activeTab === 'current_round' ? currentRound : reviewRound;
       if (data.duplicate_skipped) {
         // 중복은 오류가 아니라 '이미 저장된 상태' — 시간도 갱신하고 완료된 입력을 정리.
         patchManual({
@@ -1403,7 +1407,7 @@ export default function PhotoAnalysisPage() {
             </Button>
           }
         >
-          🎯 <strong>{currentRound}회 당첨번호가 발표됐습니다.</strong>{' '}
+          🎯 <strong>{latestRound}회 당첨번호가 발표됐습니다.</strong>{' '}
           이번회차 탭에 등록한 번호는 이제 <strong>복기 탭</strong>에서 당첨번호와 비교할 수 있습니다.
           <br />
           <Typography variant="caption" color="text.secondary">
@@ -1413,7 +1417,7 @@ export default function PhotoAnalysisPage() {
       )}
 
       <ParallelRoundPanel
-        targetRound={activeTab === 'review' ? (latestRound ?? currentRound) : (currentRound ?? latestRound)}
+        targetRound={activeTab === 'review' ? (reviewRound ?? currentRound) : (currentRound ?? latestRound)}
         modeLabel={activeTab === 'review' ? '복기회차' : '이번회차'}
       />
 
@@ -1489,11 +1493,11 @@ export default function PhotoAnalysisPage() {
             type="button"
             variant="outlined"
             color="primary"
-            disabled={isReanalyzing}
+            disabled={isReanalyzing || manualLoading}
             onClick={() => void handleReanalyze()}
             sx={{ minWidth: 110 }}
           >
-            {isReanalyzing ? (
+            {isReanalyzing || manualLoading ? (
               <><CircularProgress size={16} sx={{ mr: 0.5 }} />재분석…</>
             ) : (
               '↻ 재분석'
@@ -1680,7 +1684,7 @@ export default function PhotoAnalysisPage() {
                   onClick={clearStore}
                   disabled={
                     ticketLines.length === 0 &&
-                    (!accumulated || accumulated.total_analyses === 0)
+                    (activeSlice?.saved_auto_lines?.length ?? 0) === 0
                   }
                 >
                   자동 누적 전체 삭제

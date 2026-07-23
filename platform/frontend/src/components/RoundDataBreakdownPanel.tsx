@@ -79,23 +79,36 @@ export default function RoundDataBreakdownPanel({
   };
 
   const clearOrphanReviews = async () => {
+    const orphanRounds = Array.from(
+      new Set(orphans.map((r) => Number(r.ticket_round)).filter((n) => Number.isInteger(n) && n > 0)),
+    );
+    if (orphanRounds.length === 0) {
+      setNotice('삭제할 고아 회차를 식별하지 못했습니다.');
+      return;
+    }
     const ok = await confirm({
       message:
         '보관 정본과 줄 수가 동일한 「고아 복기 저장분」을 삭제할까요?\n\n' +
-        `대상 회차: ${orphans.map((r) => r.ticket_round).join(', ')}\n` +
+        `대상 회차: ${orphanRounds.join(', ')}회 (이 회차만 삭제)\n` +
         '• 롤오버 보관 정본은 절대 삭제하지 않습니다.\n' +
-        '• 복기 탭 live 저장분만 제거합니다.',
+        '• 다른 회차의 복기 저장분은 건드리지 않습니다.',
       confirmText: '고아 복기 삭제',
     });
     if (!ok) return;
     setBusy(true);
     setNotice(null);
     try {
-      // intent=review, include_archived=false (기본) → 보관 정본 유지
-      const res = await v1Api.clearPhotoAnalysisStore('review');
+      // ⚠️ 반드시 회차별 round_no 로 삭제 — 회차 미지정 삭제는 '전체 복기'를 날려
+      // 다른 회차의 정상 복기 데이터까지 잃는다(데이터 손실 버그였음). include_archived
+      // 기본 false 라 롤오버 보관 정본은 유지된다.
+      let removed = 0;
+      for (const r of orphanRounds) {
+        const res = await v1Api.clearPhotoAnalysisStore('review', undefined, { roundNo: r });
+        removed += res.removed ?? 0;
+      }
       const acc = await v1Api.getPhotoAnalysisAccumulated();
       onAccumulatedChange?.(acc);
-      setNotice(`✅ 고아 복기 정리 완료 (삭제 ${res.removed ?? '?'}건). 보관 정본은 유지됩니다.`);
+      setNotice(`✅ 고아 복기 정리 완료 (${orphanRounds.length}개 회차 · 삭제 ${removed}건). 보관 정본·타 회차 복기는 유지됩니다.`);
     } catch (e) {
       setNotice(`❌ 고아 삭제 실패: ${e instanceof Error ? e.message : '서버 오류'}`);
     } finally {

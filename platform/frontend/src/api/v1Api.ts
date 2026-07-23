@@ -651,10 +651,12 @@ export const v1Api = {
   clearPhotoAnalysisStore: (
     intent?: 'review' | 'current_round',
     pickType?: '자동' | '반자동',
+    opts?: { roundNo?: number },
   ) => {
     const q = new URLSearchParams();
     if (intent) q.set('intent', intent);
     if (pickType) q.set('pick_type', pickType);
+    if (opts?.roundNo != null) q.set('round_no', String(opts.roundNo));
     const qs = q.toString();
     return fetchJson<{ ok: boolean; removed: number }>(
       `/api/v1/photo-analysis/store${qs ? `?${qs}` : ''}`,

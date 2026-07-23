@@ -461,6 +461,10 @@ def delete_store(
         default=False,
         description="복기 한정 — 롤오버 보관 배치도 함께 삭제(복기 탭이 표시하는 정본)",
     ),
+    round_no: int | None = Query(
+        default=None,
+        description="복기 한정 — 지정 시 그 회차 소속 엔트리만 삭제(고아 복기 정리 안전 필터)",
+    ),
 ):
     if pick_type is not None and pick_type not in ("자동", "반자동"):
         raise HTTPException(status_code=400, detail="pick_type 은 자동 또는 반자동 이어야 합니다.")
@@ -468,7 +472,10 @@ def delete_store(
         if intent not in ("review", "current_round"):
             raise HTTPException(status_code=400, detail="intent 는 review 또는 current_round 이어야 합니다.")
         # pick_type 지정 시 해당 픽타입만 삭제(자동만/반자동만), 미지정 시 intent 전체.
-        removed = clear_store_intent(intent, pick_type=pick_type, include_archived=include_archived)
+        # round_no 지정 시 그 회차 소속만(복기 한정) — 다른 회차 정상 복기 보존.
+        removed = clear_store_intent(
+            intent, pick_type=pick_type, include_archived=include_archived, round_no=round_no
+        )
     else:
         removed = clear_store()
     return {"ok": True, "removed": removed}

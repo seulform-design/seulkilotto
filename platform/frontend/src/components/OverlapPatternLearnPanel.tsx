@@ -134,7 +134,9 @@ export default function OverlapPatternLearnPanel({
         </Box>
       ) : (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-          이번회차 겹침 조합이 아직 없습니다. 이번회차 자동 용지를 등록하면 학습 프로파일로 후보를 채점합니다.
+          {profile.win
+            ? '이번회차 겹침 조합이 아직 없습니다. 이번회차 자동 용지를 등록하면 학습 프로파일로 후보를 채점합니다.'
+            : '복기 회차에 「완전 당첨 겹침 조합」이 없어 학습 프로파일을 만들지 못했습니다(그런 조합은 드묾 — 정상, 이번회차 겹침 조합이 있어도 채점 불가). 회차가 쌓이면 채점됩니다.'}
         </Typography>
       )}
 

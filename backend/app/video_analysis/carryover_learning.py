@@ -15,7 +15,8 @@ from typing import Any, Dict, List
 
 BASELINE_HIT = 6.0 / 45.0  # 임의 번호가 다음 회차 당첨 6개에 속할 확률
 CARRYOVER_KS = [6, 12, 18]
-LIFT_SIGNAL = 1.15  # 이월을 '신호'로 인정하는 하한(이 미만이면 평탄=미주입)
+LIFT_SIGNAL = 1.15  # 이월을 '신호'로 인정하는 lift 하한
+MIN_PAIRS_FOR_SIGNAL = 3  # 표본(전이) 하한 — 2 전이(3회차)로는 lift 2.5 도 우연이라 평탄 처리
 
 
 def _support_ranked(sample: Any) -> List[int]:
@@ -64,13 +65,16 @@ def build_carryover_learning(seed: int = 42) -> Dict[str, Any]:
         per_pair.append(row)
 
     backtest_by_k: Dict[str, Any] = {}
-    flat = True
+    best_lift = 0.0
     for k in CARRYOVER_KS:
         hit, exp = agg[k]["hit"], agg[k]["exp"]
         lift = round(hit / exp, 3) if exp > 0 else 0.0
         backtest_by_k[str(k)] = {"hit": hit, "exp": round(exp, 3), "lift": lift, "pairs": int(agg[k]["cnt"])}
-        if lift >= LIFT_SIGNAL:
-            flat = False  # 어떤 K 에서든 뚜렷한 초과가 재현되면 '평탄 아님'
+        best_lift = max(best_lift, lift)
+    pairs = len(per_pair)
+    # 신호(비평탄) 인정: 표본(전이) 하한 이상 **AND** 재현되는 초과(lift≥1.15).
+    # 표본이 부족하면 lift 가 커도 우연이므로 평탄 처리 → 순위 미가산(배지 참고만).
+    flat = not (pairs >= MIN_PAIRS_FOR_SIGNAL and best_lift >= LIFT_SIGNAL)
 
     # 이번회차 이월 후보 = 최신 보관(추첨완료) 회차의 '강수였지만 미당첨' 상위 18.
     # 아직 안 나온 강수라 다음(=이번) 회차로 '이월'된다는 가설의 후보. 이번회차는
@@ -101,7 +105,8 @@ def build_carryover_learning(seed: int = 42) -> Dict[str, Any]:
         "honesty": (
             f"보관 {len(samples)}개 회차({len(per_pair)}개 전이)로 '강수 미당첨 → 다음 회차 당첨' 이월을 "
             "검증했습니다. 로또는 독립시행이라 이월은 대개 무작위와 구분되지 않습니다(lift≈1). "
-            "재현되는 초과(lift≥1.15)가 없으면 순위 가산에 넣지 않고 '참고'로만 표시하며, "
+            f"충분한 표본(전이 {MIN_PAIRS_FOR_SIGNAL}개 이상)에서 재현되는 초과(lift≥{LIFT_SIGNAL})가 없으면 "
+            "순위 가산에 넣지 않고 '참고'로만 표시합니다(현재 소표본은 lift 가 커도 우연). "
             "1등 확률(1/8,145,060)은 어떤 이월로도 변하지 않습니다."
         ),
     }

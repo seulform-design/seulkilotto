@@ -589,6 +589,13 @@ export const v1Api = {
       { timeoutMs: 180_000 },
     ),
 
+  /** 복기 이월(carryover) 역산 — '강수 미당첨 → 다음 회차 당첨' 검증 + 이번회차 이월 후보. */
+  getCarryoverLearning: (seed = 42) =>
+    fetchJson<CarryoverLearningResponse>(
+      `/api/v1/photo-analysis/carryover-learning?seed=${seed}`,
+      { timeoutMs: 120_000 },
+    ),
+
   /** 복기 엔트리 회차 재귀속(관리자) — 라벨만 교정, 보관 정본 불변, 원본 회차 보존. */
   reattributeEntries: (fromRound: number, toRound: number, entryIds?: string[]) =>
     fetchJson<{
@@ -1057,6 +1064,27 @@ export interface OverlapLearningResponse {
     random_baseline?: { top6: number; top10: number; top18: number };
     verdict?: string;
   };
+  honesty?: string;
+}
+
+/** 복기 이월(carryover) 역산 — '강수 미당첨 → 다음 회차 당첨' 검증 + 이번회차 이월 후보. */
+export interface CarryoverLearningResponse {
+  ok: boolean;
+  reason?: string;
+  round_count: number;
+  from_round?: number;
+  backtest?: {
+    pairs: number;
+    by_k?: Record<string, { hit: number; exp: number; lift: number; pairs: number }>;
+    per_pair?: {
+      from_round: number;
+      to_round: number;
+      by_k: Record<string, { pool: number; hit: number; exp: number; lift: number; carried: number[] }>;
+    }[];
+  };
+  calibration_flat?: boolean;
+  current_candidates?: { number: number; prev_support_rank: number; score: number }[];
+  baselines?: { uniform_hit_rate: number };
   honesty?: string;
 }
 

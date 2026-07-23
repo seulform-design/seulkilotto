@@ -47,7 +47,7 @@ export interface ValidatedLearningSignal {
   number: number;
   /** 0~1 정규화 가중 (검증 통과분만). */
   weight: number;
-  source: 'feature' | 'round' | 'overlap' | 'coverage' | 'pattern';
+  source: 'feature' | 'round' | 'overlap' | 'coverage' | 'pattern' | 'carryover';
   label: string;
 }
 

@@ -1326,6 +1326,12 @@ export default function SemiAutoComparePanel({
     staleTime: 300_000,
     retry: 1,
   });
+  const carryoverQuery = useQuery({
+    queryKey: ['v1-photo-carryover-learning', 'semi-auto'],
+    queryFn: () => v1Api.getCarryoverLearning(42),
+    staleTime: 300_000,
+    retry: 1,
+  });
 
   const validatedLearning = useMemo((): ValidatedLearningSignal[] => {
     const out: ValidatedLearningSignal[] = [];
@@ -1393,6 +1399,16 @@ export default function SemiAutoComparePanel({
       }
     }
 
+    const co = carryoverQuery.data;
+    // 이월(carryover)은 재현되는 초과(lift≥1.15, calibration_flat=false)가 있을 때만
+    // 순위 가산 — 평탄(무작위 수준)이면 넣지 않는다(overlap 게이트와 대칭). 로또는
+    // 독립시행이라 대개 평탄이며, 그땐 '참고' 섹션에만 표시하고 점수엔 미반영.
+    if (co?.ok && !co.calibration_flat && (co.current_candidates?.length ?? 0) > 0) {
+      for (const c of co.current_candidates!.slice(0, 12)) {
+        push(c.number, 0.3 + 0.5 * c.score, 'carryover', '이월');
+      }
+    }
+
     return out.sort((a, b) => b.weight - a.weight);
   }, [
     featureLearningQuery.data,
@@ -1400,6 +1416,7 @@ export default function SemiAutoComparePanel({
     overlapLearningQuery.data,
     reviewVerificationQuery.data,
     patternMiningQuery.data,
+    carryoverQuery.data,
   ]);
 
   const learningBridgeStatus = useMemo(() => {
@@ -1418,6 +1435,8 @@ export default function SemiAutoComparePanel({
       overlapFlat: Boolean(overlapLearningQuery.data?.ok && overlapLearningQuery.data.calibration_flat),
       coverageWired: Boolean(rv?.current_coverage_set),
       coverageConf,
+      carryoverPairs: carryoverQuery.data?.ok ? (carryoverQuery.data.backtest?.pairs ?? 0) : 0,
+      carryoverFlat: carryoverQuery.data?.ok ? (carryoverQuery.data.calibration_flat ?? true) : true,
     };
   }, [
     validatedLearning.length,
@@ -1426,6 +1445,7 @@ export default function SemiAutoComparePanel({
     roundLearningQuery.data,
     overlapLearningQuery.data,
     reviewVerificationQuery.data,
+    carryoverQuery.data,
   ]);
 
   const resolvedStrongCandidates = useMemo(() => {
@@ -2509,6 +2529,71 @@ export default function SemiAutoComparePanel({
       distribution,
     };
   }, [predictedNumbers, winningSet]);
+
+  // 🎯 최종 강수·기대수 (구간별 신호 종합) — '1:1 강수&기대(반복도)'를 시작점으로,
+  // 검증 학습(Feature/Pattern/커버리지/다회차/겹침)·이월(carryover)이 함께 가리키는
+  // 번호를 위로 올려 재정렬한다. 여러 신호가 겹칠수록 최종 강수. 당첨은 사후 대조만
+  // (계산 미사용). 확률 불변 — '넓은 합의' 를 한눈에 보여주는 종합 표시.
+  const finalStrongExpected = useMemo(() => {
+    if (!decadePattern) return null;
+    const valByNum = new Map<number, { weight: number; sources: Set<string> }>();
+    for (const v of validatedLearning) {
+      const e = valByNum.get(v.number) ?? { weight: 0, sources: new Set<string>() };
+      e.weight = Math.max(e.weight, v.weight);
+      e.sources.add(v.label);
+      valByNum.set(v.number, e);
+    }
+    const co = carryoverQuery.data;
+    const carrySet = new Set((co?.ok ? co.current_candidates ?? [] : []).map((c) => c.number));
+    const carryFlat = co?.calibration_flat ?? true;
+
+    const glyph = (fams: string[]) =>
+      fams.map((f) => (f === '반복' ? '🔁' : f === '학습' ? '🧠' : '↪')).join('');
+
+    const scoreOne = (p: { number: number; auto: number; semi: number; maxMatch: number; winning: boolean }, repWeight: number) => {
+      const val = valByNum.get(p.number);
+      const isCarry = carrySet.has(p.number);
+      const families: string[] = ['반복'];
+      if (val) families.push('학습');
+      if (isCarry) families.push('이월');
+      // 이월은 검증(비평탄)일 때만 점수 가산 — 평탄이면 배지만(참고).
+      const score = repWeight + (val ? 1.5 * val.weight : 0) + (isCarry && !carryFlat ? 0.8 : 0);
+      return {
+        number: p.number,
+        auto: p.auto,
+        semi: p.semi,
+        maxMatch: p.maxMatch,
+        winning: p.winning,
+        score,
+        families,
+        glyphs: glyph(families),
+        agreement: families.length,
+        valSources: val ? Array.from(val.sources) : [],
+        carry: isCarry,
+      };
+    };
+
+    const bands = decadePattern.byBand.map((b) => {
+      const pool = [
+        ...b.strong.map((s) => scoreOne(s, 2)),
+        ...b.expected.map((s) => scoreOne(s, 1)),
+      ].sort((a, b2) => b2.score - a.score || a.number - b2.number);
+      return { label: b.label, strong: pool.slice(0, 3), expected: pool.slice(3, 6) };
+    });
+
+    const allScored = bands.flatMap((b) => [...b.strong, ...b.expected]);
+    const consensus = [...allScored].sort(
+      (a, b) => b.agreement - a.agreement || b.score - a.score || a.number - b.number,
+    );
+    const winHit = compareWinning && winningSet
+      ? {
+          strong: bands.flatMap((b) => b.strong).filter((s) => winningSet.has(s.number)).length,
+          multi: consensus.filter((c) => c.agreement >= 2 && winningSet.has(c.number)).length,
+          multiTotal: consensus.filter((c) => c.agreement >= 2).length,
+        }
+      : null;
+    return { bands, consensus, winHit, carryFlat };
+  }, [decadePattern, validatedLearning, carryoverQuery.data, compareWinning, winningSet]);
 
   // 🧬 당첨 패턴 학습 — 복기(1231) 서버 데이터로 '당첨번호가 1:1 데이터에서 갖던
   // 프로파일'(반복도 백분위·자동/반자동 등장 비율·3+일치 여부)을 통계화한다.
@@ -4316,6 +4401,7 @@ export default function SemiAutoComparePanel({
                 <Typography variant="caption">
                   ✅ 복기 학습 연동 (Feature 채택 {learningBridgeStatus.adoptedFeatures} · Pattern 채택 {learningBridgeStatus.adoptedPatterns}
                   · 다회차 {learningBridgeStatus.roundLearningRounds}회 · 겹침 {learningBridgeStatus.overlapRounds}회{learningBridgeStatus.overlapFlat ? '(평탄→미주입)' : ''}
+                  · 이월 {learningBridgeStatus.carryoverPairs}전이{learningBridgeStatus.carryoverFlat ? '(평탄→참고만)' : '(신호)'}
                   · 커버리지 {learningBridgeStatus.coverageWired ? `신뢰도 ${learningBridgeStatus.coverageConf}%` : 'OFF'})
                   — 검증 통과분만 <strong>아래 ‘🔗 교차검증’에 가산</strong>됩니다(현재 {learningBridgeStatus.validatedCount}개 신호).
                   위 <strong>예상번호 balls·복기 백테스트는 순수 반복도 그대로</strong> 두어 자기검증 순환을 막습니다.
@@ -4579,6 +4665,90 @@ export default function SemiAutoComparePanel({
                     ) : (
                       ' 미출수가 많을수록 이번 회차를 티켓 데이터로 커버 못 하는 범위가 큽니다.'
                     )}
+                  </Typography>
+                </Box>
+              )}
+
+              {/* 🎯 최종 강수·기대수 (구간별 신호 종합) — 반복도 × 검증학습 × 이월 겹침 재정렬 */}
+              {finalStrongExpected && (
+                <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'warning.main' }}>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
+                    <Typography variant="caption" fontWeight={800}>
+                      🎯 최종 강수·기대수 (구간별 신호 종합)
+                    </Typography>
+                    {carryoverQuery.data?.ok && carryoverQuery.data.backtest?.by_k?.['6'] && (
+                      <Chip
+                        size="small"
+                        color={!finalStrongExpected.carryFlat ? 'success' : 'default'}
+                        label={`이월 검증 lift ${carryoverQuery.data.backtest.by_k['6'].lift}×(K6)·${carryoverQuery.data.backtest.by_k['12']?.lift ?? '-'}×(K12) — ${finalStrongExpected.carryFlat ? '평탄(참고만)' : '신호 반영'}`}
+                        sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+                      />
+                    )}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                    <strong>1:1 강수·기대(반복도)</strong> × <strong>검증 학습(Feature·Pattern·커버리지·다회차·겹침)</strong> × <strong>이월(강수 미당첨→다음 회차)</strong>이
+                    함께 가리키는 번호일수록 위로 재정렬. 배지 🔁반복·🧠학습·↪이월 — <strong>2개+ 겹치면 최종 강수 후보</strong>. 확률 불변(넓은 합의 표시).
+                  </Typography>
+                  <Stack spacing={0.5}>
+                    {finalStrongExpected.bands.map((b) => (
+                      <Stack key={`fse-${b.label}`} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
+                        <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>{b.label}</Typography>
+                        <Typography variant="caption" color="error.light" sx={{ fontSize: 10, fontWeight: 700 }}>강수</Typography>
+                        {b.strong.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
+                        {b.strong.map((s) => (
+                          <Box key={`fss-${s.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                            <LottoBall number={s.number} size={24} dimmed={compareWinning && winningSet ? !s.winning : false} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: s.agreement >= 2 ? 'warning.light' : 'text.disabled', fontWeight: s.agreement >= 2 ? 700 : 400 }}>
+                              {s.glyphs}
+                            </Typography>
+                          </Box>
+                        ))}
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5 }}>기대</Typography>
+                        {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
+                        {b.expected.map((s) => (
+                          <Box key={`fse2-${s.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                            <LottoBall number={s.number} size={20} dimmed={compareWinning && winningSet ? !s.winning : true} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
+                              {s.glyphs}
+                            </Typography>
+                          </Box>
+                        ))}
+                      </Stack>
+                    ))}
+                  </Stack>
+                  {(() => {
+                    const multi = finalStrongExpected.consensus.filter((c) => c.agreement >= 2).slice(0, 8);
+                    if (multi.length === 0) {
+                      return (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5, fontStyle: 'italic' }}>
+                          지금은 반복도 외 신호(학습·이월)와 겹치는 번호가 없습니다 — 3개 회차로는 정상. 회차가 쌓이면 합의가 늘어납니다.
+                        </Typography>
+                      );
+                    }
+                    return (
+                      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.75, p: 0.5, borderRadius: 0.5, bgcolor: 'action.hover' }}>
+                        <Typography variant="caption" fontWeight={700} sx={{ fontSize: 10, color: 'warning.light' }}>⭐ 2개+ 신호 합의:</Typography>
+                        {multi.map((c) => (
+                          <Box key={`cons-${c.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                            <LottoBall number={c.number} size={22} dimmed={compareWinning && winningSet ? !c.winning : false} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
+                              {c.glyphs}
+                            </Typography>
+                          </Box>
+                        ))}
+                        {finalStrongExpected.winHit && (
+                          <Chip
+                            size="small"
+                            color={finalStrongExpected.winHit.multi >= 2 ? 'success' : finalStrongExpected.winHit.multi >= 1 ? 'warning' : 'default'}
+                            label={`합의 ${finalStrongExpected.winHit.multiTotal}개 중 당첨 ${finalStrongExpected.winHit.multi}개`}
+                            sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                          />
+                        )}
+                      </Stack>
+                    );
+                  })()}
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5, fontStyle: 'italic' }}>
+                    ⚠️ {carryoverQuery.data?.honesty ?? '이월·학습 신호는 무작위 대비 재현될 때만 순위에 가산되고, 평탄이면 배지(참고)로만 표시합니다. 1등 확률은 불변.'}
                   </Typography>
                 </Box>
               )}

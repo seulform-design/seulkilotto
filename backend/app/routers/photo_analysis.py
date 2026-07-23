@@ -421,6 +421,17 @@ def get_pattern_mining(seed: int = Query(42, ge=0, le=999_999)):
     return to_jsonable(build_pattern_mining(seed=seed))
 
 
+@router.get("/carryover-learning")
+def get_carryover_learning(seed: int = Query(42, ge=0, le=999_999)):
+    """복기 이월(carryover) 역산 — '강수였지만 미당첨' 번호가 다음 회차에 나오는지
+    보관 회차쌍으로 정직하게 검증하고, 이번회차 이월 후보(과거 회차 기준, 누수 없음)를
+    제시한다. 재현되는 초과(lift≥1.15)가 없으면 평탄으로 보고 순위 가산엔 넣지 않는다.
+    """
+    from ..video_analysis.carryover_learning import build_carryover_learning
+
+    return to_jsonable(build_carryover_learning(seed=seed))
+
+
 class ReattributeRequest(BaseModel):
     from_round: int = Field(..., ge=1, description="현재 잘못 기록된 회차")
     to_round: int = Field(..., ge=1, description="교정할 실제 회차")

@@ -223,6 +223,50 @@ def _signal_leaderboard() -> Dict[str, Any]:
     }
 
 
+def _consensus_coverage(
+    cur_signals: Dict[str, Dict[int, float]], leaderboard: Dict[str, Any]
+) -> Dict[str, Any]:
+    """이번회차 커버리지를 '검증 통과 신호들의 합의'로 만든다 — 단일 신호가 아니라, 복기서
+    당첨을 무작위 이상으로 잡았던 신호들이 **함께** 상위로 가리키는 번호를 위로 올린다.
+
+    good 신호 = 다회차 상위18 평균이 무작위 기대(2.4) 초과. 각 번호가 몇 개 good 신호의
+    top-18 에 들었나(agreement)로 정렬 → '여러 신호가 동의할수록 핵심'. 과거 회차 성적만
+    사용(누수 없음). 확률 불변 — 넓은 합의 표시용.
+    """
+    lb = leaderboard.get("leaderboard", []) or []
+    random_top18 = 18 * 6 / 45  # ≈ 2.4
+    good = [
+        e["key"] for e in lb
+        if float(e.get("mean_top18", 0)) > random_top18 and e["key"] in cur_signals
+    ]
+    if len(good) < 2:  # 무작위 초과 신호가 부족하면 성적 상위 3개로 폴백
+        good = [e["key"] for e in lb[:3] if e["key"] in cur_signals]
+    if not good:
+        return {}
+    agree = {n: 0 for n in range(1, 46)}
+    best_rank = {n: 99 for n in range(1, 46)}
+    for key in good:
+        ranked = _rank_signal(cur_signals[key])
+        for i, n in enumerate(ranked):
+            if i < 18:
+                agree[n] += 1
+            best_rank[n] = min(best_rank[n], i + 1)
+    order = sorted(range(1, 46), key=lambda n: (-agree[n], best_rank[n], n))
+    need = max(2, (len(good) + 1) // 2)  # 과반 good 신호 동의
+    core = [n for n in order if agree[n] >= need][:6]
+    if len(core) < 6:
+        core = order[:6]
+    expand = order[:18]
+    return {
+        "good_signal_count": len(good),
+        "good_signals": good,
+        "core6": core,
+        "expand18": expand,
+        "agreement": {str(n): agree[n] for n in expand},
+        "need": need,
+    }
+
+
 def build_review_verification() -> Dict[str, Any]:
     from .store import (
         _review_entries_for_round,
@@ -264,6 +308,7 @@ def build_review_verification() -> Dict[str, Any]:
     cur_auto = _manual_saved_lines(cur_entries, "자동", include_photo=True)
     cur_semi = _manual_saved_lines(cur_entries, "반자동", include_photo=True)
     current_coverage_set: Dict[str, Any] = {}
+    consensus_coverage: Dict[str, Any] = {}
     if cur_auto or cur_semi:
         csig = _signals(cur_auto, cur_semi)
         # 커버리지 신호를 '다회차 성적'(당첨을 가장 잘 잡은 신호)으로 선택 — 단일회차 best
@@ -278,6 +323,8 @@ def build_review_verification() -> Dict[str, Any]:
             "core6": ranked[:6],
             "expand18": ranked[:18],
         }
+        # 다중신호 합의 — 검증 통과 신호들이 함께 가리키는 번호(단일 신호보다 강건).
+        consensus_coverage = _consensus_coverage(csig, leaderboard)
 
     # 정직한 요약 — top-6 vs top-18 커버리지 대비.
     best_entry = next((s for s in analysis["signals"] if s["key"] == analysis["best_signal_key"]), None)
@@ -298,6 +345,7 @@ def build_review_verification() -> Dict[str, Any]:
         "best_signal_key": analysis["best_signal_key"],
         "current_round_no": int(get_current_round_no()),
         "current_coverage_set": current_coverage_set,
+        "consensus_coverage": consensus_coverage,
         "multi_round_backtest": _multi_round_backtest(),
         "signal_leaderboard": leaderboard,
         "summary": {

@@ -2478,16 +2478,23 @@ export default function SemiAutoComparePanel({
   // 우선순위: 복기 다회차 best 신호 커버리지 세트 → (없으면) currentRoundForecast/반복도 폴백.
   const heroRecommendation = useMemo(() => {
     const rv = reviewVerificationQuery.data;
+    const consensus = rv?.ok ? rv.consensus_coverage : undefined;
     const cov = rv?.ok ? rv.current_coverage_set : undefined;
     const lb = rv?.ok ? rv.signal_leaderboard : undefined;
     const best = lb?.leaderboard?.[0];
     const clean = (arr: number[] | undefined) =>
       Array.from(new Set((arr ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= 45)));
-    let core6 = clean(cov?.core6);
-    let expand18 = clean(cov?.expand18);
-    let source: 'coverage' | 'forecast' | 'repeat' = 'coverage';
+    // 우선순위: ①다중신호 합의(consensus, 가장 강건) → ②다회차 best 신호 커버리지 → ③로컬 폴백.
+    let core6 = clean(consensus?.core6);
+    let expand18 = clean(consensus?.expand18);
+    let source: 'consensus' | 'coverage' | 'forecast' | 'repeat' = 'consensus';
     if (core6.length < 6 || expand18.length < 6) {
-      // 폴백 — 커버리지 세트가 없으면(서버 이번회차 용지 없음) 로컬 신호로 채운다.
+      core6 = clean(cov?.core6);
+      expand18 = clean(cov?.expand18);
+      source = 'coverage';
+    }
+    if (core6.length < 6 || expand18.length < 6) {
+      // 폴백 — 서버 커버리지가 없으면(이번회차 용지 없음) 로컬 신호로 채운다.
       const rep = currentRoundForecast?.representative ?? [];
       const predTop = predictedNumbers.map((p) => p.number);
       core6 = clean(rep.length >= 6 ? rep : predTop.slice(0, 6));
@@ -2497,8 +2504,8 @@ export default function SemiAutoComparePanel({
     const ready = core6.length >= 6 && expand18.length >= 6;
     const shareResult = ready ? optimizeForSharing(expand18, Math.min(18, expand18.length)) : null;
     const shareOpt = shareResult ? shareResult.numbers.slice(0, 6) : [];
-    // 추천 picks 는 '이번회차(미추첨)' 대상이므로 어느 탭에서든 당첨 대조·dim 하지 않는다
-    // (복기 탭에서 지난 회차 당첨과 섞으면 오해). 검증은 아래 '복기 검증' 근거로 분리.
+    // 추천 picks 는 '이번회차(미추첨)' 대상이므로 어느 탭에서든 당첨 대조·dim 하지 않는다.
+    const agreement = consensus?.agreement ?? {};
     return {
       ready,
       core6: [...core6].slice(0, 6).sort((a, b) => a - b),
@@ -2509,6 +2516,8 @@ export default function SemiAutoComparePanel({
       selectedByMulti: cov?.selected_by === 'multi_round',
       bestTop18: best?.mean_top18 ?? (rv?.ok ? rv.summary?.best_top18 : null) ?? null,
       reviewRounds: lb?.rounds ?? 0,
+      goodSignalCount: source === 'consensus' ? (consensus?.good_signal_count ?? 0) : 0,
+      agreement: source === 'consensus' ? agreement : {},
     };
   }, [reviewVerificationQuery.data, currentRoundForecast, predictedNumbers]);
 
@@ -3983,14 +3992,25 @@ export default function SemiAutoComparePanel({
                 ✅ <strong>복기 {heroRecommendation.reviewRounds}회차 검증 완료</strong> — 당첨을 가장 잘 잡은 신호는{' '}
                 <strong>{heroRecommendation.signalLabel}</strong>{heroRecommendation.selectedByMulti ? '(다회차 1위)' : ''}
                 {heroRecommendation.bestTop18 != null ? `, 상위18에 평균 ${heroRecommendation.bestTop18}/6 담음` : ''}.
-                → 이 검증으로 이번회차 추천을 만듭니다. <strong>top-6 집중보다 넓은 그물이 유효</strong>(확률 불변).
+                → 이 검증으로 이번회차 추천을 만듭니다.
+                {heroRecommendation.goodSignalCount > 0
+                  ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다(공에 '몇 신호').`
+                  : ''}{' '}
+                <strong>top-6 집중보다 넓은 그물이 유효</strong>(확률 불변).
               </Typography>
             </Alert>
           )}
           <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>핵심 6</Typography>
             {heroRecommendation.core6.map((n) => (
-              <LottoBall key={`hero-c-${n}`} number={n} size={30} />
+              <Box key={`hero-c-${n}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                <LottoBall number={n} size={30} />
+                {heroRecommendation.agreement[String(n)] != null && (
+                  <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
+                    {heroRecommendation.agreement[String(n)]}신호
+                  </Typography>
+                )}
+              </Box>
             ))}
             <SharingBadge numbers={heroRecommendation.core6} />
             <ComboActions numbers={heroRecommendation.core6} source="unknown" label="핵심6 추천" />

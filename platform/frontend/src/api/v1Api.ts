@@ -1037,6 +1037,15 @@ export interface ReviewVerificationResponse {
     core6: number[];
     expand18: number[];
   };
+  /** 다중신호 합의 커버리지 — 검증 통과 신호들이 함께 가리키는 번호(단일 신호보다 강건). */
+  consensus_coverage?: {
+    good_signal_count?: number;
+    good_signals?: string[];
+    core6?: number[];
+    expand18?: number[];
+    agreement?: Record<string, number>;
+    need?: number;
+  };
   /** 다회차 신호 순위표 — 어느 신호가 당첨을 가장 잘 잡았나(고정수 제외). */
   signal_leaderboard?: {
     rounds: number;

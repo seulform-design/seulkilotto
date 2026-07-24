@@ -109,12 +109,17 @@ const SIGNAL_SOURCE_LABELS: Record<string, string> = {
   'accumulated-fallback': '누적 보조',
 };
 
-// 대량 임계값 — 페어 매칭 계산 자체는 가볍다(수십만 페어 ≈ 수십 ms).
+// 대량 임계값(안내용) — 페어 매칭 계산 자체는 가볍다(수십만 페어 ≈ 수십 ms).
 // 브라우저 보호는 '데이터 샘플링(상위 N장)'이 아니라 렌더 페이징
 // (groupShowLimit / lineRenderCap)으로 한다. 상위 N장만 쓰면 전수비교 결과가
 // 왜곡되어 제품 버그가 된다.
 const HEAVY_COMPARISON_TICKET_LIMIT = 1_200;
 const HEAVY_LINE_PAIR_LIMIT = 200_000;
+// 실제 '계산 보류(빈 그룹)' 는 계산이 수 초 걸릴 극단에서만 — 모바일이든 PC든 그
+// 미만에선 항상 계산해 파생 분석(예상번호·강수기대·이월·최종)이 보이게 한다.
+// (메모리 실측: 모바일 재부팅 원인은 '계산' 이 아니라 '렌더' — 렌더만 캡으로 보호.)
+const EXTREME_COMPARISON_TICKET_LIMIT = 6_000;
+const EXTREME_LINE_PAIR_LIMIT = 2_000_000;
 
 // 모바일 감지 — 과거 lowMem||lowCpu 단독 true 로 4코어 노트북까지
 // '보류'되어 상위 200장 샘플만 보이는 사고가 있었다. 실제 모바일 신호만 사용.
@@ -1257,13 +1262,17 @@ export default function SemiAutoComparePanel({
     bulkTickets.length;
   const combinedTicketEstimate = autoLineCountEstimate + semiLineCountEstimate;
   const estimatedLinePairCount = autoLineCountEstimate * semiLineCountEstimate;
-  // 대량 여부(안내용). 실제 보류는 모바일에서만 — PC는 항상 전체 전수비교.
-  // 브라우저 보호는 렌더 페이징(groupShowLimit / lineRenderCap)으로 한다.
+  // 대량 여부(안내용). 계산(그룹·파생신호)은 모바일에서도 보류하지 않는다 — 예상번호·
+  // 강수/기대·이월·최종강수가 모바일에서도 항상 보이게. 진짜 보류(빈 그룹)는 계산이 수 초
+  // 걸릴 '극단' 에서만(디바이스 무관 백스톱). 무거운 카드 목록 렌더는 groupShowLimit/
+  // lineRenderCap 로 보호한다(모바일 OOM 방지). ← 메모리 실측 결론 복원.
   const isHeavyVolume =
     combinedTicketEstimate > HEAVY_COMPARISON_TICKET_LIMIT ||
     estimatedLinePairCount > HEAVY_LINE_PAIR_LIMIT;
-  const suspendHeavyComparison =
-    IS_CONSTRAINED_DEVICE && isHeavyVolume && !forceDetailedComparison;
+  const isExtremeVolume =
+    combinedTicketEstimate > EXTREME_COMPARISON_TICKET_LIMIT ||
+    estimatedLinePairCount > EXTREME_LINE_PAIR_LIMIT;
+  const suspendHeavyComparison = isExtremeVolume && !forceDetailedComparison;
 
   const strongCandidateResolution = useMemo(
     () => resolveStrongCandidates(accumulated, sheetIntent, autoOnlyLines),
@@ -3483,52 +3492,42 @@ export default function SemiAutoComparePanel({
         </Alert>
       )}
 
-      {IS_CONSTRAINED_DEVICE && isHeavyVolume && (
+      {isExtremeVolume && (
         <Alert
-          severity="info"
+          severity={suspendHeavyComparison ? 'warning' : 'success'}
           sx={{ mb: 1.5 }}
           action={
-            !forceDetailedComparison ? (
-              <Button
-                color="info"
-                size="small"
-                variant="outlined"
-                onClick={() => setForceDetailedComparison(true)}
-              >
+            suspendHeavyComparison ? (
+              <Button color="warning" size="small" variant="outlined" onClick={() => setForceDetailedComparison(true)}>
                 전체 전수비교 실행
               </Button>
             ) : (
-              <Button
-                color="inherit"
-                size="small"
-                onClick={() => setForceDetailedComparison(false)}
-              >
+              <Button color="inherit" size="small" onClick={() => setForceDetailedComparison(false)}>
                 다시 보류
               </Button>
             )
           }
         >
-          {forceDetailedComparison ? (
+          {suspendHeavyComparison ? (
             <>
-              전체 {combinedTicketEstimate.toLocaleString()}줄 · 약{' '}
-              {estimatedLinePairCount.toLocaleString()}페어로 <strong>1:1 전수비교·교집합 요약</strong>을
-              표시 중입니다. 카드·줄 목록은 페이지네이션으로 나눠 렌더합니다.
+              매우 대량({combinedTicketEstimate.toLocaleString()}줄 · 약{' '}
+              {estimatedLinePairCount.toLocaleString()}페어)이라 계산이 몇 초 걸릴 수 있어 잠시 보류했습니다.
+              <strong> [전체 전수비교 실행]</strong>으로 샘플링 없이 전체 분석합니다(카드·줄은 페이지·캡으로 렌더).
             </>
           ) : (
             <>
-              모바일에서 대량 데이터({combinedTicketEstimate.toLocaleString()}줄 · 약{' '}
-              {estimatedLinePairCount.toLocaleString()}페어)라 탭 보호를 위해 상세 전수비교를 잠시
-              보류합니다. <strong>[전체 전수비교 실행]</strong>으로 샘플링 없이 전체 데이터를
-              분석할 수 있습니다.
+              전체 {combinedTicketEstimate.toLocaleString()}줄 · 약{' '}
+              {estimatedLinePairCount.toLocaleString()}페어 <strong>1:1 전수비교</strong> 표시 중(샘플링 없음).
             </>
           )}
         </Alert>
       )}
-      {!IS_CONSTRAINED_DEVICE && isHeavyVolume && (
+      {isHeavyVolume && !isExtremeVolume && (
         <Alert severity="success" sx={{ mb: 1.5 }}>
           전체 {combinedTicketEstimate.toLocaleString()}줄 · 약{' '}
-          {estimatedLinePairCount.toLocaleString()}페어 <strong>1:1 전수비교</strong> 진행 중
-          (샘플링 없음). 결과 카드는 페이지로 나눠 표시합니다.
+          {estimatedLinePairCount.toLocaleString()}페어 <strong>1:1 전수비교</strong> 진행 중(샘플링 없음).
+          예상번호·강수/기대 등 분석은 <strong>전체로 계산</strong>하고,{' '}
+          {IS_CONSTRAINED_DEVICE ? '모바일에선 카드·줄 목록만 페이지·캡으로' : '카드는 페이지로'} 나눠 렌더합니다.
         </Alert>
       )}
 

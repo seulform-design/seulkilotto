@@ -32,10 +32,17 @@ def _line_freq(lines: List[List[int]]) -> Counter:
 
 
 def _signals(auto: List[List[int]], semi: List[List[int]]) -> Dict[str, Dict[int, float]]:
+    from .feature_learning_engine import _detect_fixed_semi
+
     ac = _line_freq(auto)
     sc = _line_freq(semi)
-    support = {n: float(min(ac.get(n, 0), sc.get(n, 0))) for n in range(1, 46)}
-    total = {n: float(ac.get(n, 0) + sc.get(n, 0)) for n in range(1, 46)}
+    # 반자동 고정수(사용자 지정 반복)는 반자동 지지·전체빈도에서 제외 — feature/pattern/
+    # carryover 와 동일 기준으로 '지지/강수' 신호를 일관되게 정화(과거엔 이 모듈만 미제외라
+    # 같은 support 신호가 섹션마다 값이 달랐다).
+    fixed = _detect_fixed_semi(semi)
+    sc_sup = {n: (0.0 if n in fixed else float(sc.get(n, 0))) for n in range(1, 46)}
+    support = {n: float(min(float(ac.get(n, 0)), sc_sup[n])) for n in range(1, 46)}
+    total = {n: float(ac.get(n, 0) + sc_sup[n]) for n in range(1, 46)}
     # 균형: 지지 점수에 구간(10단위) 상한을 둬 한 구간 쏠림을 억제한 커버리지 지향 신호.
     balanced_order = _rank_signal(support)
     balanced_val: Dict[int, float] = {}
@@ -101,6 +108,59 @@ def _analyze(auto: List[List[int]], semi: List[List[int]], winning: List[int]) -
     return {"signals": out_signals, "best_signal_key": best[1]["key"] if best else None}
 
 
+def _multi_round_backtest() -> Dict[str, Any]:
+    """보관된 **모든** 회차의 자동·반자동 용지로 '지지(support, 고정수 제외) 상위 K 가
+    그 회차 당첨을 얼마나 담나' 를 회차별·평균으로 백테스트한다(단일 회차가 아닌 다회차).
+
+    support_rank 는 build_number_features 가 이미 고정수를 제외해 산출한 값을 재사용 —
+    review-verification 단일회차 신호와 동일 기준. 다음 회차 이월(강수 미당첨→다음 당첨)도 병기.
+    """
+    from .feature_learning_engine import collect_round_samples, _detect_fixed_semi
+
+    samples = collect_round_samples()
+    ks = [6, 12, 18]
+    per_round: List[Dict[str, Any]] = []
+    agg = {k: {"hit": 0, "exp": 0.0} for k in ks}
+    for i, s in enumerate(samples):
+        ranked = sorted(range(1, 46), key=lambda n: s.features[n]["support_rank"])
+        win = set(s.winning)
+        cov: Dict[str, int] = {}
+        for k in ks:
+            hit = sum(1 for n in ranked[:k] if n in win)
+            cov[str(k)] = hit
+            agg[k]["hit"] += hit
+            agg[k]["exp"] += k * (6.0 / 45.0)
+        carry = None
+        if i + 1 < len(samples):
+            nxt_win = set(samples[i + 1].winning)
+            missed = [n for n in ranked if n not in win][:12]
+            carry = {
+                "to_round": samples[i + 1].round_no,
+                "hit": sum(1 for n in missed if n in nxt_win),
+                "pool": len(missed),
+                "carried": sorted(n for n in missed if n in nxt_win),
+            }
+        per_round.append({
+            "round_no": s.round_no,
+            "winning": list(s.winning),
+            "auto_lines": len(s.auto_lines),
+            "semi_lines": len(s.semi_lines),
+            "fixed_semi": sorted(_detect_fixed_semi(s.semi_lines)),
+            "support_coverage": cov,
+            "carryover": carry,
+        })
+    n = max(1, len(samples))
+    aggregate = {
+        str(k): {
+            "mean_hit": round(agg[k]["hit"] / n, 3),
+            "mean_exp": round(agg[k]["exp"] / n, 3),
+            "lift": round(agg[k]["hit"] / agg[k]["exp"], 3) if agg[k]["exp"] > 0 else 0.0,
+        }
+        for k in ks
+    }
+    return {"rounds": len(samples), "per_round": per_round, "aggregate": aggregate}
+
+
 def build_review_verification() -> Dict[str, Any]:
     from .store import (
         _review_entries_for_round,
@@ -158,16 +218,21 @@ def build_review_verification() -> Dict[str, Any]:
     t6 = best_entry["coverage"]["top6"] if best_entry else 0
     t18 = best_entry["coverage"]["top18"] if best_entry else 0
 
+    from .feature_learning_engine import _detect_fixed_semi
+
     return {
         "ok": True,
         "round_no": review_round,
         "winning_numbers": winning,
         "auto_line_count": len(auto),
         "semi_line_count": len(semi),
+        "review_fixed_semi": sorted(_detect_fixed_semi(semi)),
+        "current_fixed_semi": sorted(_detect_fixed_semi(cur_semi)) if (cur_auto or cur_semi) else [],
         "signals": analysis["signals"],
         "best_signal_key": analysis["best_signal_key"],
         "current_round_no": int(get_current_round_no()),
         "current_coverage_set": current_coverage_set,
+        "multi_round_backtest": _multi_round_backtest(),
         "summary": {
             "best_top6": t6,
             "best_top18": t18,

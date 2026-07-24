@@ -1028,11 +1028,27 @@ export interface ReviewVerificationResponse {
   }[];
   best_signal_key?: string;
   current_round_no?: number;
+  review_fixed_semi?: number[];
+  current_fixed_semi?: number[];
   current_coverage_set?: {
     signal: string;
     signal_label: string;
     core6: number[];
     expand18: number[];
+  };
+  /** 다회차 백테스트 — 보관 전 회차의 지지(고정수 제외) 상위 K 커버리지 + 이월. */
+  multi_round_backtest?: {
+    rounds: number;
+    aggregate?: Record<string, { mean_hit: number; mean_exp: number; lift: number }>;
+    per_round?: {
+      round_no: number;
+      winning: number[];
+      auto_lines: number;
+      semi_lines: number;
+      fixed_semi: number[];
+      support_coverage: Record<string, number>;
+      carryover: { to_round: number; hit: number; pool: number; carried: number[] } | null;
+    }[];
   };
   summary?: { best_top6: number; best_top18: number; best_label: string | null };
   honesty?: string;

@@ -111,7 +111,53 @@ export default function ReviewVerificationPanel() {
         <strong>진단</strong>: 가장 많이 산 번호(고지지 <em>최상위</em>)는 당첨과 무관해 top-6 집중 픽은
         구조적으로 실패합니다. 당첨은 <strong>중간 지지대</strong>에 흩어져 top-18 커버리지에서만 대부분
         잡힙니다. <strong>'자동 빈도' 는 최악</strong>(단면 신호), <strong>'양쪽 지지' 가 최선</strong>입니다.
+        {' '}지지 신호는 <strong>반자동 고정수를 제외</strong>해 산출합니다(고정수는 거의 모든 반자동 줄에 반복돼 왜곡).
       </Alert>
+
+      {/* 🧪 다회차 백테스트 — 보관 전 회차의 지지(고정수 제외) 상위 K 커버리지 + 이월 */}
+      {d.multi_round_backtest && d.multi_round_backtest.rounds > 1 && (
+        <Box sx={{ mb: 1.5, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
+            🧪 다회차 백테스트 ({d.multi_round_backtest.rounds}개 보관 회차 · 반자동 고정수 제외 지지 기준)
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+            각 회차의 자동↔반자동 지지 상위 K 가 그 회차 당첨을 몇 개 담나 — <strong>단일회차가 아닌 전 회차 평균</strong>.
+            lift = 실제/무작위기대. 이월 = 그 회차 강수 미당첨 → <strong>다음 회차</strong> 당첨.
+          </Typography>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+            {['6', '12', '18'].map((k) => {
+              const a = d.multi_round_backtest!.aggregate?.[k];
+              if (!a) return null;
+              return (
+                <Chip
+                  key={k}
+                  size="small"
+                  color={a.lift >= 1.15 ? 'success' : 'default'}
+                  label={`top-${k} 평균 ${a.mean_hit}/6 (무작위 ${a.mean_exp} · ×${a.lift})`}
+                  sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+                />
+              );
+            })}
+          </Stack>
+          <Stack spacing={0.3}>
+            {(d.multi_round_backtest.per_round ?? []).map((r) => (
+              <Stack key={r.round_no} direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography sx={{ fontSize: 10, fontWeight: 700, minWidth: 42 }}>{r.round_no}회</Typography>
+                <Typography variant="caption" sx={{ fontSize: 10, color: 'text.secondary' }}>
+                  자{r.auto_lines}·반{r.semi_lines} · <strong>top6 {r.support_coverage['6']} · top18 {r.support_coverage['18']}</strong>
+                  {r.fixed_semi.length > 0 ? ` · 🔒고정수 ${r.fixed_semi.join('·')}` : ''}
+                  {r.carryover
+                    ? ` · 이월→${r.carryover.to_round} ${r.carryover.hit}개${r.carryover.carried.length ? `(${r.carryover.carried.join('·')})` : ''}`
+                    : ''}
+                </Typography>
+              </Stack>
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontSize: 9, mt: 0.5, fontStyle: 'italic' }}>
+            ⚠️ 표본({d.multi_round_backtest.rounds}회차)이 작아 lift 는 우연일 수 있습니다. 회차가 쌓일수록 신뢰도가 오릅니다. 1등 확률(1/8,145,060)은 불변.
+          </Typography>
+        </Box>
+      )}
 
       {/* 이번회차 커버리지 세트 */}
       {d.current_coverage_set && (d.current_coverage_set.expand18?.length ?? 0) > 0 && (

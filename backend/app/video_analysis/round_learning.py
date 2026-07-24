@@ -50,7 +50,14 @@ def _bucket_of_rank(rank: int) -> str:
 
 
 def _number_support(auto_lines: List[List[int]], semi_lines: List[List[int]]) -> Dict[int, Dict[str, int]]:
-    """번호별 자동/반자동 등장 줄 수(줄 단위 중복 제거)."""
+    """번호별 자동/반자동 등장 줄 수(줄 단위 중복 제거).
+
+    반자동 고정수(사용자 지정 반복)는 지지(support=min)에서 제외 — 안 그러면 고정수가
+    항상 반자동 최대치라 강수로 둔갑한다(feature/pattern/carryover/review 와 동일 기준).
+    표시용 semi 카운트는 유지(투명성).
+    """
+    from .feature_learning_engine import _detect_fixed_semi
+
     auto_c: Counter = Counter()
     semi_c: Counter = Counter()
     for ln in auto_lines:
@@ -59,11 +66,13 @@ def _number_support(auto_lines: List[List[int]], semi_lines: List[List[int]]) ->
     for ln in semi_lines:
         for n in set(int(x) for x in ln if 1 <= int(x) <= 45):
             semi_c[n] += 1
+    fixed = _detect_fixed_semi(semi_lines)
     out: Dict[int, Dict[str, int]] = {}
     for n in range(1, 46):
         a = auto_c.get(n, 0)
         s = semi_c.get(n, 0)
-        out[n] = {"number": n, "auto": a, "semi": s, "support": min(a, s)}
+        s_sup = 0 if n in fixed else s
+        out[n] = {"number": n, "auto": a, "semi": s, "support": min(a, s_sup)}
     return out
 
 

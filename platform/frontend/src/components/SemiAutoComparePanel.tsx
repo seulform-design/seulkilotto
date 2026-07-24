@@ -5576,8 +5576,8 @@ export default function SemiAutoComparePanel({
         </>
       )}
 
-      {/* ── 자동 ↔ 반자동 줄 페어 1:1 매칭 — picked 와 무관, 누적 데이터만 있으면 표시 ── */}
-      {canRenderLineMatching && (
+      {/* ── 자동 ↔ 반자동 줄 페어 1:1 매칭 — 상세 토글 안으로(무거운 카드 렌더=모바일 부담) ── */}
+      {showPredictionDetail && canRenderLineMatching && (
             <Box ref={lineMatchingRef}>
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
               <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>

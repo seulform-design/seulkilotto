@@ -2212,12 +2212,31 @@ export default function SemiAutoComparePanel({
     winningSet,
   ]);
 
+  // 🔒 반자동 고정수 감지 — 반자동은 '고정수(사용자 지정) + 자동fill' 구조라, 고정수는
+  // 거의 모든 반자동 줄에 반복 등장해(자동fill 은 번호당 ~13%/줄) 빈도·지지·1:1 통계를
+  // 왜곡한다(support=min 이라 고정수는 반자동 쪽이 최대치가 돼 자동값 그대로 강수화).
+  // 반자동 줄의 50%+ 에 등장하는 번호를 고정수로 보고 '발견 신호'에서 분리한다.
+  // 표본이 적으면(<10줄) 자동fill 우연이 50%를 넘을 수 있어 감지하지 않는다(오탐 방지).
+  const fixedSemiNumbers = useMemo(() => {
+    const lines = groupLineMatching.allSemiNumbers;
+    const n = lines.length;
+    if (n < 10) return { set: new Set<number>(), list: [] as { number: number; frac: number }[], lineCount: n };
+    const freq: Record<number, number> = {};
+    for (const line of lines) for (const v of new Set(line)) if (v >= 1 && v <= 45) freq[v] = (freq[v] ?? 0) + 1;
+    const list = Object.entries(freq)
+      .map(([v, c]) => ({ number: Number(v), frac: c / n }))
+      .filter((x) => x.frac >= 0.5)
+      .sort((a, b) => b.frac - a.frac || a.number - b.number);
+    return { set: new Set(list.map((x) => x.number)), list, lineCount: n };
+  }, [groupLineMatching.allSemiNumbers]);
+
   // 🎯 당첨 예상번호 & 번호별 반복 출현 정밀 프로파일 (단일 소스).
   // 핵심 신호 = 자동↔반자동 1:1 전수비교에서 '서로 다른 자동 줄 수 × 서로 다른
   // 반자동 줄 수'(distinct line — 같은 줄 중복 안 셈). 자동·반자동 '양쪽 모두'에서
   // 반복 출현할수록 강하고, 큰 매치(3+)에 든 번호는 보너스. 한쪽만 인기인 번호는
   // 곱(log×log)으로 자동 억제된다. 여기에 세트 중복(동반 반복)·평행회차를 더한다.
   // 당첨번호(winningSet)는 계산에 넣지 않는다(누수 방지) — 복기 탭은 대조만.
+  // 🔒 반자동 고정수는 발견 신호에서 제외한다(fixedSemiNumbers, 아래 add 가드).
   const predictedNumbers = useMemo(() => {
     type Prof = {
       autoIdx: Set<number>;
@@ -2258,8 +2277,10 @@ export default function SemiAutoComparePanel({
 
     const score: Record<number, number> = {};
     const srcMap: Record<number, Set<string>> = {};
+    const fixedSet = fixedSemiNumbers.set;
     const add = (n: number, w: number, src: string) => {
       if (!Number.isInteger(n) || n < 1 || n > 45 || w <= 0) return;
+      if (fixedSet.has(n)) return; // 🔒 반자동 고정수는 발견 신호(강수/기대/예상)에서 제외 — 별도 패널 표시
       score[n] = (score[n] ?? 0) + w;
       (srcMap[n] ??= new Set<string>()).add(src);
     };
@@ -2319,6 +2340,7 @@ export default function SemiAutoComparePanel({
     parallelStrong,
     parallelExpected,
     crossSetPatterns,
+    fixedSemiNumbers,
   ]);
 
   // 🔗 전수비교 × 심층역산 교차 검증 — 심층역산과 1:1 전수비교를 교차해
@@ -2466,7 +2488,10 @@ export default function SemiAutoComparePanel({
     // 미출수 — 자동·반자동 어느 줄에도 등장하지 않은 번호(양쪽 등장 0).
     // 티켓 기반 방법으론 절대 추출 불가한 영역 — 당첨이 여기서 나오면 그 회차는
     // 데이터로 못 잡는다는 정직한 지표가 된다.
+    // ⚠️ 고정수는 predictedNumbers 에서 제외됐지만 반자동 줄엔 '등장' 하므로 미출이
+    //    아니다 — presentSet 에 다시 포함해 미출로 오분류되지 않게 한다.
     const presentSet = new Set(predictedNumbers.filter((p) => p.auto + p.semi > 0).map((p) => p.number));
+    for (const n of fixedSemiNumbers.set) presentSet.add(n);
     const byBand = bands.map((b) => {
       const inBand = predictedNumbers.filter((p) => p.number >= b.lo && p.number <= b.hi && p.auto + p.semi > 0);
       const mk = (p: (typeof predictedNumbers)[number]) => ({
@@ -2528,7 +2553,7 @@ export default function SemiAutoComparePanel({
       strongWinHit,
       distribution,
     };
-  }, [predictedNumbers, winningSet]);
+  }, [predictedNumbers, winningSet, fixedSemiNumbers]);
 
   // 🎯 최종 강수·기대수 (구간별 신호 종합) — '1:1 강수&기대(반복도)'를 시작점으로,
   // 검증 학습(Feature/Pattern/커버리지/다회차/겹침)·이월(carryover)이 함께 가리키는
@@ -4408,6 +4433,21 @@ export default function SemiAutoComparePanel({
                   미검증 Feature/Pattern·평탄 신호는 넣지 않으며, <strong>3개 회차로는 채택이 거의 0</strong>이라 지금 영향은 작고 회차가 쌓일수록 커집니다. 1등 확률은 불변.
                 </Typography>
               </Alert>
+              {fixedSemiNumbers.list.length > 0 && (
+                <Alert severity="warning" icon={false} sx={{ mb: 1, py: 0.5 }}>
+                  <Typography variant="caption">
+                    🔒 <strong>반자동 고정수 {fixedSemiNumbers.list.length}개 감지</strong>
+                    {' '}(반자동 {fixedSemiNumbers.lineCount}줄 중 50%+ 반복):{' '}
+                    {fixedSemiNumbers.list.slice(0, 12).map((f) => `${f.number}(${Math.round(f.frac * 100)}%)`).join(' · ')}
+                    {fixedSemiNumbers.list.length > 12 ? ' …' : ''}
+                    <br />
+                    반자동은 <strong>고정수(사용자 지정) + 자동fill</strong> 구조라 고정수가 거의 모든 줄에 반복돼
+                    빈도·지지·1:1 통계를 왜곡합니다(고정수는 반자동 쪽이 항상 최대치 → 강수로 둔갑).
+                    → 위 고정수는 <strong>강수·기대·예상·교차검증에서 분리</strong>했습니다(자동fill·자동용지 기반으로만 신호 산출).
+                    복기·이번회차 동일 적용. 확률 불변.
+                  </Typography>
+                </Alert>
+              )}
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
                 {predictedNumbers.slice(0, 10).map((p, i) => (
                   <Box key={`pred-${p.number}`} sx={{ textAlign: 'center', minWidth: 44 }}>

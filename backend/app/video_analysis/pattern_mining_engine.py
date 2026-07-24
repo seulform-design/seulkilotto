@@ -57,10 +57,19 @@ def _line_freq(lines: Sequence[Sequence[int]]) -> Counter:
 
 
 def _strong18(auto: List[List[int]], semi: List[List[int]]) -> List[int]:
+    from .feature_learning_engine import _detect_fixed_semi
+
     ac, sc = _line_freq(auto), _line_freq(semi)
+    # 반자동 고정수(사용자 지정 반복)는 반자동 쪽 지지에서 제외 — 안 그러면 고정수가
+    # 항상 강한후보 상위를 차지해 strong_core/support_band 패턴을 오염시킨다.
+    fixed = _detect_fixed_semi(semi)
+
+    def s(n: int) -> int:
+        return 0 if n in fixed else int(sc.get(n, 0))
+
     ranked = sorted(
         range(1, 46),
-        key=lambda n: (-min(ac.get(n, 0), sc.get(n, 0)), -(ac.get(n, 0) + sc.get(n, 0)), -ac.get(n, 0), n),
+        key=lambda n: (-min(ac.get(n, 0), s(n)), -(ac.get(n, 0) + s(n)), -ac.get(n, 0), n),
     )
     return ranked[:18]
 

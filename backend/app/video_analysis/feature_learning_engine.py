@@ -40,6 +40,20 @@ def _line_freq(lines: Sequence[Sequence[int]]) -> Counter:
     return c
 
 
+def _detect_fixed_semi(semi_lines: Sequence[Sequence[int]], frac: float = 0.5, min_lines: int = 10) -> set:
+    """반자동 고정수 추정 — 반자동 줄의 frac(기본 50%) 이상에 등장하는 번호.
+
+    반자동은 '고정수(사용자 지정) + 자동fill' 이라 고정수는 거의 모든 줄에 반복 등장한다
+    (자동fill 은 번호당 ~6/45≈13%/줄). 표본이 적으면(<min_lines) 자동fill 우연이 임계를
+    넘을 수 있어 감지하지 않는다(오탐 방지). 프론트 fixedSemiNumbers 와 동일 기준.
+    """
+    n = len(semi_lines)
+    if n < min_lines:
+        return set()
+    c = _line_freq(semi_lines)
+    return {int(num) for num, cnt in c.items() if cnt / n >= frac}
+
+
 def _decade(n: int) -> int:
     return min(4, (n - 1) // 10)
 
@@ -110,7 +124,12 @@ def build_number_features(
             line_span[n].append(span)
             line_consec[n].append(consec)
 
-    support = {n: float(min(ac.get(n, 0), sc.get(n, 0))) for n in range(1, 46)}
+    # 반자동 고정수(거의 모든 줄에 반복=사용자 지정)는 반자동 쪽 지지에서 제외한다.
+    # support=min 이라 고정수는 반자동이 항상 최대치 → 자동값 그대로 강수로 둔갑해 통계를
+    # 왜곡한다. 발견 신호(support/순위/강한후보/역순위)는 자동fill 기준으로만 산출.
+    fixed_semi = _detect_fixed_semi(semi_lines)
+    semi_sup = {n: (0.0 if n in fixed_semi else float(sc.get(n, 0))) for n in range(1, 46)}
+    support = {n: float(min(float(ac.get(n, 0)), semi_sup[n])) for n in range(1, 46)}
     ranked = sorted(range(1, 46), key=lambda n: (-support[n], -(ac.get(n, 0) + sc.get(n, 0)), -ac.get(n, 0), n))
     rank_of = {n: i + 1 for i, n in enumerate(ranked)}
 
@@ -134,7 +153,7 @@ def build_number_features(
         out[n] = {
             "auto_count": a,
             "semi_count": s,
-            "support": float(min(a, s)),
+            "support": float(min(a, semi_sup[n])),  # 고정수 제외 지지(발견 신호)
             "total_freq": tot,
             "auto_rate": a / auto_n,
             "semi_rate": s / semi_n,

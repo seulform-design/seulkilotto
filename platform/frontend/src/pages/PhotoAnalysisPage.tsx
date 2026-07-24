@@ -767,6 +767,8 @@ export default function PhotoAnalysisPage() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [manualLoading, setManualLoading] = useState(false);
   const [isReanalyzing, setIsReanalyzing] = useState(false);
+  // 학습·패턴 엔진 상세는 기본 접어둔다(추천은 위 요약·복기 검증으로 충분, 클러터 감소).
+  const [showEngineDetail, setShowEngineDetail] = useState(false);
   // 비동기 작업 중 unmount 가드 (메모리 안정성)
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -1757,20 +1759,37 @@ export default function PhotoAnalysisPage() {
       {/* 🗂 회차별 용지 데이터 — 복기 저장분 vs 롤오버 보관분 분리 표시 */}
       <RoundDataBreakdownPanel accumulated={accumulated} onAccumulatedChange={setAccumulated} />
 
-      {/* 🔬 복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였나 + 커버리지 곡선 */}
+      {/* 🔬 복기 역산 검증 — 복기 먼저 검증(신호 성적표·다회차 커버리지) → 이번회차 반영 */}
       <ReviewVerificationPanel />
 
-      {/* 🧠 복기 Feature 자동 생성·검증·학습 — WF/Random 통과분만 추천·기여도 */}
-      <FeatureLearningPanel />
+      {/* 🔬 학습·패턴 엔진 상세 — 기본 접힘(추천 요약은 위 핵심추천·복기검증으로 충분) */}
+      <Box sx={{ mb: 1.5 }}>
+        <Button
+          fullWidth
+          variant="outlined"
+          color="inherit"
+          onClick={() => setShowEngineDetail((v) => !v)}
+          sx={{ justifyContent: 'space-between', textTransform: 'none' }}
+          endIcon={<span>{showEngineDetail ? '▲' : '▼'}</span>}
+        >
+          🔬 학습·패턴 엔진 상세 {showEngineDetail ? '접기' : '펼치기'} (Feature · Pattern Mining · 다회차 · 줄겹침)
+        </Button>
+      </Box>
+      {showEngineDetail && (
+        <>
+          {/* 🧠 복기 Feature 자동 생성·검증·학습 — WF/Random 통과분만 추천·기여도 */}
+          <FeatureLearningPanel />
 
-      {/* 🔍 복기 Pattern Mining — 전수 학습·Cluster·설명가능 추천 */}
-      <PatternMiningPanel />
+          {/* 🔍 복기 Pattern Mining — 전수 학습·Cluster·설명가능 추천 */}
+          <PatternMiningPanel />
 
-      {/* 🎓 다회차 용지 학습 — 보관 회차(누수 없음) 캘리브레이션 → 이번회차 적용 */}
-      <RoundLearningPanel />
+          {/* 🎓 다회차 용지 학습 — 보관 회차(누수 없음) 캘리브레이션 → 이번회차 적용 */}
+          <RoundLearningPanel />
 
-      {/* 🔎 줄겹침 패턴 역산 학습 — 복기 당첨일치 겹침 구조로 이번회차 후보 채점 */}
-      <OverlapPatternLearnPanel accumulated={accumulated} />
+          {/* 🔎 줄겹침 패턴 역산 학습 — 복기 당첨일치 겹침 구조로 이번회차 후보 채점 */}
+          <OverlapPatternLearnPanel accumulated={accumulated} />
+        </>
+      )}
 
       {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
 

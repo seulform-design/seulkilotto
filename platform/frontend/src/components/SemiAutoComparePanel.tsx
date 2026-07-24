@@ -1126,6 +1126,9 @@ export default function SemiAutoComparePanel({
    * (샘플링/상위 N장 없음 — 분석 왜곡 방지)
    */
   const [forceDetailedComparison, setForceDetailedComparison] = useState(false);
+  // 🎯 요약/상세 보기 — 추천번호 리스트가 여러 개라 기본은 '핵심 추천'만 보여주고,
+  // 상세 분석(심층역산·교차검증·강수기대·최종종합·1:1매칭 등)은 접어둔다(기능은 유지).
+  const [showPredictionDetail, setShowPredictionDetail] = useState(false);
 
   // 탭 전환 시 해당 탭 전용 localStorage 로드
   useEffect(() => {
@@ -2469,6 +2472,45 @@ export default function SemiAutoComparePanel({
       signalTiers,
     };
   }, [compareWinning, crossValidation, predictionSignals, resolvedStrongCandidates, parallelStrong, parallelExpected, groupLineMatching.autoLineCount, groupLineMatching.semiLineCount]);
+
+  // 🎯 핵심 추천 (한눈에) — 여러 추천 리스트를 하나로 요약한다. 복기 검증(신호 성적표·
+  // 다회차 커버리지)을 근거로, 이번회차 '핵심 6 + 확장 18(넓은 그물) + 분산 최적'을 낸다.
+  // 우선순위: 복기 다회차 best 신호 커버리지 세트 → (없으면) currentRoundForecast/반복도 폴백.
+  const heroRecommendation = useMemo(() => {
+    const rv = reviewVerificationQuery.data;
+    const cov = rv?.ok ? rv.current_coverage_set : undefined;
+    const lb = rv?.ok ? rv.signal_leaderboard : undefined;
+    const best = lb?.leaderboard?.[0];
+    const clean = (arr: number[] | undefined) =>
+      Array.from(new Set((arr ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= 45)));
+    let core6 = clean(cov?.core6);
+    let expand18 = clean(cov?.expand18);
+    let source: 'coverage' | 'forecast' | 'repeat' = 'coverage';
+    if (core6.length < 6 || expand18.length < 6) {
+      // 폴백 — 커버리지 세트가 없으면(서버 이번회차 용지 없음) 로컬 신호로 채운다.
+      const rep = currentRoundForecast?.representative ?? [];
+      const predTop = predictedNumbers.map((p) => p.number);
+      core6 = clean(rep.length >= 6 ? rep : predTop.slice(0, 6));
+      expand18 = clean(predTop.slice(0, 18));
+      source = rep.length >= 6 ? 'forecast' : 'repeat';
+    }
+    const ready = core6.length >= 6 && expand18.length >= 6;
+    const shareResult = ready ? optimizeForSharing(expand18, Math.min(18, expand18.length)) : null;
+    const shareOpt = shareResult ? shareResult.numbers.slice(0, 6) : [];
+    // 추천 picks 는 '이번회차(미추첨)' 대상이므로 어느 탭에서든 당첨 대조·dim 하지 않는다
+    // (복기 탭에서 지난 회차 당첨과 섞으면 오해). 검증은 아래 '복기 검증' 근거로 분리.
+    return {
+      ready,
+      core6: [...core6].slice(0, 6).sort((a, b) => a - b),
+      expand18: [...expand18].slice(0, 18).sort((a, b) => a - b),
+      shareOpt: [...shareOpt].sort((a, b) => a - b),
+      source,
+      signalLabel: cov?.signal_label ?? best?.label ?? '자동↔반자동 양쪽 지지',
+      selectedByMulti: cov?.selected_by === 'multi_round',
+      bestTop18: best?.mean_top18 ?? (rv?.ok ? rv.summary?.best_top18 : null) ?? null,
+      reviewRounds: lb?.rounds ?? 0,
+    };
+  }, [reviewVerificationQuery.data, currentRoundForecast, predictedNumbers]);
 
   // ★ 1:1 강수·기대수 (구간별) — 평행회차 패널과 같은 레이아웃을 1:1 전수비교
   // 반복도(predictedNumbers 순위)로 생성. 강수=구간(단/10/20/30/40번대) 내 반복도
@@ -3919,9 +3961,67 @@ export default function SemiAutoComparePanel({
         </>
       )}
 
+      {/* 🎯 핵심 추천 (한눈에) — 복기 검증 → 이번회차 추천 요약. 상세는 토글로 접어둠. */}
+      {heroRecommendation.ready && (
+        <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+            <Typography variant="body1" fontWeight={800}>
+              🎯 {currentRound ?? effectiveRound ?? '?'}회 이번회차 핵심 추천 (복기 검증 기반)
+            </Typography>
+            <Button
+              size="small"
+              variant={showPredictionDetail ? 'outlined' : 'contained'}
+              color="warning"
+              onClick={() => setShowPredictionDetail((v) => !v)}
+            >
+              {showPredictionDetail ? '상세 분석 접기 ▲' : '상세 분석 모두 보기 ▼'}
+            </Button>
+          </Stack>
+          {heroRecommendation.reviewRounds > 0 && (
+            <Alert severity="success" icon={false} sx={{ py: 0.5, mb: 1 }}>
+              <Typography variant="caption">
+                ✅ <strong>복기 {heroRecommendation.reviewRounds}회차 검증 완료</strong> — 당첨을 가장 잘 잡은 신호는{' '}
+                <strong>{heroRecommendation.signalLabel}</strong>{heroRecommendation.selectedByMulti ? '(다회차 1위)' : ''}
+                {heroRecommendation.bestTop18 != null ? `, 상위18에 평균 ${heroRecommendation.bestTop18}/6 담음` : ''}.
+                → 이 검증으로 이번회차 추천을 만듭니다. <strong>top-6 집중보다 넓은 그물이 유효</strong>(확률 불변).
+              </Typography>
+            </Alert>
+          )}
+          <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+            <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>핵심 6</Typography>
+            {heroRecommendation.core6.map((n) => (
+              <LottoBall key={`hero-c-${n}`} number={n} size={30} />
+            ))}
+            <SharingBadge numbers={heroRecommendation.core6} />
+            <ComboActions numbers={heroRecommendation.core6} source="unknown" label="핵심6 추천" />
+          </Stack>
+          {heroRecommendation.shareOpt.length === 6 && (
+            <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+              <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>분산 최적</Typography>
+              {heroRecommendation.shareOpt.map((n) => (
+                <LottoBall key={`hero-s-${n}`} number={n} size={26} />
+              ))}
+              <SharingBadge numbers={heroRecommendation.shareOpt} />
+              <ComboActions numbers={heroRecommendation.shareOpt} source="unknown" label="분산최적 추천" />
+            </Stack>
+          )}
+          <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>확장 18</Typography>
+            {heroRecommendation.expand18.map((n) => (
+              <LottoBall key={`hero-e-${n}`} number={n} size={20} />
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
+            핵심 6 = 집중 픽 · 확장 18 = 넓은 그물(복기상 더 잘 잡음) · 분산 최적 = 공동당첨 회피(확률 동일).
+            {' '}상세 근거(심층역산·교차검증·강수기대·최종종합·1:1매칭)는 <strong>[상세 분석 모두 보기]</strong>로.
+            1등 확률(1/8,145,060)은 어떤 분석으로도 변하지 않습니다.
+          </Typography>
+        </Paper>
+      )}
+
       {/* 🎯 이번회차 종합 예측 대시보드 — 이번회차 탭 전용. 티켓 없어도 통합·평행
           신호로 예측이 나오고, 이번회차 용지를 올리면 용지 교차검증이 주 축으로 가세. */}
-      {currentRoundForecast && (
+      {showPredictionDetail && currentRoundForecast && (
         <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'primary.main', borderWidth: 2 }}>
           <Stack direction="row" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant="body2" fontWeight={800}>
@@ -3986,7 +4086,7 @@ export default function SemiAutoComparePanel({
       )}
 
       {/* ─── 대량 비교 결과 ─────────────────────────────────────── */}
-      {activeComparison && (
+      {showPredictionDetail && activeComparison && (
         <>
           <Divider sx={{ my: 2 }} />
           {!compareWinning && (

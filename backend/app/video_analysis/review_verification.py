@@ -124,6 +124,13 @@ def _multi_round_backtest() -> Dict[str, Any]:
     for i, s in enumerate(samples):
         ranked = sorted(range(1, 46), key=lambda n: s.features[n]["support_rank"])
         win = set(s.winning)
+        # 반자동 최다반복 번호(고정수 후보) — 임계 미만이라도 분포를 투명하게 보여준다.
+        semi_n = max(1, len(s.semi_lines))
+        semi_c = _line_freq(s.semi_lines)
+        semi_repeat_top = [
+            {"number": int(num), "frac": round(cnt / semi_n, 3)}
+            for num, cnt in sorted(semi_c.items(), key=lambda kv: (-kv[1], kv[0]))[:6]
+        ]
         cov: Dict[str, int] = {}
         for k in ks:
             hit = sum(1 for n in ranked[:k] if n in win)
@@ -146,6 +153,7 @@ def _multi_round_backtest() -> Dict[str, Any]:
             "auto_lines": len(s.auto_lines),
             "semi_lines": len(s.semi_lines),
             "fixed_semi": sorted(_detect_fixed_semi(s.semi_lines)),
+            "semi_repeat_top": semi_repeat_top,
             "support_coverage": cov,
             "carryover": carry,
         })

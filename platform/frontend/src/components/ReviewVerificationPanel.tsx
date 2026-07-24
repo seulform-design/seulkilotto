@@ -145,7 +145,11 @@ export default function ReviewVerificationPanel() {
                 <Typography sx={{ fontSize: 10, fontWeight: 700, minWidth: 42 }}>{r.round_no}회</Typography>
                 <Typography variant="caption" sx={{ fontSize: 10, color: 'text.secondary' }}>
                   자{r.auto_lines}·반{r.semi_lines} · <strong>top6 {r.support_coverage['6']} · top18 {r.support_coverage['18']}</strong>
-                  {r.fixed_semi.length > 0 ? ` · 🔒고정수 ${r.fixed_semi.join('·')}` : ''}
+                  {r.fixed_semi.length > 0
+                    ? ` · 🔒고정수 ${r.fixed_semi.join('·')}`
+                    : r.semi_repeat_top && r.semi_repeat_top.length > 0
+                      ? ` · 반자동 최다반복 ${r.semi_repeat_top.slice(0, 4).map((x) => `${x.number}(${Math.round(x.frac * 100)}%)`).join('·')}${r.semi_repeat_top[0].frac < 0.5 ? ' (50%↑ 없음=강한 고정수 없음)' : ''}`
+                      : ''}
                   {r.carryover
                     ? ` · 이월→${r.carryover.to_round} ${r.carryover.hit}개${r.carryover.carried.length ? `(${r.carryover.carried.join('·')})` : ''}`
                     : ''}

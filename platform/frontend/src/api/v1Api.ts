@@ -1046,6 +1046,7 @@ export interface ReviewVerificationResponse {
       auto_lines: number;
       semi_lines: number;
       fixed_semi: number[];
+      semi_repeat_top?: { number: number; frac: number }[];
       support_coverage: Record<string, number>;
       carryover: { to_round: number; hit: number; pool: number; carried: number[] } | null;
     }[];

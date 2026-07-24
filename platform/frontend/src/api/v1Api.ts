@@ -1033,8 +1033,21 @@ export interface ReviewVerificationResponse {
   current_coverage_set?: {
     signal: string;
     signal_label: string;
+    selected_by?: 'multi_round' | 'single_round';
     core6: number[];
     expand18: number[];
+  };
+  /** 다회차 신호 순위표 — 어느 신호가 당첨을 가장 잘 잡았나(고정수 제외). */
+  signal_leaderboard?: {
+    rounds: number;
+    best_signal_multi?: string | null;
+    leaderboard?: {
+      key: string;
+      label: string;
+      mean_top6: number;
+      mean_top18: number;
+      tiers: { t6: number; t18: number; t30: number; out: number };
+    }[];
   };
   /** 다회차 백테스트 — 보관 전 회차의 지지(고정수 제외) 상위 K 커버리지 + 이월. */
   multi_round_backtest?: {

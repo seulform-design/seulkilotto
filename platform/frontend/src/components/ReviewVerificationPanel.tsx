@@ -163,11 +163,45 @@ export default function ReviewVerificationPanel() {
         </Box>
       )}
 
+      {/* 🏆 다회차 신호 순위표 — 어느 신호가 당첨을 가장 잘 잡았나(고정수 제외) */}
+      {d.signal_leaderboard && (d.signal_leaderboard.leaderboard?.length ?? 0) > 0 && d.signal_leaderboard.rounds > 0 && (
+        <Box sx={{ mb: 1.5, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
+            🏆 신호 성적표 ({d.signal_leaderboard.rounds}개 회차 다회차 집계) — 어느 방법이 당첨을 잘 잡았나
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+            각 신호로 세운 순위에서 실제 당첨이 <strong>상위6/상위18</strong>에 평균 몇 개 들었나(전 회차 평균).
+            이번회차 커버리지 신호는 <strong>단일 회차가 아닌 이 다회차 성적 1위</strong>로 고릅니다(우연 흔들림 완화).
+            tier = 당첨이 상위6·7~18·19~30·상위밖 중 어디에 떨어졌나(집중 실패·커버리지 유효의 증거).
+          </Typography>
+          <Stack spacing={0.3}>
+            {(d.signal_leaderboard.leaderboard ?? []).map((s, i) => (
+              <Stack key={s.key} direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap
+                sx={{ p: 0.3, borderRadius: 0.5, bgcolor: s.key === d.signal_leaderboard!.best_signal_multi ? 'rgba(46,125,50,0.12)' : 'transparent' }}>
+                <Typography sx={{ fontSize: 10, fontWeight: 700, minWidth: 16, color: 'text.disabled' }}>{i + 1}</Typography>
+                <Typography variant="caption" sx={{ fontSize: 10.5, fontWeight: s.key === d.signal_leaderboard!.best_signal_multi ? 800 : 600, minWidth: 130 }}>
+                  {s.label}{s.key === d.signal_leaderboard!.best_signal_multi ? ' ⭐' : ''}
+                </Typography>
+                <Chip size="small" color={s.mean_top18 >= 3 ? 'success' : 'default'}
+                  label={`상위6 ${s.mean_top6} · 상위18 ${s.mean_top18}`} sx={{ height: 17, fontSize: 9.5, fontWeight: 700 }} />
+                <Typography variant="caption" sx={{ fontSize: 9, color: 'text.disabled' }}>
+                  tier 6:{s.tiers.t6}·18:{s.tiers.t18}·30:{s.tiers.t30}·밖:{s.tiers.out}
+                </Typography>
+              </Stack>
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontSize: 9, mt: 0.5, fontStyle: 'italic' }}>
+            ⚠️ {d.signal_leaderboard.rounds}회차는 표본이 작아 순위는 흔들릴 수 있습니다 — 회차가 쌓일수록 안정됩니다. 확률 불변.
+          </Typography>
+        </Box>
+      )}
+
       {/* 이번회차 커버리지 세트 */}
       {d.current_coverage_set && (d.current_coverage_set.expand18?.length ?? 0) > 0 && (
         <Box sx={{ p: 1.25, borderRadius: 1, border: '1px dashed', borderColor: 'primary.main' }}>
           <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
             🎯 {d.current_round_no}회 커버리지 세트 — {d.current_coverage_set.signal_label} 기준
+            {d.current_coverage_set.selected_by === 'multi_round' ? ' (다회차 성적 1위 신호)' : ''}
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
             top-6 '집중' 대신 <strong>핵심 6 + 확장 12(합 18)</strong>로 제시합니다(복기 검증상 확장이 더 잡음).

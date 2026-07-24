@@ -169,6 +169,60 @@ def _multi_round_backtest() -> Dict[str, Any]:
     return {"rounds": len(samples), "per_round": per_round, "aggregate": aggregate}
 
 
+def _signal_leaderboard() -> Dict[str, Any]:
+    """복기 보관 **모든** 회차에서 각 신호(고정수 제외)가 그 회차 당첨을 얼마나 담았나를
+    집계해 '어느 신호가 당첨을 가장 잘 잡았나' 순위를 낸다.
+
+    이번회차 커버리지 신호를 단일 회차가 아닌 **다회차 성적**으로 고른다 — 단일회차 best
+    는 우연에 쉽게 흔들려(같은 support 신호가 회차마다 1등/꼴찌 오갈 수 있음) 신호 선택
+    자체가 노이즈였다. 당첨 순위 tier 분포(상위6/7~18/19~30/31~45)도 함께 내 '집중 실패·
+    커버리지 유효' 를 정량화한다. 과거(추첨완료) 회차만 사용 — 이번회차 누수 없음.
+    """
+    from .feature_learning_engine import collect_round_samples
+
+    samples = collect_round_samples()
+    keys = list(_SIGNAL_LABELS.keys())
+    agg = {sk: {6: 0, 18: 0} for sk in keys}
+    tiers = {sk: {"t6": 0, "t18": 0, "t30": 0, "out": 0} for sk in keys}
+    for s in samples:
+        sigs = _signals(s.auto_lines, s.semi_lines)
+        win = list(s.winning)
+        for sk in keys:
+            ranked = _rank_signal(sigs[sk])
+            pos = {n: ranked.index(n) + 1 for n in win}
+            agg[sk][6] += sum(1 for n in win if pos[n] <= 6)
+            agg[sk][18] += sum(1 for n in win if pos[n] <= 18)
+            for n in win:
+                r = pos[n]
+                if r <= 6:
+                    tiers[sk]["t6"] += 1
+                elif r <= 18:
+                    tiers[sk]["t18"] += 1
+                elif r <= 30:
+                    tiers[sk]["t30"] += 1
+                else:
+                    tiers[sk]["out"] += 1
+    n = max(1, len(samples))
+    leaderboard = sorted(
+        (
+            {
+                "key": sk,
+                "label": _SIGNAL_LABELS.get(sk, sk),
+                "mean_top6": round(agg[sk][6] / n, 3),
+                "mean_top18": round(agg[sk][18] / n, 3),
+                "tiers": tiers[sk],
+            }
+            for sk in keys
+        ),
+        key=lambda x: (-x["mean_top18"], -x["mean_top6"], x["key"]),
+    )
+    return {
+        "rounds": len(samples),
+        "leaderboard": leaderboard,
+        "best_signal_multi": leaderboard[0]["key"] if (leaderboard and samples) else None,
+    }
+
+
 def build_review_verification() -> Dict[str, Any]:
     from .store import (
         _review_entries_for_round,
@@ -202,6 +256,7 @@ def build_review_verification() -> Dict[str, Any]:
         }
 
     analysis = _analyze(auto, semi, winning)
+    leaderboard = _signal_leaderboard()
 
     # 이번회차 — 같은 신호로 '커버리지 세트' 를 제시(집중 top-6 + 확장 top-18).
     cur = _load_current_raw()
@@ -211,12 +266,15 @@ def build_review_verification() -> Dict[str, Any]:
     current_coverage_set: Dict[str, Any] = {}
     if cur_auto or cur_semi:
         csig = _signals(cur_auto, cur_semi)
-        # best_signal 로 확인된 신호를 이번회차에 적용.
-        bkey = analysis.get("best_signal_key") or "support"
+        # 커버리지 신호를 '다회차 성적'(당첨을 가장 잘 잡은 신호)으로 선택 — 단일회차 best
+        # 는 우연에 흔들린다. 폴백: 단일회차 best → support.
+        multi_key = leaderboard.get("best_signal_multi")
+        bkey = multi_key or analysis.get("best_signal_key") or "support"
         ranked = _rank_signal(csig.get(bkey, csig["support"]))
         current_coverage_set = {
             "signal": bkey,
             "signal_label": _SIGNAL_LABELS.get(bkey, bkey),
+            "selected_by": "multi_round" if multi_key else "single_round",
             "core6": ranked[:6],
             "expand18": ranked[:18],
         }
@@ -241,6 +299,7 @@ def build_review_verification() -> Dict[str, Any]:
         "current_round_no": int(get_current_round_no()),
         "current_coverage_set": current_coverage_set,
         "multi_round_backtest": _multi_round_backtest(),
+        "signal_leaderboard": leaderboard,
         "summary": {
             "best_top6": t6,
             "best_top18": t18,

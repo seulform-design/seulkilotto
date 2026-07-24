@@ -109,28 +109,25 @@ const SIGNAL_SOURCE_LABELS: Record<string, string> = {
   'accumulated-fallback': '누적 보조',
 };
 
-// 보류(suspend) 임계값. 페어 매칭/요약 비교의 실제 계산 비용은 가벼워서
-// (수십만 페어도 수십 ms) 과거 값(180줄/8000페어)은 지나치게 낮아 243×40
-// 같은 정상 사용까지 1:1 비교를 0건으로 보류시켰다. 현실적인 상한으로 올리고,
-// 그래도 렌더가 폭증하지 않도록 그룹 카드 줄 목록은 별도 캡(아래)으로 제한한다.
+// 대량 임계값 — 페어 매칭 계산 자체는 가볍다(수십만 페어 ≈ 수십 ms).
+// 브라우저 보호는 '데이터 샘플링(상위 N장)'이 아니라 렌더 페이징
+// (groupShowLimit / lineRenderCap)으로 한다. 상위 N장만 쓰면 전수비교 결과가
+// 왜곡되어 제품 버그가 된다.
 const HEAVY_COMPARISON_TICKET_LIMIT = 1_200;
 const HEAVY_LINE_PAIR_LIMIT = 200_000;
-/** 보류 상태에서 [상세 비교 보기] 강제 시 경량 비교에 사용할 상위 줄 수 캡. */
-const FORCE_DETAILED_TICKET_CAP = 200;
 
-// 모바일/저사양 기기 감지 — 무거운 1:1 전수비교·심층분석(수만~십수만 페어)이 메인
-// 스레드를 수 초 점유하면 모바일 브라우저가 탭을 강제 종료(재부팅 루프)한다. 이런
-// 기기에선 임계값을 크게 낮춰 상세 계산을 자동 보류하고, 데이터(누적 줄·카운트)는
-// 그대로 보여준다. 상세 분석이 필요하면 PC에서 열거나 [상세 보기]로 경량 실행.
+// 모바일 감지 — 과거 lowMem||lowCpu 단독 true 로 4코어 노트북까지
+// '보류'되어 상위 200장 샘플만 보이는 사고가 있었다. 실제 모바일 신호만 사용.
 const IS_CONSTRAINED_DEVICE = (() => {
   try {
     if (typeof navigator === 'undefined') return false;
-    const nav = navigator as Navigator & { deviceMemory?: number };
-    const smallVp = typeof window !== 'undefined' && window.innerWidth > 0 && window.innerWidth < 820;
-    const coarse = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)')?.matches;
-    const lowMem = typeof nav.deviceMemory === 'number' && nav.deviceMemory <= 4;
-    const lowCpu = typeof nav.hardwareConcurrency === 'number' && nav.hardwareConcurrency <= 4;
-    return smallVp || coarse || lowMem || lowCpu;
+    const ua = navigator.userAgent || '';
+    const mobileUa = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    const smallVp =
+      typeof window !== 'undefined' && window.innerWidth > 0 && window.innerWidth < 820;
+    const coarse =
+      typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)')?.matches;
+    return mobileUa || (coarse && smallVp);
   } catch {
     return false;
   }
@@ -1119,9 +1116,9 @@ export default function SemiAutoComparePanel({
   const [localRoundNo, setLocalRoundNo] = useState<number | null>(initial.roundNo);
   const [compareRound, setCompareRound] = useState<number | null>(null);
   /**
-   * 대량 입력이 많아 자동 보류된 상태에서 사용자가 [상세 비교 보기] 를 누르면
-   * 상위 일부(캡)만으로 경량 비교(상세 교집합/요약)를 강제 표시한다.
-   * 무거운 1:1 전수비교는 브라우저 보호를 위해 보류 유지.
+   * 모바일+대량에서 자동 보류된 뒤 사용자가 [전체 전수비교 실행]을 누르면
+   * 전체 줄·전체 페어로 1:1 전수비교·교집합 요약을 모두 계산한다.
+   * (샘플링/상위 N장 없음 — 분석 왜곡 방지)
    */
   const [forceDetailedComparison, setForceDetailedComparison] = useState(false);
 
@@ -1260,13 +1257,13 @@ export default function SemiAutoComparePanel({
     bulkTickets.length;
   const combinedTicketEstimate = autoLineCountEstimate + semiLineCountEstimate;
   const estimatedLinePairCount = autoLineCountEstimate * semiLineCountEstimate;
-  // 1:1 전수비교 '계산'은 모바일에서도 보류하지 않는다(사용자 핵심 기능). 계산 자체는
-  // 가볍고, 모바일 재부팅의 진짜 원인은 결과 '렌더'(수만 DOM)였다 → 렌더를 페이지네이션·
-  // 줄수 캡으로 제한해 해결한다(아래 groupShowLimit / lineRenderCap). 보류는 원래의
-  // 극단적 대량(1200줄/20만 페어) 에서만.
-  const suspendHeavyComparison =
+  // 대량 여부(안내용). 실제 보류는 모바일에서만 — PC는 항상 전체 전수비교.
+  // 브라우저 보호는 렌더 페이징(groupShowLimit / lineRenderCap)으로 한다.
+  const isHeavyVolume =
     combinedTicketEstimate > HEAVY_COMPARISON_TICKET_LIMIT ||
     estimatedLinePairCount > HEAVY_LINE_PAIR_LIMIT;
+  const suspendHeavyComparison =
+    IS_CONSTRAINED_DEVICE && isHeavyVolume && !forceDetailedComparison;
 
   const strongCandidateResolution = useMemo(
     () => resolveStrongCandidates(accumulated, sheetIntent, autoOnlyLines),
@@ -1792,18 +1789,14 @@ export default function SemiAutoComparePanel({
     [picked, slipQueue, accumulated, sheetIntent, winningNumbers, winningBonus, resolvedStrongCandidates]
   );
 
-  // 경량 비교(상세 교집합/요약)는 보류 중이라도 [상세 비교 보기] 강제 시
-  // 상위 캡만큼만 계산해 표시. 무거운 1:1 전수비교는 별도(아래)에서 보류 유지.
-  const lightComparisonSuspended = suspendHeavyComparison && !forceDetailedComparison;
+  // 보류 중이면 교집합/요약도 잠시 쉰다. 해제 시에는 항상 전체 줄로 계산(샘플링 없음).
+  const lightComparisonSuspended = suspendHeavyComparison;
 
   const bulkComparison = useMemo(
     () => {
       if (lightComparisonSuspended || bulkTickets.length === 0) return null;
-      const cmpTickets = suspendHeavyComparison
-        ? bulkTickets.slice(0, FORCE_DETAILED_TICKET_CAP)
-        : bulkTickets;
       return buildBulkComparison(
-        cmpTickets,
+        bulkTickets,
         slipQueue,
         accumulated,
         winningNumbers,
@@ -1812,7 +1805,7 @@ export default function SemiAutoComparePanel({
         resolvedStrongCandidates
       );
     },
-    [bulkTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates, lightComparisonSuspended, suspendHeavyComparison]
+    [bulkTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates, lightComparisonSuspended]
   );
 
   /**
@@ -1841,11 +1834,8 @@ export default function SemiAutoComparePanel({
   const combinedComparison = useMemo(
     () => {
       if (lightComparisonSuspended || combinedTickets.length === 0) return null;
-      const cmpTickets = suspendHeavyComparison
-        ? combinedTickets.slice(0, FORCE_DETAILED_TICKET_CAP)
-        : combinedTickets;
       return buildBulkComparison(
-        cmpTickets,
+        combinedTickets,
         slipQueue,
         accumulated,
         winningNumbers,
@@ -1854,7 +1844,7 @@ export default function SemiAutoComparePanel({
         resolvedStrongCandidates
       );
     },
-    [combinedTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates, lightComparisonSuspended, suspendHeavyComparison]
+    [combinedTickets, slipQueue, accumulated, winningNumbers, winningBonus, sheetIntent, resolvedStrongCandidates, lightComparisonSuspended]
   );
 
   /**
@@ -3493,7 +3483,7 @@ export default function SemiAutoComparePanel({
         </Alert>
       )}
 
-      {suspendHeavyComparison && (
+      {IS_CONSTRAINED_DEVICE && isHeavyVolume && (
         <Alert
           severity="info"
           sx={{ mb: 1.5 }}
@@ -3505,7 +3495,7 @@ export default function SemiAutoComparePanel({
                 variant="outlined"
                 onClick={() => setForceDetailedComparison(true)}
               >
-                상세 비교 보기 (상위 {FORCE_DETAILED_TICKET_CAP}장)
+                전체 전수비교 실행
               </Button>
             ) : (
               <Button
@@ -3520,15 +3510,25 @@ export default function SemiAutoComparePanel({
         >
           {forceDetailedComparison ? (
             <>
-              상위 {FORCE_DETAILED_TICKET_CAP}장만으로 <strong>상세 교집합·요약 비교</strong>를 표시 중입니다.
-              (무거운 1:1 전수비교는 브라우저 보호를 위해 보류 — 줄 수를 줄이면 전체가 표시됩니다.)
+              전체 {combinedTicketEstimate.toLocaleString()}줄 · 약{' '}
+              {estimatedLinePairCount.toLocaleString()}페어로 <strong>1:1 전수비교·교집합 요약</strong>을
+              표시 중입니다. 카드·줄 목록은 페이지네이션으로 나눠 렌더합니다.
             </>
           ) : (
             <>
-              매우 대량(1200줄/20만 페어 초과)이라 브라우저 보호를 위해 상세 계산을 잠시 보류합니다.
-              내 데이터는 서버에 안전하며, <strong>[상세 비교 보기]</strong> 로 상위 일부만 보거나 줄 수를 줄이면 세부 비교가 다시 표시됩니다.
+              모바일에서 대량 데이터({combinedTicketEstimate.toLocaleString()}줄 · 약{' '}
+              {estimatedLinePairCount.toLocaleString()}페어)라 탭 보호를 위해 상세 전수비교를 잠시
+              보류합니다. <strong>[전체 전수비교 실행]</strong>으로 샘플링 없이 전체 데이터를
+              분석할 수 있습니다.
             </>
           )}
+        </Alert>
+      )}
+      {!IS_CONSTRAINED_DEVICE && isHeavyVolume && (
+        <Alert severity="success" sx={{ mb: 1.5 }}>
+          전체 {combinedTicketEstimate.toLocaleString()}줄 · 약{' '}
+          {estimatedLinePairCount.toLocaleString()}페어 <strong>1:1 전수비교</strong> 진행 중
+          (샘플링 없음). 결과 카드는 페이지로 나눠 표시합니다.
         </Alert>
       )}
 

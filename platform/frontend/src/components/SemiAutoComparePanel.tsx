@@ -532,9 +532,9 @@ interface SemiAutoComparePanelProps {
   analysisPrelude?: ReactNode;
   /** ② 분석 하단(1:1 뒤) — 누적 패턴 · 회차별 용지 데이터 */
   analysisEpilogue?: ReactNode;
-  /** ③ 복기 검증 — 추천(④) 바로 위에 렌더 */
+  /** ④ 패턴 엔진 안 — 복기검증·백테스트 */
   verificationSlot?: ReactNode;
-  /** ⑤ 학습 엔진 접힘 안 — 평행회차·Feature 등 */
+  /** ④ 패턴 엔진 안 — 평행회차·Feature 등 */
   engineExtraSlot?: ReactNode;
 }
 
@@ -1144,9 +1144,11 @@ export default function SemiAutoComparePanel({
    * (샘플링/상위 N장 없음 — 분석 왜곡 방지)
    */
   const [forceDetailedComparison, setForceDetailedComparison] = useState(false);
-  // ② 분석 결과·1:1 — 기본 펼침, 접기 가능
-  const [showAnalysisSection, setShowAnalysisSection] = useState(true);
-  // ⑤ 학습·패턴 엔진 — 기본 접힘 (평행·심층역산·통합신호·Feature…)
+  // ② 분석·1:1 — 기본 접힘 (필수: ①등록·③추천만 펼침)
+  const [showAnalysisSection, setShowAnalysisSection] = useState(false);
+  // ③ 추천 상세(강수·종합예측) — 기본 접힘, 핵심 추천만 상시
+  const [showRecommendDetail, setShowRecommendDetail] = useState(false);
+  // ④ 패턴 분석 엔진(복기검증·백테스트 포함) — 기본 접힘
   const [showPredictionDetail, setShowPredictionDetail] = useState(false);
 
   // 탭 전환 시 해당 탭 전용 localStorage 로드
@@ -4649,398 +4651,23 @@ export default function SemiAutoComparePanel({
         )}
       </Paper>
 
-      {/* ════════ ③ 복기 검증 (추천 바로 위) ════════ */}
-      {verificationSlot}
-
-      {/* ── 용지 티켓 당첨 대조 (§③ 복기 검증 — 1:1과 분리) ── */}
-      {activeComparison && (
-        <Paper sx={{ p: 2 }}>
-          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-            <Typography variant="subtitle1" fontWeight={800}>
-              용지 티켓 당첨 대조
-            </Typography>
-            <Chip size="small" color="info" label="③ 복기 검증 근거" sx={{ height: 22, fontWeight: 700 }} />
-            <Chip size="small" variant="outlined" label={`${activeComparison.ticketCount}장`} sx={{ height: 22 }} />
-          </Stack>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            등록한 자동·반자동 줄이 비교 회차 당첨과 얼마나 맞는지 측정합니다(적중률·분포·티켓 목록).
-            위 신호 성적표와 함께 <strong>아래 ④ 추천의 검증 근거</strong>이며, 확률(1/8,145,060)은 변하지 않습니다.
-            1:1 구조 분석은 위 <strong>②</strong>에 있습니다.
-          </Typography>
-          {!compareWinning && (
-            <Alert severity="info" sx={{ mb: 1.5 }}>
-              <strong>이번회차 모드</strong> — 당첨번호·적중률 비교는 표시하지 않습니다.
-              당첨 검증은 <strong>복기 탭</strong>을 사용하세요.
-              {roundDrawn && currentRound != null && (
-                <> ({currentRound}회 추첨 완료 — 복기 탭에서 {latestRound ?? currentRound - 1}회와 비교)</>
-              )}
-            </Alert>
-          )}
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            alignItems={{ xs: 'stretch', sm: 'center' }}
-            spacing={1}
-            sx={{ mb: 1.5, position: 'relative', zIndex: 1 }}
-            useFlexGap
-          >
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-              <Button
-                type="button"
-                size="small"
-                variant="outlined"
-                disabled={isReanalyzing}
-                onClick={() => void handleReanalyze()}
-                sx={{ minWidth: 88 }}
-              >
-                {isReanalyzing ? (
-                  <><CircularProgress size={14} sx={{ mr: 0.5 }} />재분석…</>
-                ) : (
-                  '↻ 재분석'
-                )}
-              </Button>
-              <Button type="button" size="small" color="error" variant="outlined" onClick={resetBulk}>
-                초기화
-              </Button>
-            </Stack>
-            {compareWinning ? (
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
-                <TextField
-                  size="small"
-                  label="비교 회차"
-                  type="number"
-                  value={effectiveRound ?? ''}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    if (Number.isInteger(v) && v > 0 && (!latestRound || v <= latestRound)) {
-                      setCompareRound(v);
-                    } else if (e.target.value === '') {
-                      setCompareRound(null);
-                    }
-                  }}
-                  inputProps={{ min: 1, max: latestRound ?? undefined, step: 1 }}
-                  sx={{ width: 130 }}
-                />
-                <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
-                  {compareRound != null
-                    ? '복기 기준'
-                    : latest.data
-                      ? `최신 ${latest.data.round}회`
-                      : ''}
-                </Typography>
-                {compareRound != null && (
-                  <Button type="button" size="small" onClick={() => setCompareRound(null)}>
-                    ↺ 최신
-                  </Button>
-                )}
-              </Stack>
-            ) : (
-              <Chip
-                size="small"
-                color="secondary"
-                label={`이번회차 ${effectiveRound ?? '?'}회 (당첨번호 미사용)`}
-              />
-            )}
-          </Stack>
-
-          {/* 집계 메트릭 — 복기 탭에서만 당첨 적중률 */}
-          {compareWinning && (
-          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
-            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-              <Chip
-                size="small"
-                color="primary"
-                label={`평균 적중 ${activeComparison.avgHits.toFixed(3)} / 6`}
-                sx={{ fontWeight: 700 }}
-              />
-              <Chip size="small" label={`고유 번호 ${activeComparison.uniqueNumberCount}/45`} variant="outlined" />
-              <Chip
-                size="small"
-                color="success"
-                label={`3개+ 일치(5등↑) ${(activeComparison.hitRates.threePlus * 100).toFixed(2)}%`}
-                sx={{ fontWeight: 700 }}
-              />
-              <Chip
-                size="small"
-                color="warning"
-                label={`4개+ 일치(4등↑) ${(activeComparison.hitRates.fourPlus * 100).toFixed(2)}%`}
-              />
-              <Chip
-                size="small"
-                color="error"
-                label={`6개 일치(1등) ${(activeComparison.hitRates.six * 100).toFixed(4)}%`}
-              />
-              {activeComparison.excludedWarningCount > 0 && (
-                <Chip
-                  size="small"
-                  color="error"
-                  label={`⚠ 배제 매치 2+ 티켓: ${activeComparison.excludedWarningCount}`}
-                />
-              )}
-            </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-              ※ 베이스라인(균등 무작위) 평균 적중 = 0.800 — 본 결과와 비교해 보세요.
-            </Typography>
-          </Paper>
-          )}
-
-          {compareWinning && (
-          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
-            <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-              적중 개수 분포
-            </Typography>
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-              {[0, 1, 2, 3, 4, 5, 6].map((hits) => {
-                const count = activeComparison.hitDistribution[hits] ?? 0;
-                const pct = activeComparison.ticketCount > 0
-                  ? (count / activeComparison.ticketCount) * 100
-                  : 0;
-                return (
-                  <Chip
-                    key={hits}
-                    size="small"
-                    label={`${hits}개: ${count}장 (${pct.toFixed(1)}%)`}
-                    color={hits >= 3 ? 'success' : 'default'}
-                    variant={hits >= 3 ? 'filled' : 'outlined'}
-                  />
-                );
-              })}
-            </Stack>
-          </Paper>
-          )}
-
-          {!compareWinning && (
-            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
-              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                <Chip size="small" label={`고유 번호 ${activeComparison.uniqueNumberCount}/45`} variant="outlined" />
-                <Chip
-                  size="small"
-                  color="secondary"
-                  label={`2개+ 강한후보 겹침 ${activeComparison.twoPlusStrongCount}장`}
-                />
-                <Chip size="small" label={`3개+ 강한후보 겹침 ${activeComparison.threePlusStrongCount}장`} />
-              </Stack>
-            </Paper>
-          )}
-
-          {/* 당첨번호 표시 — 복기 탭 전용 */}
-          {compareWinning && comparisonRoundData?.numbers && (
-            <Paper
-              variant="outlined"
-              sx={{
-                p: 1.5,
-                mb: 1.5,
-                borderColor: 'warning.main',
-                borderWidth: 2,
-              }}
-            >
-              <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-                <Typography variant="body2" fontWeight={700}>
-                  🎯 {comparisonRoundData.round}회 당첨번호
-                </Typography>
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                  {comparisonRoundData.numbers.map((n) => (
-                    <LottoBall key={n} number={n} size={32} />
-                  ))}
-                  {comparisonRoundData.bonus != null && (
-                    <>
-                      <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mx: 0.5 }}>
-                        + 보너스
-                      </Typography>
-                      <LottoBall number={comparisonRoundData.bonus} size={28} />
-                    </>
-                  )}
-                </Stack>
-              </Stack>
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                ※ 아래 티켓의 번호 중 당첨번호와 일치하는 것은 색상 유지, 미일치는 회색 dim 처리.
-              </Typography>
-            </Paper>
-          )}
-
-          {/* 전체 티켓 목록 — 자동 / 반자동 각각 § 1, § 3 추가 세팅의 평탄화 패턴과 동일 룩.
-              데이터 소스: 자동 = currentSlipLines + slipQueue + bulkAutoTickets,
-                          반자동 = semiCurrentLines + semiSlipQueue + bulkTickets. */}
-          {(() => {
-            const autoTickets = [
-              ...currentSlipLines.map((line, idx) => ({
-                key: `auto-current-${idx}`,
-                label: `입력 중·${line.label}`,
-                numbers: line.numbers,
-                onRemove: onRemoveCurrentLine ? () => onRemoveCurrentLine(idx) : undefined,
-              })),
-              ...slipQueue.flatMap((slip, slipIdx) =>
-                slip.lines.map((line, lineIdx) => ({
-                  key: `auto-slip-${slipIdx}-${lineIdx}`,
-                  label: `용지${slipIdx + 1}·${line.label}`,
-                  numbers: line.numbers,
-                  onRemove: onRemoveSlipLine ? () => onRemoveSlipLine(slipIdx, lineIdx) : undefined,
-                }))
-              ),
-              ...bulkAutoTickets.map((ticket, idx) => ({
-                key: `auto-bulk-${idx}`,
-                label: `대량 #${idx + 1}`,
-                numbers: ticket,
-                onRemove: onRemoveBulkAutoTicket ? () => onRemoveBulkAutoTicket(idx) : undefined,
-              })),
-            ];
-            const semiTickets = [
-              ...semiCurrentLines.map((line, idx) => ({
-                key: `semi-current-${idx}`,
-                label: `입력 중·${line.label}`,
-                numbers: line.numbers,
-                onRemove: () => removeCurrentLine(idx),
-              })),
-              ...semiSlipQueue.flatMap((slip, slipIdx) =>
-                slip.lines.map((line, lineIdx) => ({
-                  key: `semi-slip-${slipIdx}-${lineIdx}`,
-                  label: `용지${slipIdx + 1}·${line.label}`,
-                  numbers: line.numbers,
-                  onRemove: () => removeSlipLine(slipIdx, lineIdx),
-                }))
-              ),
-              ...bulkTickets.map((ticket, idx) => ({
-                key: `semi-bulk-${idx}`,
-                label: `대량 #${idx + 1}`,
-                numbers: ticket,
-                onRemove: () =>
-                  setBulkTickets((prev) => prev.filter((_, i) => i !== idx)),
-              })),
-            ];
-            const renderRow = (
-              t: { key: string; label: string; numbers: number[]; onRemove?: () => void },
-              idx: number
-            ) => {
-              const matchCount = winningSet
-                ? t.numbers.filter((n) => winningSet.has(n)).length
-                : 0;
-              return (
-                <Stack
-                  key={t.key}
-                  direction="row"
-                  alignItems="center"
-                  spacing={0.5}
-                  flexWrap="wrap"
-                  useFlexGap
-                >
-                  <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
-                    #{idx + 1}
-                  </Typography>
-                  <Chip size="small" label={t.label} variant="outlined" sx={{ minWidth: 84 }} />
-                  <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
-                    {t.numbers.map((n) => (
-                      <LottoBall
-                        key={`${t.key}-${n}`}
-                        number={n}
-                        size={22}
-                        dimmed={winningSet ? !winningSet.has(n) : false}
-                      />
-                    ))}
-                  </Stack>
-                  {winningSet && (
-                    <Chip
-                      size="small"
-                      color={matchCount >= 3 ? 'success' : 'default'}
-                      label={`${matchCount}/6`}
-                      sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                    />
-                  )}
-                  {t.onRemove && (
-                    <IconButton
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        t.onRemove!();
-                      }}
-                      aria-label="삭제"
-                      sx={{ ml: 'auto' }}
-                    >
-                      ×
-                    </IconButton>
-                  )}
-                </Stack>
-              );
-            };
-            return (
-              <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
-                <Stack
-                  direction="row"
-                  alignItems="center"
-                  justifyContent="space-between"
-                  sx={{ cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => setShowAllTickets((v) => !v)}
-                >
-                  <Typography variant="body2" fontWeight={700}>
-                    🎫 전체 티켓 목록 — 자동 {autoTickets.length}줄 / 반자동 {semiTickets.length}줄
-                    {showAllTickets ? ' ▼' : ' ▶'}
-                  </Typography>
-                  <Button size="small" variant="text">
-                    {showAllTickets ? '접기' : '펼치기'}
-                  </Button>
-                </Stack>
-                {showAllTickets && (
-                  <Box sx={{ mt: 1 }}>
-                    {/* 자동 영역 — § 1 추가 세팅과 동일 데이터 소스·카운트 형식 */}
-                    <Typography variant="caption" color="success.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-                      📋 자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkAutoTickets.length}장 · 총 {autoTickets.length}줄
-                    </Typography>
-                    {autoTickets.length === 0 ? (
-                      <Alert severity="info" sx={{ mb: 1.5 }}>
-                        자동 데이터가 없습니다. 상단 § 1 의 '구입번호 직접입력' 으로 추가하세요.
-                      </Alert>
-                    ) : (
-                      <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
-                        <Stack spacing={0.5}>{autoTickets.map(renderRow)}</Stack>
-                      </Box>
-                    )}
-
-                    {/* 반자동 영역 — § 3 추가 세팅과 동일 데이터 소스·카운트 형식 */}
-                    <Typography variant="caption" color="primary.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-                      🔄 반자동 누적: {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkTickets.length}장 · 총 {semiTickets.length}줄
-                    </Typography>
-                    {semiTickets.length === 0 ? (
-                      <Alert severity="info">
-                        반자동 데이터가 없습니다. 그리드에서 6개 선택 후 [줄 저장] 하거나 [⬆ 대량 입력] 으로 추가하세요.
-                      </Alert>
-                    ) : (
-                      <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
-                        <Stack spacing={0.5}>{semiTickets.map(renderRow)}</Stack>
-                      </Box>
-                    )}
-                  </Box>
-                )}
-              </Paper>
-            );
-          })()}
-
-          {/* 자동/반자동 한쪽만 있으면 1:1 축이 죽는다 — 조용히 사라지지 않게 사유를 알린다. */}
-          {!canRenderLineMatching && hasLineMatchingInputs && (
-            <Alert severity="warning" sx={{ mb: 1.5 }}>
-              현재 <strong>자동 {groupLineMatching.autoLineCount}줄 · 반자동{' '}
-              {groupLineMatching.semiLineCount}줄</strong>입니다. ②의 <strong>1:1 전수비교</strong>와
-              ⑤의 <strong>심층 역산·당첨 예상</strong>은 자동↔반자동 <strong>양쪽</strong>이 있어야 동작합니다.
-              비어 있는 쪽을 등록하면 활성화됩니다.
-            </Alert>
-          )}
-
-        </Paper>
-      )}
-
-      {/* ════════ ④ 번호 추천 (결론) ════════ */}
+      {/* ════════ ③ 번호 추천 (필수 · 결론) ════════ */}
       <Paper sx={{ p: 2 }}>
       <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
         <Typography variant="subtitle1" fontWeight={800}>
-          ④ 번호 추천
+          ③ 번호 추천
         </Typography>
-        <Chip size="small" color="success" label="위 복기 검증 기준" sx={{ height: 22, fontWeight: 700 }} />
+        <Chip size="small" color="success" label="필수" sx={{ height: 22, fontWeight: 700 }} />
+        <Chip size="small" variant="outlined" label="복기검증은 ④ 엔진" sx={{ height: 22 }} />
       </Stack>
-      {/* 🎯 핵심 추천 — ③ 복기 검증 직후 */}
+      {/* 🎯 핵심 추천 — 필수 상시 표시 */}
       {heroRecommendation.ready && (
         <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant="body1" fontWeight={800}>
               🎯 {currentRound ?? effectiveRound ?? '?'}회 이번회차 핵심 추천
             </Typography>
-            <Chip size="small" variant="outlined" color="success" label="위 복기 검증 기준" sx={{ height: 20, fontSize: 10, fontWeight: 700 }} />
+            <Chip size="small" variant="outlined" color="success" label="④ 엔진 복기검증 참고" sx={{ height: 20, fontSize: 10, fontWeight: 700 }} />
           </Stack>
           {heroRecommendation.reviewRounds > 0 && (
             <Alert severity="success" icon={false} sx={{ py: 0.5, mb: 1 }}>
@@ -5089,12 +4716,22 @@ export default function SemiAutoComparePanel({
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
             핵심 6 = 집중 픽 · 확장 18 = 넓은 그물(복기상 더 잘 잡음) · 분산 최적 = 공동당첨 회피(확률 동일).
-            {' '}바로 아래 <strong>강수·기대수(구간별)</strong>가 메인입니다. 1:1 전수비교는 <strong>②</strong>, 당첨 대조는 <strong>③</strong>, 심층역산·교차검증·통합신호는 <strong>⑤ 학습 엔진</strong>에 있습니다. 1등 확률(1/8,145,060)은 변하지 않습니다.
+             상세(강수·종합예측)는 아래 펼침. 1:1은 <strong>②</strong>, 복기검증·백테스트·심층역산은 <strong>④ 패턴 분석 엔진</strong>. 1등 확률(1/8,145,060)은 변하지 않습니다.
           </Typography>
         </Paper>
       )}
 
 
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mt: 1, mb: showRecommendDetail ? 1 : 0 }}>
+        <Typography variant="body2" fontWeight={700} color="text.secondary">
+          추천 상세 (강수·기대수 · 종합 예측)
+        </Typography>
+        <Button size="small" variant="outlined" onClick={() => setShowRecommendDetail((v) => !v)}>
+          {showRecommendDetail ? '접기 ▲' : '펼치기 ▼'}
+        </Button>
+      </Stack>
+      {showRecommendDetail && (
+      <>
       {/* 🎯 강수·기대수 (구간별) — 메인 뷰. 상세 역산·학습은 [학습 엔진]으로 접어둔다. */}
       {activeComparison && (
         <>
@@ -5275,7 +4912,7 @@ export default function SemiAutoComparePanel({
         </>
       )}
 
-      {/* 이번회차 종합 예측 — ④ 추천 보조(학습엔진에서 승격) */}
+      {/* 이번회차 종합 예측 — ③ 추천 상세 */}
       {/* 🎯 이번회차 종합 예측 대시보드 */}
       {currentRoundForecast && (
         <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'primary.main', borderWidth: 2 }}>
@@ -5340,9 +4977,11 @@ export default function SemiAutoComparePanel({
           </Typography>
         </Paper>
       )}
+      </>
+      )}
       </Paper>
 
-      {/* ════════ ⑤ 분석·패턴 학습 엔진 (기본 접힘) ════════ */}
+      {/* ════════ ④ 패턴 분석 엔진 (기본 접힘 · 복기검증/백테스트 포함) ════════ */}
       <Box>
         <Button
           fullWidth
@@ -5352,14 +4991,14 @@ export default function SemiAutoComparePanel({
           sx={{ justifyContent: 'space-between', textTransform: 'none', mb: 1 }}
           endIcon={<span>{showPredictionDetail ? '▲' : '▼'}</span>}
         >
-          ⑤ 분석·패턴 학습 엔진 {showPredictionDetail ? '접기' : '펼치기'}
-          （평행회차 · 당첨예상 · 교차/심층역산 · 통합신호 · Feature）
+          ④ 패턴 분석 엔진 {showPredictionDetail ? '접기' : '펼치기'}
+          （복기검증 · 백테스트 · 평행회차 · 심층역산 · 통합신호 · Feature）
         </Button>
       {showPredictionDetail && (
         <Stack spacing={1.5}>
           {engineExtraSlot}
 
-      {/* 당첨 예상·심층역산 등 — §⑤ 학습 엔진 본문 */}
+      {/* 당첨 예상·심층역산 등 — §④ 학습 엔진 본문 */}
       {activeComparison && (
         <>
           {/* 🎯 당첨 예상번호 — 전수비교 심층 역산(주) + 평행회차(보조). 호기 제외. */}
@@ -6270,7 +5909,7 @@ export default function SemiAutoComparePanel({
 
 
 
-      {/* 📡 통합 예측 신호 + 신호 성적표 — ⑤ 학습 엔진 안 */}
+      {/* 📡 통합 예측 신호 + 신호 성적표 — ④ 학습 엔진 안 */}
       <>
       <Divider sx={{ my: 2 }} />
       <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'info.main' }}>
@@ -6446,6 +6085,389 @@ export default function SemiAutoComparePanel({
         );
       })()}
       </>
+
+
+      {/* ── 복기 검증 · 백테스트 — ④ 패턴 분석 엔진 안 ── */}
+      <Divider textAlign="left">
+        <Typography variant="caption" fontWeight={800} color="text.secondary">
+          복기 검증 · 백테스트
+        </Typography>
+      </Divider>
+      {verificationSlot}
+
+      {/* ── 용지 티켓 당첨 대조 (④ 엔진 · 복기 검증) ── */}
+      {activeComparison && (
+        <Paper sx={{ p: 2 }}>
+          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+            <Typography variant="subtitle1" fontWeight={800}>
+              용지 티켓 당첨 대조
+            </Typography>
+            <Chip size="small" color="info" label="④ 엔진 · 복기검증" sx={{ height: 22, fontWeight: 700 }} />
+            <Chip size="small" variant="outlined" label={`${activeComparison.ticketCount}장`} sx={{ height: 22 }} />
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            등록한 자동·반자동 줄이 비교 회차 당첨과 얼마나 맞는지 측정합니다(적중률·분포·티켓 목록).
+            상단 <strong>③ 번호 추천</strong>의 사후 점검(엔진 안)입니다. 확률(1/8,145,060)은 변하지 않습니다.
+            1:1 구조 분석은 위 <strong>②</strong>에 있습니다.
+          </Typography>
+          {!compareWinning && (
+            <Alert severity="info" sx={{ mb: 1.5 }}>
+              <strong>이번회차 모드</strong> — 당첨번호·적중률 비교는 표시하지 않습니다.
+              당첨 검증은 <strong>복기 탭</strong>을 사용하세요.
+              {roundDrawn && currentRound != null && (
+                <> ({currentRound}회 추첨 완료 — 복기 탭에서 {latestRound ?? currentRound - 1}회와 비교)</>
+              )}
+            </Alert>
+          )}
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            alignItems={{ xs: 'stretch', sm: 'center' }}
+            spacing={1}
+            sx={{ mb: 1.5, position: 'relative', zIndex: 1 }}
+            useFlexGap
+          >
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              <Button
+                type="button"
+                size="small"
+                variant="outlined"
+                disabled={isReanalyzing}
+                onClick={() => void handleReanalyze()}
+                sx={{ minWidth: 88 }}
+              >
+                {isReanalyzing ? (
+                  <><CircularProgress size={14} sx={{ mr: 0.5 }} />재분석…</>
+                ) : (
+                  '↻ 재분석'
+                )}
+              </Button>
+              <Button type="button" size="small" color="error" variant="outlined" onClick={resetBulk}>
+                초기화
+              </Button>
+            </Stack>
+            {compareWinning ? (
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
+                <TextField
+                  size="small"
+                  label="비교 회차"
+                  type="number"
+                  value={effectiveRound ?? ''}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isInteger(v) && v > 0 && (!latestRound || v <= latestRound)) {
+                      setCompareRound(v);
+                    } else if (e.target.value === '') {
+                      setCompareRound(null);
+                    }
+                  }}
+                  inputProps={{ min: 1, max: latestRound ?? undefined, step: 1 }}
+                  sx={{ width: 130 }}
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
+                  {compareRound != null
+                    ? '복기 기준'
+                    : latest.data
+                      ? `최신 ${latest.data.round}회`
+                      : ''}
+                </Typography>
+                {compareRound != null && (
+                  <Button type="button" size="small" onClick={() => setCompareRound(null)}>
+                    ↺ 최신
+                  </Button>
+                )}
+              </Stack>
+            ) : (
+              <Chip
+                size="small"
+                color="secondary"
+                label={`이번회차 ${effectiveRound ?? '?'}회 (당첨번호 미사용)`}
+              />
+            )}
+          </Stack>
+
+          {/* 집계 메트릭 — 복기 탭에서만 당첨 적중률 */}
+          {compareWinning && (
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+              <Chip
+                size="small"
+                color="primary"
+                label={`평균 적중 ${activeComparison.avgHits.toFixed(3)} / 6`}
+                sx={{ fontWeight: 700 }}
+              />
+              <Chip size="small" label={`고유 번호 ${activeComparison.uniqueNumberCount}/45`} variant="outlined" />
+              <Chip
+                size="small"
+                color="success"
+                label={`3개+ 일치(5등↑) ${(activeComparison.hitRates.threePlus * 100).toFixed(2)}%`}
+                sx={{ fontWeight: 700 }}
+              />
+              <Chip
+                size="small"
+                color="warning"
+                label={`4개+ 일치(4등↑) ${(activeComparison.hitRates.fourPlus * 100).toFixed(2)}%`}
+              />
+              <Chip
+                size="small"
+                color="error"
+                label={`6개 일치(1등) ${(activeComparison.hitRates.six * 100).toFixed(4)}%`}
+              />
+              {activeComparison.excludedWarningCount > 0 && (
+                <Chip
+                  size="small"
+                  color="error"
+                  label={`⚠ 배제 매치 2+ 티켓: ${activeComparison.excludedWarningCount}`}
+                />
+              )}
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              ※ 베이스라인(균등 무작위) 평균 적중 = 0.800 — 본 결과와 비교해 보세요.
+            </Typography>
+          </Paper>
+          )}
+
+          {compareWinning && (
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+            <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+              적중 개수 분포
+            </Typography>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              {[0, 1, 2, 3, 4, 5, 6].map((hits) => {
+                const count = activeComparison.hitDistribution[hits] ?? 0;
+                const pct = activeComparison.ticketCount > 0
+                  ? (count / activeComparison.ticketCount) * 100
+                  : 0;
+                return (
+                  <Chip
+                    key={hits}
+                    size="small"
+                    label={`${hits}개: ${count}장 (${pct.toFixed(1)}%)`}
+                    color={hits >= 3 ? 'success' : 'default'}
+                    variant={hits >= 3 ? 'filled' : 'outlined'}
+                  />
+                );
+              })}
+            </Stack>
+          </Paper>
+          )}
+
+          {!compareWinning && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                <Chip size="small" label={`고유 번호 ${activeComparison.uniqueNumberCount}/45`} variant="outlined" />
+                <Chip
+                  size="small"
+                  color="secondary"
+                  label={`2개+ 강한후보 겹침 ${activeComparison.twoPlusStrongCount}장`}
+                />
+                <Chip size="small" label={`3개+ 강한후보 겹침 ${activeComparison.threePlusStrongCount}장`} />
+              </Stack>
+            </Paper>
+          )}
+
+          {/* 당첨번호 표시 — 복기 탭 전용 */}
+          {compareWinning && comparisonRoundData?.numbers && (
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 1.5,
+                mb: 1.5,
+                borderColor: 'warning.main',
+                borderWidth: 2,
+              }}
+            >
+              <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+                <Typography variant="body2" fontWeight={700}>
+                  🎯 {comparisonRoundData.round}회 당첨번호
+                </Typography>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                  {comparisonRoundData.numbers.map((n) => (
+                    <LottoBall key={n} number={n} size={32} />
+                  ))}
+                  {comparisonRoundData.bonus != null && (
+                    <>
+                      <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mx: 0.5 }}>
+                        + 보너스
+                      </Typography>
+                      <LottoBall number={comparisonRoundData.bonus} size={28} />
+                    </>
+                  )}
+                </Stack>
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                ※ 아래 티켓의 번호 중 당첨번호와 일치하는 것은 색상 유지, 미일치는 회색 dim 처리.
+              </Typography>
+            </Paper>
+          )}
+
+          {/* 전체 티켓 목록 — 자동 / 반자동 각각 § 1, § 3 추가 세팅의 평탄화 패턴과 동일 룩.
+              데이터 소스: 자동 = currentSlipLines + slipQueue + bulkAutoTickets,
+                          반자동 = semiCurrentLines + semiSlipQueue + bulkTickets. */}
+          {(() => {
+            const autoTickets = [
+              ...currentSlipLines.map((line, idx) => ({
+                key: `auto-current-${idx}`,
+                label: `입력 중·${line.label}`,
+                numbers: line.numbers,
+                onRemove: onRemoveCurrentLine ? () => onRemoveCurrentLine(idx) : undefined,
+              })),
+              ...slipQueue.flatMap((slip, slipIdx) =>
+                slip.lines.map((line, lineIdx) => ({
+                  key: `auto-slip-${slipIdx}-${lineIdx}`,
+                  label: `용지${slipIdx + 1}·${line.label}`,
+                  numbers: line.numbers,
+                  onRemove: onRemoveSlipLine ? () => onRemoveSlipLine(slipIdx, lineIdx) : undefined,
+                }))
+              ),
+              ...bulkAutoTickets.map((ticket, idx) => ({
+                key: `auto-bulk-${idx}`,
+                label: `대량 #${idx + 1}`,
+                numbers: ticket,
+                onRemove: onRemoveBulkAutoTicket ? () => onRemoveBulkAutoTicket(idx) : undefined,
+              })),
+            ];
+            const semiTickets = [
+              ...semiCurrentLines.map((line, idx) => ({
+                key: `semi-current-${idx}`,
+                label: `입력 중·${line.label}`,
+                numbers: line.numbers,
+                onRemove: () => removeCurrentLine(idx),
+              })),
+              ...semiSlipQueue.flatMap((slip, slipIdx) =>
+                slip.lines.map((line, lineIdx) => ({
+                  key: `semi-slip-${slipIdx}-${lineIdx}`,
+                  label: `용지${slipIdx + 1}·${line.label}`,
+                  numbers: line.numbers,
+                  onRemove: () => removeSlipLine(slipIdx, lineIdx),
+                }))
+              ),
+              ...bulkTickets.map((ticket, idx) => ({
+                key: `semi-bulk-${idx}`,
+                label: `대량 #${idx + 1}`,
+                numbers: ticket,
+                onRemove: () =>
+                  setBulkTickets((prev) => prev.filter((_, i) => i !== idx)),
+              })),
+            ];
+            const renderRow = (
+              t: { key: string; label: string; numbers: number[]; onRemove?: () => void },
+              idx: number
+            ) => {
+              const matchCount = winningSet
+                ? t.numbers.filter((n) => winningSet.has(n)).length
+                : 0;
+              return (
+                <Stack
+                  key={t.key}
+                  direction="row"
+                  alignItems="center"
+                  spacing={0.5}
+                  flexWrap="wrap"
+                  useFlexGap
+                >
+                  <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
+                    #{idx + 1}
+                  </Typography>
+                  <Chip size="small" label={t.label} variant="outlined" sx={{ minWidth: 84 }} />
+                  <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                    {t.numbers.map((n) => (
+                      <LottoBall
+                        key={`${t.key}-${n}`}
+                        number={n}
+                        size={22}
+                        dimmed={winningSet ? !winningSet.has(n) : false}
+                      />
+                    ))}
+                  </Stack>
+                  {winningSet && (
+                    <Chip
+                      size="small"
+                      color={matchCount >= 3 ? 'success' : 'default'}
+                      label={`${matchCount}/6`}
+                      sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                    />
+                  )}
+                  {t.onRemove && (
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        t.onRemove!();
+                      }}
+                      aria-label="삭제"
+                      sx={{ ml: 'auto' }}
+                    >
+                      ×
+                    </IconButton>
+                  )}
+                </Stack>
+              );
+            };
+            return (
+              <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  sx={{ cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => setShowAllTickets((v) => !v)}
+                >
+                  <Typography variant="body2" fontWeight={700}>
+                    🎫 전체 티켓 목록 — 자동 {autoTickets.length}줄 / 반자동 {semiTickets.length}줄
+                    {showAllTickets ? ' ▼' : ' ▶'}
+                  </Typography>
+                  <Button size="small" variant="text">
+                    {showAllTickets ? '접기' : '펼치기'}
+                  </Button>
+                </Stack>
+                {showAllTickets && (
+                  <Box sx={{ mt: 1 }}>
+                    {/* 자동 영역 — § 1 추가 세팅과 동일 데이터 소스·카운트 형식 */}
+                    <Typography variant="caption" color="success.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+                      📋 자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkAutoTickets.length}장 · 총 {autoTickets.length}줄
+                    </Typography>
+                    {autoTickets.length === 0 ? (
+                      <Alert severity="info" sx={{ mb: 1.5 }}>
+                        자동 데이터가 없습니다. 상단 § 1 의 '구입번호 직접입력' 으로 추가하세요.
+                      </Alert>
+                    ) : (
+                      <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
+                        <Stack spacing={0.5}>{autoTickets.map(renderRow)}</Stack>
+                      </Box>
+                    )}
+
+                    {/* 반자동 영역 — § 3 추가 세팅과 동일 데이터 소스·카운트 형식 */}
+                    <Typography variant="caption" color="primary.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+                      🔄 반자동 누적: {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkTickets.length}장 · 총 {semiTickets.length}줄
+                    </Typography>
+                    {semiTickets.length === 0 ? (
+                      <Alert severity="info">
+                        반자동 데이터가 없습니다. 그리드에서 6개 선택 후 [줄 저장] 하거나 [⬆ 대량 입력] 으로 추가하세요.
+                      </Alert>
+                    ) : (
+                      <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75 }}>
+                        <Stack spacing={0.5}>{semiTickets.map(renderRow)}</Stack>
+                      </Box>
+                    )}
+                  </Box>
+                )}
+              </Paper>
+            );
+          })()}
+
+          {/* 자동/반자동 한쪽만 있으면 1:1 축이 죽는다 — 조용히 사라지지 않게 사유를 알린다. */}
+          {!canRenderLineMatching && hasLineMatchingInputs && (
+            <Alert severity="warning" sx={{ mb: 1.5 }}>
+              현재 <strong>자동 {groupLineMatching.autoLineCount}줄 · 반자동{' '}
+              {groupLineMatching.semiLineCount}줄</strong>입니다. ②의 <strong>1:1 전수비교</strong>와
+              ④ 학습 엔진의 <strong>심층 역산·당첨 예상</strong>은 자동↔반자동 <strong>양쪽</strong>이 있어야 동작합니다.
+              비어 있는 쪽을 등록하면 활성화됩니다.
+            </Alert>
+          )}
+
+        </Paper>
+      )}
+
 
         </Stack>
       )}

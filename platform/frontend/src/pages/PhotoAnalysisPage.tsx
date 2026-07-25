@@ -1740,7 +1740,7 @@ export default function PhotoAnalysisPage() {
       {notice && <Alert severity="info">{notice}</Alert>}
       {error && <Alert severity="error" sx={{ whiteSpace: 'pre-wrap' }}>{error}</Alert>}
 
-      {/* ① 반자동 등록 → ② 분석/1:1 → ③ 복기검증 → ④ 추천 → ⑤ 학습엔진 */}
+      {/* ① 등록(필수) → ② 분석 → ③ 추천(필수) → ④ 패턴엔진(복기검증·백테스트·학습, 기본 접힘) */}
       <SemiAutoComparePanel
         sheetIntent={activeTab}
         currentRound={currentRound}
@@ -1795,15 +1795,10 @@ export default function PhotoAnalysisPage() {
         }
         verificationSlot={
           <Stack spacing={1.5}>
-            <Divider textAlign="left">
-              <Typography variant="overline" fontWeight={800} color="primary.main" sx={{ letterSpacing: 1.2 }}>
-                ③ 복기 검증 — 아래 추천의 근거
-              </Typography>
-            </Divider>
             <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
               <Typography variant="caption">
-                이 검증(신호 성적표·다회차 백테스트·놓친 당첨·구간 커버리지)과 바로 이어지는{' '}
-                <strong>용지 티켓 당첨 대조</strong>가 <strong>아래 ④ 번호 추천</strong>의 근거입니다.
+                ④ 패턴 분석 엔진 안 — 신호 성적표·다회차 백테스트·놓친 당첨·구간 커버리지와{' '}
+                <strong>용지 티켓 당첨 대조</strong>로 상단 <strong>③ 번호 추천</strong>을 사후 점검합니다.
                 확률은 변하지 않습니다.
               </Typography>
             </Alert>

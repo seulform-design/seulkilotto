@@ -24,6 +24,7 @@ import { v1Api, type FeatureLearningFeatureReport } from '../api/v1Api';
  * 검증 통과 Feature 만 추천에 쓰고, Random 대비 지표·기여도를 함께 표시한다.
  */
 export default function FeatureLearningPanel() {
+  const [open, setOpen] = useState(false);
   const [showRejected, setShowRejected] = useState(false);
   const [expandedNumber, setExpandedNumber] = useState<number | null>(null);
 
@@ -90,7 +91,7 @@ export default function FeatureLearningPanel() {
 
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: open ? 0.5 : 0 }}>
         <Typography variant="subtitle1" fontWeight={800}>
           🧠 복기 Feature 학습 엔진 ({d.round_count}개 회차)
         </Typography>
@@ -108,8 +109,13 @@ export default function FeatureLearningPanel() {
             sx={{ height: 20, fontSize: 10 }}
           />
         )}
+        <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)} sx={{ ml: 'auto' }}>
+          {open ? '접기 ▲' : '펼치기 ▼'}
+        </Button>
       </Stack>
 
+      {open && (
+      <>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
         추첨 <strong>전</strong> 보관 용지만으로 Feature 를 만들고, Walk-Forward · Bootstrap ·
         Permutation · Monte Carlo · Time-Split 으로 검증합니다. Random 보다 일관된 향상이
@@ -336,6 +342,8 @@ export default function FeatureLearningPanel() {
             </Typography>
           )}
         </>
+      )}
+      </>
       )}
     </Paper>
   );

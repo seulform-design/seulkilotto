@@ -1,4 +1,5 @@
-import { Alert, Box, Chip, LinearProgress, Paper, Stack, Typography } from '@mui/material';
+import { Alert, Button, Box, Chip, LinearProgress, Paper, Stack, Typography } from '@mui/material';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
@@ -13,6 +14,7 @@ import { v1Api } from '../api/v1Api';
  * ⚠️ 확률 불변. 이 리포트는 헛된 집중 예측 대신 커버리지 전략을 쓰게 하는 정직한 도구.
  */
 export default function ReviewVerificationPanel() {
+  const [open, setOpen] = useState(false);
   const q = useQuery({
     queryKey: ['v1-photo-review-verification'],
     queryFn: v1Api.getReviewVerification,
@@ -23,10 +25,13 @@ export default function ReviewVerificationPanel() {
   if (q.isLoading) {
     return (
       <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>
-          🔬 복기 역산 검증
-        </Typography>
-        <LinearProgress />
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: open ? 1 : 0 }}>
+          <Typography variant="subtitle1" fontWeight={800}>🔬 복기 역산 검증</Typography>
+          <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)}>
+            {open ? '접기 ▲' : '펼치기 ▼'}
+          </Button>
+        </Stack>
+        {open && <LinearProgress />}
       </Paper>
     );
   }
@@ -35,10 +40,13 @@ export default function ReviewVerificationPanel() {
   if (!d.ok) {
     return (
       <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.5 }}>
-          🔬 복기 역산 검증
-        </Typography>
-        <Alert severity="info">{d.reason ?? '검증할 복기 데이터가 없습니다.'}</Alert>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: open ? 0.5 : 0 }}>
+          <Typography variant="subtitle1" fontWeight={800}>🔬 복기 역산 검증</Typography>
+          <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)}>
+            {open ? '접기 ▲' : '펼치기 ▼'}
+          </Button>
+        </Stack>
+        {open && <Alert severity="info">{d.reason ?? '검증할 복기 데이터가 없습니다.'}</Alert>}
       </Paper>
     );
   }
@@ -47,7 +55,7 @@ export default function ReviewVerificationPanel() {
 
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: open ? 0.5 : 0 }}>
         <Typography variant="subtitle1" fontWeight={800}>
           🔬 {d.round_no}회 복기 역산 검증
         </Typography>
@@ -59,8 +67,13 @@ export default function ReviewVerificationPanel() {
             sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
           />
         )}
+        <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)} sx={{ ml: 'auto' }}>
+          {open ? '접기 ▲' : '펼치기 ▼'}
+        </Button>
       </Stack>
 
+      {open && (
+      <>
       {/* 실제 당첨 */}
       <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
         <Typography variant="caption" fontWeight={700}>{d.round_no}회 당첨:</Typography>
@@ -316,6 +329,8 @@ export default function ReviewVerificationPanel() {
       <Typography variant="caption" sx={{ display: 'block', mt: 1, fontStyle: 'italic', color: 'text.disabled' }}>
         ⚠️ {d.honesty}
       </Typography>
+      </>
+      )}
     </Paper>
   );
 }

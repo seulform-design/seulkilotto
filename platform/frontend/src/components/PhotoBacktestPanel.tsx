@@ -266,6 +266,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
   const latestRound = meta.data?.latest_round ?? null;
   const [manualRound, setManualRound] = useState<number | null>(null);
   const [history, setHistory] = useState<BacktestSnapshot[]>(() => loadBacktestHistory());
+  const [open, setOpen] = useState(false);
 
   const autoSelectedRound = useMemo(() => {
     if (!latestRound) return null;
@@ -475,8 +476,8 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
 
   return (
     <Paper sx={{ p: 2, mb: 2, borderLeft: '4px solid', borderLeftColor: 'warning.main' }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Box>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: open ? 1 : 0 }} spacing={1}>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography variant="subtitle1" fontWeight={700}>
             🧪 이전 이번회차 백테스트
           </Typography>
@@ -486,23 +487,30 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
               : '회차 정보 없음'}
           </Typography>
         </Box>
-        {upgradeStatus.data?.can_upgrade && (
-          <Button
-            size="small"
-            color="warning"
-            variant="contained"
-            onClick={() => upgrade.mutate()}
-            disabled={upgrade.isPending}
-          >
-            {upgrade.isPending ? (
-              <CircularProgress size={18} color="inherit" />
-            ) : (
-              `↻ ${upgradeStatus.data.pending_count}개 회차 업데이트`
-            )}
+        <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
+          {open && upgradeStatus.data?.can_upgrade && (
+            <Button
+              size="small"
+              color="warning"
+              variant="contained"
+              onClick={() => upgrade.mutate()}
+              disabled={upgrade.isPending}
+            >
+              {upgrade.isPending ? (
+                <CircularProgress size={18} color="inherit" />
+              ) : (
+                `↻ ${upgradeStatus.data.pending_count}개 회차 업데이트`
+              )}
+            </Button>
+          )}
+          <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)}>
+            {open ? '접기 ▲' : '펼치기 ▼'}
           </Button>
-        )}
+        </Stack>
       </Stack>
 
+      {open && (
+      <>
       {/* 펜딩 회차 알림 */}
       {upgradeStatus.data?.pending_count != null && upgradeStatus.data.pending_count > 0 && (
         <Alert severity="info" sx={{ mb: 1.5 }}>
@@ -1126,6 +1134,8 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
             ※ 이력은 이 브라우저에만 저장됩니다. 같은 회차 백테스트는 최신값으로 덮어씁니다.
           </Typography>
         </>
+      )}
+      </>
       )}
     </Paper>
   );

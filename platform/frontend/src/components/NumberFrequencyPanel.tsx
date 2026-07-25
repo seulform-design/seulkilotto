@@ -32,7 +32,7 @@ interface NumberFrequencyPanelProps {
   emptyHint: string;
   /** 본문 캡션의 데이터 소스 표현. 예: '자동 (구입번호 직접입력)', '반자동 누적'. */
   bodyLabel: string;
-  /** 기본 펼침 여부 (default: true). */
+  /** 기본 펼침 여부 (default: false). */
   defaultOpen?: boolean;
 }
 
@@ -42,7 +42,7 @@ export default function NumberFrequencyPanel({
   sourceLabel,
   emptyHint,
   bodyLabel,
-  defaultOpen = true,
+  defaultOpen = false,
 }: NumberFrequencyPanelProps) {
   const [open, setOpen] = useState(defaultOpen);
 

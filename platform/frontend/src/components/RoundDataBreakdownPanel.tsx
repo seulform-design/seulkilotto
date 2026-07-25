@@ -34,6 +34,7 @@ export default function RoundDataBreakdownPanel({
   onAccumulatedChange?: (acc: PhotoAnalysisAccumulated) => void;
 }) {
   const { confirm, ConfirmDialog } = useConfirm();
+  const [showPanel, setShowPanel] = useState(false);
   const [openFor, setOpenFor] = useState<string | null>(null);
   const [targetRound, setTargetRound] = useState('');
   const [busy, setBusy] = useState(false);
@@ -118,23 +119,30 @@ export default function RoundDataBreakdownPanel({
 
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-        <Typography variant="subtitle1" fontWeight={800}>
-          🗂 회차별 용지 데이터 ({rows.length}개 회차)
-        </Typography>
-        {orphans.length > 0 && (
-          <Button
-            size="small"
-            color="warning"
-            variant="outlined"
-            disabled={busy}
-            onClick={clearOrphanReviews}
-            sx={{ fontSize: 11 }}
-          >
-            고아 복기 {orphans.length}건 삭제
-          </Button>
-        )}
+      <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showPanel ? 0.5 : 0 }} spacing={1}>
+        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+          <Typography variant="subtitle1" fontWeight={800}>
+            🗂 회차별 용지 데이터 ({rows.length}개 회차)
+          </Typography>
+          {showPanel && orphans.length > 0 && (
+            <Button
+              size="small"
+              color="warning"
+              variant="outlined"
+              disabled={busy}
+              onClick={clearOrphanReviews}
+              sx={{ fontSize: 11 }}
+            >
+              고아 복기 {orphans.length}건 삭제
+            </Button>
+          )}
+        </Stack>
+        <Button size="small" variant="outlined" onClick={() => setShowPanel((v) => !v)}>
+          {showPanel ? '접기 ▲' : '펼치기 ▼'}
+        </Button>
       </Stack>
+      {showPanel && (
+      <>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
         <strong>롤오버 보관분</strong>이 그 회차에 실제로 등록한 이번회차 용지입니다(추첨 시 동결).
         <strong> 복기 저장분</strong>은 복기 탭 저장분으로, 저장 시점의 최신 추첨 회차로 라벨링되어
@@ -268,11 +276,13 @@ export default function RoundDataBreakdownPanel({
           {notice}
         </Alert>
       )}
-      {ConfirmDialog}
 
       <Typography variant="caption" sx={{ display: 'block', mt: 1, fontStyle: 'italic', color: 'text.disabled' }}>
         ※ 보관 정본은 학습·분석의 기준입니다. 고아 복기만 삭제하며, 일반 공존은 재귀속으로 교정합니다.
       </Typography>
+      </>
+      )}
+      {ConfirmDialog}
     </Paper>
   );
 }

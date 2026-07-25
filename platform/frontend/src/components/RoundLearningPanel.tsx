@@ -1,4 +1,5 @@
-import { Alert, Box, Chip, LinearProgress, Paper, Stack, Typography } from '@mui/material';
+import { Alert, Button, Box, Chip, LinearProgress, Paper, Stack, Typography } from '@mui/material';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
@@ -13,6 +14,7 @@ import { v1Api } from '../api/v1Api';
  * 신호가 있다고 우기는 게 아니라 내 용지 구조의 예측력을 정직하게 측정하는 데 있다.
  */
 export default function RoundLearningPanel() {
+  const [open, setOpen] = useState(false);
   const q = useQuery({
     queryKey: ['v1-photo-round-learning'],
     queryFn: v1Api.getRoundLearning,
@@ -71,7 +73,7 @@ export default function RoundLearningPanel() {
 
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: open ? 0.5 : 0 }}>
         <Typography variant="subtitle1" fontWeight={800}>
           🎓 다회차 용지 학습 ({d.round_count}개 회차)
         </Typography>
@@ -83,7 +85,14 @@ export default function RoundLearningPanel() {
             sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
           />
         )}
+
+        <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)} sx={{ ml: 'auto' }}>
+          {open ? '접기 ▲' : '펼치기 ▼'}
+        </Button>
       </Stack>
+
+      {open && (
+      <>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
         추첨 <strong>전</strong>에 등록된 보관 용지만 사용하므로 <strong>누수가 없습니다</strong>.
         번호별 <strong>양쪽 지지</strong>(자동·반자동 줄에 함께 등장한 정도)가 실제 당첨과 얼마나
@@ -316,6 +325,8 @@ export default function RoundLearningPanel() {
         <Alert severity="info" sx={{ mt: 1.5 }}>
           🔗 줄겹침 학습: {ov.data.reason}
         </Alert>
+      )}
+      </>
       )}
     </Paper>
   );

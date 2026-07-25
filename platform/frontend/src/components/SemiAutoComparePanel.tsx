@@ -1144,12 +1144,13 @@ export default function SemiAutoComparePanel({
    * (샘플링/상위 N장 없음 — 분석 왜곡 방지)
    */
   const [forceDetailedComparison, setForceDetailedComparison] = useState(false);
-  // ② 분석·1:1 — 기본 접힘 (필수: ①등록·③추천만 펼침)
+  // 모든 섹션 접힘/펼침 가능 — ①·③만 기본 펼침
+  const [showSemiRegister, setShowSemiRegister] = useState(true);
   const [showAnalysisSection, setShowAnalysisSection] = useState(false);
-  // ③ 추천 상세(강수·종합예측) — 기본 접힘, 핵심 추천만 상시
+  const [showRecommendSection, setShowRecommendSection] = useState(true);
   const [showRecommendDetail, setShowRecommendDetail] = useState(false);
-  // ④ 패턴 분석 엔진(복기검증·백테스트 포함) — 기본 접힘
   const [showPredictionDetail, setShowPredictionDetail] = useState(false);
+  const [showTicketCompare, setShowTicketCompare] = useState(false);
 
   // 탭 전환 시 해당 탭 전용 localStorage 로드
   useEffect(() => {
@@ -3452,8 +3453,8 @@ export default function SemiAutoComparePanel({
     <Stack spacing={2}>
       {/* ════════ ① 반자동 번호 등록 ════════ */}
       <Paper sx={{ p: 2 }}>
-      <Stack direction="row" alignItems="flex-start" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Box>
+      <Stack direction="row" alignItems="flex-start" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showSemiRegister ? 1 : 0 }} spacing={1}>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography variant="subtitle1" fontWeight={700}>
             ① 반자동 줄 입력
           </Typography>
@@ -3463,22 +3464,29 @@ export default function SemiAutoComparePanel({
               : '이번회차 — 줄간 겹침·강한 후보 분석 (당첨번호 미사용)'}
           </Typography>
         </Box>
-        <Button
-          type="button"
-          size="small"
-          variant="outlined"
-          disabled={isReanalyzing}
-          onClick={() => void handleReanalyze()}
-          sx={{ flexShrink: 0, minWidth: 88, zIndex: 2 }}
-        >
-          {isReanalyzing ? (
-            <><CircularProgress size={14} sx={{ mr: 0.5 }} />재분석…</>
-          ) : (
-            '↻ 재분석'
-          )}
-        </Button>
+        <Stack direction="row" spacing={0.75} flexShrink={0}>
+          <Button
+            type="button"
+            size="small"
+            variant="outlined"
+            disabled={isReanalyzing}
+            onClick={() => void handleReanalyze()}
+            sx={{ minWidth: 88, zIndex: 2 }}
+          >
+            {isReanalyzing ? (
+              <><CircularProgress size={14} sx={{ mr: 0.5 }} />재분석…</>
+            ) : (
+              '↻ 재분석'
+            )}
+          </Button>
+          <Button size="small" variant="outlined" onClick={() => setShowSemiRegister((v) => !v)}>
+            {showSemiRegister ? '접기 ▲' : '펼치기 ▼'}
+          </Button>
+        </Stack>
       </Stack>
 
+      {showSemiRegister && (
+      <>
       {reanalyzeNotice && (
         <Alert
           severity={reanalyzeNotice.startsWith('❌') ? 'error' : 'success'}
@@ -3898,6 +3906,8 @@ export default function SemiAutoComparePanel({
         );
       })()}
 
+      </>
+      )}
       </Paper>
 
       {/* ════════ ② 번호 분석 결과 & 1:1 전수비교 ════════ */}
@@ -3925,6 +3935,7 @@ export default function SemiAutoComparePanel({
             sourceLabel="반자동 누적"
             bodyLabel="반자동 누적"
             emptyHint="반자동 누적이 없습니다. 그리드에서 6개 선택 후 [줄 저장] 으로 누적하세요."
+            defaultOpen={false}
           />
         </Box>
       )}
@@ -4651,16 +4662,23 @@ export default function SemiAutoComparePanel({
         )}
       </Paper>
 
-      {/* ════════ ③ 번호 추천 (필수 · 결론) ════════ */}
+      {/* ════════ ③ 번호 추천 (기본 펼침 · 접기 가능) ════════ */}
       <Paper sx={{ p: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-        <Typography variant="subtitle1" fontWeight={800}>
-          ③ 번호 추천
-        </Typography>
-        <Chip size="small" color="success" label="필수" sx={{ height: 22, fontWeight: 700 }} />
-        <Chip size="small" variant="outlined" label="복기검증은 ④ 엔진" sx={{ height: 22 }} />
+      <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showRecommendSection ? 1 : 0 }} spacing={1}>
+        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+          <Typography variant="subtitle1" fontWeight={800}>
+            ③ 번호 추천
+          </Typography>
+          <Chip size="small" color="success" label="기본 펼침" sx={{ height: 22, fontWeight: 700 }} />
+          <Chip size="small" variant="outlined" label="복기검증은 ④ 엔진" sx={{ height: 22 }} />
+        </Stack>
+        <Button size="small" variant="outlined" onClick={() => setShowRecommendSection((v) => !v)}>
+          {showRecommendSection ? '접기 ▲' : '펼치기 ▼'}
+        </Button>
       </Stack>
-      {/* 🎯 핵심 추천 — 필수 상시 표시 */}
+      {showRecommendSection && (
+      <>
+      {/* 🎯 핵심 추천 */}
       {heroRecommendation.ready && (
         <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
@@ -4976,6 +4994,8 @@ export default function SemiAutoComparePanel({
             ⚠️ 종합은 신호 일관성 도구입니다. 1등 확률(1/8,145,060)은 불변이며, 분산 최적은 당첨 시 공동분배 회피(실수령 기대)만 개선합니다.
           </Typography>
         </Paper>
+      )}
+      </>
       )}
       </>
       )}
@@ -6098,13 +6118,20 @@ export default function SemiAutoComparePanel({
       {/* ── 용지 티켓 당첨 대조 (④ 엔진 · 복기 검증) ── */}
       {activeComparison && (
         <Paper sx={{ p: 2 }}>
-          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-            <Typography variant="subtitle1" fontWeight={800}>
-              용지 티켓 당첨 대조
-            </Typography>
-            <Chip size="small" color="info" label="④ 엔진 · 복기검증" sx={{ height: 22, fontWeight: 700 }} />
-            <Chip size="small" variant="outlined" label={`${activeComparison.ticketCount}장`} sx={{ height: 22 }} />
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showTicketCompare ? 1 : 0 }} spacing={1}>
+            <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+              <Typography variant="subtitle1" fontWeight={800}>
+                용지 티켓 당첨 대조
+              </Typography>
+              <Chip size="small" color="info" label="④ 엔진 · 복기검증" sx={{ height: 22, fontWeight: 700 }} />
+              <Chip size="small" variant="outlined" label={`${activeComparison.ticketCount}장`} sx={{ height: 22 }} />
+            </Stack>
+            <Button size="small" variant="outlined" onClick={() => setShowTicketCompare((v) => !v)}>
+              {showTicketCompare ? '접기 ▲' : '펼치기 ▼'}
+            </Button>
           </Stack>
+          {showTicketCompare && (
+          <>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
             등록한 자동·반자동 줄이 비교 회차 당첨과 얼마나 맞는지 측정합니다(적중률·분포·티켓 목록).
             상단 <strong>③ 번호 추천</strong>의 사후 점검(엔진 안)입니다. 확률(1/8,145,060)은 변하지 않습니다.
@@ -6465,6 +6492,8 @@ export default function SemiAutoComparePanel({
             </Alert>
           )}
 
+          </>
+          )}
         </Paper>
       )}
 

@@ -1,5 +1,5 @@
-import { Box, Chip, Paper, Stack, Tooltip, Typography } from '@mui/material';
-import { useMemo } from 'react';
+import { Box, Button, Chip, Paper, Stack, Tooltip, Typography } from '@mui/material';
+import { useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
 import SharingBadge from './SharingBadge';
@@ -33,6 +33,7 @@ export default function OverlapPatternLearnPanel({
 }: {
   accumulated: PhotoAnalysisAccumulated | null;
 }) {
+  const [open, setOpen] = useState(false);
   const review = accumulated?.by_intent?.review ?? null;
   const current = accumulated?.by_intent?.current_round ?? null;
 
@@ -56,7 +57,7 @@ export default function OverlapPatternLearnPanel({
 
   return (
     <Paper sx={{ p: 2, mb: 2, border: '1px solid', borderColor: 'divider' }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }} flexWrap="wrap" useFlexGap>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: open ? 0.5 : 0 }} flexWrap="wrap" useFlexGap>
         <Typography variant="subtitle1" fontWeight={800}>
           🔎 줄겹침 패턴 역산 학습
         </Typography>
@@ -68,7 +69,12 @@ export default function OverlapPatternLearnPanel({
         {reviewRound && (
           <Chip size="small" variant="outlined" label={`복기 ${reviewRound}회 기준`} sx={{ height: 20 }} />
         )}
+        <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)} sx={{ ml: 'auto' }}>
+          {open ? '접기 ▲' : '펼치기 ▼'}
+        </Button>
       </Stack>
+      {open && (
+      <>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
         복기 '다른 줄에도 겹침(2·3·4번호)' 조합 중 <strong>실제 당첨번호와 일치한 조합</strong>이 어떤 구조
         (겹친 줄 수·lift·z)를 가졌는지 역산해, 이번회차 겹침 조합을 같은 기준으로 채점합니다.
@@ -143,6 +149,8 @@ export default function OverlapPatternLearnPanel({
       <Typography variant="caption" sx={{ display: 'block', mt: 1.25, fontStyle: 'italic', color: 'text.disabled' }}>
         ⚠️ {profile.note} 1등 확률(1/8,145,060)은 어떤 패턴으로도 변하지 않습니다 — 본 학습은 분석 일관성 도구입니다.
       </Typography>
+      </>
+      )}
     </Paper>
   );
 }

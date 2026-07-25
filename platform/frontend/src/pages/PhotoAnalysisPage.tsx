@@ -309,6 +309,7 @@ function IntentAccumulatedPanel({
   legacyCount?: number;
   onDeleteEntry: (id: string) => void;
 }) {
+  const [showAcc, setShowAcc] = useState(false);
   if (!slice?.total_analyses) {
     return (
       <Alert severity="info">
@@ -326,9 +327,16 @@ function IntentAccumulatedPanel({
   return (
     <Stack spacing={2}>
       <Paper sx={{ p: 2, border: intent === 'review' ? '1px solid #2e7d32' : '1px solid #1565c0' }}>
-        <Typography variant="h6" fontWeight={700} gutterBottom>
-          {slice.video_intent_label} 누적 ({slice.ticket_round}회)
-        </Typography>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showAcc ? 1 : 0 }}>
+          <Typography variant="h6" fontWeight={700}>
+            {slice.video_intent_label} 누적 ({slice.ticket_round}회)
+          </Typography>
+          <Button size="small" variant="outlined" onClick={() => setShowAcc((v) => !v)}>
+            {showAcc ? '접기 ▲' : '펼치기 ▼'}
+          </Button>
+        </Stack>
+        {showAcc && (
+        <>
         <Typography variant="body2" color="text.secondary" gutterBottom>
           {slice.app_ui_message}
         </Typography>
@@ -373,32 +381,38 @@ function IntentAccumulatedPanel({
               <strong>롤오버 보관 정본</strong>을 기준으로 분석합니다. 저장분은 삭제되지 않고 보존됩니다.
             </Alert>
           )}
+        </>
+        )}
       </Paper>
-      {(legacyCount ?? 0) > 0 && intent === 'review' && (
-        <Alert severity="warning">구형 복기 데이터 {legacyCount}건 — 누적 삭제 후 다시 분석하세요.</Alert>
+      {showAcc && (
+        <>
+          {(legacyCount ?? 0) > 0 && intent === 'review' && (
+            <Alert severity="warning">구형 복기 데이터 {legacyCount}건 — 누적 삭제 후 다시 분석하세요.</Alert>
+          )}
+          {intent === 'review' && slice.draw_template && (
+            <DrawWinningTemplatePanel data={slice.draw_template} intentLabel="복기" />
+          )}
+          {intent === 'review' && (
+            <SavedReviewTemplatePanel data={slice.saved_review_template} winningSet={winningSet} />
+          )}
+          {slice.accumulated_combo_patterns &&
+            (slice.accumulated_combo_patterns.same_line_matches?.length ||
+              slice.accumulated_combo_patterns.pair_duplicates?.length ||
+              slice.accumulated_combo_patterns.triple_duplicates?.length ||
+              slice.accumulated_combo_patterns.quad_duplicates?.length) ? (
+            <Paper sx={{ p: 2, border: '1px solid #5c4d00' }}>
+              <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+                {comboTitle}
+              </Typography>
+              <ComboDuplicatePanel
+                data={slice.accumulated_combo_patterns}
+                mode={intent}
+                winningSet={winningSet}
+              />
+            </Paper>
+          ) : null}
+        </>
       )}
-      {intent === 'review' && slice.draw_template && (
-        <DrawWinningTemplatePanel data={slice.draw_template} intentLabel="복기" />
-      )}
-      {intent === 'review' && (
-        <SavedReviewTemplatePanel data={slice.saved_review_template} winningSet={winningSet} />
-      )}
-      {slice.accumulated_combo_patterns &&
-        (slice.accumulated_combo_patterns.same_line_matches?.length ||
-          slice.accumulated_combo_patterns.pair_duplicates?.length ||
-          slice.accumulated_combo_patterns.triple_duplicates?.length ||
-          slice.accumulated_combo_patterns.quad_duplicates?.length) ? (
-        <Paper sx={{ p: 2, border: '1px solid #5c4d00' }}>
-          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-            {comboTitle}
-          </Typography>
-          <ComboDuplicatePanel
-            data={slice.accumulated_combo_patterns}
-            mode={intent}
-            winningSet={winningSet}
-          />
-        </Paper>
-      ) : null}
     </Stack>
   );
 }
@@ -782,6 +796,8 @@ export default function PhotoAnalysisPage() {
   const [accumulated, setAccumulated] = useState<PhotoAnalysisAccumulated | null>(null);
   const [visionConfigured, setVisionConfigured] = useState(false);
   const [useVisionApi, setUseVisionApi] = useState(false);
+  const [showAutoRegister, setShowAutoRegister] = useState(true);
+  const [showHistorySection, setShowHistorySection] = useState(false);
   const [showVisionAdvanced, setShowVisionAdvanced] = useState(false);
   const [visionKey, setVisionKey] = useState('');
   const [visionSaving, setVisionSaving] = useState(false);
@@ -1471,25 +1487,34 @@ export default function PhotoAnalysisPage() {
       </Divider>
 
       <Paper sx={{ p: 2 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: showAutoRegister ? 1 : 0 }} spacing={1}>
           <Typography variant="subtitle1" fontWeight={700}>
             📋 구입번호 직접입력 <Typography component="span" variant="caption" color="text.secondary">(자동 구매 용지)</Typography>
           </Typography>
-          <Stack direction="row" spacing={1}>
-            <Button type="button" size="small" onClick={(e) => { e.preventDefault(); e.stopPropagation(); resetPicked(); }}>
-              초기화
-            </Button>
-            <Button
-              type="button"
-              size="small"
-              variant="contained"
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); saveCurrentLine(); }}
-              disabled={picked.length !== 6}
-            >
-              줄 저장
+          <Stack direction="row" spacing={1} alignItems="center">
+            {showAutoRegister && (
+              <>
+                <Button type="button" size="small" onClick={(e) => { e.preventDefault(); e.stopPropagation(); resetPicked(); }}>
+                  초기화
+                </Button>
+                <Button
+                  type="button"
+                  size="small"
+                  variant="contained"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); saveCurrentLine(); }}
+                  disabled={picked.length !== 6}
+                >
+                  줄 저장
+                </Button>
+              </>
+            )}
+            <Button size="small" variant="outlined" onClick={() => setShowAutoRegister((v) => !v)}>
+              {showAutoRegister ? '접기 ▲' : '펼치기 ▼'}
             </Button>
           </Stack>
         </Stack>
+        {showAutoRegister && (
+        <>
         <ManualNumberGrid
           picked={picked}
           onToggle={togglePicked}
@@ -1735,6 +1760,8 @@ export default function PhotoAnalysisPage() {
             </>
           );
         })()}
+        </>
+        )}
       </Paper>
 
       {notice && <Alert severity="info">{notice}</Alert>}
@@ -1771,6 +1798,7 @@ export default function PhotoAnalysisPage() {
               sourceLabel="자동 = 구입번호 직접입력"
               bodyLabel="자동 (구입번호 직접입력)"
               emptyHint="자동 데이터가 없습니다. '구입번호 직접입력' 영역에서 줄을 추가하면 여기에 빈도가 표시됩니다."
+              defaultOpen={false}
             />
             {activeTab === 'current_round' && (activeSlice?.total_analyses ?? 0) === 0 && (
               <ArchivedCurrentRoundPanel snapshot={archivedCurrentSnapshot} />
@@ -1894,19 +1922,19 @@ export default function PhotoAnalysisPage() {
 
       {/* ════════════ 분석 이력 (페이지 최하단) ════════════ */}
       {activeSlice?.entries_summary?.length ? (
-        <>
-          <Divider textAlign="left" sx={{ mt: 1 }}>
-            <Typography
-              variant="overline"
-              fontWeight={800}
-              color="text.secondary"
-              sx={{ letterSpacing: 1.2 }}
-            >
+        <Paper sx={{ p: 2 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showHistorySection ? 1 : 0 }}>
+            <Typography variant="subtitle1" fontWeight={800}>
               {activeTab === 'review' ? '복기' : '이번회차'} 분석 이력
             </Typography>
-          </Divider>
-          <HistoryEntriesPanel slice={activeSlice} onDeleteEntry={deleteHistoryEntry} />
-        </>
+            <Button size="small" variant="outlined" onClick={() => setShowHistorySection((v) => !v)}>
+              {showHistorySection ? '접기 ▲' : '펼치기 ▼'}
+            </Button>
+          </Stack>
+          {showHistorySection && (
+            <HistoryEntriesPanel slice={activeSlice} onDeleteEntry={deleteHistoryEntry} />
+          )}
+        </Paper>
       ) : null}
 
       <BulkLineInputDialog

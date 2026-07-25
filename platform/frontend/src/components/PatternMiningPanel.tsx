@@ -24,6 +24,7 @@ import { v1Api, type PatternMiningResponse } from '../api/v1Api';
  * 검증 통과 Pattern · Cluster · Feature · 설명가능 추천을 표시한다.
  */
 export default function PatternMiningPanel() {
+  const [open, setOpen] = useState(false);
   const [showRejected, setShowRejected] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -87,7 +88,7 @@ export default function PatternMiningPanel() {
 
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: open ? 0.5 : 0 }}>
         <Typography variant="subtitle1" fontWeight={800}>
           🔍 복기 Pattern Mining 엔진 ({d.round_count}개 회차)
         </Typography>
@@ -97,7 +98,14 @@ export default function PatternMiningPanel() {
           label={`Pattern ${d.pattern_count} · 채택 ${d.adopted_count} · 제외 ${d.rejected_count}`}
           sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
         />
+
+        <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)} sx={{ ml: 'auto' }}>
+          {open ? '접기 ▲' : '펼치기 ▼'}
+        </Button>
       </Stack>
+
+      {open && (
+      <>
 
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
         자동·반자동·매치카드·강한후보·간격·구간배치를 <strong>전수 학습</strong>해 Pattern 을 자동
@@ -354,6 +362,8 @@ export default function PatternMiningPanel() {
             </Typography>
           )}
         </>
+      )}
+      </>
       )}
     </Paper>
   );

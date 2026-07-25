@@ -1154,6 +1154,8 @@ export default function SemiAutoComparePanel({
   const [showRecommendDetail, setShowRecommendDetail] = useState(false);
   const [showPredictionDetail, setShowPredictionDetail] = useState(false);
   const [showTicketCompare, setShowTicketCompare] = useState(false);
+  /** 1:1 전수비교 상세(매칭 카드) — 요약만 기본, 상세 보기로 펼침 */
+  const [showLineMatchDetail, setShowLineMatchDetail] = useState(false);
 
   // 탭 전환 시 해당 탭 전용 localStorage 로드
   useEffect(() => {
@@ -4112,14 +4114,26 @@ export default function SemiAutoComparePanel({
                     type="button"
                     size="small"
                     variant="outlined"
-                    onClick={() => lineMatchingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    onClick={() => {
+                      if (showLineMatchDetail) {
+                        setShowLineMatchDetail(false);
+                        return;
+                      }
+                      setShowLineMatchDetail(true);
+                      window.setTimeout(() => {
+                        lineMatchingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }, 50);
+                    }}
                   >
-                    상세 보기
+                    {showLineMatchDetail ? '접기 ▲' : '상세 보기 ▼'}
                   </Button>
                 )}
               </Stack>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 {intentSectionLabel} 탭 기준으로 자동 누적 줄과 반자동 누적 줄을 전수 비교해 공통 번호 2개 이상인 매치를 찾습니다.
+                {canRenderLineMatching && !showLineMatchDetail
+                  ? ' 상세 매칭 카드·필터는 [상세 보기]에서 펼칩니다.'
+                  : ''}
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                 <Chip size="small" variant="outlined" label={`자동 ${groupLineMatching.autoLineCount}줄`} />
@@ -4128,7 +4142,9 @@ export default function SemiAutoComparePanel({
                   <>
                     <Chip size="small" color="secondary" variant="outlined" label={`원본 페어 ${groupLineMatching.rawPairCount}건`} />
                     <Chip size="small" color="secondary" label={`통합 카드 ${groupLineMatching.groupCount}건`} sx={{ fontWeight: 700 }} />
-                    <Chip size="small" variant="outlined" label={`현재 표시 ${visibleGroupMatchTotal}건`} />
+                    {showLineMatchDetail && (
+                      <Chip size="small" variant="outlined" label={`현재 표시 ${visibleGroupMatchTotal}건`} />
+                    )}
                   </>
                 )}
               </Stack>
@@ -4140,14 +4156,24 @@ export default function SemiAutoComparePanel({
             </Paper>
       )}
 
-      {/* 1:1 전수비교 그룹 — ② 번호 분석 (학습엔진 아님) */}
-      {canRenderLineMatching && (
+      {/* 1:1 전수비교 그룹 — 요약의 [상세 보기]로만 펼침 */}
+      {canRenderLineMatching && showLineMatchDetail && (
 
             <Box ref={lineMatchingRef}>
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
-              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-                🔀 자동 ↔ 반자동 줄 1:1 매칭 (공통 번호 2~6개)
-              </Typography>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }} spacing={1}>
+                <Typography variant="body2" fontWeight={700}>
+                  🔀 자동 ↔ 반자동 줄 1:1 매칭 (공통 번호 2~6개)
+                </Typography>
+                <Button
+                  type="button"
+                  size="small"
+                  variant="outlined"
+                  onClick={() => setShowLineMatchDetail(false)}
+                >
+                  접기 ▲
+                </Button>
+              </Stack>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 자동 {groupLineMatching.autoLineCount}줄
                 {groupLineMatching.autoDupRemoved > 0 && (

@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
 import SharingBadge from './SharingBadge';
-import { EngineSection, EngineStatusChip } from './EngineSection';
+import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
 import { v1Api } from '../api/v1Api';
 
 /**
@@ -80,7 +80,7 @@ export default function ReviewVerificationPanel() {
       <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
         <Typography variant="caption" fontWeight={700}>{d.round_no}회 당첨:</Typography>
         {(d.winning_numbers ?? []).map((n) => (
-          <LottoBall key={`w-${n}`} number={n} size={26} />
+          <LottoBall key={`w-${n}`} number={n} size={ENGINE_BALL.list} />
         ))}
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
@@ -297,7 +297,7 @@ export default function ReviewVerificationPanel() {
             <Typography variant="caption" fontWeight={700} sx={{ fontSize: 11 }}>핵심 6:</Typography>
             {/* 이번회차(미추첨) 픽이므로 지난(복기) 회차 당첨과 대조(dimmed)하지 않는다. */}
             {d.current_coverage_set.core6.map((n) => (
-              <LottoBall key={`c6-${n}`} number={n} size={26} />
+              <LottoBall key={`c6-${n}`} number={n} size={ENGINE_BALL.list} />
             ))}
             <SharingBadge numbers={[...d.current_coverage_set.core6].sort((a, b) => a - b)} />
             <ComboActions numbers={[...d.current_coverage_set.core6].sort((a, b) => a - b)} source="unknown" label="복기검증 핵심6" />
@@ -308,7 +308,7 @@ export default function ReviewVerificationPanel() {
             {d.current_coverage_set.expand18
               .filter((n) => !d.current_coverage_set!.core6.includes(n))
               .map((n) => (
-                <LottoBall key={`e18-${n}`} number={n} size={20} />
+                <LottoBall key={`e18-${n}`} number={n} size={ENGINE_BALL.table} />
               ))}
           </Stack>
           {d.current_coverage_set.decade_balance && (

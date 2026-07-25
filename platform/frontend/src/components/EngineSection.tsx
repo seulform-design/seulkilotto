@@ -30,8 +30,11 @@ const TONE_BORDER: Record<EngineTone, string> = {
 /** 엔진 전역 Chip 규격 */
 export const ENGINE_CHIP_SX = { height: 20, fontSize: 10, fontWeight: 700 } as const;
 
-/** 엔진 안 공 크기 규격 — 테이블/목록/강조 */
-export const ENGINE_BALL = { table: 18, list: 22, emphasis: 28, hero: 34 } as const;
+/**
+ * 엔진·용지분석 공 크기 규격 (가로 순위줄 = 세로 목록 = 동일).
+ * table: 표/밀집 · list: 기본(거의 전부) · hero: 최종 결론 픽만
+ */
+export const ENGINE_BALL = { table: 20, list: 24, emphasis: 24, hero: 28 } as const;
 
 export function EngineStatusChip({ sx, ...props }: ChipProps) {
   return <Chip size="small" {...props} sx={{ ...ENGINE_CHIP_SX, ...(sx as object) }} />;

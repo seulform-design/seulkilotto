@@ -19,7 +19,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { v1Api, type ParallelRoundAnalysisResponse } from '../api/v1Api';
-import { EngineSection } from './EngineSection';
+import { ENGINE_BALL, EngineSection } from './EngineSection';
 import LottoBall from './LottoBall';
 
 interface ParallelRoundPanelProps {
@@ -226,13 +226,13 @@ export default function ParallelRoundPanel({
                               <TableCell key={`${row.round}-${idx}`} align="center" sx={{ p: 0.5 }}>
                                 <LottoBall
                                   number={n}
-                                  size={28}
+                                  size={ENGINE_BALL.list}
                                   dimmed={!highlightSet.has(n)}
                                 />
                               </TableCell>
                             ))}
                             <TableCell align="center" sx={{ p: 0.5 }}>
-                              <LottoBall number={row.bonus} size={28} dimmed={!highlightSet.has(row.bonus)} />
+                              <LottoBall number={row.bonus} size={ENGINE_BALL.list} dimmed={!highlightSet.has(row.bonus)} />
                             </TableCell>
                           </TableRow>
                         );

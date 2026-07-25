@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
 import SharingBadge from './SharingBadge';
-import { EngineSection, EngineStatusChip } from './EngineSection';
+import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
 import type { PhotoAnalysisAccumulated } from '../api/v1Api';
 import {
   learnOverlapProfile,
@@ -118,7 +118,7 @@ export default function OverlapPatternLearnPanel({
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mb: 0.75 }}>
             {ranked.map((r) => (
               <Box key={r.number} sx={{ textAlign: 'center' }}>
-                <LottoBall number={r.number} size={30} />
+                <LottoBall number={r.number} size={ENGINE_BALL.list} />
                 <Typography sx={{ fontSize: 9, color: 'text.disabled', lineHeight: 1 }}>
                   {r.score} · {r.support}조합
                 </Typography>
@@ -131,7 +131,7 @@ export default function OverlapPatternLearnPanel({
                 상위 6:
               </Typography>
               {topCombo.map((n) => (
-                <LottoBall key={`tc-${n}`} number={n} size={24} />
+                <LottoBall key={`tc-${n}`} number={n} size={ENGINE_BALL.list} />
               ))}
               <SharingBadge numbers={topCombo} />
               <ComboActions numbers={topCombo} source="unknown" label="줄겹침 학습 후보" />

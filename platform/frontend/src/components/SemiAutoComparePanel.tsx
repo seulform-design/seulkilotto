@@ -3900,7 +3900,7 @@ export default function SemiAutoComparePanel({
                             <LottoBall
                               key={`${line.key}-${n}`}
                               number={n}
-                              size={22}
+                              size={ENGINE_BALL.list}
                               dimmed={winningSet ? !winningSet.has(n) : false}
                             />
                           ))}
@@ -4464,7 +4464,7 @@ export default function SemiAutoComparePanel({
                                           <LottoBall
                                             key={`ga-${g.key}-${a.idx}-${n}`}
                                             number={n}
-                                            size={20}
+                                            size={ENGINE_BALL.table}
                                             dimmed={winningSet ? !winningSet.has(n) : !mset.has(n)}
                                           />
                                         ))}
@@ -4507,7 +4507,7 @@ export default function SemiAutoComparePanel({
                                           <LottoBall
                                             key={`gs-${g.key}-${s.idx}-${n}`}
                                             number={n}
-                                            size={20}
+                                            size={ENGINE_BALL.table}
                                             dimmed={winningSet ? !winningSet.has(n) : !mset.has(n)}
                                           />
                                         ))}
@@ -4684,7 +4684,7 @@ export default function SemiAutoComparePanel({
                         <LottoBall
                           key={n}
                           number={n}
-                          size={22}
+                          size={ENGINE_BALL.list}
                           dimmed={winningSet ? !winningSet.has(n) : false}
                         />
                       ))}
@@ -4787,7 +4787,7 @@ export default function SemiAutoComparePanel({
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>핵심 6</Typography>
             {heroRecommendation.core6.map((n) => (
               <Box key={`hero-c-${n}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                <LottoBall number={n} size={30} />
+                <LottoBall number={n} size={ENGINE_BALL.list} />
                 {heroRecommendation.agreement[String(n)] != null && (
                   <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
                     {heroRecommendation.agreement[String(n)]}신호
@@ -4802,7 +4802,7 @@ export default function SemiAutoComparePanel({
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
               <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>분산 최적</Typography>
               {heroRecommendation.shareOpt.map((n) => (
-                <LottoBall key={`hero-s-${n}`} number={n} size={26} />
+                <LottoBall key={`hero-s-${n}`} number={n} size={ENGINE_BALL.list} />
               ))}
               <SharingBadge numbers={heroRecommendation.shareOpt} />
               <ComboActions numbers={heroRecommendation.shareOpt} source="unknown" label="분산최적 추천" />
@@ -4811,7 +4811,7 @@ export default function SemiAutoComparePanel({
           <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap>
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>확장 18</Typography>
             {heroRecommendation.expand18.map((n) => (
-              <LottoBall key={`hero-e-${n}`} number={n} size={20} />
+              <LottoBall key={`hero-e-${n}`} number={n} size={ENGINE_BALL.list} />
             ))}
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
@@ -4881,7 +4881,7 @@ export default function SemiAutoComparePanel({
                   <Chip size="small" label={`${idx + 1}`} variant="outlined" sx={{ minWidth: 32, fontWeight: 700 }} />
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                     {rec.combo.map((n) => (
-                      <LottoBall key={n} number={n} size={28} dimmed={winningSet ? !winningSet.has(n) : false} />
+                      <LottoBall key={n} number={n} size={ENGINE_BALL.list} dimmed={winningSet ? !winningSet.has(n) : false} />
                     ))}
                   </Stack>
                   {compareWinning && winningSet && (
@@ -4958,7 +4958,7 @@ export default function SemiAutoComparePanel({
                         {b.strong.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
                         {b.strong.map((s) => (
                           <Box key={`st-${s.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
-                            <LottoBall number={s.number} size={24} dimmed={compareWinning && winningSet ? !s.winning : false} />
+                            <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : false} />
                             <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
                               {s.auto}/{s.semi}{s.maxMatch >= 3 ? `·${s.maxMatch}일치` : ''}
                             </Typography>
@@ -4968,7 +4968,7 @@ export default function SemiAutoComparePanel({
                         {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
                         {b.expected.map((s) => (
                           <Box key={`ex-${s.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
-                            <LottoBall number={s.number} size={20} dimmed={compareWinning && winningSet ? !s.winning : true} />
+                            <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : true} />
                             <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
                               {s.auto}/{s.semi}
                             </Typography>
@@ -5064,7 +5064,7 @@ export default function SemiAutoComparePanel({
                         {b.strong.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
                         {b.strong.map((s) => (
                           <Box key={`fss-${s.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                            <LottoBall number={s.number} size={24} dimmed={compareWinning && winningSet ? !s.winning : false} />
+                            <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : false} />
                             <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: s.agreement >= 2 ? 'warning.light' : 'text.disabled', fontWeight: s.agreement >= 2 ? 700 : 400 }}>
                               {s.glyphs}
                             </Typography>
@@ -5074,7 +5074,7 @@ export default function SemiAutoComparePanel({
                         {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
                         {b.expected.map((s) => (
                           <Box key={`fse2-${s.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                            <LottoBall number={s.number} size={20} dimmed={compareWinning && winningSet ? !s.winning : true} />
+                            <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : true} />
                             <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
                               {s.glyphs}
                             </Typography>
@@ -5097,7 +5097,7 @@ export default function SemiAutoComparePanel({
                         <Typography variant="caption" fontWeight={700} sx={{ fontSize: 10, color: 'warning.light' }}>⭐ 2개+ 신호 합의:</Typography>
                         {multi.map((c) => (
                           <Box key={`cons-${c.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                            <LottoBall number={c.number} size={22} dimmed={compareWinning && winningSet ? !c.winning : false} />
+                            <LottoBall number={c.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !c.winning : false} />
                             <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
                               {c.glyphs}
                             </Typography>
@@ -5155,7 +5155,7 @@ export default function SemiAutoComparePanel({
                 <Typography sx={{ fontSize: 8, color: i < 6 ? 'primary.light' : 'text.disabled', fontWeight: 700, lineHeight: 1 }}>
                   {i + 1}위
                 </Typography>
-                <LottoBall number={r.number} size={i < 6 ? 34 : 28} />
+                <LottoBall number={r.number} size={ENGINE_BALL.list} />
                 <Typography sx={{ fontSize: 8, color: 'text.disabled', lineHeight: 1.1 }}>{r.pct}%</Typography>
                 <Typography sx={{ fontSize: 7.5, color: 'text.disabled', lineHeight: 1 }}>{r.sources.join('·')}</Typography>
               </Box>
@@ -5165,7 +5165,7 @@ export default function SemiAutoComparePanel({
             <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
               <Typography variant="caption" fontWeight={700}>대표 조합:</Typography>
               {currentRoundForecast.representative.map((n) => (
-                <LottoBall key={`crfr-${n}`} number={n} size={28} />
+                <LottoBall key={`crfr-${n}`} number={n} size={ENGINE_BALL.list} />
               ))}
               <SharingBadge numbers={currentRoundForecast.representative} />
               <ComboActions numbers={currentRoundForecast.representative} source="unknown" label="이번회차 종합 예측" />
@@ -5176,7 +5176,7 @@ export default function SemiAutoComparePanel({
                 <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
                   <Typography variant="caption" fontWeight={700}>💰 분산 최적:</Typography>
                   {currentRoundForecast.shareOpt.numbers.map((n) => (
-                    <LottoBall key={`crfo-${n}`} number={n} size={24} />
+                    <LottoBall key={`crfo-${n}`} number={n} size={ENGINE_BALL.list} />
                   ))}
                   <SharingBadge numbers={currentRoundForecast.shareOpt.numbers} />
                   <ComboActions numbers={currentRoundForecast.shareOpt.numbers} source="unknown" label="이번회차 분산 최적" />
@@ -5361,7 +5361,7 @@ export default function SemiAutoComparePanel({
                     </Typography>
                     <LottoBall
                       number={p.number}
-                      size={36}
+                      size={ENGINE_BALL.list}
                       dimmed={compareWinning && winningSet ? !winningSet.has(p.number) : false}
                     />
                     <Typography variant="caption" sx={{ display: 'block', fontSize: 9, lineHeight: 1.2, color: 'text.secondary', mt: 0.25 }}>
@@ -5419,9 +5419,9 @@ export default function SemiAutoComparePanel({
                         sx={{ p: 0.5, borderRadius: 0.5, bgcolor: x.won ? 'rgba(46,125,50,0.18)' : 'transparent' }}
                       >
                         <Typography sx={{ fontSize: 10, color: 'text.disabled', minWidth: 22, fontWeight: 700 }}>{i + 1}위</Typography>
-                        <LottoBall number={x.number} size={26} dimmed={compareWinning && x.won === false} />
-                        {x.won === true && <Chip size="small" color="success" label="당첨" sx={{ height: 16, fontSize: 9 }} />}
-                        {x.validated && <Chip size="small" color="info" label="🧠검증학습" sx={{ height: 16, fontSize: 9 }} />}
+                        <LottoBall number={x.number} size={ENGINE_BALL.list} dimmed={compareWinning && x.won === false} />
+                        {x.won === true && <EngineStatusChip color="success" label="당첨" />}
+                        {x.validated && <EngineStatusChip color="info" label="검증학습" />}
                         <Typography variant="caption" sx={{ fontSize: 10.5 }}>
                           교차 {x.cross} · 심층 {x.deep}% · <strong>자동 {x.auto}줄 · 반자동 {x.semi}줄</strong>
                           {x.maxMatch >= 3 ? ` · 최대일치 ${x.maxMatch}` : ''} · {x.sources.join('·')}
@@ -5468,7 +5468,7 @@ export default function SemiAutoComparePanel({
                       {compareWinning ? '검증용 조합' : `${effectiveRound ?? '?'}회 예상 조합`}:
                     </Typography>
                     {pick.map((n) => (
-                      <LottoBall key={`pk-${n}`} number={n} size={26} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
+                      <LottoBall key={`pk-${n}`} number={n} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
                     ))}
                     {hit != null && (
                       <Chip size="small" color={hit >= 3 ? 'success' : hit >= 2 ? 'warning' : 'default'} label={`당첨 ${hit}/6`} sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />
@@ -5541,7 +5541,7 @@ export default function SemiAutoComparePanel({
                         <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: i < 6 ? 'info.light' : 'text.disabled', fontWeight: 700 }}>
                           {i + 1}위
                         </Typography>
-                        <LottoBall number={m.number} size={30} dimmed={compareWinning && winningSet ? !m.winning : false} />
+                        <LottoBall number={m.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !m.winning : false} />
                         <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
                           유사 {m.sim}%{m.deep ? '·3+' : ''}
                         </Typography>
@@ -5596,7 +5596,7 @@ export default function SemiAutoComparePanel({
                         .join(' · ');
                       return (
                         <Stack key={`win-${w.number}`} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
-                          <LottoBall number={w.number} size={24} />
+                          <LottoBall number={w.number} size={ENGINE_BALL.list} />
                           <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
                             {w.appeared
                               ? <>반복도 <strong>{w.rank}위</strong> · {w.totalGroups}그룹 ({levelStr}) · 자동 {w.auto}줄·반자동 {w.semi}줄</>
@@ -5645,7 +5645,7 @@ export default function SemiAutoComparePanel({
                           <Stack key={`rec-${r.number}`} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
                             <LottoBall
                               number={r.number}
-                              size={26}
+                              size={ENGINE_BALL.list}
                               dimmed={compareWinning && winningSet ? !isWin : false}
                             />
                             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
@@ -5698,7 +5698,7 @@ export default function SemiAutoComparePanel({
                               <LottoBall
                                 key={n}
                                 number={n}
-                                size={22}
+                                size={ENGINE_BALL.list}
                                 dimmed={compareWinning && winningSet ? !winningSet.has(n) : false}
                               />
                             ))}
@@ -5735,7 +5735,7 @@ export default function SemiAutoComparePanel({
                             <Box key={x.number} sx={{ textAlign: 'center', minWidth: 26 }}>
                               <LottoBall
                                 number={x.number}
-                                size={22}
+                                size={ENGINE_BALL.list}
                                 dimmed={compareWinning && winningSet ? !x.winning : false}
                               />
                               <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
@@ -5791,7 +5791,7 @@ export default function SemiAutoComparePanel({
                                   <LottoBall
                                     key={n}
                                     number={n}
-                                    size={22}
+                                    size={ENGINE_BALL.list}
                                     dimmed={compareWinning && winningSet ? !winningSet.has(n) : false}
                                   />
                                 ))}
@@ -6523,14 +6523,14 @@ export default function SemiAutoComparePanel({
                 </Typography>
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                   {comparisonRoundData.numbers.map((n) => (
-                    <LottoBall key={n} number={n} size={32} />
+                    <LottoBall key={n} number={n} size={ENGINE_BALL.list} />
                   ))}
                   {comparisonRoundData.bonus != null && (
                     <>
                       <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mx: 0.5 }}>
                         + 보너스
                       </Typography>
-                      <LottoBall number={comparisonRoundData.bonus} size={28} />
+                      <LottoBall number={comparisonRoundData.bonus} size={ENGINE_BALL.list} />
                     </>
                   )}
                 </Stack>
@@ -6615,7 +6615,7 @@ export default function SemiAutoComparePanel({
                       <LottoBall
                         key={`${t.key}-${n}`}
                         number={n}
-                        size={22}
+                        size={ENGINE_BALL.list}
                         dimmed={winningSet ? !winningSet.has(n) : false}
                       />
                     ))}

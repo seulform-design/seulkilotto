@@ -16,7 +16,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
-import { EngineSection, EngineStatusChip } from './EngineSection';
+import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
 import { v1Api, type PatternMiningResponse } from '../api/v1Api';
 
 /**
@@ -139,7 +139,7 @@ export default function PatternMiningPanel() {
                   sx={{ height: 18, fontSize: 10 }}
                 />
                 {r.winning.map((n) => (
-                  <LottoBall key={`${r.round_no}-w-${n}`} number={n} size={18} />
+                  <LottoBall key={`${r.round_no}-w-${n}`} number={n} size={ENGINE_BALL.table} />
                 ))}
               </Stack>
             ))}
@@ -267,7 +267,7 @@ export default function PatternMiningPanel() {
               Top6
             </Typography>
             {(rec.top6 ?? []).map((n) => (
-              <LottoBall key={`pm-top6-${n}`} number={n} size={28} />
+              <LottoBall key={`pm-top6-${n}`} number={n} size={ENGINE_BALL.list} />
             ))}
             <Chip
               size="small"
@@ -287,7 +287,7 @@ export default function PatternMiningPanel() {
                     sx={{ cursor: 'pointer' }}
                     onClick={() => setExpanded(open ? null : String(row.number))}
                   >
-                    <LottoBall number={row.number} size={24} />
+                    <LottoBall number={row.number} size={ENGINE_BALL.list} />
                     <Typography sx={{ fontWeight: 700, fontSize: 12, minWidth: 64 }}>
                       점수 {row.score.toFixed(2)}
                     </Typography>

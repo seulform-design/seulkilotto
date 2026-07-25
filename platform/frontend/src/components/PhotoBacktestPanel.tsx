@@ -33,7 +33,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
-import { EngineSection } from './EngineSection';
+import { ENGINE_BALL, EngineSection } from './EngineSection';
 import {
   v1Api,
   type ArchivedCurrentRoundSnapshot,
@@ -638,7 +638,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
           </Typography>
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
             {currentSignals.data?.strong_candidates.map((n) => (
-              <LottoBall key={`pv-${n}`} number={n} size={28} />
+              <LottoBall key={`pv-${n}`} number={n} size={ENGINE_BALL.list} />
             ))}
           </Stack>
           <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 0.75, fontStyle: 'italic' }}>
@@ -657,12 +657,12 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
             </Typography>
             <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
               {analysis.winning.map((n) => (
-                <LottoBall key={n} number={n} size={36} />
+                <LottoBall key={n} number={n} size={ENGINE_BALL.hero} />
               ))}
               <Typography variant="caption" color="text.secondary" sx={{ mx: 0.5 }}>
                 + 보너스
               </Typography>
-              <LottoBall number={analysis.bonus} size={32} />
+              <LottoBall number={analysis.bonus} size={ENGINE_BALL.hero} />
               <Chip
                 size="small"
                 label={`종합 등급: ${analysis.grade}`}
@@ -711,7 +711,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
                 </Typography>
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                   {analysis.strongHits.map((n) => (
-                    <LottoBall key={n} number={n} size={28} />
+                    <LottoBall key={n} number={n} size={ENGINE_BALL.list} />
                   ))}
                 </Stack>
               </Box>
@@ -723,7 +723,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
                 </Typography>
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                   {analysis.strongMisses.map((n) => (
-                    <LottoBall key={n} number={n} size={24} dimmed />
+                    <LottoBall key={n} number={n} size={ENGINE_BALL.list} dimmed />
                   ))}
                 </Stack>
               </Box>
@@ -766,7 +766,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
                 </Typography>
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                   {analysis.excludedHits.map((n) => (
-                    <LottoBall key={n} number={n} size={28} />
+                    <LottoBall key={n} number={n} size={ENGINE_BALL.list} />
                   ))}
                 </Stack>
               </>
@@ -822,7 +822,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
                     >
                       <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                         {t.numbers.map((n) => (
-                          <LottoBall key={n} number={n} size={24} />
+                          <LottoBall key={n} number={n} size={ENGINE_BALL.list} />
                         ))}
                       </Stack>
                       <Chip size="small" variant="outlined" label={`${t.repeat_count ?? 0}장에서 등장`} />
@@ -848,7 +848,7 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
                     >
                       <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                         {p.numbers.map((n) => (
-                          <LottoBall key={n} number={n} size={22} />
+                          <LottoBall key={n} number={n} size={ENGINE_BALL.list} />
                         ))}
                       </Stack>
                       <Chip size="small" variant="outlined" label={`${p.repeat_count ?? 0}장에서 등장`} />

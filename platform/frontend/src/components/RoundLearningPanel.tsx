@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
 import SharingBadge from './SharingBadge';
-import { EngineSection, EngineStatusChip } from './EngineSection';
+import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
 import { v1Api } from '../api/v1Api';
 
 /**
@@ -97,7 +97,7 @@ export default function RoundLearningPanel() {
             <Chip size="small" variant="outlined" label={`자동 ${r.auto_line_count}줄·반자동 ${r.semi_line_count}줄`} sx={{ height: 18, fontSize: 10 }} />
             <Typography sx={{ fontSize: 10.5, color: 'text.secondary' }}>지지 상위6:</Typography>
             {r.top6_by_support.map((n) => (
-              <LottoBall key={`${r.round_no}-${n}`} number={n} size={20} dimmed={!r.winning_numbers.includes(n)} />
+              <LottoBall key={`${r.round_no}-${n}`} number={n} size={ENGINE_BALL.table} dimmed={!r.winning_numbers.includes(n)} />
             ))}
             <Chip
               size="small"
@@ -153,7 +153,7 @@ export default function RoundLearningPanel() {
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
             {scores.map((s) => (
               <Box key={`rl-${s.number}`} sx={{ textAlign: 'center', minWidth: 38 }}>
-                <LottoBall number={s.number} size={26} />
+                <LottoBall number={s.number} size={ENGINE_BALL.list} />
                 <Typography sx={{ fontSize: 8, color: 'text.disabled', lineHeight: 1.1 }}>{s.score}</Typography>
                 <Typography sx={{ fontSize: 7.5, color: 'text.disabled', lineHeight: 1 }}>
                   자{s.auto}·반{s.semi}
@@ -165,7 +165,7 @@ export default function RoundLearningPanel() {
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
               <Typography variant="caption" fontWeight={700} sx={{ fontSize: 11 }}>학습 상위6:</Typography>
               {top6.map((n) => (
-                <LottoBall key={`rlt-${n}`} number={n} size={24} />
+                <LottoBall key={`rlt-${n}`} number={n} size={ENGINE_BALL.list} />
               ))}
               <SharingBadge numbers={top6} />
               <ComboActions numbers={top6} source="unknown" label="다회차 학습 상위6" />
@@ -292,7 +292,7 @@ export default function RoundLearningPanel() {
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                 {ov.data.current_scores!.map((s) => (
                   <Box key={`ovc-${s.number}`} sx={{ textAlign: 'center', minWidth: 36 }}>
-                    <LottoBall number={s.number} size={26} />
+                    <LottoBall number={s.number} size={ENGINE_BALL.list} />
                     <Typography sx={{ fontSize: 8, color: 'text.disabled', lineHeight: 1.1 }}>{s.score}</Typography>
                     <Typography sx={{ fontSize: 7.5, color: 'text.disabled', lineHeight: 1 }}>{s.combo_support}조합</Typography>
                   </Box>

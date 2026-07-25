@@ -4,7 +4,7 @@
  */
 import { Alert, Box, Stack, Typography } from '@mui/material';
 import LottoBall from './LottoBall';
-import { EngineSection, EngineStatusChip, EngineTabBanner } from './EngineSection';
+import { ENGINE_BALL, EngineSection, EngineStatusChip, EngineTabBanner } from './EngineSection';
 
 export type MissingBand = {
   label: string;
@@ -119,7 +119,7 @@ export default function EngineAuxSignalsPanel({
                     —
                   </Typography>
                 ) : (
-                  nums.slice(0, 18).map((n) => <LottoBall key={`post-${grade}-${n}`} number={n} size={22} />)
+                  nums.slice(0, 18).map((n) => <LottoBall key={`post-${grade}-${n}`} number={n} size={ENGINE_BALL.list} />)
                 )}
               </Stack>
             ))}
@@ -141,7 +141,7 @@ export default function EngineAuxSignalsPanel({
         {gapPool.length > 0 ? (
           <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
             {gapPool.slice(0, 24).map((n) => (
-              <LottoBall key={`gap-${n}`} number={n} size={22} />
+              <LottoBall key={`gap-${n}`} number={n} size={ENGINE_BALL.list} />
             ))}
           </Stack>
         ) : (
@@ -213,7 +213,7 @@ export default function EngineAuxSignalsPanel({
                     <Box key={`miss-${m.number}`} sx={{ textAlign: 'center' }}>
                       <LottoBall
                         number={m.number}
-                        size={22}
+                        size={ENGINE_BALL.list}
                         dimmed={compareWinning ? !m.winning : true}
                       />
                     </Box>

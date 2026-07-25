@@ -528,6 +528,8 @@ interface SemiAutoComparePanelProps {
   onRemoveBulkAutoTicket?: (idx: number) => void;
   /** 서버 누적·당첨번호 재조회 (재분석 버튼). */
   onRefreshAccumulated?: () => Promise<void>;
+  /** ① 번호 등록 — 자동 용지 블록(반자동과 한 Paper) */
+  registerPrelude?: ReactNode;
   /** ② 분석 상단 — 자동 빈도 등 */
   analysisPrelude?: ReactNode;
   /** ② 분석 하단(1:1 뒤) — 누적 패턴 · 회차별 용지 데이터 */
@@ -1095,6 +1097,7 @@ export default function SemiAutoComparePanel({
   onRemoveCurrentLine,
   onRemoveBulkAutoTicket,
   onRefreshAccumulated,
+  registerPrelude = null,
   analysisPrelude = null,
   analysisEpilogue = null,
   verificationSlot = null,
@@ -1145,7 +1148,7 @@ export default function SemiAutoComparePanel({
    */
   const [forceDetailedComparison, setForceDetailedComparison] = useState(false);
   // 모든 섹션 접힘/펼침 가능 — ①·③만 기본 펼침
-  const [showSemiRegister, setShowSemiRegister] = useState(true);
+  const [showRegister, setShowRegister] = useState(true);
   const [showAnalysisSection, setShowAnalysisSection] = useState(false);
   const [showRecommendSection, setShowRecommendSection] = useState(true);
   const [showRecommendDetail, setShowRecommendDetail] = useState(false);
@@ -3451,14 +3454,15 @@ export default function SemiAutoComparePanel({
 
   return (
     <Stack spacing={2}>
-      {/* ════════ ① 반자동 번호 등록 ════════ */}
+      {/* ════════ ① 번호 등록 (자동 + 반자동 한 세트) ════════ */}
       <Paper sx={{ p: 2 }}>
-      <Stack direction="row" alignItems="flex-start" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showSemiRegister ? 1 : 0 }} spacing={1}>
+      <Stack direction="row" alignItems="flex-start" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showRegister ? 1 : 0 }} spacing={1}>
         <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography variant="subtitle1" fontWeight={700}>
-            ① 반자동 줄 입력
+          <Typography variant="subtitle1" fontWeight={800}>
+            ① 번호 등록
           </Typography>
           <Typography variant="caption" color="text.secondary">
+            자동·반자동 용지를 한곳에서 등록합니다.{' '}
             {compareWinning
               ? '복기 — 당첨번호·누적 강한후보·교집합 통계 비교'
               : '이번회차 — 줄간 겹침·강한 후보 분석 (당첨번호 미사용)'}
@@ -3479,14 +3483,20 @@ export default function SemiAutoComparePanel({
               '↻ 재분석'
             )}
           </Button>
-          <Button size="small" variant="outlined" onClick={() => setShowSemiRegister((v) => !v)}>
-            {showSemiRegister ? '접기 ▲' : '펼치기 ▼'}
+          <Button size="small" variant="outlined" onClick={() => setShowRegister((v) => !v)}>
+            {showRegister ? '접기 ▲' : '펼치기 ▼'}
           </Button>
         </Stack>
       </Stack>
 
-      {showSemiRegister && (
+      {showRegister && (
       <>
+      {registerPrelude}
+      <Divider textAlign="left" sx={{ my: 2 }}>
+        <Typography variant="caption" fontWeight={800} color="text.secondary">
+          반자동 용지
+        </Typography>
+      </Divider>
       {reanalyzeNotice && (
         <Alert
           severity={reanalyzeNotice.startsWith('❌') ? 'error' : 'success'}

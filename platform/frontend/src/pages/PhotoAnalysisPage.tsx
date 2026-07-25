@@ -796,7 +796,6 @@ export default function PhotoAnalysisPage() {
   const [accumulated, setAccumulated] = useState<PhotoAnalysisAccumulated | null>(null);
   const [visionConfigured, setVisionConfigured] = useState(false);
   const [useVisionApi, setUseVisionApi] = useState(false);
-  const [showAutoRegister, setShowAutoRegister] = useState(true);
   const [showHistorySection, setShowHistorySection] = useState(false);
   const [showVisionAdvanced, setShowVisionAdvanced] = useState(false);
   const [visionKey, setVisionKey] = useState('');
@@ -1479,291 +1478,6 @@ export default function PhotoAnalysisPage() {
         </Alert>
       )}
 
-      {/* ════════════ ① 번호 등록 ════════════ */}
-      <Divider textAlign="left" sx={{ mt: 1 }}>
-        <Typography variant="overline" fontWeight={800} color="primary.main" sx={{ letterSpacing: 1.2 }}>
-          ① 번호 등록
-        </Typography>
-      </Divider>
-
-      <Paper sx={{ p: 2 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: showAutoRegister ? 1 : 0 }} spacing={1}>
-          <Typography variant="subtitle1" fontWeight={700}>
-            📋 구입번호 직접입력 <Typography component="span" variant="caption" color="text.secondary">(자동 구매 용지)</Typography>
-          </Typography>
-          <Stack direction="row" spacing={1} alignItems="center">
-            {showAutoRegister && (
-              <>
-                <Button type="button" size="small" onClick={(e) => { e.preventDefault(); e.stopPropagation(); resetPicked(); }}>
-                  초기화
-                </Button>
-                <Button
-                  type="button"
-                  size="small"
-                  variant="contained"
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); saveCurrentLine(); }}
-                  disabled={picked.length !== 6}
-                >
-                  줄 저장
-                </Button>
-              </>
-            )}
-            <Button size="small" variant="outlined" onClick={() => setShowAutoRegister((v) => !v)}>
-              {showAutoRegister ? '접기 ▲' : '펼치기 ▼'}
-            </Button>
-          </Stack>
-        </Stack>
-        {showAutoRegister && (
-        <>
-        <ManualNumberGrid
-          picked={picked}
-          onToggle={togglePicked}
-          currentLabel={currentLabel}
-        />
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 2 }}>
-          <Button type="button" variant="outlined" color="inherit" onClick={resetCurrentSlip}>
-            용지 초기화
-          </Button>
-          <Button type="button" variant="outlined" color="primary" onClick={() => setBulkOpen(true)}>
-            ⬆ 대량 입력 (자동 500줄+)
-          </Button>
-          <Button
-            type="button"
-            variant="contained"
-            color="success"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              void runManualAnalyze();
-            }}
-            disabled={manualLoading || (
-              slipQueue.length === 0 &&
-              currentSlipLines.length === 0 &&
-              bulkAutoTickets.length === 0
-            )}
-            sx={{ minWidth: 180 }}
-          >
-            {(() => {
-              if (manualLoading) {
-                return <><CircularProgress size={16} color="inherit" sx={{ mr: 1 }} />저장 중…</>;
-              }
-              const totalLines =
-                currentSlipLines.length +
-                slipQueue.reduce((s, sl) => s + sl.lines.length, 0) +
-                bulkAutoTickets.length;
-              return totalLines > 0
-                ? `💾 누적·저장 (${totalLines}줄)`
-                : '💾 누적·저장';
-            })()}
-          </Button>
-          <Button
-            type="button"
-            variant="outlined"
-            color="primary"
-            disabled={isReanalyzing || manualLoading}
-            onClick={() => void handleReanalyze()}
-            sx={{ minWidth: 110 }}
-          >
-            {isReanalyzing || manualLoading ? (
-              <><CircularProgress size={16} sx={{ mr: 0.5 }} />재분석…</>
-            ) : (
-              '↻ 재분석'
-            )}
-          </Button>
-        </Stack>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
-          자동 서버 저장: <strong>{savedAutoKeySet.size}줄</strong>
-          {lastSavedAt ? ` · 마지막 저장: ${new Date(lastSavedAt).toLocaleString('ko-KR', { hour: '2-digit', minute: '2-digit', month: 'numeric', day: 'numeric' })}` : ' · 아직 저장 안 됨'}
-          {unsavedLocalCount > 0 ? ` · 미저장 로컬 ${unsavedLocalCount}줄` : ' · 모두 저장됨'}
-        </Typography>
-        {/* 미저장 로컬 줄이 실제로 남아 있을 때만 경고 — 로컬↔서버 일치/불일치 상세 표시 */}
-        {unsavedLocalCount > 0 && (() => {
-          // 로컬 고유 키 대비 서버 일치 수 — '전부 미저장'인지 '일부 드리프트'인지 구분.
-          const localKeys = new Set<string>();
-          for (const t of bulkAutoTickets) localKeys.add(lineKey(t));
-          for (const slip of slipQueue) for (const l of slip.lines) localKeys.add(lineKey(l.numbers));
-          for (const l of currentSlipLines) localKeys.add(lineKey(l.numbers));
-          const matched = [...localKeys].filter((k) => savedAutoKeySet.has(k)).length;
-          return (
-            <Alert
-              severity={savedAutoKeySet.size > 0 && matched === 0 ? 'warning' : 'info'}
-              sx={{ mt: 1 }}
-              action={
-                savedAutoKeySet.size > 0 ? (
-                  <Button
-                    color="inherit"
-                    size="small"
-                    variant="outlined"
-                    onClick={async () => {
-                      const serverLines = activeSlice?.saved_auto_lines ?? [];
-                      if (!serverLines.length) return;
-                      if (!(await confirm({
-                        message: `로컬 자동 누적(${localKeys.size}줄)을 버리고 서버 저장분(${serverLines.length}줄)으로 맞출까요? 서버에 없는 로컬 줄은 사라집니다. (반대로 로컬을 서버에 올리려면 [누적·저장])`,
-                        destructive: true,
-                        confirmText: '서버 기준으로 동기화',
-                      }))) return;
-                      patchManual({
-                        bulkAutoTickets: serverLines.map((l) => [...l]),
-                        slipQueue: [],
-                        currentSlipLines: [],
-                        picked: [],
-                      });
-                      setNotice(`서버 저장분 ${serverLines.length}줄로 로컬 자동 누적을 동기화했습니다.`);
-                    }}
-                  >
-                    서버 기준 동기화
-                  </Button>
-                ) : undefined
-              }
-            >
-              📋 로컬 {localKeys.size}줄 중 서버 일치 <strong>{matched}줄</strong> · 미반영 <strong>{unsavedLocalCount}줄</strong>.
-              {savedAutoKeySet.size > 0 && matched === 0 ? (
-                <> 서버({savedAutoKeySet.size}줄)와 로컬이 <strong>완전히 다릅니다</strong> — 이전에 저장한 세트와 지금 로컬 세트가 다른 데이터입니다.
-                로컬을 서버에 올리려면 <strong>[💾 누적·저장]</strong>, 서버 저장분을 그대로 쓰려면 <strong>[서버 기준 동기화]</strong>.</>
-              ) : (
-                <> 위 <strong>[💾 누적·저장]</strong> 버튼을 눌러야 통계에 반영됩니다.</>
-              )}
-            </Alert>
-          );
-        })()}
-        <Divider sx={{ my: 2 }} />
-        <Typography variant="subtitle2" fontWeight={700} gutterBottom>
-          저장 누적
-        </Typography>
-        <SavedLinesPanel
-          currentSlipLines={currentSlipLines}
-          slipQueue={slipQueue}
-          onRemoveSlip={(idx) =>
-            patchManual({ slipQueue: slipQueue.filter((_, i) => i !== idx) })
-          }
-          onRemoveCurrentLine={removeCurrentLine}
-          onEditCurrentLine={editCurrentLine}
-          onRemoveSlipLine={removeSlipLine}
-        />
-
-        {/* 추가 세팅 — 자동(구입번호 직접입력) 전용. 반자동과 분리. */}
-        <Divider sx={{ my: 2 }} />
-        <Typography variant="subtitle2" fontWeight={700} gutterBottom>
-          ⚙ 추가 세팅
-        </Typography>
-        {(() => {
-          // 자동 누적 평탄화 — 반자동 ① 추가 세팅과 동일 룩앤필.
-          // 데이터 소스: 입력 중 줄 + 저장 용지의 모든 줄 + 대량 입력 (bulkAutoTickets).
-          // 백엔드 누적은 ② IntentAccumulatedPanel 에서만 관리하므로 여기서는 제외.
-          const ticketLines = [
-            ...currentSlipLines.map((line, idx) => ({
-              key: `current-${idx}`,
-              label: `입력 중·${line.label}`,
-              numbers: line.numbers,
-              onRemove: () => removeCurrentLine(idx),
-            })),
-            ...slipQueue.flatMap((slip, slipIdx) =>
-              slip.lines.map((line, lineIdx) => ({
-                key: `slip-${slipIdx}-${lineIdx}`,
-                label: `용지${slipIdx + 1}·${line.label}`,
-                numbers: line.numbers,
-                onRemove: () => removeSlipLine(slipIdx, lineIdx),
-              }))
-            ),
-            ...bulkAutoTickets.map((ticket, idx) => ({
-              key: `bulk-${idx}`,
-              label: `대량 #${idx + 1}`,
-              numbers: ticket,
-              onRemove: () =>
-                patchManual({
-                  bulkAutoTickets: bulkAutoTickets.filter((_, i) => i !== idx),
-                }),
-            })),
-          ];
-          const winSet = activeTab === 'review' ? activeReviewWinningSet : null;
-          // 'N/6' 카운트는 메인 6개만 — winSet 은 보너스를 포함(볼 색칠용)하므로
-          // 그대로 세면 보너스 일치가 메인 일치처럼 부풀려진다. 보너스는 '+보'로 따로.
-          const reviewBonus =
-            activeTab === 'review'
-              ? (activeSlice?.draw_template?.bonus ?? reviewDrawQuery.data?.bonus ?? null)
-              : null;
-          return (
-            <>
-              <Typography variant="body2" sx={{ mb: 0.5 }}>
-                자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkAutoTickets.length}장 · 총 {ticketLines.length}줄
-                {' '}(서버 저장 자동 {activeSlice?.saved_auto_lines?.length ?? 0}줄)
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                아래 목록의 [×] 로 개별 줄 삭제. 하단 [자동 누적 전체 삭제] 는 현재 탭의 서버 저장분 중 <strong>자동만</strong> 지웁니다(반자동 저장분은 유지). 로컬 자동 누적도 초기화됩니다.
-              </Typography>
-              {ticketLines.length === 0 ? (
-                <Alert severity="info" sx={{ mb: 1.5 }}>
-                  자동 누적 줄이 없습니다. 위 그리드에서 6개 선택 후 [줄 저장].
-                </Alert>
-              ) : (
-                <Box sx={{ maxHeight: 320, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
-                  <Stack spacing={0.5}>
-                    {ticketLines.map((line, idx) => {
-                      const matchCount = winSet
-                        ? line.numbers.filter((n) => winSet.has(n) && n !== reviewBonus).length
-                        : 0;
-                      const bonusHit = reviewBonus != null && line.numbers.includes(reviewBonus);
-                      return (
-                        <Stack
-                          key={line.key}
-                          direction="row"
-                          alignItems="center"
-                          spacing={0.5}
-                          flexWrap="wrap"
-                          useFlexGap
-                        >
-                          <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
-                            #{idx + 1}
-                          </Typography>
-                          <Chip size="small" label={line.label} variant="outlined" sx={{ minWidth: 84 }} />
-                          <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
-                            {line.numbers.map((n) => (
-                              <LottoBall
-                                key={`${line.key}-${n}`}
-                                number={n}
-                                size={22}
-                                dimmed={winSet ? !winSet.has(n) : false}
-                              />
-                            ))}
-                          </Stack>
-                          {winSet && (
-                            <Chip
-                              size="small"
-                              color={matchCount >= 3 ? 'success' : 'default'}
-                              label={`${matchCount}/6${bonusHit ? '+보' : ''}`}
-                              sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                            />
-                          )}
-                          <IconButton size="small" onClick={line.onRemove} aria-label="삭제" sx={{ ml: 'auto' }}>
-                            ×
-                          </IconButton>
-                        </Stack>
-                      );
-                    })}
-                  </Stack>
-                </Box>
-              )}
-              <Stack direction="row" justifyContent="flex-end">
-                <Button
-                  size="small"
-                  color="error"
-                  variant="outlined"
-                  onClick={clearStore}
-                  disabled={
-                    ticketLines.length === 0 &&
-                    (activeSlice?.saved_auto_lines?.length ?? 0) === 0
-                  }
-                >
-                  자동 누적 전체 삭제
-                </Button>
-              </Stack>
-            </>
-          );
-        })()}
-        </>
-        )}
-      </Paper>
-
       {notice && <Alert severity="info">{notice}</Alert>}
       {error && <Alert severity="error" sx={{ whiteSpace: 'pre-wrap' }}>{error}</Alert>}
 
@@ -1786,6 +1500,274 @@ export default function PhotoAnalysisPage() {
           })
         }
         onRefreshAccumulated={refreshAccumulated}
+        registerPrelude={
+          <Box sx={{ mb: 0.5 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }} spacing={1}>
+              <Typography variant="subtitle2" fontWeight={800}>
+                📋 자동 구매 용지
+              </Typography>
+              <Stack direction="row" spacing={1}>
+                <Button type="button" size="small" onClick={(e) => { e.preventDefault(); e.stopPropagation(); resetPicked(); }}>
+                  초기화
+                </Button>
+                <Button
+                  type="button"
+                  size="small"
+                  variant="contained"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); saveCurrentLine(); }}
+                  disabled={picked.length !== 6}
+                >
+                  줄 저장
+                </Button>
+              </Stack>
+            </Stack>
+            <ManualNumberGrid
+                      picked={picked}
+                      onToggle={togglePicked}
+                      currentLabel={currentLabel}
+                    />
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 2 }}>
+                      <Button type="button" variant="outlined" color="inherit" onClick={resetCurrentSlip}>
+                        용지 초기화
+                      </Button>
+                      <Button type="button" variant="outlined" color="primary" onClick={() => setBulkOpen(true)}>
+                        ⬆ 대량 입력 (자동 500줄+)
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="contained"
+                        color="success"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          void runManualAnalyze();
+                        }}
+                        disabled={manualLoading || (
+                          slipQueue.length === 0 &&
+                          currentSlipLines.length === 0 &&
+                          bulkAutoTickets.length === 0
+                        )}
+                        sx={{ minWidth: 180 }}
+                      >
+                        {(() => {
+                          if (manualLoading) {
+                            return <><CircularProgress size={16} color="inherit" sx={{ mr: 1 }} />저장 중…</>;
+                          }
+                          const totalLines =
+                            currentSlipLines.length +
+                            slipQueue.reduce((s, sl) => s + sl.lines.length, 0) +
+                            bulkAutoTickets.length;
+                          return totalLines > 0
+                            ? `💾 누적·저장 (${totalLines}줄)`
+                            : '💾 누적·저장';
+                        })()}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outlined"
+                        color="primary"
+                        disabled={isReanalyzing || manualLoading}
+                        onClick={() => void handleReanalyze()}
+                        sx={{ minWidth: 110 }}
+                      >
+                        {isReanalyzing || manualLoading ? (
+                          <><CircularProgress size={16} sx={{ mr: 0.5 }} />재분석…</>
+                        ) : (
+                          '↻ 재분석'
+                        )}
+                      </Button>
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                      자동 서버 저장: <strong>{savedAutoKeySet.size}줄</strong>
+                      {lastSavedAt ? ` · 마지막 저장: ${new Date(lastSavedAt).toLocaleString('ko-KR', { hour: '2-digit', minute: '2-digit', month: 'numeric', day: 'numeric' })}` : ' · 아직 저장 안 됨'}
+                      {unsavedLocalCount > 0 ? ` · 미저장 로컬 ${unsavedLocalCount}줄` : ' · 모두 저장됨'}
+                    </Typography>
+                    {/* 미저장 로컬 줄이 실제로 남아 있을 때만 경고 — 로컬↔서버 일치/불일치 상세 표시 */}
+                    {unsavedLocalCount > 0 && (() => {
+                      // 로컬 고유 키 대비 서버 일치 수 — '전부 미저장'인지 '일부 드리프트'인지 구분.
+                      const localKeys = new Set<string>();
+                      for (const t of bulkAutoTickets) localKeys.add(lineKey(t));
+                      for (const slip of slipQueue) for (const l of slip.lines) localKeys.add(lineKey(l.numbers));
+                      for (const l of currentSlipLines) localKeys.add(lineKey(l.numbers));
+                      const matched = [...localKeys].filter((k) => savedAutoKeySet.has(k)).length;
+                      return (
+                        <Alert
+                          severity={savedAutoKeySet.size > 0 && matched === 0 ? 'warning' : 'info'}
+                          sx={{ mt: 1 }}
+                          action={
+                            savedAutoKeySet.size > 0 ? (
+                              <Button
+                                color="inherit"
+                                size="small"
+                                variant="outlined"
+                                onClick={async () => {
+                                  const serverLines = activeSlice?.saved_auto_lines ?? [];
+                                  if (!serverLines.length) return;
+                                  if (!(await confirm({
+                                    message: `로컬 자동 누적(${localKeys.size}줄)을 버리고 서버 저장분(${serverLines.length}줄)으로 맞출까요? 서버에 없는 로컬 줄은 사라집니다. (반대로 로컬을 서버에 올리려면 [누적·저장])`,
+                                    destructive: true,
+                                    confirmText: '서버 기준으로 동기화',
+                                  }))) return;
+                                  patchManual({
+                                    bulkAutoTickets: serverLines.map((l) => [...l]),
+                                    slipQueue: [],
+                                    currentSlipLines: [],
+                                    picked: [],
+                                  });
+                                  setNotice(`서버 저장분 ${serverLines.length}줄로 로컬 자동 누적을 동기화했습니다.`);
+                                }}
+                              >
+                                서버 기준 동기화
+                              </Button>
+                            ) : undefined
+                          }
+                        >
+                          📋 로컬 {localKeys.size}줄 중 서버 일치 <strong>{matched}줄</strong> · 미반영 <strong>{unsavedLocalCount}줄</strong>.
+                          {savedAutoKeySet.size > 0 && matched === 0 ? (
+                            <> 서버({savedAutoKeySet.size}줄)와 로컬이 <strong>완전히 다릅니다</strong> — 이전에 저장한 세트와 지금 로컬 세트가 다른 데이터입니다.
+                            로컬을 서버에 올리려면 <strong>[💾 누적·저장]</strong>, 서버 저장분을 그대로 쓰려면 <strong>[서버 기준 동기화]</strong>.</>
+                          ) : (
+                            <> 위 <strong>[💾 누적·저장]</strong> 버튼을 눌러야 통계에 반영됩니다.</>
+                          )}
+                        </Alert>
+                      );
+                    })()}
+                    <Divider sx={{ my: 2 }} />
+                    <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                      저장 누적
+                    </Typography>
+                    <SavedLinesPanel
+                      currentSlipLines={currentSlipLines}
+                      slipQueue={slipQueue}
+                      onRemoveSlip={(idx) =>
+                        patchManual({ slipQueue: slipQueue.filter((_, i) => i !== idx) })
+                      }
+                      onRemoveCurrentLine={removeCurrentLine}
+                      onEditCurrentLine={editCurrentLine}
+                      onRemoveSlipLine={removeSlipLine}
+                    />
+
+                    {/* 추가 세팅 — 자동(구입번호 직접입력) 전용. 반자동과 분리. */}
+                    <Divider sx={{ my: 2 }} />
+                    <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                      ⚙ 추가 세팅
+                    </Typography>
+                    {(() => {
+                      // 자동 누적 평탄화 — 반자동 ① 추가 세팅과 동일 룩앤필.
+                      // 데이터 소스: 입력 중 줄 + 저장 용지의 모든 줄 + 대량 입력 (bulkAutoTickets).
+                      // 백엔드 누적은 ② IntentAccumulatedPanel 에서만 관리하므로 여기서는 제외.
+                      const ticketLines = [
+                        ...currentSlipLines.map((line, idx) => ({
+                          key: `current-${idx}`,
+                          label: `입력 중·${line.label}`,
+                          numbers: line.numbers,
+                          onRemove: () => removeCurrentLine(idx),
+                        })),
+                        ...slipQueue.flatMap((slip, slipIdx) =>
+                          slip.lines.map((line, lineIdx) => ({
+                            key: `slip-${slipIdx}-${lineIdx}`,
+                            label: `용지${slipIdx + 1}·${line.label}`,
+                            numbers: line.numbers,
+                            onRemove: () => removeSlipLine(slipIdx, lineIdx),
+                          }))
+                        ),
+                        ...bulkAutoTickets.map((ticket, idx) => ({
+                          key: `bulk-${idx}`,
+                          label: `대량 #${idx + 1}`,
+                          numbers: ticket,
+                          onRemove: () =>
+                            patchManual({
+                              bulkAutoTickets: bulkAutoTickets.filter((_, i) => i !== idx),
+                            }),
+                        })),
+                      ];
+                      const winSet = activeTab === 'review' ? activeReviewWinningSet : null;
+                      // 'N/6' 카운트는 메인 6개만 — winSet 은 보너스를 포함(볼 색칠용)하므로
+                      // 그대로 세면 보너스 일치가 메인 일치처럼 부풀려진다. 보너스는 '+보'로 따로.
+                      const reviewBonus =
+                        activeTab === 'review'
+                          ? (activeSlice?.draw_template?.bonus ?? reviewDrawQuery.data?.bonus ?? null)
+                          : null;
+                      return (
+                        <>
+                          <Typography variant="body2" sx={{ mb: 0.5 }}>
+                            자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkAutoTickets.length}장 · 총 {ticketLines.length}줄
+                            {' '}(서버 저장 자동 {activeSlice?.saved_auto_lines?.length ?? 0}줄)
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                            아래 목록의 [×] 로 개별 줄 삭제. 하단 [자동 누적 전체 삭제] 는 현재 탭의 서버 저장분 중 <strong>자동만</strong> 지웁니다(반자동 저장분은 유지). 로컬 자동 누적도 초기화됩니다.
+                          </Typography>
+                          {ticketLines.length === 0 ? (
+                            <Alert severity="info" sx={{ mb: 1.5 }}>
+                              자동 누적 줄이 없습니다. 위 그리드에서 6개 선택 후 [줄 저장].
+                            </Alert>
+                          ) : (
+                            <Box sx={{ maxHeight: 320, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
+                              <Stack spacing={0.5}>
+                                {ticketLines.map((line, idx) => {
+                                  const matchCount = winSet
+                                    ? line.numbers.filter((n) => winSet.has(n) && n !== reviewBonus).length
+                                    : 0;
+                                  const bonusHit = reviewBonus != null && line.numbers.includes(reviewBonus);
+                                  return (
+                                    <Stack
+                                      key={line.key}
+                                      direction="row"
+                                      alignItems="center"
+                                      spacing={0.5}
+                                      flexWrap="wrap"
+                                      useFlexGap
+                                    >
+                                      <Typography variant="caption" sx={{ minWidth: 36, color: 'text.secondary', fontWeight: 600 }}>
+                                        #{idx + 1}
+                                      </Typography>
+                                      <Chip size="small" label={line.label} variant="outlined" sx={{ minWidth: 84 }} />
+                                      <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                                        {line.numbers.map((n) => (
+                                          <LottoBall
+                                            key={`${line.key}-${n}`}
+                                            number={n}
+                                            size={22}
+                                            dimmed={winSet ? !winSet.has(n) : false}
+                                          />
+                                        ))}
+                                      </Stack>
+                                      {winSet && (
+                                        <Chip
+                                          size="small"
+                                          color={matchCount >= 3 ? 'success' : 'default'}
+                                          label={`${matchCount}/6${bonusHit ? '+보' : ''}`}
+                                          sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                                        />
+                                      )}
+                                      <IconButton size="small" onClick={line.onRemove} aria-label="삭제" sx={{ ml: 'auto' }}>
+                                        ×
+                                      </IconButton>
+                                    </Stack>
+                                  );
+                                })}
+                              </Stack>
+                            </Box>
+                          )}
+                          <Stack direction="row" justifyContent="flex-end">
+                            <Button
+                              size="small"
+                              color="error"
+                              variant="outlined"
+                              onClick={clearStore}
+                              disabled={
+                                ticketLines.length === 0 &&
+                                (activeSlice?.saved_auto_lines?.length ?? 0) === 0
+                              }
+                            >
+                              자동 누적 전체 삭제
+                            </Button>
+                          </Stack>
+                        </>
+                      );
+                    })()}
+          </Box>
+        }
         analysisPrelude={
           <Stack spacing={1.5}>
             <NumberFrequencyPanel

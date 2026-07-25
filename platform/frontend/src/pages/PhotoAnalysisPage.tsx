@@ -1392,15 +1392,10 @@ export default function PhotoAnalysisPage() {
         }}
       >
         <Stack spacing={0.5}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap>
-            <Typography variant="h6" fontWeight={800}>
-              용지 분석
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-              복기 {displayReviewRound}회 · 이번회차 {displayCurrentRound}회 · 정직성: 확률 불변
-            </Typography>
-          </Stack>
-          {/* 탭은 의도만(복기/이번회차). 회차는 위 캡션·안내문에만 — 업그레이드해도 탭 문구 고정 */}
+          <Typography variant="h6" fontWeight={800}>
+            용지 분석
+          </Typography>
+          {/* 탭은 의도만(복기/이번회차). 회차는 탭 문구에 넣지 않음 */}
           <Tabs
             value={activeTab}
             onChange={(_, v: SheetIntent) => {

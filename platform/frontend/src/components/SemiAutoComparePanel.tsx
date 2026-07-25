@@ -1267,6 +1267,13 @@ export default function SemiAutoComparePanel({
   const winningBonus = compareWinning ? (comparisonRoundData?.bonus ?? null) : null;
 
   const intentSectionLabel = sheetIntent === 'review' ? '복기' : '이번회차';
+  /** ③ 추천 헤더용 — 복기 탭은 검증 회차, 이번회차 탭은 미추첨 회차. currentRound 우선 쓰면 복기에서 1235로 오표기됨. */
+  const recommendHeroTitle = compareWinning
+    ? `🎯 복기 ${effectiveRound ?? '?'}회 검증 추천`
+    : `🎯 ${currentRound ?? effectiveRound ?? '?'}회 이번회차 핵심 추천`;
+  const recommendHeroHint = compareWinning
+    ? `복기 ${effectiveRound ?? '?'}회 당첨 대조 결과입니다. 다음 회차(${currentRound ?? '?'}) 실시간 추천은 이번회차 탭에서 확인하세요.`
+    : `복기 검증을 근거로 ${currentRound ?? effectiveRound ?? '?'}회 이번회차 추천을 만듭니다.`;
 
   // 로컬 누적이 '지난 회차 기준' 인지 판정 — 회차가 넘어간 뒤 그대로 재저장하면
   // 서버에 **새 회차로 재라벨링**되어 데이터가 오염된다(실제 사고: 1232 용지가
@@ -4718,9 +4725,17 @@ export default function SemiAutoComparePanel({
       {heroRecommendation.ready && (
         <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-            <Typography variant="body1" fontWeight={800}>
-              🎯 {currentRound ?? effectiveRound ?? '?'}회 이번회차 핵심 추천
-            </Typography>
+            <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
+              <Typography variant="body1" fontWeight={800}>
+                {recommendHeroTitle}
+              </Typography>
+              <Chip
+                size="small"
+                color={compareWinning ? 'primary' : 'secondary'}
+                label={compareWinning ? `복기 ${effectiveRound ?? '?'}회` : `이번회차 ${currentRound ?? '?'}회`}
+                sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+              />
+            </Stack>
             <Chip size="small" variant="outlined" color="success" label="④ 엔진 복기검증 참고" sx={{ height: 20, fontSize: 10, fontWeight: 700 }} />
           </Stack>
           {heroRecommendation.reviewRounds > 0 && (
@@ -4729,7 +4744,7 @@ export default function SemiAutoComparePanel({
                 ✅ <strong>복기 {heroRecommendation.reviewRounds}회차 검증 완료</strong> — 당첨을 가장 잘 잡은 신호는{' '}
                 <strong>{heroRecommendation.signalLabel}</strong>{heroRecommendation.selectedByMulti ? '(다회차 1위)' : ''}
                 {heroRecommendation.bestTop18 != null ? `, 상위18에 평균 ${heroRecommendation.bestTop18}/6 담음` : ''}.
-                → 이 검증으로 이번회차 추천을 만듭니다.
+                {' '}→ {recommendHeroHint}
                 {heroRecommendation.goodSignalCount > 0
                   ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다(공에 '몇 신호').`
                   : ''}{' '}
@@ -4770,16 +4785,24 @@ export default function SemiAutoComparePanel({
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
             핵심 6 = 집중 픽 · 확장 18 = 넓은 그물(복기상 더 잘 잡음) · 분산 최적 = 공동당첨 회피(확률 동일).
-             상세(강수·종합예측)는 아래 펼침. 1:1은 <strong>②</strong>, 복기검증·백테스트·심층역산은 <strong>④ 패턴 분석 엔진</strong>. 1등 확률(1/8,145,060)은 변하지 않습니다.
+            {' '}상세(강수·종합예측)는 아래 펼침. 1:1은 <strong>②</strong>, 복기검증·백테스트·심층역산은 <strong>④ 패턴 분석 엔진</strong>. 1등 확률(1/8,145,060)은 변하지 않습니다.
           </Typography>
         </Paper>
       )}
 
 
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mt: 1, mb: showRecommendDetail ? 1 : 0 }}>
-        <Typography variant="body2" fontWeight={700} color="text.secondary">
-          추천 상세 (강수·기대수 · 종합 예측)
-        </Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mt: 1, mb: showRecommendDetail ? 1 : 0 }} spacing={1}>
+        <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
+          <Typography variant="body2" fontWeight={700} color="text.secondary">
+            추천 상세 (강수·기대수 · 종합 예측)
+          </Typography>
+          <Chip
+            size="small"
+            variant="outlined"
+            label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`}
+            sx={{ height: 20, fontSize: 10 }}
+          />
+        </Stack>
         <Button size="small" variant="outlined" onClick={() => setShowRecommendDetail((v) => !v)}>
           {showRecommendDetail ? '접기 ▲' : '펼치기 ▼'}
         </Button>
@@ -4793,9 +4816,12 @@ export default function SemiAutoComparePanel({
               {decadePattern && (
                 <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
                   <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
-                    <Typography variant="caption" fontWeight={700}>
-                      ★ 1:1 강수 & 기대수 (구간별) — 전수비교 반복도 기준
-                    </Typography>
+                    <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      <Typography variant="caption" fontWeight={700}>
+                        ★ 1:1 강수 &amp; 기대수 (구간별)
+                      </Typography>
+                      <Chip size="small" variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회 · 전수비교 반복도`} sx={{ height: 18, fontSize: 9 }} />
+                    </Stack>
                     {decadePattern.strongWinHit != null && (
                       <Chip
                         size="small"
@@ -4807,7 +4833,9 @@ export default function SemiAutoComparePanel({
                   </Stack>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
                     강수 = 구간별 1:1 반복도 상위 3 · 기대 = 다음 3. 숫자 아래 = 자동/반자동 등장 줄 수.
-                    {compareWinning ? ' 밝은 공 = 실제 당첨 · 회색 = 비당첨.' : ' 반자동 고정 후보 참고용.'}
+                    {compareWinning
+                      ? ` 밝은 공 = ${effectiveRound ?? '?'}회 실제 당첨 · 회색 = 비당첨.`
+                      : ' 이번회차(미추첨) — 당첨 대조 없음. 반자동 고정수는 강수에서 분리됨.'}
                   </Typography>
                   <Stack spacing={0.5}>
                     {decadePattern.byBand.map((b) => (
@@ -4884,9 +4912,12 @@ export default function SemiAutoComparePanel({
               {finalStrongExpected && (
                 <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'warning.main' }}>
                   <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
-                    <Typography variant="caption" fontWeight={800}>
-                      🎯 최종 강수·기대수 (구간별 신호 종합)
-                    </Typography>
+                    <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      <Typography variant="caption" fontWeight={800}>
+                        🎯 최종 강수·기대수 (구간별 신호 종합)
+                      </Typography>
+                      <Chip size="small" variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`} sx={{ height: 18, fontSize: 9 }} />
+                    </Stack>
                     {carryoverQuery.data?.ok && carryoverQuery.data.backtest?.by_k?.['6'] && (
                       <Chip
                         size="small"
@@ -4896,9 +4927,21 @@ export default function SemiAutoComparePanel({
                       />
                     )}
                   </Stack>
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                    <Chip size="small" variant="outlined" label="🔁 반복(1:1)" sx={{ height: 18, fontSize: 9 }} />
+                    <Chip size="small" variant="outlined" label="🧠 검증학습" sx={{ height: 18, fontSize: 9 }} />
+                    <Chip size="small" variant="outlined" label="↪ 이월" sx={{ height: 18, fontSize: 9 }} />
+                    <Chip size="small" color="warning" variant="outlined" label="2개+ 겹침 = 최종 강수 후보" sx={{ height: 18, fontSize: 9, fontWeight: 700 }} />
+                    {compareWinning && (
+                      <Chip size="small" color="success" variant="outlined" label={`${effectiveRound ?? '?'}회 당첨 대조`} sx={{ height: 18, fontSize: 9 }} />
+                    )}
+                  </Stack>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-                    <strong>1:1 강수·기대(반복도)</strong> × <strong>검증 학습(Feature·Pattern·커버리지·다회차·겹침)</strong> × <strong>이월(강수 미당첨→다음 회차)</strong>이
-                    함께 가리키는 번호일수록 위로 재정렬. 배지 🔁반복·🧠학습·↪이월 — <strong>2개+ 겹치면 최종 강수 후보</strong>. 확률 불변(넓은 합의 표시).
+                    위 1:1 반복도를 시작점으로, <strong>검증 학습</strong>·<strong>이월</strong>이 겹치는 번호를 구간별로 위로 재정렬합니다.
+                    {compareWinning
+                      ? ` 밝은 공 = ${effectiveRound ?? '?'}회 실제 당첨.`
+                      : ' 이번회차(미추첨) — 당첨 하이라이트 없음.'}{' '}
+                    확률 불변(넓은 합의 표시).
                   </Typography>
                   <Stack spacing={0.5}>
                     {finalStrongExpected.bands.map((b) => (
@@ -4966,14 +5009,14 @@ export default function SemiAutoComparePanel({
         </>
       )}
 
-      {/* 이번회차 종합 예측 — ③ 추천 상세 */}
-      {/* 🎯 이번회차 종합 예측 대시보드 */}
+      {/* 이번회차 종합 예측 — ③ 추천 상세 (복기 탭에서는 currentRoundForecast=null) */}
       {currentRoundForecast && (
         <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'primary.main', borderWidth: 2 }}>
           <Stack direction="row" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant="body2" fontWeight={800}>
-              🎯 {effectiveRound ?? currentRound ?? '?'}회 이번회차 종합 예측
+              🎯 {currentRound ?? effectiveRound ?? '?'}회 이번회차 종합 예측
             </Typography>
+            <Chip size="small" color="secondary" label={`이번회차 ${currentRound ?? '?'}회`} sx={{ height: 18, fontSize: 9, fontWeight: 700 }} />
             {Object.entries(currentRoundForecast.signalTiers).map(([k, on]) => (
               <Chip
                 key={k}

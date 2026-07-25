@@ -1088,6 +1088,8 @@ export default function SemiAutoComparePanel({
   const lineMatchingRef = useRef<HTMLDivElement | null>(null);
   const [lineMatchFilter, setLineMatchFilter] = useState<'all' | 2 | 3 | 4 | 5 | 6>('all');
   const [lineMatchNumberFilter, setLineMatchNumberFilter] = useState('');
+  // 1:1 매칭 그룹을 '반자동 측 일치 줄 수'로 정렬 — none(기본: matchCount·지지순)/desc(많은순)/asc(적은순).
+  const [semiLineSort, setSemiLineSort] = useState<'none' | 'desc' | 'asc'>('none');
   // 1:1 매칭 그룹 카드 렌더 페이지네이션 — 한 번에 모든 그룹(수백)×모든 줄을 DOM 에
   // 올리면 모바일이 OOM 재부팅한다. 레벨당 이만큼만 렌더하고 [더 보기]로 늘린다.
   const [groupShowLimit, setGroupShowLimit] = useState(IS_CONSTRAINED_DEVICE ? 10 : 60);
@@ -5695,6 +5697,24 @@ export default function SemiAutoComparePanel({
                     />
                   ))}
                 </Stack>
+                <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>반자동 일치줄:</Typography>
+                  {([
+                    ['none', '기본순'],
+                    ['desc', '많은순 ▼'],
+                    ['asc', '적은순 ▲'],
+                  ] as const).map(([val, lbl]) => (
+                    <Chip
+                      key={`semi-sort-${val}`}
+                      size="small"
+                      clickable
+                      color={semiLineSort === val ? 'secondary' : 'default'}
+                      variant={semiLineSort === val ? 'filled' : 'outlined'}
+                      label={lbl}
+                      onClick={() => setSemiLineSort(val)}
+                    />
+                  ))}
+                </Stack>
                 {(lineMatchFilter !== 'all' || lineMatchNumberFilter) && (
                   <Button
                     type="button"
@@ -5717,6 +5737,15 @@ export default function SemiAutoComparePanel({
                   groups: typeof groupLineMatching.groups6
                 ) => {
                   if (groups.length === 0) return null;
+                  // 반자동 측 일치 줄 수(semiList)로 정렬 — 기본(none)은 원래 순서(matchCount·지지).
+                  const sorted =
+                    semiLineSort === 'none'
+                      ? groups
+                      : [...groups].sort((a, b) =>
+                          semiLineSort === 'desc'
+                            ? b.semiList.length - a.semiList.length || a.key.localeCompare(b.key)
+                            : a.semiList.length - b.semiList.length || a.key.localeCompare(b.key),
+                        );
                   return (
                     <Box sx={{ mb: 1.5 }}>
                       <Typography
@@ -5736,7 +5765,7 @@ export default function SemiAutoComparePanel({
                         }}
                       >
                         <Stack spacing={0.75}>
-                          {groups.slice(0, groupShowLimit).map((g, idx) => {
+                          {sorted.slice(0, groupShowLimit).map((g, idx) => {
                             const mset = matchedSet(g.matchedNumbers);
                             return (
                               <Box

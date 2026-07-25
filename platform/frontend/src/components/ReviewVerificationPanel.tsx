@@ -1,9 +1,10 @@
-import { Alert, Button, Box, Chip, LinearProgress, Paper, Stack, Typography } from '@mui/material';
+import { Alert, Box, Chip, LinearProgress, Stack, Typography } from '@mui/material';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
 import SharingBadge from './SharingBadge';
+import { EngineSection, EngineStatusChip } from './EngineSection';
 import { v1Api } from '../api/v1Api';
 
 /**
@@ -24,56 +25,57 @@ export default function ReviewVerificationPanel() {
 
   if (q.isLoading) {
     return (
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: open ? 1 : 0 }}>
-          <Typography variant="subtitle1" fontWeight={800}>🔬 복기 역산 검증</Typography>
-          <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)}>
-            {open ? '접기 ▲' : '펼치기 ▼'}
-          </Button>
-        </Stack>
-        {open && <LinearProgress />}
-      </Paper>
+      <EngineSection
+        tone="warning"
+        title="🔬 복기 역산 검증"
+        collapsible
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        defaultOpen={false}
+        sx={{ mb: 2 }}
+      >
+        <LinearProgress />
+      </EngineSection>
     );
   }
   const d = q.data;
   if (!d) return null;
   if (!d.ok) {
     return (
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: open ? 0.5 : 0 }}>
-          <Typography variant="subtitle1" fontWeight={800}>🔬 복기 역산 검증</Typography>
-          <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)}>
-            {open ? '접기 ▲' : '펼치기 ▼'}
-          </Button>
-        </Stack>
-        {open && <Alert severity="info">{d.reason ?? '검증할 복기 데이터가 없습니다.'}</Alert>}
-      </Paper>
+      <EngineSection
+        tone="warning"
+        title="🔬 복기 역산 검증"
+        collapsible
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        defaultOpen={false}
+        sx={{ mb: 2 }}
+      >
+        <Alert severity="info">{d.reason ?? '검증할 복기 데이터가 없습니다.'}</Alert>
+      </EngineSection>
     );
   }
 
   const ks = ['top6', 'top10', 'top15', 'top18', 'top24', 'top30'];
 
   return (
-    <Paper sx={{ p: 2, mb: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: open ? 0.5 : 0 }}>
-        <Typography variant="subtitle1" fontWeight={800}>
-          🔬 {d.round_no}회 복기 역산 검증
-        </Typography>
-        {d.summary && (
-          <Chip
-            size="small"
+    <EngineSection
+      tone="warning"
+      title={`🔬 ${d.round_no}회 복기 역산 검증`}
+      collapsible
+      open={open}
+      onToggle={() => setOpen((v) => !v)}
+      defaultOpen={false}
+      sx={{ mb: 2 }}
+      chips={
+        d.summary ? (
+          <EngineStatusChip
             color="warning"
             label={`어떤 신호도 top-6 최대 ${d.summary.best_top6}개 · top-18 ${d.summary.best_top18}개`}
-            sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
           />
-        )}
-        <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)} sx={{ ml: 'auto' }}>
-          {open ? '접기 ▲' : '펼치기 ▼'}
-        </Button>
-      </Stack>
-
-      {open && (
-      <>
+        ) : undefined
+      }
+    >
       {/* 실제 당첨 */}
       <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
         <Typography variant="caption" fontWeight={700}>{d.round_no}회 당첨:</Typography>
@@ -329,8 +331,6 @@ export default function ReviewVerificationPanel() {
       <Typography variant="caption" sx={{ display: 'block', mt: 1, fontStyle: 'italic', color: 'text.disabled' }}>
         ⚠️ {d.honesty}
       </Typography>
-      </>
-      )}
-    </Paper>
+    </EngineSection>
   );
 }

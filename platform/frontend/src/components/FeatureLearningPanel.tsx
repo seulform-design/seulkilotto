@@ -5,7 +5,6 @@ import {
   Chip,
   Collapse,
   LinearProgress,
-  Paper,
   Stack,
   Table,
   TableBody,
@@ -17,6 +16,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
+import { EngineSection, EngineStatusChip } from './EngineSection';
 import { v1Api, type FeatureLearningFeatureReport } from '../api/v1Api';
 
 /**
@@ -46,29 +46,23 @@ export default function FeatureLearningPanel() {
 
   if (q.isLoading) {
     return (
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>
-          🧠 복기 Feature 학습 엔진
-        </Typography>
+      <EngineSection tone="info" title="🧠 복기 Feature 학습 엔진" sx={{ mb: 2 }}>
         <LinearProgress />
         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
           Feature 생성 · Walk-Forward / Bootstrap / Permutation / Monte Carlo 검증 중…
         </Typography>
-      </Paper>
+      </EngineSection>
     );
   }
 
   if (q.isError) {
     return (
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.5 }}>
-          🧠 복기 Feature 학습 엔진
-        </Typography>
+      <EngineSection tone="info" title="🧠 복기 Feature 학습 엔진" sx={{ mb: 2 }}>
         <Alert severity="error">
           학습 엔진을 불러오지 못했습니다:{' '}
           {q.error instanceof Error ? q.error.message : '서버 오류'}
         </Alert>
-      </Paper>
+      </EngineSection>
     );
   }
 
@@ -77,12 +71,9 @@ export default function FeatureLearningPanel() {
 
   if (!d.ok) {
     return (
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.5 }}>
-          🧠 복기 Feature 학습 엔진
-        </Typography>
+      <EngineSection tone="info" title="🧠 복기 Feature 학습 엔진" sx={{ mb: 2 }}>
         <Alert severity="info">{d.reason ?? '학습할 보관 회차가 아직 없습니다.'}</Alert>
-      </Paper>
+      </EngineSection>
     );
   }
 
@@ -90,38 +81,36 @@ export default function FeatureLearningPanel() {
   const ensemble = d.ensemble;
 
   return (
-    <Paper sx={{ p: 2, mb: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: open ? 0.5 : 0 }}>
-        <Typography variant="subtitle1" fontWeight={800}>
-          🧠 복기 Feature 학습 엔진 ({d.round_count}개 회차)
-        </Typography>
-        <Chip
-          size="small"
-          color={adopted.length > 0 ? 'success' : 'default'}
-          label={`채택 ${d.adopted_count ?? adopted.length} · 제외 ${d.rejected_count ?? rejected.length}`}
-          sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
-        />
-        {d.baselines && (
-          <Chip
-            size="small"
-            variant="outlined"
-            label={`Random 기준 top6≈${d.baselines.uniform_top6_hits}`}
-            sx={{ height: 20, fontSize: 10 }}
+    <EngineSection
+      tone="info"
+      title={`🧠 복기 Feature 학습 엔진 (${d.round_count}개 회차)`}
+      collapsible
+      open={open}
+      onToggle={() => setOpen((v) => !v)}
+      defaultOpen={false}
+      sx={{ mb: 2 }}
+      chips={
+        <>
+          <EngineStatusChip
+            color={adopted.length > 0 ? 'success' : 'default'}
+            label={`채택 ${d.adopted_count ?? adopted.length} · 제외 ${d.rejected_count ?? rejected.length}`}
           />
-        )}
-        <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)} sx={{ ml: 'auto' }}>
-          {open ? '접기 ▲' : '펼치기 ▼'}
-        </Button>
-      </Stack>
-
-      {open && (
-      <>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-        추첨 <strong>전</strong> 보관 용지만으로 Feature 를 만들고, Walk-Forward · Bootstrap ·
-        Permutation · Monte Carlo · Time-Split 으로 검증합니다. Random 보다 일관된 향상이
-        재현되지 않으면 폐기하고, 통과한 Feature 만 추천·기여도에 반영합니다.
-      </Typography>
-
+          {d.baselines && (
+            <EngineStatusChip
+              variant="outlined"
+              label={`Random 기준 top6≈${d.baselines.uniform_top6_hits}`}
+            />
+          )}
+        </>
+      }
+      intent={
+        <>
+          추첨 <strong>전</strong> 보관 용지만으로 Feature 를 만들고, Walk-Forward · Bootstrap ·
+          Permutation · Monte Carlo · Time-Split 으로 검증합니다. Random 보다 일관된 향상이
+          재현되지 않으면 폐기하고, 통과한 Feature 만 추천·기여도에 반영합니다.
+        </>
+      }
+    >
       {d.honesty && (
         <Alert severity="warning" sx={{ mb: 1.5, py: 0.5 }}>
           <Typography variant="caption">{d.honesty}</Typography>
@@ -343,9 +332,7 @@ export default function FeatureLearningPanel() {
           )}
         </>
       )}
-      </>
-      )}
-    </Paper>
+    </EngineSection>
   );
 }
 

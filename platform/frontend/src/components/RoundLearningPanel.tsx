@@ -1,9 +1,10 @@
-import { Alert, Button, Box, Chip, LinearProgress, Paper, Stack, Typography } from '@mui/material';
+import { Alert, Box, Chip, LinearProgress, Stack, Typography } from '@mui/material';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
 import SharingBadge from './SharingBadge';
+import { EngineSection, EngineStatusChip } from './EngineSection';
 import { v1Api } from '../api/v1Api';
 
 /**
@@ -31,25 +32,19 @@ export default function RoundLearningPanel() {
 
   if (q.isLoading) {
     return (
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>
-          🎓 다회차 용지 학습
-        </Typography>
+      <EngineSection tone="primary" title="🎓 다회차 용지 학습" sx={{ mb: 2 }}>
         <LinearProgress />
-      </Paper>
+      </EngineSection>
     );
   }
   // 실패 시 조용히 사라지지 않도록 오류를 표면화(구버전은 null 반환으로 섹션이 증발).
   if (q.isError) {
     return (
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.5 }}>
-          🎓 다회차 용지 학습
-        </Typography>
+      <EngineSection tone="primary" title="🎓 다회차 용지 학습" sx={{ mb: 2 }}>
         <Alert severity="error">
           학습 데이터를 불러오지 못했습니다: {q.error instanceof Error ? q.error.message : '서버 오류'}
         </Alert>
-      </Paper>
+      </EngineSection>
     );
   }
   const d = q.data;
@@ -57,12 +52,9 @@ export default function RoundLearningPanel() {
 
   if (!d.ok) {
     return (
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.5 }}>
-          🎓 다회차 용지 학습
-        </Typography>
+      <EngineSection tone="primary" title="🎓 다회차 용지 학습" sx={{ mb: 2 }}>
         <Alert severity="info">{d.reason ?? '학습할 보관 회차가 아직 없습니다.'}</Alert>
-      </Paper>
+      </EngineSection>
     );
   }
 
@@ -72,33 +64,30 @@ export default function RoundLearningPanel() {
   const top6 = scores.slice(0, 6).map((s) => s.number).sort((a, b) => a - b);
 
   return (
-    <Paper sx={{ p: 2, mb: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: open ? 0.5 : 0 }}>
-        <Typography variant="subtitle1" fontWeight={800}>
-          🎓 다회차 용지 학습 ({d.round_count}개 회차)
-        </Typography>
-        {d.summary && (
-          <Chip
-            size="small"
+    <EngineSection
+      tone="primary"
+      title={`🎓 다회차 용지 학습 (${d.round_count}개 회차)`}
+      collapsible
+      open={open}
+      onToggle={() => setOpen((v) => !v)}
+      defaultOpen={false}
+      sx={{ mb: 2 }}
+      chips={
+        d.summary ? (
+          <EngineStatusChip
             color={d.summary.total_top6_hits > d.summary.expected_top6_hits ? 'success' : 'default'}
             label={`지지 상위6 누적 적중 ${d.summary.total_top6_hits}개 (기대 ${d.summary.expected_top6_hits})`}
-            sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
           />
-        )}
-
-        <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)} sx={{ ml: 'auto' }}>
-          {open ? '접기 ▲' : '펼치기 ▼'}
-        </Button>
-      </Stack>
-
-      {open && (
-      <>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-        추첨 <strong>전</strong>에 등록된 보관 용지만 사용하므로 <strong>누수가 없습니다</strong>.
-        번호별 <strong>양쪽 지지</strong>(자동·반자동 줄에 함께 등장한 정도)가 실제 당첨과 얼마나
-        연관됐는지 회차를 합산해 측정합니다.
-      </Typography>
-
+        ) : undefined
+      }
+      intent={
+        <>
+          추첨 <strong>전</strong>에 등록된 보관 용지만 사용하므로 <strong>누수가 없습니다</strong>.
+          번호별 <strong>양쪽 지지</strong>(자동·반자동 줄에 함께 등장한 정도)가 실제 당첨과 얼마나
+          연관됐는지 회차를 합산해 측정합니다.
+        </>
+      }
+    >
       {/* 회차별 결과 */}
       <Stack spacing={0.5} sx={{ mb: 1.5 }}>
         {(d.rounds ?? []).map((r) => (
@@ -326,8 +315,6 @@ export default function RoundLearningPanel() {
           🔗 줄겹침 학습: {ov.data.reason}
         </Alert>
       )}
-      </>
-      )}
-    </Paper>
+    </EngineSection>
   );
 }

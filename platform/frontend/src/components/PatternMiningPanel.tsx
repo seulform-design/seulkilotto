@@ -5,7 +5,6 @@ import {
   Chip,
   Collapse,
   LinearProgress,
-  Paper,
   Stack,
   Table,
   TableBody,
@@ -17,6 +16,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
+import { EngineSection, EngineStatusChip } from './EngineSection';
 import { v1Api, type PatternMiningResponse } from '../api/v1Api';
 
 /**
@@ -46,28 +46,22 @@ export default function PatternMiningPanel() {
 
   if (q.isLoading) {
     return (
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>
-          🔍 복기 Pattern Mining 엔진
-        </Typography>
+      <EngineSection tone="secondary" title="🔍 복기 Pattern Mining 엔진" sx={{ mb: 2 }}>
         <LinearProgress />
         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
           전수 학습 · Pattern 탐색 · WF/Rolling/Time-Split 검증 · Cluster · Feature 선택 중…
         </Typography>
-      </Paper>
+      </EngineSection>
     );
   }
 
   if (q.isError) {
     return (
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.5 }}>
-          🔍 복기 Pattern Mining 엔진
-        </Typography>
+      <EngineSection tone="secondary" title="🔍 복기 Pattern Mining 엔진" sx={{ mb: 2 }}>
         <Alert severity="error">
           엔진을 불러오지 못했습니다: {q.error instanceof Error ? q.error.message : '서버 오류'}
         </Alert>
-      </Paper>
+      </EngineSection>
     );
   }
 
@@ -75,44 +69,37 @@ export default function PatternMiningPanel() {
   if (!d) return null;
   if (!d.ok) {
     return (
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.5 }}>
-          🔍 복기 Pattern Mining 엔진
-        </Typography>
+      <EngineSection tone="secondary" title="🔍 복기 Pattern Mining 엔진" sx={{ mb: 2 }}>
         <Alert severity="info">{d.reason ?? '학습할 보관 회차가 없습니다.'}</Alert>
-      </Paper>
+      </EngineSection>
     );
   }
 
   const rec = d.recommendation;
 
   return (
-    <Paper sx={{ p: 2, mb: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: open ? 0.5 : 0 }}>
-        <Typography variant="subtitle1" fontWeight={800}>
-          🔍 복기 Pattern Mining 엔진 ({d.round_count}개 회차)
-        </Typography>
-        <Chip
-          size="small"
+    <EngineSection
+      tone="secondary"
+      title={`🔍 복기 Pattern Mining 엔진 (${d.round_count}개 회차)`}
+      collapsible
+      open={open}
+      onToggle={() => setOpen((v) => !v)}
+      defaultOpen={false}
+      sx={{ mb: 2 }}
+      chips={
+        <EngineStatusChip
           color={(d.adopted_count ?? 0) > 0 ? 'success' : 'default'}
           label={`Pattern ${d.pattern_count} · 채택 ${d.adopted_count} · 제외 ${d.rejected_count}`}
-          sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
         />
-
-        <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)} sx={{ ml: 'auto' }}>
-          {open ? '접기 ▲' : '펼치기 ▼'}
-        </Button>
-      </Stack>
-
-      {open && (
-      <>
-
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        자동·반자동·매치카드·강한후보·간격·구간배치를 <strong>전수 학습</strong>해 Pattern 을 자동
-        생성하고, Walk-Forward / Rolling / Time-Split / Backtest 로 검증합니다. 검증 통과분만
-        추천하며, 각 번호에 Pattern·Cluster·기여도를 함께 표시합니다.
-      </Typography>
-
+      }
+      intent={
+        <>
+          자동·반자동·매치카드·강한후보·간격·구간배치를 <strong>전수 학습</strong>해 Pattern 을 자동
+          생성하고, Walk-Forward / Rolling / Time-Split / Backtest 로 검증합니다. 검증 통과분만
+          추천하며, 각 번호에 Pattern·Cluster·기여도를 함께 표시합니다.
+        </>
+      }
+    >
       {d.honesty && (
         <Alert severity="warning" sx={{ mb: 1.5, py: 0.5 }}>
           <Typography variant="caption">{d.honesty}</Typography>
@@ -363,8 +350,6 @@ export default function PatternMiningPanel() {
           )}
         </>
       )}
-      </>
-      )}
-    </Paper>
+    </EngineSection>
   );
 }

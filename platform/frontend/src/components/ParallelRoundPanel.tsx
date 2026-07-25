@@ -7,7 +7,6 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Paper,
   Stack,
   Table,
   TableBody,
@@ -20,6 +19,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { v1Api, type ParallelRoundAnalysisResponse } from '../api/v1Api';
+import { EngineSection } from './EngineSection';
 import LottoBall from './LottoBall';
 
 interface ParallelRoundPanelProps {
@@ -113,36 +113,32 @@ export default function ParallelRoundPanel({
     .sort((a, b) => (sortMode === 'desc' ? b.round - a.round : a.round - b.round));
 
   return (
-    <Paper variant="outlined" sx={{ p: 1.5, borderColor: 'warning.main' }}>
-      <Stack
-        direction="row"
-        alignItems="center"
-        justifyContent="space-between"
-        sx={{ cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Typography variant="subtitle2" fontWeight={700}>
+    <EngineSection
+      tone="warning"
+      title={
+        <>
           🔀 평행회차 분석
           {data ? ` — ${data.suffix_label} · ${data.parallel_count}회` : ''}
-          {open ? ' ▼' : ' ▶'}
-        </Typography>
-        {query.isFetching && <CircularProgress size={16} />}
-      </Stack>
-
-      {open && (
-        <Box sx={{ mt: 1 }}>
-          {query.isError && (
-            <Alert severity="warning" sx={{ mb: 1 }}>
-              {modeLabel} 평행회차 데이터를 불러오지 못했습니다.
-            </Alert>
-          )}
-          {data && (
-            <>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                {modeLabel} 기준 · {data.summary} · 대상 {data.target_round}회 · 평행 고정수 추천(상위 3){' '}
-                {data.semi_auto_fixed_hint.join(', ') || '—'}
-              </Typography>
-              <Stack
+        </>
+      }
+      collapsible
+      open={open}
+      onToggle={() => setOpen((v) => !v)}
+      actions={query.isFetching ? <CircularProgress size={16} /> : undefined}
+      intent={
+        data
+          ? `${modeLabel} 기준 · ${data.summary} · 대상 ${data.target_round}회 · 평행 고정수 추천(상위 3) ${data.semi_auto_fixed_hint.join(', ') || '—'}`
+          : undefined
+      }
+    >
+      {query.isError && (
+        <Alert severity="warning" sx={{ mb: 1 }}>
+          {modeLabel} 평행회차 데이터를 불러오지 못했습니다.
+        </Alert>
+      )}
+      {data && (
+        <>
+          <Stack
                 direction={{ xs: 'column', sm: 'row' }}
                 spacing={1}
                 alignItems={{ xs: 'stretch', sm: 'center' }}
@@ -271,10 +267,8 @@ export default function ParallelRoundPanel({
                   </Stack>
                 </Box>
               )}
-            </>
-          )}
-        </Box>
+        </>
       )}
-    </Paper>
+    </EngineSection>
   );
 }

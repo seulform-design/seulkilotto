@@ -33,6 +33,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
+import { EngineSection } from './EngineSection';
 import {
   v1Api,
   type ArchivedCurrentRoundSnapshot,
@@ -475,42 +476,37 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
   };
 
   return (
-    <Paper sx={{ p: 2, mb: 2, borderLeft: '4px solid', borderLeftColor: 'warning.main' }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: open ? 1 : 0 }} spacing={1}>
-        <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography variant="subtitle1" fontWeight={700}>
-            🧪 이전 이번회차 백테스트
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {targetRound
-              ? `${targetRound}회 자동 누적 ${slice?.total_analyses ?? 0}건 → 실제 결과 비교${usingArchivedSlice ? ' (보관본)' : ''}`
-              : '회차 정보 없음'}
-          </Typography>
-        </Box>
-        <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
-          {open && upgradeStatus.data?.can_upgrade && (
-            <Button
-              size="small"
-              color="warning"
-              variant="contained"
-              onClick={() => upgrade.mutate()}
-              disabled={upgrade.isPending}
-            >
-              {upgrade.isPending ? (
-                <CircularProgress size={18} color="inherit" />
-              ) : (
-                `↻ ${upgradeStatus.data.pending_count}개 회차 업데이트`
-              )}
-            </Button>
-          )}
-          <Button size="small" variant="outlined" onClick={() => setOpen((v) => !v)}>
-            {open ? '접기 ▲' : '펼치기 ▼'}
+    <EngineSection
+      tone="warning"
+      title="🧪 이전 이번회차 백테스트"
+      collapsible
+      open={open}
+      onToggle={() => setOpen((v) => !v)}
+      defaultOpen={false}
+      sx={{ mb: 2 }}
+      intent={
+        targetRound
+          ? `${targetRound}회 자동 누적 ${slice?.total_analyses ?? 0}건 → 실제 결과 비교${usingArchivedSlice ? ' (보관본)' : ''}`
+          : '회차 정보 없음'
+      }
+      actions={
+        open && upgradeStatus.data?.can_upgrade ? (
+          <Button
+            size="small"
+            color="warning"
+            variant="contained"
+            onClick={() => upgrade.mutate()}
+            disabled={upgrade.isPending}
+          >
+            {upgrade.isPending ? (
+              <CircularProgress size={18} color="inherit" />
+            ) : (
+              `↻ ${upgradeStatus.data.pending_count}개 회차 업데이트`
+            )}
           </Button>
-        </Stack>
-      </Stack>
-
-      {open && (
-      <>
+        ) : undefined
+      }
+    >
       {/* 펜딩 회차 알림 */}
       {upgradeStatus.data?.pending_count != null && upgradeStatus.data.pending_count > 0 && (
         <Alert severity="info" sx={{ mb: 1.5 }}>
@@ -1135,8 +1131,6 @@ export default function PhotoBacktestPanel({ accumulated }: PhotoBacktestPanelPr
           </Typography>
         </>
       )}
-      </>
-      )}
-    </Paper>
+    </EngineSection>
   );
 }

@@ -17,9 +17,11 @@ import { v1Api } from '../api/v1Api';
 export default function ReviewVerificationPanel() {
   const [open, setOpen] = useState(false);
   const q = useQuery({
+    // round_no 가 응답에 포함되므로 stale 시 회차 업그레이드 후 옛 검증이 남을 수 있음 → 재조회 주기 단축
     queryKey: ['v1-photo-review-verification'],
     queryFn: v1Api.getReviewVerification,
-    staleTime: 300_000,
+    staleTime: 60_000,
+    refetchOnMount: 'always',
     retry: 1,
   });
 

@@ -1216,7 +1216,10 @@ export default function SemiAutoComparePanel({
       // 으로 보여 '동기화 안 됨'처럼 오해되고, 재저장을 유발했다.
       setLastSavedAt((prev) => prev ?? new Date().toISOString());
       // 서버 복원분은 그 슬라이스(=현재 대상 회차) 기준 데이터 → 회차 stamp 도 맞춘다.
-      setLocalRoundNo(effectiveRound ?? null);
+      // (effectiveRound 는 아래서 계산되므로 슬라이스 ticket_round 를 우선 사용)
+      const stampRaw = accumulated?.by_intent?.[sheetIntent]?.ticket_round;
+      const stampN = stampRaw != null ? parseInt(String(stampRaw), 10) : NaN;
+      setLocalRoundNo(Number.isFinite(stampN) && stampN > 0 ? stampN : null);
       setSaveNotice(
         `☁ 다른 기기에서 저장한 반자동 누적 ${serverLines.length}줄을 서버에서 불러왔습니다.`
       );
@@ -1278,13 +1281,21 @@ export default function SemiAutoComparePanel({
   const winningNumbers = compareWinning ? (comparisonRoundData?.numbers ?? []) : [];
   const winningBonus = compareWinning ? (comparisonRoundData?.bonus ?? null) : null;
 
+  // 하이드레이션·로컬 입력 후 회차 stamp 가 비어 있으면 effectiveRound 로 보정.
+  useEffect(() => {
+    if (localRoundNo != null || effectiveRound == null) return;
+    const hasLocal =
+      bulkTickets.length > 0 || semiSlipQueue.length > 0 || semiCurrentLines.length > 0;
+    if (hasLocal) setLocalRoundNo(effectiveRound);
+  }, [effectiveRound, localRoundNo, bulkTickets.length, semiSlipQueue.length, semiCurrentLines.length]);
+
   const intentSectionLabel = sheetIntent === 'review' ? '복기' : '이번회차';
-  /** ③ 추천 헤더용 — 복기 탭은 검증 회차, 이번회차 탭은 미추첨 회차. currentRound 우선 쓰면 복기에서 1235로 오표기됨. */
+  /** 복기 탭 히어로도 '다음 회차용 픽'이므로 회차 칩은 이번회차. 검증 근거 회차는 Alert에만. */
   const recommendHeroTitle = compareWinning
-    ? `🎯 복기 ${effectiveRound ?? '?'}회 검증 추천`
+    ? '🎯 복기 검증 기반 · 다음 회차 추천'
     : `🎯 ${currentRound ?? effectiveRound ?? '?'}회 이번회차 핵심 추천`;
   const recommendHeroHint = compareWinning
-    ? `복기 ${effectiveRound ?? '?'}회 당첨 대조 결과입니다. 다음 회차(${currentRound ?? '?'}) 실시간 추천은 이번회차 탭에서 확인하세요.`
+    ? `복기 ${effectiveRound ?? '?'}회 당첨 대조로 검증한 신호입니다. 아래 픽은 다음 회차(${currentRound ?? '?'})용 — 이번회차 탭과 동일 축.`
     : `복기 검증을 근거로 ${currentRound ?? effectiveRound ?? '?'}회 이번회차 추천을 만듭니다.`;
 
   // 로컬 누적이 '지난 회차 기준' 인지 판정 — 회차가 넘어간 뒤 그대로 재저장하면
@@ -3483,7 +3494,7 @@ export default function SemiAutoComparePanel({
             <Typography variant="subtitle1" fontWeight={800}>
               ① 번호 등록
             </Typography>
-            <Chip size="small" variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`} sx={{ height: 20, fontSize: 10 }} />
+            <Chip size="small" variant="outlined" label={intentSectionLabel} sx={{ height: 20, fontSize: 10 }} />
           </Stack>
           <Typography variant="caption" color="text.secondary">
             자동·반자동 용지 등록 → 저장하면 ② 분석·③ 추천에 반영됩니다.{' '}
@@ -3951,7 +3962,7 @@ export default function SemiAutoComparePanel({
             <Typography variant="subtitle1" fontWeight={800}>
               ② 번호 분석 · 1:1 전수비교
             </Typography>
-            <Chip size="small" variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`} sx={{ height: 20, fontSize: 10 }} />
+            <Chip size="small" variant="outlined" label={intentSectionLabel} sx={{ height: 20, fontSize: 10 }} />
           </Stack>
           <Button size="small" variant="outlined" onClick={() => setShowAnalysisSection((v) => !v)}>
             {showAnalysisSection ? '접기 ▲' : '펼치기 ▼'}
@@ -3969,12 +3980,13 @@ export default function SemiAutoComparePanel({
       </Typography>
       {analysisPrelude}
       {/* 반자동 누적 기반 빈도 — 자동 분석과 분리, 반자동 누적만 카운트 */}
-      {(semiCurrentLines.length > 0 || semiSlipQueue.length > 0) && (
+      {(semiCurrentLines.length > 0 || semiSlipQueue.length > 0 || bulkTickets.length > 0) && (
         <Box sx={{ mb: 1.5 }}>
           <NumberFrequencyPanel
             lines={[
               ...semiCurrentLines.map((l) => l.numbers),
               ...semiSlipQueue.flatMap((s) => s.lines.map((l) => l.numbers)),
+              ...bulkTickets,
             ]}
             winningSet={winningSet}
             sourceLabel="반자동 누적"
@@ -3990,10 +4002,11 @@ export default function SemiAutoComparePanel({
         <>
           <Divider sx={{ my: 1.5 }} />
           <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
-            📊 4축 비교 결과
+            📊 {compareWinning ? '4축' : '3축'} 비교 결과
           </Typography>
 
-          {/* 1. vs 최근 당첨 */}
+          {/* 1. vs 최근 당첨 — 복기 탭에서만 (이번회차는 당첨 미사용) */}
+          {compareWinning && (
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1 }}>
             <Stack
               direction={{ xs: 'column', sm: 'row' }}
@@ -4002,7 +4015,7 @@ export default function SemiAutoComparePanel({
               justifyContent="space-between"
             >
               <Typography variant="body2" fontWeight={700}>
-                🎯 vs 최근 당첨 ({comparison.vsLatest.winningNumbers.join(', ') || '데이터 없음'})
+                🎯 vs 당첨 ({comparison.vsLatest.winningNumbers.join(', ') || '데이터 없음'})
               </Typography>
               {comparison.vsLatest.available && (
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
@@ -4019,6 +4032,7 @@ export default function SemiAutoComparePanel({
               )}
             </Stack>
           </Paper>
+          )}
 
           {/* 2. vs 저장된 슬립 */}
           <Paper variant="outlined" sx={{ p: 1.5, mb: 1 }}>
@@ -4738,7 +4752,7 @@ export default function SemiAutoComparePanel({
           <Typography variant="subtitle1" fontWeight={800}>
             ③ 번호 추천
           </Typography>
-          <Chip size="small" color={compareWinning ? 'primary' : 'secondary'} label={`${intentSectionLabel} ${effectiveRound ?? currentRound ?? '?'}회`} sx={{ height: 22, fontWeight: 700 }} />
+          <Chip size="small" color={compareWinning ? 'primary' : 'secondary'} label={intentSectionLabel} sx={{ height: 22, fontWeight: 700 }} />
           <Chip size="small" variant="outlined" label="검증·후속·미출 → ④" sx={{ height: 22 }} />
         </Stack>
         <Button size="small" variant="outlined" onClick={() => setShowRecommendSection((v) => !v)}>
@@ -4763,7 +4777,11 @@ export default function SemiAutoComparePanel({
               <Chip
                 size="small"
                 color={compareWinning ? 'primary' : 'secondary'}
-                label={compareWinning ? `복기 ${effectiveRound ?? '?'}회` : `이번회차 ${currentRound ?? '?'}회`}
+                label={
+                  compareWinning
+                    ? `검증 ${effectiveRound ?? '?'}회 · 대상 ${currentRound ?? '?'}회`
+                    : `이번회차 ${currentRound ?? '?'}회`
+                }
                 sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
               />
             </Stack>
@@ -4772,7 +4790,9 @@ export default function SemiAutoComparePanel({
           {heroRecommendation.reviewRounds > 0 && (
             <Alert severity="success" icon={false} sx={{ py: 0.5, mb: 1 }}>
               <Typography variant="caption">
-                ✅ <strong>복기 {heroRecommendation.reviewRounds}회차 검증 완료</strong> — 당첨을 가장 잘 잡은 신호는{' '}
+                ✅ <strong>복기 {heroRecommendation.reviewRounds}회차 검증 완료</strong>
+                {compareWinning && effectiveRound != null ? ` (기준 ${effectiveRound}회)` : ''}
+                {' '}— 당첨을 가장 잘 잡은 신호는{' '}
                 <strong>{heroRecommendation.signalLabel}</strong>{heroRecommendation.selectedByMulti ? '(다회차 1위)' : ''}
                 {heroRecommendation.bestTop18 != null ? `, 상위18에 평균 ${heroRecommendation.bestTop18}/6 담음` : ''}.
                 {' '}→ {recommendHeroHint}
@@ -5221,7 +5241,7 @@ export default function SemiAutoComparePanel({
           </Tabs>
           {/* 엔진 공통 상태 — 탭과 무관하게 진단 포인트 고정 노출 */}
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1.25 }}>
-            <EngineStatusChip variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`} />
+            <EngineStatusChip variant="outlined" label={intentSectionLabel} />
             <EngineStatusChip
               color={canRenderLineMatching ? 'success' : 'warning'}
               label={canRenderLineMatching ? '1:1 ON' : '1:1 OFF'}
@@ -5869,7 +5889,7 @@ export default function SemiAutoComparePanel({
               {/* ① 핵심 TOP15 */}
               <EngineSubBlock
                 tone="info"
-                title="① 핵심번호 TOP15"
+                title="A. 핵심번호 TOP15"
                 chips={
                   deepAnalysis.winCheck ? (
                     <EngineStatusChip
@@ -5993,7 +6013,7 @@ export default function SemiAutoComparePanel({
               </EngineSubBlock>
 
               {/* ② 허브 */}
-              <EngineSubBlock tone="info" title="② 허브번호 TOP10 (공출현 중심성)">
+              <EngineSubBlock tone="info" title="B. 허브번호 TOP10 (공출현 중심성)">
                 <Stack spacing={0.35}>
                   {deepAnalysis.hubRank.slice(0, 10).map((h, i) => (
                     <Stack key={`hub-${h.number}`} direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
@@ -6013,7 +6033,7 @@ export default function SemiAutoComparePanel({
               {/* ③ 강한 세트 */}
               <EngineSubBlock
                 tone="success"
-                title={`③ 가장 강한 세트 (2·3·4번호)${compareWinning ? ' — 밝은 배경: 전부 당첨' : ''}`}
+                title={`C. 가장 강한 세트 (2·3·4번호)${compareWinning ? ' — 밝은 배경: 전부 당첨' : ''}`}
               >
                 {([
                   { label: '2번호', items: crossSetPatterns.pairs.slice(0, 4) },
@@ -6036,7 +6056,7 @@ export default function SemiAutoComparePanel({
 
               {/* ④⑤ 공통·숨은 */}
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
-                <EngineSubBlock tone="primary" title="④ 자동·반자동 공통 핵심" sx={{ flex: 1 }}>
+                <EngineSubBlock tone="primary" title="D. 자동·반자동 공통 핵심" sx={{ flex: 1 }}>
                   <Stack direction="row" spacing={0.35} flexWrap="wrap" useFlexGap>
                     {deepAnalysis.both.slice(0, 10).map((n) => (
                       <LottoBall key={`both-${n}`} number={n} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
@@ -6044,7 +6064,7 @@ export default function SemiAutoComparePanel({
                     {deepAnalysis.both.length === 0 && <Typography variant="caption" color="text.disabled">없음</Typography>}
                   </Stack>
                 </EngineSubBlock>
-                <EngineSubBlock tone="secondary" title="⑤ 숨은 강수 (등장↓·큰매치↑)" sx={{ flex: 1 }}>
+                <EngineSubBlock tone="secondary" title="E. 숨은 강수 (등장↓·큰매치↑)" sx={{ flex: 1 }}>
                   <Stack direction="row" spacing={0.35} flexWrap="wrap" useFlexGap>
                     {deepAnalysis.hidden.map((h) => (
                       <Box key={`hid-${h.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
@@ -6061,7 +6081,7 @@ export default function SemiAutoComparePanel({
               {deepAnalysis.exclude.length > 0 && (
                 <EngineSubBlock
                   tone="warning"
-                  title={`⑥ 제외 후보 (한쪽만 강함 — 양쪽 합의 약함)${compareWinning ? ' · 주황 라벨=실제 당첨(제외 주의)' : ''}`}
+                  title={`F. 제외 후보 (한쪽만 강함 — 양쪽 합의 약함)${compareWinning ? ' · 주황 라벨=실제 당첨(제외 주의)' : ''}`}
                   chips={<EngineStatusChip variant="outlined" label={`${deepAnalysis.exclude.length}개`} />}
                 >
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
@@ -6081,7 +6101,7 @@ export default function SemiAutoComparePanel({
               )}
 
               {/* ⑦ 빈도·가중치 */}
-              <EngineSubBlock tone="neutral" title="⑦ 빈도·가중치 TOP12" chips={<EngineStatusChip variant="outlined" label="번호·자동·반자동·전체·가중치" />}>
+              <EngineSubBlock tone="neutral" title="G. 빈도·가중치 TOP12" chips={<EngineStatusChip variant="outlined" label="번호·자동·반자동·전체·가중치" />}>
                 <Stack direction="row" sx={{ fontSize: 10, fontWeight: 700, color: 'text.secondary', px: 0.5, mb: 0.25 }}>
                   <Box sx={{ width: 42 }}>번호</Box>
                   <Box sx={{ width: 40, textAlign: 'right' }}>자동</Box>
@@ -6355,8 +6375,8 @@ export default function SemiAutoComparePanel({
             <Alert severity="info" sx={{ mb: 1.5 }}>
               <strong>이번회차 모드</strong> — 당첨번호·적중률 비교는 표시하지 않습니다.
               당첨 검증은 <strong>복기 탭</strong>을 사용하세요.
-              {roundDrawn && currentRound != null && (
-                <> ({currentRound}회 추첨 완료 — 복기 탭에서 {latestRound ?? currentRound - 1}회와 비교)</>
+              {roundDrawn && (
+                <> ({latestRound ?? '?'}회 추첨 완료 — 복기 탭에서 당첨 대조 · 이번회차는 {currentRound ?? '?'}회 미추첨)</>
               )}
             </Alert>
           )}
@@ -6663,13 +6683,13 @@ export default function SemiAutoComparePanel({
                 </Stack>
                 {showAllTickets && (
                   <Box sx={{ mt: 1 }}>
-                    {/* 자동 영역 — § 1 추가 세팅과 동일 데이터 소스·카운트 형식 */}
+                    {/* 자동 영역 — ① 번호 등록(자동)과 동일 데이터 소스 */}
                     <Typography variant="caption" color="success.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
                       📋 자동 누적: {slipQueue.length}장 · 입력 중 {currentSlipLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkAutoTickets.length}장 · 총 {autoTickets.length}줄
                     </Typography>
                     {autoTickets.length === 0 ? (
                       <Alert severity="info" sx={{ mb: 1.5 }}>
-                        자동 데이터가 없습니다. 상단 § 1 의 '구입번호 직접입력' 으로 추가하세요.
+                        자동 데이터가 없습니다. ① 번호 등록의 자동 용지·구입번호 직접입력으로 추가하세요.
                       </Alert>
                     ) : (
                       <Box sx={{ maxHeight: 280, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
@@ -6677,7 +6697,7 @@ export default function SemiAutoComparePanel({
                       </Box>
                     )}
 
-                    {/* 반자동 영역 — § 3 추가 세팅과 동일 데이터 소스·카운트 형식 */}
+                    {/* 반자동 영역 — ① 번호 등록(반자동)과 동일 데이터 소스 */}
                     <Typography variant="caption" color="primary.light" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
                       🔄 반자동 누적: {semiSlipQueue.length}장 · 입력 중 {semiCurrentLines.length}/{GAME_LABELS.length}줄 · 대량 {bulkTickets.length}장 · 총 {semiTickets.length}줄
                     </Typography>
@@ -6701,7 +6721,7 @@ export default function SemiAutoComparePanel({
             <Alert severity="warning" sx={{ mb: 1.5 }}>
               현재 <strong>자동 {groupLineMatching.autoLineCount}줄 · 반자동{' '}
               {groupLineMatching.semiLineCount}줄</strong>입니다. ②의 <strong>1:1 전수비교</strong>와
-              ④ 학습 엔진의 <strong>심층 역산·당첨 예상</strong>은 자동↔반자동 <strong>양쪽</strong>이 있어야 동작합니다.
+              ④ 엔진 → <strong>역산·신호</strong>의 심층 역산·당첨 예상은 자동↔반자동 <strong>양쪽</strong>이 있어야 동작합니다.
               비어 있는 쪽을 등록하면 활성화됩니다.
             </Alert>
           )}

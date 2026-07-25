@@ -342,7 +342,7 @@ function IntentAccumulatedPanel({
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           이 누적은 <strong>자동 등록분({slice.saved_auto_lines?.length ?? 0}줄)만</strong> 분석합니다.
-          반자동({slice.saved_semi_lines?.length ?? 0}줄)은 ① 반자동 등록·② 1:1에서 별도로 다룹니다.
+          반자동({slice.saved_semi_lines?.length ?? 0}줄)은 ① 번호 등록(반자동)·② 1:1에서 별도로 다룹니다.
         </Typography>
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
           <Chip label={`${slice.video_intent_label} ${slice.total_analyses}건`} size="small" color={intent === 'review' ? 'primary' : 'secondary'} />
@@ -1392,14 +1392,31 @@ export default function PhotoAnalysisPage() {
         }}
       >
         <Stack spacing={0.5}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
             <Typography variant="h6" fontWeight={800}>
               용지 분석
             </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-              복기 {displayReviewRound}회 · 이번회차 {displayCurrentRound}회 · 정직성: 확률 불변
-            </Typography>
+            <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+              <Chip
+                size="small"
+                color={activeTab === 'review' ? 'primary' : 'default'}
+                variant={activeTab === 'review' ? 'filled' : 'outlined'}
+                label={`복기 ${displayReviewRound}회`}
+                sx={{ height: 22, fontWeight: 700, fontSize: 11 }}
+              />
+              <Chip
+                size="small"
+                color={activeTab === 'current_round' ? 'secondary' : 'default'}
+                variant={activeTab === 'current_round' ? 'filled' : 'outlined'}
+                label={`이번회차 ${displayCurrentRound}회`}
+                sx={{ height: 22, fontWeight: 700, fontSize: 11 }}
+              />
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                정직성: 확률 불변
+              </Typography>
+            </Stack>
           </Stack>
+          {/* 탭 라벨은 의도만 고정 — 회차는 업그레이드마다 바뀌므로 위 칩/안내문에만 표시 */}
           <Tabs
             value={activeTab}
             onChange={(_, v: SheetIntent) => {
@@ -1408,22 +1425,21 @@ export default function PhotoAnalysisPage() {
               setNotice(null);
             }}
             variant="fullWidth"
+            sx={{
+              minHeight: 40,
+              '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontSize: 15 },
+            }}
           >
             <Tab
               value="review"
-              label={`복기 (${displayReviewRound}회 당첨)`}
-              sx={{ fontWeight: activeTab === 'review' ? 700 : 400, minHeight: 42 }}
+              label="복기"
+              sx={{ fontWeight: activeTab === 'review' ? 800 : 500 }}
             />
             <Tab
               value="current_round"
-              label={
-                roundDrawn
-                  ? `이번회차 (${displayCurrentRound}회) ⚠️`
-                  : `이번회차 (${displayCurrentRound}회)`
-              }
+              label={roundDrawn ? '이번회차 ⚠' : '이번회차'}
               sx={{
-                fontWeight: activeTab === 'current_round' ? 700 : 400,
-                minHeight: 42,
+                fontWeight: activeTab === 'current_round' ? 800 : 500,
                 color: roundDrawn && activeTab !== 'current_round' ? 'warning.main' : undefined,
               }}
             />
@@ -1469,11 +1485,11 @@ export default function PhotoAnalysisPage() {
             </Button>
           }
         >
-          🎯 <strong>{latestRound}회 당첨번호가 발표됐습니다.</strong>{' '}
+          🎯 <strong>{displayReviewRound}회 당첨번호가 발표됐습니다.</strong>{' '}
           이번회차 탭에 등록한 번호는 이제 <strong>복기 탭</strong>에서 당첨번호와 비교할 수 있습니다.
           <br />
           <Typography variant="caption" color="text.secondary">
-            복기 탭 → {latestRound}회 당첨번호 기준 비교 | 이번회차 탭 → {currentRound}회 (미추첨)
+            복기 탭 → {displayReviewRound}회 당첨 대조 | 이번회차 탭 → {displayCurrentRound}회 (미추첨·다음 회차)
           </Typography>
         </Alert>
       )}

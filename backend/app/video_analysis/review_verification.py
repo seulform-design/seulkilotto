@@ -108,16 +108,18 @@ def _analyze(auto: List[List[int]], semi: List[List[int]], winning: List[int]) -
     return {"signals": out_signals, "best_signal_key": best[1]["key"] if best else None}
 
 
-def _multi_round_backtest() -> Dict[str, Any]:
+def _multi_round_backtest(samples=None) -> Dict[str, Any]:
     """보관된 **모든** 회차의 자동·반자동 용지로 '지지(support, 고정수 제외) 상위 K 가
     그 회차 당첨을 얼마나 담나' 를 회차별·평균으로 백테스트한다(단일 회차가 아닌 다회차).
 
     support_rank 는 build_number_features 가 이미 고정수를 제외해 산출한 값을 재사용 —
     review-verification 단일회차 신호와 동일 기준. 다음 회차 이월(강수 미당첨→다음 당첨)도 병기.
+    samples 를 넘기면 재수집하지 않는다(collect_round_samples 는 회차별 feature 재계산이라 무겁다).
     """
     from .feature_learning_engine import collect_round_samples, _detect_fixed_semi
 
-    samples = collect_round_samples()
+    if samples is None:
+        samples = collect_round_samples()
     ks = [6, 12, 18]
     per_round: List[Dict[str, Any]] = []
     agg = {k: {"hit": 0, "exp": 0.0} for k in ks}
@@ -169,7 +171,7 @@ def _multi_round_backtest() -> Dict[str, Any]:
     return {"rounds": len(samples), "per_round": per_round, "aggregate": aggregate}
 
 
-def _signal_leaderboard() -> Dict[str, Any]:
+def _signal_leaderboard(samples=None) -> Dict[str, Any]:
     """복기 보관 **모든** 회차에서 각 신호(고정수 제외)가 그 회차 당첨을 얼마나 담았나를
     집계해 '어느 신호가 당첨을 가장 잘 잡았나' 순위를 낸다.
 
@@ -180,7 +182,8 @@ def _signal_leaderboard() -> Dict[str, Any]:
     """
     from .feature_learning_engine import collect_round_samples
 
-    samples = collect_round_samples()
+    if samples is None:
+        samples = collect_round_samples()
     keys = list(_SIGNAL_LABELS.keys())
     agg = {sk: {6: 0, 18: 0} for sk in keys}
     tiers = {sk: {"t6": 0, "t18": 0, "t30": 0, "out": 0} for sk in keys}
@@ -252,7 +255,7 @@ def _consensus_coverage(
                 agree[n] += 1
             best_rank[n] = min(best_rank[n], i + 1)
     order = sorted(range(1, 46), key=lambda n: (-agree[n], best_rank[n], n))
-    need = max(2, (len(good) + 1) // 2)  # 과반 good 신호 동의
+    need = max(2, len(good) // 2 + 1)  # 엄격 과반(예: good 4 → 3) good 신호 동의
     core = [n for n in order if agree[n] >= need][:6]
     if len(core) < 6:
         core = order[:6]
@@ -265,6 +268,59 @@ def _consensus_coverage(
         "agreement": {str(n): agree[n] for n in expand},
         "need": need,
     }
+
+
+def _missed_winner_analysis(samples=None) -> Dict[str, Any]:
+    """복기 보관 **모든** 회차에서 '어떤 신호로도 못 잡은 당첨번호'를 집계 — 예측의 정직한
+    천장(ceiling).
+
+    각 당첨번호의 '전 신호 최선 순위'(모든 신호 중 최소 rank)로 분류: 어떤 신호든 상위6/
+    상위18/상위30에 들었나, 아니면 전부 상위밖(구조적 미포착). 티켓(자동·반자동 줄)에 아예
+    없던 당첨(미등장)은 티켓 기반으론 원천적으로 못 잡는다. '어떤 분석으로도 못 잡는 당첨이
+    얼마나 되나'를 정량화 — 확률을 못 올린다는 직접 증거이자 예측 한계의 정직한 표시.
+    과거(추첨완료) 회차만 사용(누수 없음).
+    """
+    from .feature_learning_engine import collect_round_samples
+
+    if samples is None:
+        samples = collect_round_samples()
+    keys = list(_SIGNAL_LABELS.keys())
+    per_round: List[Dict[str, Any]] = []
+    agg = {"total": 0, "top6_any": 0, "top18_any": 0, "top30_any": 0, "uncatchable": 0, "missing_ticket": 0}
+    for s in samples:
+        sigs = _signals(s.auto_lines, s.semi_lines)
+        rank_pos = {k: {n: i + 1 for i, n in enumerate(_rank_signal(sigs[k]))} for k in keys}
+        appeared = {int(n) for ln in (s.auto_lines + s.semi_lines) for n in ln if 1 <= int(n) <= 45}
+        missed: List[Dict[str, Any]] = []
+        caught: List[int] = []
+        for n in s.winning:
+            best = min((rank_pos[k].get(n, 99) for k in keys), default=99)
+            in_ticket = n in appeared
+            agg["total"] += 1
+            if not in_ticket:
+                agg["missing_ticket"] += 1
+            if best <= 6:
+                agg["top6_any"] += 1
+                agg["top18_any"] += 1
+                agg["top30_any"] += 1
+                caught.append(int(n))
+            elif best <= 18:
+                agg["top18_any"] += 1
+                agg["top30_any"] += 1
+                caught.append(int(n))
+            else:
+                if best <= 30:
+                    agg["top30_any"] += 1
+                else:
+                    agg["uncatchable"] += 1
+                missed.append({"number": int(n), "best_rank": int(best), "in_ticket": in_ticket})
+        per_round.append({
+            "round_no": s.round_no,
+            "winning": list(s.winning),
+            "caught_top18": caught,
+            "missed": missed,
+        })
+    return {"rounds": len(samples), "aggregate": agg, "per_round": per_round}
 
 
 def build_review_verification() -> Dict[str, Any]:
@@ -300,7 +356,11 @@ def build_review_verification() -> Dict[str, Any]:
         }
 
     analysis = _analyze(auto, semi, winning)
-    leaderboard = _signal_leaderboard()
+    # 보관 샘플은 회차별 feature 재계산이라 무겁다 — 한 번만 수집해 재사용(3× 재수집 방지).
+    from .feature_learning_engine import collect_round_samples
+
+    _samples = collect_round_samples()
+    leaderboard = _signal_leaderboard(_samples)
 
     # 이번회차 — 같은 신호로 '커버리지 세트' 를 제시(집중 top-6 + 확장 top-18).
     cur = _load_current_raw()
@@ -346,8 +406,9 @@ def build_review_verification() -> Dict[str, Any]:
         "current_round_no": int(get_current_round_no()),
         "current_coverage_set": current_coverage_set,
         "consensus_coverage": consensus_coverage,
-        "multi_round_backtest": _multi_round_backtest(),
+        "multi_round_backtest": _multi_round_backtest(_samples),
         "signal_leaderboard": leaderboard,
+        "missed_winner_analysis": _missed_winner_analysis(_samples),
         "summary": {
             "best_top6": t6,
             "best_top18": t18,

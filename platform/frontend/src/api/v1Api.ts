@@ -1046,6 +1046,24 @@ export interface ReviewVerificationResponse {
     agreement?: Record<string, number>;
     need?: number;
   };
+  /** 놓친 당첨 분석 — 어떤 신호로도 못 잡은 당첨(예측 천장). */
+  missed_winner_analysis?: {
+    rounds: number;
+    aggregate: {
+      total: number;
+      top6_any: number;
+      top18_any: number;
+      top30_any: number;
+      uncatchable: number;
+      missing_ticket: number;
+    };
+    per_round?: {
+      round_no: number;
+      winning: number[];
+      caught_top18: number[];
+      missed: { number: number; best_rank: number; in_ticket: boolean }[];
+    }[];
+  };
   /** 다회차 신호 순위표 — 어느 신호가 당첨을 가장 잘 잡았나(고정수 제외). */
   signal_leaderboard?: {
     rounds: number;

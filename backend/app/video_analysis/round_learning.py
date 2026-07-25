@@ -39,7 +39,9 @@ def _rank_key(s: Dict[str, int]) -> tuple:
     구간이 갈린다(측정이 아니라 인덱스 편향이 lift 로 둔갑). 한쪽만 등록한 경우에도
     실제 등장량으로 서열이 잡히게 한다.
     """
-    return (-s["support"], -(s["auto"] + s["semi"]), -s["auto"], s.get("number", 0))
+    # tie-break 도 고정수 제외 semi(semi_sup)로 — 고정수가 support-0 그룹 최상위로
+    # 둔갑하는 것을 막는다(feature/pattern 과 동일 기준).
+    return (-s["support"], -(s["auto"] + s.get("semi_sup", s["semi"])), -s["auto"], s.get("number", 0))
 
 
 def _bucket_of_rank(rank: int) -> str:
@@ -72,7 +74,7 @@ def _number_support(auto_lines: List[List[int]], semi_lines: List[List[int]]) ->
         a = auto_c.get(n, 0)
         s = semi_c.get(n, 0)
         s_sup = 0 if n in fixed else s
-        out[n] = {"number": n, "auto": a, "semi": s, "support": min(a, s_sup)}
+        out[n] = {"number": n, "auto": a, "semi": s, "semi_sup": s_sup, "support": min(a, s_sup)}
     return out
 
 

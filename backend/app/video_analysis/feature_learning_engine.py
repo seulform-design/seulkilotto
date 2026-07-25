@@ -130,7 +130,10 @@ def build_number_features(
     fixed_semi = _detect_fixed_semi(semi_lines)
     semi_sup = {n: (0.0 if n in fixed_semi else float(sc.get(n, 0))) for n in range(1, 46)}
     support = {n: float(min(float(ac.get(n, 0)), semi_sup[n])) for n in range(1, 46)}
-    ranked = sorted(range(1, 46), key=lambda n: (-support[n], -(ac.get(n, 0) + sc.get(n, 0)), -ac.get(n, 0), n))
+    # tie-break 도 고정수 제외 semi(semi_sup)로 — 안 그러면 고정수(support 0)가 raw semi 로
+    # support-0 그룹 최상위에 올라 support_rank≤6(강한후보)로 둔갑, carryover 후보로 재유입된다
+    # (pattern_mining._strong18 과 동일 기준으로 통일).
+    ranked = sorted(range(1, 46), key=lambda n: (-support[n], -(ac.get(n, 0) + semi_sup[n]), -ac.get(n, 0), n))
     rank_of = {n: i + 1 for i, n in enumerate(ranked)}
 
     # 그룹(같은 decade 내 등장 밀도)
@@ -154,7 +157,7 @@ def build_number_features(
             "auto_count": a,
             "semi_count": s,
             "support": float(min(a, semi_sup[n])),  # 고정수 제외 지지(발견 신호)
-            "total_freq": tot,
+            "total_freq": float(a + semi_sup[n]),  # 고정수 제외(review_verification 과 동일 기준)
             "auto_rate": a / auto_n,
             "semi_rate": s / semi_n,
             "inclusion_rate": tot / total_lines,

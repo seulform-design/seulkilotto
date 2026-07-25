@@ -196,6 +196,42 @@ export default function ReviewVerificationPanel() {
         </Box>
       )}
 
+      {/* 🚫 놓친 당첨 분석 — 어떤 신호로도 못 잡은 당첨(예측 천장) */}
+      {d.missed_winner_analysis && d.missed_winner_analysis.rounds > 0 && d.missed_winner_analysis.aggregate.total > 0 && (() => {
+        const a = d.missed_winner_analysis.aggregate;
+        const pct = (x: number) => Math.round((x / a.total) * 100);
+        return (
+          <Box sx={{ mb: 1.5, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'warning.dark' }}>
+            <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
+              🚫 놓친 당첨 분석 — 예측 천장 ({d.missed_winner_analysis.rounds}개 회차 · 당첨 {a.total}개)
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+              <strong>전 신호를 종합해도</strong> 각 당첨번호가 어디까지 잡혔나 — 어떤 신호의 상위6/18/30에도 못 든 당첨,
+              특히 <strong>티켓(자동·반자동)에 아예 없던 당첨</strong>은 티켓 데이터로 구조적으로 못 잡습니다.
+            </Typography>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+              <Chip size="small" color="success" label={`상위6 안 ${a.top6_any} (${pct(a.top6_any)}%)`} sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+              <Chip size="small" color="success" label={`상위18 안 ${a.top18_any} (${pct(a.top18_any)}%)`} sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+              <Chip size="small" color={a.uncatchable > 0 ? 'warning' : 'default'} label={`상위밖(미포착) ${a.uncatchable}`} sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+              <Chip size="small" color={a.missing_ticket > 0 ? 'error' : 'default'} label={`티켓 미등장 ${a.missing_ticket} (${pct(a.missing_ticket)}%)`} sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+            </Stack>
+            <Stack spacing={0.2}>
+              {(d.missed_winner_analysis.per_round ?? []).map((r) => (
+                <Typography key={r.round_no} variant="caption" sx={{ fontSize: 9.5, color: 'text.secondary' }}>
+                  <strong>{r.round_no}회</strong>: 잡음 {r.caught_top18.join('·') || '-'}
+                  {r.missed.length > 0
+                    ? ` · 놓침 ${r.missed.map((m) => `${m.number}(${m.in_ticket ? m.best_rank + '위' : '미등장'})`).join('·')}`
+                    : ''}
+                </Typography>
+              ))}
+            </Stack>
+            <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontSize: 9, mt: 0.5, fontStyle: 'italic' }}>
+              ⚠️ 놓친 당첨(특히 티켓 미등장)은 어떤 분석으로도 못 잡습니다 — 이게 예측의 천장이자 확률 불변의 직접 증거입니다. 넓은 그물로 '담을 수 있는 것'만 최대화합니다.
+            </Typography>
+          </Box>
+        );
+      })()}
+
       {/* 이번회차 커버리지 세트 */}
       {d.current_coverage_set && (d.current_coverage_set.expand18?.length ?? 0) > 0 && (
         <Box sx={{ p: 1.25, borderRadius: 1, border: '1px dashed', borderColor: 'primary.main' }}>

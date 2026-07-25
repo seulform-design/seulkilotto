@@ -34,9 +34,12 @@ def build_carryover_learning(seed: int = 42) -> Dict[str, Any]:
             "ok": False,
             "reason": "이월 역산은 최소 2개 보관 회차가 필요합니다(추첨 전 등록 용지 기준).",
             "round_count": len(samples),
+            "from_round": samples[-1].round_no if samples else None,
             "backtest": {"pairs": 0, "by_k": {}, "per_pair": []},
             "calibration_flat": True,
             "current_candidates": [],
+            "baselines": {"uniform_hit_rate": round(BASELINE_HIT, 4)},
+            "honesty": "보관 회차가 2개 미만이라 이월(강수 미당첨→다음 회차)을 아직 검증할 수 없습니다. 회차가 쌓이면 자동 산출됩니다.",
         }
 
     # 인접 회차쌍마다: N 의 '강수였지만 N 에 미당첨' 상위 K → N+1 당첨 여부.

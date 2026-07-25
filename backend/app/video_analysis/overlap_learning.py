@@ -196,9 +196,16 @@ def _compare_signals_across_rounds(
         semi = _manual_saved_lines(entries, "반자동", include_photo=True)
         if len(auto) < 2:
             continue
+        from .feature_learning_engine import _detect_fixed_semi
+
         ac = _line_freq(auto)
         sc = _line_freq(semi)
-        support = {n: float(min(ac.get(n, 0), sc.get(n, 0))) for n in range(1, 46)}
+        # 반자동 고정수 제외 지지 — feature/pattern/round/review 와 동일 기준(오염 baseline 방지).
+        fixed = _detect_fixed_semi(semi)
+        support = {
+            n: float(min(ac.get(n, 0), 0 if n in fixed else sc.get(n, 0)))
+            for n in range(1, 46)
+        }
         combo = combo_strength_by_number(auto, f"cmp{rnd}")
         rounds_used += 1
         for key, vals in (("support", support), ("combo_strength", combo)):

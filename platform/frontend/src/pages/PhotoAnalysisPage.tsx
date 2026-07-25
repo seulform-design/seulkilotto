@@ -1392,31 +1392,15 @@ export default function PhotoAnalysisPage() {
         }}
       >
         <Stack spacing={0.5}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap>
             <Typography variant="h6" fontWeight={800}>
               용지 분석
             </Typography>
-            <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
-              <Chip
-                size="small"
-                color={activeTab === 'review' ? 'primary' : 'default'}
-                variant={activeTab === 'review' ? 'filled' : 'outlined'}
-                label={`복기 ${displayReviewRound}회`}
-                sx={{ height: 22, fontWeight: 700, fontSize: 11 }}
-              />
-              <Chip
-                size="small"
-                color={activeTab === 'current_round' ? 'secondary' : 'default'}
-                variant={activeTab === 'current_round' ? 'filled' : 'outlined'}
-                label={`이번회차 ${displayCurrentRound}회`}
-                sx={{ height: 22, fontWeight: 700, fontSize: 11 }}
-              />
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-                정직성: 확률 불변
-              </Typography>
-            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+              복기 {displayReviewRound}회 · 이번회차 {displayCurrentRound}회 · 정직성: 확률 불변
+            </Typography>
           </Stack>
-          {/* 탭 라벨은 의도만 고정 — 회차는 업그레이드마다 바뀌므로 위 칩/안내문에만 표시 */}
+          {/* 탭은 의도만(복기/이번회차). 회차는 위 캡션·안내문에만 — 업그레이드해도 탭 문구 고정 */}
           <Tabs
             value={activeTab}
             onChange={(_, v: SheetIntent) => {
@@ -1426,8 +1410,8 @@ export default function PhotoAnalysisPage() {
             }}
             variant="fullWidth"
             sx={{
-              minHeight: 40,
-              '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontSize: 15 },
+              minHeight: 42,
+              '& .MuiTab-root': { minHeight: 42, textTransform: 'none', fontSize: 15, fontWeight: 600 },
             }}
           >
             <Tab

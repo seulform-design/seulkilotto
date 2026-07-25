@@ -4067,7 +4067,54 @@ export default function SemiAutoComparePanel({
         </>
       )}
 
-      {/* 1:1 전수비교 그룹 — ② 분석 섹션 */}
+
+      {/* ── 1:1 전수비교 요약 (§② 번호 분석 — 학습엔진 아님) ── */}
+      {hasLineMatchingInputs && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                alignItems={{ xs: 'flex-start', sm: 'center' }}
+                justifyContent="space-between"
+                spacing={1}
+                sx={{ mb: 0.5 }}
+              >
+                <Typography variant="body2" fontWeight={700}>
+                  🔀 자동 ↔ 반자동 줄 1:1 전수비교 요약
+                </Typography>
+                {canRenderLineMatching && (
+                  <Button
+                    type="button"
+                    size="small"
+                    variant="outlined"
+                    onClick={() => lineMatchingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  >
+                    상세 보기
+                  </Button>
+                )}
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                {intentSectionLabel} 탭 기준으로 자동 누적 줄과 반자동 누적 줄을 전수 비교해 공통 번호 2개 이상인 매치를 찾습니다.
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                <Chip size="small" variant="outlined" label={`자동 ${groupLineMatching.autoLineCount}줄`} />
+                <Chip size="small" variant="outlined" label={`반자동 ${groupLineMatching.semiLineCount}줄`} />
+                {canRenderLineMatching && (
+                  <>
+                    <Chip size="small" color="secondary" variant="outlined" label={`원본 페어 ${groupLineMatching.rawPairCount}건`} />
+                    <Chip size="small" color="secondary" label={`통합 카드 ${groupLineMatching.groupCount}건`} sx={{ fontWeight: 700 }} />
+                    <Chip size="small" variant="outlined" label={`현재 표시 ${visibleGroupMatchTotal}건`} />
+                  </>
+                )}
+              </Stack>
+              {!canRenderLineMatching && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  자동과 반자동 누적 줄이 모두 있어야 1:1 전수비교가 표시됩니다.
+                </Alert>
+              )}
+            </Paper>
+      )}
+
+      {/* 1:1 전수비교 그룹 — ② 번호 분석 (학습엔진 아님) */}
       {canRenderLineMatching && (
 
             <Box ref={lineMatchingRef}>
@@ -4599,403 +4646,30 @@ export default function SemiAutoComparePanel({
       {/* ════════ ③ 복기 검증 (추천 바로 위) ════════ */}
       {verificationSlot}
 
-      {/* ════════ ④ 번호 추천 (결론) ════════ */}
-      <Paper sx={{ p: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-        <Typography variant="subtitle1" fontWeight={800}>
-          ④ 번호 추천
-        </Typography>
-        <Chip size="small" color="success" label="위 복기 검증 기준" sx={{ height: 22, fontWeight: 700 }} />
-      </Stack>
-      {/* 🎯 핵심 추천 — ③ 복기 검증 직후 */}
-      {heroRecommendation.ready && (
-        <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-            <Typography variant="body1" fontWeight={800}>
-              🎯 {currentRound ?? effectiveRound ?? '?'}회 이번회차 핵심 추천
-            </Typography>
-            <Chip size="small" variant="outlined" color="success" label="위 복기 검증 기준" sx={{ height: 20, fontSize: 10, fontWeight: 700 }} />
-          </Stack>
-          {heroRecommendation.reviewRounds > 0 && (
-            <Alert severity="success" icon={false} sx={{ py: 0.5, mb: 1 }}>
-              <Typography variant="caption">
-                ✅ <strong>복기 {heroRecommendation.reviewRounds}회차 검증 완료</strong> — 당첨을 가장 잘 잡은 신호는{' '}
-                <strong>{heroRecommendation.signalLabel}</strong>{heroRecommendation.selectedByMulti ? '(다회차 1위)' : ''}
-                {heroRecommendation.bestTop18 != null ? `, 상위18에 평균 ${heroRecommendation.bestTop18}/6 담음` : ''}.
-                → 이 검증으로 이번회차 추천을 만듭니다.
-                {heroRecommendation.goodSignalCount > 0
-                  ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다(공에 '몇 신호').`
-                  : ''}{' '}
-                <strong>top-6 집중보다 넓은 그물이 유효</strong>(확률 불변).
-              </Typography>
-            </Alert>
-          )}
-          <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
-            <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>핵심 6</Typography>
-            {heroRecommendation.core6.map((n) => (
-              <Box key={`hero-c-${n}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                <LottoBall number={n} size={30} />
-                {heroRecommendation.agreement[String(n)] != null && (
-                  <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
-                    {heroRecommendation.agreement[String(n)]}신호
-                  </Typography>
-                )}
-              </Box>
-            ))}
-            <SharingBadge numbers={heroRecommendation.core6} />
-            <ComboActions numbers={heroRecommendation.core6} source="unknown" label="핵심6 추천" />
-          </Stack>
-          {heroRecommendation.shareOpt.length === 6 && (
-            <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
-              <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>분산 최적</Typography>
-              {heroRecommendation.shareOpt.map((n) => (
-                <LottoBall key={`hero-s-${n}`} number={n} size={26} />
-              ))}
-              <SharingBadge numbers={heroRecommendation.shareOpt} />
-              <ComboActions numbers={heroRecommendation.shareOpt} source="unknown" label="분산최적 추천" />
-            </Stack>
-          )}
-          <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>확장 18</Typography>
-            {heroRecommendation.expand18.map((n) => (
-              <LottoBall key={`hero-e-${n}`} number={n} size={20} />
-            ))}
-          </Stack>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
-            핵심 6 = 집중 픽 · 확장 18 = 넓은 그물(복기상 더 잘 잡음) · 분산 최적 = 공동당첨 회피(확률 동일).
-            {' '}바로 아래 <strong>강수·기대수(구간별)</strong>가 메인입니다. 나머지 상세 근거(심층역산·교차검증·패턴학습·1:1매칭·통합신호)는{' '}
-            <strong>⑤ 분석·패턴 학습 엔진</strong>으로 접어뒀습니다. 1등 확률(1/8,145,060)은 어떤 분석으로도 변하지 않습니다.
-          </Typography>
-        </Paper>
-      )}
-
-
-      {/* 🎯 강수·기대수 (구간별) — 메인 뷰. 상세 역산·학습은 [학습 엔진]으로 접어둔다. */}
+      {/* ── 용지 티켓 당첨 대조 (§③ 복기 검증 — 1:1과 분리) ── */}
       {activeComparison && (
-        <>
-              {/* ★ 1:1 강수 & 기대수 (구간별) — 평행회차와 동일 레이아웃, 1:1 반복도 기반 */}
-              {decadePattern && (
-                <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
-                  <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
-                    <Typography variant="caption" fontWeight={700}>
-                      ★ 1:1 강수 & 기대수 (구간별) — 전수비교 반복도 기준
-                    </Typography>
-                    {decadePattern.strongWinHit != null && (
-                      <Chip
-                        size="small"
-                        color={decadePattern.strongWinHit >= 4 ? 'success' : decadePattern.strongWinHit >= 2 ? 'warning' : 'default'}
-                        label={`강수 ${decadePattern.strongCount}개 중 당첨 ${decadePattern.strongWinHit}개 (무작위 기대≈${Math.round(decadePattern.strongCount * 6 / 45 * 10) / 10}개)`}
-                        sx={{ fontWeight: 700, height: 20, fontSize: 10 }}
-                      />
-                    )}
-                  </Stack>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-                    강수 = 구간별 1:1 반복도 상위 3 · 기대 = 다음 3. 숫자 아래 = 자동/반자동 등장 줄 수.
-                    {compareWinning ? ' 밝은 공 = 실제 당첨 · 회색 = 비당첨.' : ' 반자동 고정 후보 참고용.'}
-                  </Typography>
-                  <Stack spacing={0.5}>
-                    {decadePattern.byBand.map((b) => (
-                      <Stack key={b.label} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
-                        <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>{b.label}</Typography>
-                        <Typography variant="caption" color="error.light" sx={{ fontSize: 10, fontWeight: 700 }}>강수</Typography>
-                        {b.strong.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
-                        {b.strong.map((s) => (
-                          <Box key={`st-${s.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
-                            <LottoBall number={s.number} size={24} dimmed={compareWinning && winningSet ? !s.winning : false} />
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
-                              {s.auto}/{s.semi}{s.maxMatch >= 3 ? `·${s.maxMatch}일치` : ''}
-                            </Typography>
-                          </Box>
-                        ))}
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5 }}>기대</Typography>
-                        {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
-                        {b.expected.map((s) => (
-                          <Box key={`ex-${s.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
-                            <LottoBall number={s.number} size={20} dimmed={compareWinning && winningSet ? !s.winning : true} />
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
-                              {s.auto}/{s.semi}
-                            </Typography>
-                          </Box>
-                        ))}
-                        {b.missing.length > 0 && (
-                          <>
-                            <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5, color: 'warning.light' }}>미출</Typography>
-                            {b.missing.map((m) => (
-                              <Box
-                                key={`ms-${m.number}`}
-                                component="span"
-                                sx={{
-                                  fontSize: 10,
-                                  px: 0.4,
-                                  py: 0.1,
-                                  borderRadius: 0.5,
-                                  border: '1px dashed',
-                                  borderColor: compareWinning && m.winning ? 'success.main' : 'divider',
-                                  color: compareWinning && m.winning ? 'success.light' : 'text.disabled',
-                                  fontWeight: compareWinning && m.winning ? 700 : 400,
-                                }}
-                              >
-                                {m.number}
-                              </Box>
-                            ))}
-                          </>
-                        )}
-                      </Stack>
-                    ))}
-                    <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>끝수</Typography>
-                      {decadePattern.endingTop.map((e) => (
-                        <Chip key={`ed-${e.digit}`} size="small" variant="outlined" label={`${e.digit} (${e.count})`} sx={{ height: 18, fontSize: 10 }} />
-                      ))}
-                    </Stack>
-                  </Stack>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5 }}>
-                    미출 = 자동·반자동 어느 줄에도 없는 번호 {decadePattern.missingCount}개 — 티켓 기반으론 추출 불가 영역.
-                    {compareWinning && decadePattern.distribution ? (
-                      <>
-                        {' '}<strong>당첨 분포 비교</strong>: 강수 {decadePattern.distribution.strong}개 · 기대 {decadePattern.distribution.expected}개 ·
-                        그외 등장 {decadePattern.distribution.etc}개 · <strong style={{ color: decadePattern.distribution.missing > 0 ? '#ffa726' : 'inherit' }}>미출 {decadePattern.distribution.missing}개</strong>
-                        {decadePattern.distribution.missing > 0 ? ' (미출에서 나온 당첨은 어떤 티켓 분석으로도 못 잡음)' : ' (전부 데이터 안에서 나옴 — 추출 가능 회차)'}
-                      </>
-                    ) : (
-                      ' 미출수가 많을수록 이번 회차를 티켓 데이터로 커버 못 하는 범위가 큽니다.'
-                    )}
-                  </Typography>
-                </Box>
-              )}
-
-              {/* 🎯 최종 강수·기대수 (구간별 신호 종합) — 반복도 × 검증학습 × 이월 겹침 재정렬 */}
-              {finalStrongExpected && (
-                <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'warning.main' }}>
-                  <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
-                    <Typography variant="caption" fontWeight={800}>
-                      🎯 최종 강수·기대수 (구간별 신호 종합)
-                    </Typography>
-                    {carryoverQuery.data?.ok && carryoverQuery.data.backtest?.by_k?.['6'] && (
-                      <Chip
-                        size="small"
-                        color={!finalStrongExpected.carryFlat ? 'success' : 'default'}
-                        label={`이월 검증 lift ${carryoverQuery.data.backtest.by_k['6'].lift}×(K6)·${carryoverQuery.data.backtest.by_k['12']?.lift ?? '-'}×(K12) — ${finalStrongExpected.carryFlat ? '평탄(참고만)' : '신호 반영'}`}
-                        sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
-                      />
-                    )}
-                  </Stack>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-                    <strong>1:1 강수·기대(반복도)</strong> × <strong>검증 학습(Feature·Pattern·커버리지·다회차·겹침)</strong> × <strong>이월(강수 미당첨→다음 회차)</strong>이
-                    함께 가리키는 번호일수록 위로 재정렬. 배지 🔁반복·🧠학습·↪이월 — <strong>2개+ 겹치면 최종 강수 후보</strong>. 확률 불변(넓은 합의 표시).
-                  </Typography>
-                  <Stack spacing={0.5}>
-                    {finalStrongExpected.bands.map((b) => (
-                      <Stack key={`fse-${b.label}`} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
-                        <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>{b.label}</Typography>
-                        <Typography variant="caption" color="error.light" sx={{ fontSize: 10, fontWeight: 700 }}>강수</Typography>
-                        {b.strong.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
-                        {b.strong.map((s) => (
-                          <Box key={`fss-${s.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                            <LottoBall number={s.number} size={24} dimmed={compareWinning && winningSet ? !s.winning : false} />
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: s.agreement >= 2 ? 'warning.light' : 'text.disabled', fontWeight: s.agreement >= 2 ? 700 : 400 }}>
-                              {s.glyphs}
-                            </Typography>
-                          </Box>
-                        ))}
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5 }}>기대</Typography>
-                        {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
-                        {b.expected.map((s) => (
-                          <Box key={`fse2-${s.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                            <LottoBall number={s.number} size={20} dimmed={compareWinning && winningSet ? !s.winning : true} />
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
-                              {s.glyphs}
-                            </Typography>
-                          </Box>
-                        ))}
-                      </Stack>
-                    ))}
-                  </Stack>
-                  {(() => {
-                    const multi = finalStrongExpected.consensus.filter((c) => c.agreement >= 2).slice(0, 8);
-                    if (multi.length === 0) {
-                      return (
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5, fontStyle: 'italic' }}>
-                          지금은 반복도 외 신호(학습·이월)와 겹치는 번호가 없습니다 — 3개 회차로는 정상. 회차가 쌓이면 합의가 늘어납니다.
-                        </Typography>
-                      );
-                    }
-                    return (
-                      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.75, p: 0.5, borderRadius: 0.5, bgcolor: 'action.hover' }}>
-                        <Typography variant="caption" fontWeight={700} sx={{ fontSize: 10, color: 'warning.light' }}>⭐ 2개+ 신호 합의:</Typography>
-                        {multi.map((c) => (
-                          <Box key={`cons-${c.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                            <LottoBall number={c.number} size={22} dimmed={compareWinning && winningSet ? !c.winning : false} />
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
-                              {c.glyphs}
-                            </Typography>
-                          </Box>
-                        ))}
-                        {finalStrongExpected.winHit && (
-                          <Chip
-                            size="small"
-                            color={finalStrongExpected.winHit.multi >= 2 ? 'success' : finalStrongExpected.winHit.multi >= 1 ? 'warning' : 'default'}
-                            label={`합의 ${finalStrongExpected.winHit.multiTotal}개 중 당첨 ${finalStrongExpected.winHit.multi}개`}
-                            sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-                          />
-                        )}
-                      </Stack>
-                    );
-                  })()}
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5, fontStyle: 'italic' }}>
-                    ⚠️ {carryoverQuery.data?.honesty ?? '이월·학습 신호는 무작위 대비 재현될 때만 순위에 가산되고, 평탄이면 배지(참고)로만 표시합니다. 1등 확률은 불변.'}
-                  </Typography>
-                </Box>
-              )}
-        </>
-      )}
-      </Paper>
-
-      {/* ════════ ⑤ 분석·패턴 학습 엔진 (기본 접힘) ════════ */}
-      <Box>
-        <Button
-          fullWidth
-          variant="outlined"
-          color="inherit"
-          onClick={() => setShowPredictionDetail((v) => !v)}
-          sx={{ justifyContent: 'space-between', textTransform: 'none', mb: 1 }}
-          endIcon={<span>{showPredictionDetail ? '▲' : '▼'}</span>}
-        >
-          ⑤ 분석·패턴 학습 엔진 {showPredictionDetail ? '접기' : '펼치기'}
-          （평행회차 · 예상번호 · 교차검증 · 심층역산 · 통합신호 · Feature）
-        </Button>
-      {showPredictionDetail && (
-        <Stack spacing={1.5}>
-          {engineExtraSlot}
-      {/* 🎯 이번회차 종합 예측 대시보드 */}
-      {currentRoundForecast && (
-        <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'primary.main', borderWidth: 2 }}>
-          <Stack direction="row" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-            <Typography variant="body2" fontWeight={800}>
-              🎯 {effectiveRound ?? currentRound ?? '?'}회 이번회차 종합 예측
+        <Paper sx={{ p: 2 }}>
+          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+            <Typography variant="subtitle1" fontWeight={800}>
+              용지 티켓 당첨 대조
             </Typography>
-            {Object.entries(currentRoundForecast.signalTiers).map(([k, on]) => (
-              <Chip
-                key={k}
-                size="small"
-                variant={on ? 'filled' : 'outlined'}
-                color={on ? 'primary' : 'default'}
-                label={`${k} ${on ? '✓' : '—'}`}
-                sx={{ height: 18, fontSize: 10 }}
-              />
-            ))}
+            <Chip size="small" color="info" label="③ 복기 검증 근거" sx={{ height: 22, fontWeight: 700 }} />
+            <Chip size="small" variant="outlined" label={`${activeComparison.ticketCount}장`} sx={{ height: 22 }} />
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            이번회차에서 사용 가능한 신호를 종합했습니다 — <strong>용지 교차검증(자동↔반자동 1:1 × 심층역산)</strong>
-            {' '}+ <strong>통합 예측신호(6소스)</strong> + <strong>평행회차</strong>.{' '}
-            {currentRoundForecast.hasTickets
-              ? '이번회차 용지가 있어 용지 신호가 주 축입니다.'
-              : '이번회차 용지가 없어 통계 신호(통합·평행)만 반영됐습니다. 용지를 등록하면 용지 교차검증이 가세합니다.'}
+            등록한 자동·반자동 줄이 비교 회차 당첨과 얼마나 맞는지 측정합니다(적중률·분포·티켓 목록).
+            위 신호 성적표와 함께 <strong>아래 ④ 추천의 검증 근거</strong>이며, 확률(1/8,145,060)은 변하지 않습니다.
+            1:1 구조 분석은 위 <strong>②</strong>에 있습니다.
           </Typography>
-          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-            {currentRoundForecast.ranked.map((r, i) => (
-              <Box key={`crf-${r.number}`} sx={{ textAlign: 'center', minWidth: 40 }}>
-                <Typography sx={{ fontSize: 8, color: i < 6 ? 'primary.light' : 'text.disabled', fontWeight: 700, lineHeight: 1 }}>
-                  {i + 1}위
-                </Typography>
-                <LottoBall number={r.number} size={i < 6 ? 34 : 28} />
-                <Typography sx={{ fontSize: 8, color: 'text.disabled', lineHeight: 1.1 }}>{r.pct}%</Typography>
-                <Typography sx={{ fontSize: 7.5, color: 'text.disabled', lineHeight: 1 }}>{r.sources.join('·')}</Typography>
-              </Box>
-            ))}
-          </Stack>
-          <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
-            <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-              <Typography variant="caption" fontWeight={700}>대표 조합:</Typography>
-              {currentRoundForecast.representative.map((n) => (
-                <LottoBall key={`crfr-${n}`} number={n} size={28} />
-              ))}
-              <SharingBadge numbers={currentRoundForecast.representative} />
-              <ComboActions numbers={currentRoundForecast.representative} source="unknown" label="이번회차 종합 예측" />
-            </Stack>
-            {currentRoundForecast.shareOpt &&
-              currentRoundForecast.shareOpt.numbers.join(',') !==
-                currentRoundForecast.representative.join(',') && (
-                <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
-                  <Typography variant="caption" fontWeight={700}>💰 분산 최적:</Typography>
-                  {currentRoundForecast.shareOpt.numbers.map((n) => (
-                    <LottoBall key={`crfo-${n}`} number={n} size={24} />
-                  ))}
-                  <SharingBadge numbers={currentRoundForecast.shareOpt.numbers} />
-                  <ComboActions numbers={currentRoundForecast.shareOpt.numbers} source="unknown" label="이번회차 분산 최적" />
-                </Stack>
-              )}
-          </Box>
-          <Typography variant="caption" sx={{ display: 'block', mt: 0.75, fontStyle: 'italic', color: 'text.disabled', fontSize: 10 }}>
-            ⚠️ 종합은 신호 일관성 도구입니다. 1등 확률(1/8,145,060)은 불변이며, 분산 최적은 당첨 시 공동분배 회피(실수령 기대)만 개선합니다.
-          </Typography>
-        </Paper>
-      )}
-
-      {/* ─── 대량 비교 결과 ─────────────────────────────────────── */}
-      {activeComparison && (
-        <>
-          <Divider sx={{ my: 2 }} />
           {!compareWinning && (
             <Alert severity="info" sx={{ mb: 1.5 }}>
               <strong>이번회차 모드</strong> — 당첨번호·적중률 비교는 표시하지 않습니다.
-              줄간 겹침·강한 후보만 분석합니다. 당첨 검증은 <strong>복기 탭</strong>을 사용하세요.
+              당첨 검증은 <strong>복기 탭</strong>을 사용하세요.
               {roundDrawn && currentRound != null && (
-                <> ({currentRound}회 추첨 완료 — 복기 탭에서 {latestRound ?? currentRound - 1}회 당첨번호와 비교)</>
+                <> ({currentRound}회 추첨 완료 — 복기 탭에서 {latestRound ?? currentRound - 1}회와 비교)</>
               )}
             </Alert>
           )}
-
-          {hasLineMatchingInputs && (
-            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
-              <Stack
-                direction={{ xs: 'column', sm: 'row' }}
-                alignItems={{ xs: 'flex-start', sm: 'center' }}
-                justifyContent="space-between"
-                spacing={1}
-                sx={{ mb: 0.5 }}
-              >
-                <Typography variant="body2" fontWeight={700}>
-                  🔀 자동 ↔ 반자동 줄 1:1 전수비교 요약
-                </Typography>
-                {canRenderLineMatching && (
-                  <Button
-                    type="button"
-                    size="small"
-                    variant="outlined"
-                    onClick={() => lineMatchingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  >
-                    상세 보기
-                  </Button>
-                )}
-              </Stack>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                {intentSectionLabel} 탭 기준으로 자동 누적 줄과 반자동 누적 줄을 전수 비교해 공통 번호 2개 이상인 매치를 찾습니다.
-              </Typography>
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                <Chip size="small" variant="outlined" label={`자동 ${groupLineMatching.autoLineCount}줄`} />
-                <Chip size="small" variant="outlined" label={`반자동 ${groupLineMatching.semiLineCount}줄`} />
-                {canRenderLineMatching && (
-                  <>
-                    <Chip size="small" color="secondary" variant="outlined" label={`원본 페어 ${groupLineMatching.rawPairCount}건`} />
-                    <Chip size="small" color="secondary" label={`통합 카드 ${groupLineMatching.groupCount}건`} sx={{ fontWeight: 700 }} />
-                    <Chip size="small" variant="outlined" label={`현재 표시 ${visibleGroupMatchTotal}건`} />
-                  </>
-                )}
-              </Stack>
-              {!canRenderLineMatching && (
-                <Alert severity="info" sx={{ mt: 1 }}>
-                  자동과 반자동 누적 줄이 모두 있어야 1:1 전수비교가 표시됩니다.
-                </Alert>
-              )}
-            </Paper>
-          )}
-
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }} flexWrap="wrap" gap={1}>
-            <Typography variant="subtitle1" fontWeight={700}>
-              📋 대량 비교 결과 ({activeComparison.ticketCount}장)
-            </Typography>
-          </Stack>
           <Stack
             direction={{ xs: 'column', sm: 'row' }}
             alignItems={{ xs: 'stretch', sm: 'center' }}
@@ -5336,13 +5010,351 @@ export default function SemiAutoComparePanel({
           {!canRenderLineMatching && hasLineMatchingInputs && (
             <Alert severity="warning" sx={{ mb: 1.5 }}>
               현재 <strong>자동 {groupLineMatching.autoLineCount}줄 · 반자동{' '}
-              {groupLineMatching.semiLineCount}줄</strong>입니다. 아래{' '}
-              <strong>당첨 예상번호 · 심층 역산 분석 · 1:1 매칭</strong>은 자동↔반자동 <strong>양쪽</strong>이
-              있어야 동작합니다. 비어 있는 쪽을 등록하면 활성화됩니다.
-              {predictedNumbers.length > 0 && ' (지금 보이는 예상번호는 평행회차 신호 위주입니다.)'}
+              {groupLineMatching.semiLineCount}줄</strong>입니다. ②의 <strong>1:1 전수비교</strong>와
+              ⑤의 <strong>심층 역산·당첨 예상</strong>은 자동↔반자동 <strong>양쪽</strong>이 있어야 동작합니다.
+              비어 있는 쪽을 등록하면 활성화됩니다.
             </Alert>
           )}
 
+        </Paper>
+      )}
+
+      {/* ════════ ④ 번호 추천 (결론) ════════ */}
+      <Paper sx={{ p: 2 }}>
+      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+        <Typography variant="subtitle1" fontWeight={800}>
+          ④ 번호 추천
+        </Typography>
+        <Chip size="small" color="success" label="위 복기 검증 기준" sx={{ height: 22, fontWeight: 700 }} />
+      </Stack>
+      {/* 🎯 핵심 추천 — ③ 복기 검증 직후 */}
+      {heroRecommendation.ready && (
+        <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+            <Typography variant="body1" fontWeight={800}>
+              🎯 {currentRound ?? effectiveRound ?? '?'}회 이번회차 핵심 추천
+            </Typography>
+            <Chip size="small" variant="outlined" color="success" label="위 복기 검증 기준" sx={{ height: 20, fontSize: 10, fontWeight: 700 }} />
+          </Stack>
+          {heroRecommendation.reviewRounds > 0 && (
+            <Alert severity="success" icon={false} sx={{ py: 0.5, mb: 1 }}>
+              <Typography variant="caption">
+                ✅ <strong>복기 {heroRecommendation.reviewRounds}회차 검증 완료</strong> — 당첨을 가장 잘 잡은 신호는{' '}
+                <strong>{heroRecommendation.signalLabel}</strong>{heroRecommendation.selectedByMulti ? '(다회차 1위)' : ''}
+                {heroRecommendation.bestTop18 != null ? `, 상위18에 평균 ${heroRecommendation.bestTop18}/6 담음` : ''}.
+                → 이 검증으로 이번회차 추천을 만듭니다.
+                {heroRecommendation.goodSignalCount > 0
+                  ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다(공에 '몇 신호').`
+                  : ''}{' '}
+                <strong>top-6 집중보다 넓은 그물이 유효</strong>(확률 불변).
+              </Typography>
+            </Alert>
+          )}
+          <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+            <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>핵심 6</Typography>
+            {heroRecommendation.core6.map((n) => (
+              <Box key={`hero-c-${n}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                <LottoBall number={n} size={30} />
+                {heroRecommendation.agreement[String(n)] != null && (
+                  <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
+                    {heroRecommendation.agreement[String(n)]}신호
+                  </Typography>
+                )}
+              </Box>
+            ))}
+            <SharingBadge numbers={heroRecommendation.core6} />
+            <ComboActions numbers={heroRecommendation.core6} source="unknown" label="핵심6 추천" />
+          </Stack>
+          {heroRecommendation.shareOpt.length === 6 && (
+            <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+              <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>분산 최적</Typography>
+              {heroRecommendation.shareOpt.map((n) => (
+                <LottoBall key={`hero-s-${n}`} number={n} size={26} />
+              ))}
+              <SharingBadge numbers={heroRecommendation.shareOpt} />
+              <ComboActions numbers={heroRecommendation.shareOpt} source="unknown" label="분산최적 추천" />
+            </Stack>
+          )}
+          <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>확장 18</Typography>
+            {heroRecommendation.expand18.map((n) => (
+              <LottoBall key={`hero-e-${n}`} number={n} size={20} />
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
+            핵심 6 = 집중 픽 · 확장 18 = 넓은 그물(복기상 더 잘 잡음) · 분산 최적 = 공동당첨 회피(확률 동일).
+            {' '}바로 아래 <strong>강수·기대수(구간별)</strong>가 메인입니다. 나머지 상세 근거(심층역산·교차검증·패턴학습·1:1매칭·통합신호)는{' '}
+            <strong>⑤ 분석·패턴 학습 엔진</strong>으로 접어뒀습니다. 1등 확률(1/8,145,060)은 어떤 분석으로도 변하지 않습니다.
+          </Typography>
+        </Paper>
+      )}
+
+
+      {/* 🎯 강수·기대수 (구간별) — 메인 뷰. 상세 역산·학습은 [학습 엔진]으로 접어둔다. */}
+      {activeComparison && (
+        <>
+              {/* ★ 1:1 강수 & 기대수 (구간별) — 평행회차와 동일 레이아웃, 1:1 반복도 기반 */}
+              {decadePattern && (
+                <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
+                    <Typography variant="caption" fontWeight={700}>
+                      ★ 1:1 강수 & 기대수 (구간별) — 전수비교 반복도 기준
+                    </Typography>
+                    {decadePattern.strongWinHit != null && (
+                      <Chip
+                        size="small"
+                        color={decadePattern.strongWinHit >= 4 ? 'success' : decadePattern.strongWinHit >= 2 ? 'warning' : 'default'}
+                        label={`강수 ${decadePattern.strongCount}개 중 당첨 ${decadePattern.strongWinHit}개 (무작위 기대≈${Math.round(decadePattern.strongCount * 6 / 45 * 10) / 10}개)`}
+                        sx={{ fontWeight: 700, height: 20, fontSize: 10 }}
+                      />
+                    )}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                    강수 = 구간별 1:1 반복도 상위 3 · 기대 = 다음 3. 숫자 아래 = 자동/반자동 등장 줄 수.
+                    {compareWinning ? ' 밝은 공 = 실제 당첨 · 회색 = 비당첨.' : ' 반자동 고정 후보 참고용.'}
+                  </Typography>
+                  <Stack spacing={0.5}>
+                    {decadePattern.byBand.map((b) => (
+                      <Stack key={b.label} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
+                        <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>{b.label}</Typography>
+                        <Typography variant="caption" color="error.light" sx={{ fontSize: 10, fontWeight: 700 }}>강수</Typography>
+                        {b.strong.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
+                        {b.strong.map((s) => (
+                          <Box key={`st-${s.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
+                            <LottoBall number={s.number} size={24} dimmed={compareWinning && winningSet ? !s.winning : false} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
+                              {s.auto}/{s.semi}{s.maxMatch >= 3 ? `·${s.maxMatch}일치` : ''}
+                            </Typography>
+                          </Box>
+                        ))}
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5 }}>기대</Typography>
+                        {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
+                        {b.expected.map((s) => (
+                          <Box key={`ex-${s.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
+                            <LottoBall number={s.number} size={20} dimmed={compareWinning && winningSet ? !s.winning : true} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
+                              {s.auto}/{s.semi}
+                            </Typography>
+                          </Box>
+                        ))}
+                        {b.missing.length > 0 && (
+                          <>
+                            <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5, color: 'warning.light' }}>미출</Typography>
+                            {b.missing.map((m) => (
+                              <Box
+                                key={`ms-${m.number}`}
+                                component="span"
+                                sx={{
+                                  fontSize: 10,
+                                  px: 0.4,
+                                  py: 0.1,
+                                  borderRadius: 0.5,
+                                  border: '1px dashed',
+                                  borderColor: compareWinning && m.winning ? 'success.main' : 'divider',
+                                  color: compareWinning && m.winning ? 'success.light' : 'text.disabled',
+                                  fontWeight: compareWinning && m.winning ? 700 : 400,
+                                }}
+                              >
+                                {m.number}
+                              </Box>
+                            ))}
+                          </>
+                        )}
+                      </Stack>
+                    ))}
+                    <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>끝수</Typography>
+                      {decadePattern.endingTop.map((e) => (
+                        <Chip key={`ed-${e.digit}`} size="small" variant="outlined" label={`${e.digit} (${e.count})`} sx={{ height: 18, fontSize: 10 }} />
+                      ))}
+                    </Stack>
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5 }}>
+                    미출 = 자동·반자동 어느 줄에도 없는 번호 {decadePattern.missingCount}개 — 티켓 기반으론 추출 불가 영역.
+                    {compareWinning && decadePattern.distribution ? (
+                      <>
+                        {' '}<strong>당첨 분포 비교</strong>: 강수 {decadePattern.distribution.strong}개 · 기대 {decadePattern.distribution.expected}개 ·
+                        그외 등장 {decadePattern.distribution.etc}개 · <strong style={{ color: decadePattern.distribution.missing > 0 ? '#ffa726' : 'inherit' }}>미출 {decadePattern.distribution.missing}개</strong>
+                        {decadePattern.distribution.missing > 0 ? ' (미출에서 나온 당첨은 어떤 티켓 분석으로도 못 잡음)' : ' (전부 데이터 안에서 나옴 — 추출 가능 회차)'}
+                      </>
+                    ) : (
+                      ' 미출수가 많을수록 이번 회차를 티켓 데이터로 커버 못 하는 범위가 큽니다.'
+                    )}
+                  </Typography>
+                </Box>
+              )}
+
+              {/* 🎯 최종 강수·기대수 (구간별 신호 종합) — 반복도 × 검증학습 × 이월 겹침 재정렬 */}
+              {finalStrongExpected && (
+                <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'warning.main' }}>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
+                    <Typography variant="caption" fontWeight={800}>
+                      🎯 최종 강수·기대수 (구간별 신호 종합)
+                    </Typography>
+                    {carryoverQuery.data?.ok && carryoverQuery.data.backtest?.by_k?.['6'] && (
+                      <Chip
+                        size="small"
+                        color={!finalStrongExpected.carryFlat ? 'success' : 'default'}
+                        label={`이월 검증 lift ${carryoverQuery.data.backtest.by_k['6'].lift}×(K6)·${carryoverQuery.data.backtest.by_k['12']?.lift ?? '-'}×(K12) — ${finalStrongExpected.carryFlat ? '평탄(참고만)' : '신호 반영'}`}
+                        sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+                      />
+                    )}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                    <strong>1:1 강수·기대(반복도)</strong> × <strong>검증 학습(Feature·Pattern·커버리지·다회차·겹침)</strong> × <strong>이월(강수 미당첨→다음 회차)</strong>이
+                    함께 가리키는 번호일수록 위로 재정렬. 배지 🔁반복·🧠학습·↪이월 — <strong>2개+ 겹치면 최종 강수 후보</strong>. 확률 불변(넓은 합의 표시).
+                  </Typography>
+                  <Stack spacing={0.5}>
+                    {finalStrongExpected.bands.map((b) => (
+                      <Stack key={`fse-${b.label}`} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
+                        <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>{b.label}</Typography>
+                        <Typography variant="caption" color="error.light" sx={{ fontSize: 10, fontWeight: 700 }}>강수</Typography>
+                        {b.strong.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
+                        {b.strong.map((s) => (
+                          <Box key={`fss-${s.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                            <LottoBall number={s.number} size={24} dimmed={compareWinning && winningSet ? !s.winning : false} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: s.agreement >= 2 ? 'warning.light' : 'text.disabled', fontWeight: s.agreement >= 2 ? 700 : 400 }}>
+                              {s.glyphs}
+                            </Typography>
+                          </Box>
+                        ))}
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5 }}>기대</Typography>
+                        {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
+                        {b.expected.map((s) => (
+                          <Box key={`fse2-${s.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                            <LottoBall number={s.number} size={20} dimmed={compareWinning && winningSet ? !s.winning : true} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
+                              {s.glyphs}
+                            </Typography>
+                          </Box>
+                        ))}
+                      </Stack>
+                    ))}
+                  </Stack>
+                  {(() => {
+                    const multi = finalStrongExpected.consensus.filter((c) => c.agreement >= 2).slice(0, 8);
+                    if (multi.length === 0) {
+                      return (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5, fontStyle: 'italic' }}>
+                          지금은 반복도 외 신호(학습·이월)와 겹치는 번호가 없습니다 — 3개 회차로는 정상. 회차가 쌓이면 합의가 늘어납니다.
+                        </Typography>
+                      );
+                    }
+                    return (
+                      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.75, p: 0.5, borderRadius: 0.5, bgcolor: 'action.hover' }}>
+                        <Typography variant="caption" fontWeight={700} sx={{ fontSize: 10, color: 'warning.light' }}>⭐ 2개+ 신호 합의:</Typography>
+                        {multi.map((c) => (
+                          <Box key={`cons-${c.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                            <LottoBall number={c.number} size={22} dimmed={compareWinning && winningSet ? !c.winning : false} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
+                              {c.glyphs}
+                            </Typography>
+                          </Box>
+                        ))}
+                        {finalStrongExpected.winHit && (
+                          <Chip
+                            size="small"
+                            color={finalStrongExpected.winHit.multi >= 2 ? 'success' : finalStrongExpected.winHit.multi >= 1 ? 'warning' : 'default'}
+                            label={`합의 ${finalStrongExpected.winHit.multiTotal}개 중 당첨 ${finalStrongExpected.winHit.multi}개`}
+                            sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                          />
+                        )}
+                      </Stack>
+                    );
+                  })()}
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5, fontStyle: 'italic' }}>
+                    ⚠️ {carryoverQuery.data?.honesty ?? '이월·학습 신호는 무작위 대비 재현될 때만 순위에 가산되고, 평탄이면 배지(참고)로만 표시합니다. 1등 확률은 불변.'}
+                  </Typography>
+                </Box>
+              )}
+        </>
+      )}
+      </Paper>
+
+      {/* ════════ ⑤ 분석·패턴 학습 엔진 (기본 접힘) ════════ */}
+      <Box>
+        <Button
+          fullWidth
+          variant="outlined"
+          color="inherit"
+          onClick={() => setShowPredictionDetail((v) => !v)}
+          sx={{ justifyContent: 'space-between', textTransform: 'none', mb: 1 }}
+          endIcon={<span>{showPredictionDetail ? '▲' : '▼'}</span>}
+        >
+          ⑤ 분석·패턴 학습 엔진 {showPredictionDetail ? '접기' : '펼치기'}
+          （평행회차 · 당첨예상 · 교차/심층역산 · 통합신호 · Feature）
+        </Button>
+      {showPredictionDetail && (
+        <Stack spacing={1.5}>
+          {engineExtraSlot}
+      {/* 🎯 이번회차 종합 예측 대시보드 */}
+      {currentRoundForecast && (
+        <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'primary.main', borderWidth: 2 }}>
+          <Stack direction="row" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+            <Typography variant="body2" fontWeight={800}>
+              🎯 {effectiveRound ?? currentRound ?? '?'}회 이번회차 종합 예측
+            </Typography>
+            {Object.entries(currentRoundForecast.signalTiers).map(([k, on]) => (
+              <Chip
+                key={k}
+                size="small"
+                variant={on ? 'filled' : 'outlined'}
+                color={on ? 'primary' : 'default'}
+                label={`${k} ${on ? '✓' : '—'}`}
+                sx={{ height: 18, fontSize: 10 }}
+              />
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            이번회차에서 사용 가능한 신호를 종합했습니다 — <strong>용지 교차검증(자동↔반자동 1:1 × 심층역산)</strong>
+            {' '}+ <strong>통합 예측신호(6소스)</strong> + <strong>평행회차</strong>.{' '}
+            {currentRoundForecast.hasTickets
+              ? '이번회차 용지가 있어 용지 신호가 주 축입니다.'
+              : '이번회차 용지가 없어 통계 신호(통합·평행)만 반영됐습니다. 용지를 등록하면 용지 교차검증이 가세합니다.'}
+          </Typography>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+            {currentRoundForecast.ranked.map((r, i) => (
+              <Box key={`crf-${r.number}`} sx={{ textAlign: 'center', minWidth: 40 }}>
+                <Typography sx={{ fontSize: 8, color: i < 6 ? 'primary.light' : 'text.disabled', fontWeight: 700, lineHeight: 1 }}>
+                  {i + 1}위
+                </Typography>
+                <LottoBall number={r.number} size={i < 6 ? 34 : 28} />
+                <Typography sx={{ fontSize: 8, color: 'text.disabled', lineHeight: 1.1 }}>{r.pct}%</Typography>
+                <Typography sx={{ fontSize: 7.5, color: 'text.disabled', lineHeight: 1 }}>{r.sources.join('·')}</Typography>
+              </Box>
+            ))}
+          </Stack>
+          <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+            <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+              <Typography variant="caption" fontWeight={700}>대표 조합:</Typography>
+              {currentRoundForecast.representative.map((n) => (
+                <LottoBall key={`crfr-${n}`} number={n} size={28} />
+              ))}
+              <SharingBadge numbers={currentRoundForecast.representative} />
+              <ComboActions numbers={currentRoundForecast.representative} source="unknown" label="이번회차 종합 예측" />
+            </Stack>
+            {currentRoundForecast.shareOpt &&
+              currentRoundForecast.shareOpt.numbers.join(',') !==
+                currentRoundForecast.representative.join(',') && (
+                <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                  <Typography variant="caption" fontWeight={700}>💰 분산 최적:</Typography>
+                  {currentRoundForecast.shareOpt.numbers.map((n) => (
+                    <LottoBall key={`crfo-${n}`} number={n} size={24} />
+                  ))}
+                  <SharingBadge numbers={currentRoundForecast.shareOpt.numbers} />
+                  <ComboActions numbers={currentRoundForecast.shareOpt.numbers} source="unknown" label="이번회차 분산 최적" />
+                </Stack>
+              )}
+          </Box>
+          <Typography variant="caption" sx={{ display: 'block', mt: 0.75, fontStyle: 'italic', color: 'text.disabled', fontSize: 10 }}>
+            ⚠️ 종합은 신호 일관성 도구입니다. 1등 확률(1/8,145,060)은 불변이며, 분산 최적은 당첨 시 공동분배 회피(실수령 기대)만 개선합니다.
+          </Typography>
+        </Paper>
+      )}
+
+      {/* 당첨 예상·심층역산 등 — §⑤ 학습 엔진 본문 */}
+      {activeComparison && (
+        <>
           {/* 🎯 당첨 예상번호 — 전수비교 심층 역산(주) + 평행회차(보조). 호기 제외. */}
           {predictedNumbers.length > 0 && (
             <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main' }}>

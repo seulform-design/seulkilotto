@@ -1793,8 +1793,9 @@ export default function PhotoAnalysisPage() {
             </Divider>
             <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
               <Typography variant="caption">
-                이 검증 결과(신호 성적표·다회차 백테스트·놓친 당첨·구간 커버리지)가{' '}
-                <strong>바로 아래 ④ 번호 추천</strong>의 근거입니다. 확률은 변하지 않습니다.
+                이 검증(신호 성적표·다회차 백테스트·놓친 당첨·구간 커버리지)과 바로 이어지는{' '}
+                <strong>용지 티켓 당첨 대조</strong>가 <strong>아래 ④ 번호 추천</strong>의 근거입니다.
+                확률은 변하지 않습니다.
               </Typography>
             </Alert>
             <ReviewVerificationPanel />

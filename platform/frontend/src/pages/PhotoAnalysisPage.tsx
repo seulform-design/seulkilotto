@@ -334,7 +334,7 @@ function IntentAccumulatedPanel({
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           이 누적은 <strong>자동 등록분({slice.saved_auto_lines?.length ?? 0}줄)만</strong> 분석합니다.
-          반자동({slice.saved_semi_lines?.length ?? 0}줄)은 §3 반자동 비교에서 별도로 다룹니다.
+          반자동({slice.saved_semi_lines?.length ?? 0}줄)은 ① 반자동 등록·② 1:1에서 별도로 다룹니다.
         </Typography>
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
           <Chip label={`${slice.video_intent_label} ${slice.total_analyses}건`} size="small" color={intent === 'review' ? 'primary' : 'secondary'} />
@@ -359,7 +359,7 @@ function IntentAccumulatedPanel({
           <Alert severity="warning" sx={{ mt: 1 }}>
             이 회차({slice.ticket_round}회)에 해당하는 용지가 없어 <strong>회차 구분 없이 전체 복기
             엔트리</strong>를 표시합니다. 서로 다른 회차의 용지가 섞여 있을 수 있으며, 당첨 대조는{' '}
-            {slice.ticket_round}회 기준입니다. 위 <strong>회차별 용지 데이터</strong>에서 [회차 재귀속]으로
+            {slice.ticket_round}회 기준입니다. ② 하단 <strong>회차별 용지 데이터</strong>에서 [회차 재귀속]으로
             정리하면 정확해집니다.
           </Alert>
         )}
@@ -1622,9 +1622,9 @@ export default function PhotoAnalysisPage() {
           ⚙ 추가 세팅
         </Typography>
         {(() => {
-          // 자동 누적 평탄화 — 반자동 § 3 추가 세팅과 동일 룩앤필.
+          // 자동 누적 평탄화 — 반자동 ① 추가 세팅과 동일 룩앤필.
           // 데이터 소스: 입력 중 줄 + 저장 용지의 모든 줄 + 대량 입력 (bulkAutoTickets).
-          // 백엔드 누적은 § 2 IntentAccumulatedPanel 에서만 관리하므로 여기서는 제외.
+          // 백엔드 누적은 ② IntentAccumulatedPanel 에서만 관리하므로 여기서는 제외.
           const ticketLines = [
             ...currentSlipLines.map((line, idx) => ({
               key: `current-${idx}`,
@@ -1772,15 +1772,24 @@ export default function PhotoAnalysisPage() {
               bodyLabel="자동 (구입번호 직접입력)"
               emptyHint="자동 데이터가 없습니다. '구입번호 직접입력' 영역에서 줄을 추가하면 여기에 빈도가 표시됩니다."
             />
+            {activeTab === 'current_round' && (activeSlice?.total_analyses ?? 0) === 0 && (
+              <ArchivedCurrentRoundPanel snapshot={archivedCurrentSnapshot} />
+            )}
+          </Stack>
+        }
+        analysisEpilogue={
+          <Stack spacing={1.5} sx={{ mt: 2 }}>
+            <Divider textAlign="left">
+              <Typography variant="caption" fontWeight={800} color="text.secondary">
+                누적 · 회차별 용지 데이터
+              </Typography>
+            </Divider>
             <IntentAccumulatedPanel
               slice={activeSlice}
               intent={activeTab}
               legacyCount={accumulated?.legacy_entry_count}
               onDeleteEntry={deleteHistoryEntry}
             />
-            {activeTab === 'current_round' && (activeSlice?.total_analyses ?? 0) === 0 && (
-              <ArchivedCurrentRoundPanel snapshot={archivedCurrentSnapshot} />
-            )}
             <RoundDataBreakdownPanel accumulated={accumulated} onAccumulatedChange={setAccumulated} />
           </Stack>
         }

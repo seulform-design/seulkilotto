@@ -528,8 +528,10 @@ interface SemiAutoComparePanelProps {
   onRemoveBulkAutoTicket?: (idx: number) => void;
   /** 서버 누적·당첨번호 재조회 (재분석 버튼). */
   onRefreshAccumulated?: () => Promise<void>;
-  /** ① 등록 후·② 분석 전 — 자동 빈도/누적/회차분해 등 */
+  /** ② 분석 상단 — 자동 빈도 등 */
   analysisPrelude?: ReactNode;
+  /** ② 분석 하단(1:1 뒤) — 누적 패턴 · 회차별 용지 데이터 */
+  analysisEpilogue?: ReactNode;
   /** ③ 복기 검증 — 추천(④) 바로 위에 렌더 */
   verificationSlot?: ReactNode;
   /** ⑤ 학습 엔진 접힘 안 — 평행회차·Feature 등 */
@@ -1094,6 +1096,7 @@ export default function SemiAutoComparePanel({
   onRemoveBulkAutoTicket,
   onRefreshAccumulated,
   analysisPrelude = null,
+  analysisEpilogue = null,
   verificationSlot = null,
   engineExtraSlot = null,
 }: SemiAutoComparePanelProps) {
@@ -4639,6 +4642,9 @@ export default function SemiAutoComparePanel({
           </Typography>
         </>
       )}
+
+      {/* 누적 패턴 · 회차별 용지 데이터 — ② 끝(1:1 뒤). 분석 본문과 분리된 데이터 층. */}
+      {analysisEpilogue}
         </>
         )}
       </Paper>
@@ -5083,8 +5089,7 @@ export default function SemiAutoComparePanel({
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
             핵심 6 = 집중 픽 · 확장 18 = 넓은 그물(복기상 더 잘 잡음) · 분산 최적 = 공동당첨 회피(확률 동일).
-            {' '}바로 아래 <strong>강수·기대수(구간별)</strong>가 메인입니다. 나머지 상세 근거(심층역산·교차검증·패턴학습·1:1매칭·통합신호)는{' '}
-            <strong>⑤ 분석·패턴 학습 엔진</strong>으로 접어뒀습니다. 1등 확률(1/8,145,060)은 어떤 분석으로도 변하지 않습니다.
+            {' '}바로 아래 <strong>강수·기대수(구간별)</strong>가 메인입니다. 1:1 전수비교는 <strong>②</strong>, 당첨 대조는 <strong>③</strong>, 심층역산·교차검증·통합신호는 <strong>⑤ 학습 엔진</strong>에 있습니다. 1등 확률(1/8,145,060)은 변하지 않습니다.
           </Typography>
         </Paper>
       )}
@@ -5269,24 +5274,8 @@ export default function SemiAutoComparePanel({
               )}
         </>
       )}
-      </Paper>
 
-      {/* ════════ ⑤ 분석·패턴 학습 엔진 (기본 접힘) ════════ */}
-      <Box>
-        <Button
-          fullWidth
-          variant="outlined"
-          color="inherit"
-          onClick={() => setShowPredictionDetail((v) => !v)}
-          sx={{ justifyContent: 'space-between', textTransform: 'none', mb: 1 }}
-          endIcon={<span>{showPredictionDetail ? '▲' : '▼'}</span>}
-        >
-          ⑤ 분석·패턴 학습 엔진 {showPredictionDetail ? '접기' : '펼치기'}
-          （평행회차 · 당첨예상 · 교차/심층역산 · 통합신호 · Feature）
-        </Button>
-      {showPredictionDetail && (
-        <Stack spacing={1.5}>
-          {engineExtraSlot}
+      {/* 이번회차 종합 예측 — ④ 추천 보조(학습엔진에서 승격) */}
       {/* 🎯 이번회차 종합 예측 대시보드 */}
       {currentRoundForecast && (
         <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'primary.main', borderWidth: 2 }}>
@@ -5351,6 +5340,24 @@ export default function SemiAutoComparePanel({
           </Typography>
         </Paper>
       )}
+      </Paper>
+
+      {/* ════════ ⑤ 분석·패턴 학습 엔진 (기본 접힘) ════════ */}
+      <Box>
+        <Button
+          fullWidth
+          variant="outlined"
+          color="inherit"
+          onClick={() => setShowPredictionDetail((v) => !v)}
+          sx={{ justifyContent: 'space-between', textTransform: 'none', mb: 1 }}
+          endIcon={<span>{showPredictionDetail ? '▲' : '▼'}</span>}
+        >
+          ⑤ 분석·패턴 학습 엔진 {showPredictionDetail ? '접기' : '펼치기'}
+          （평행회차 · 당첨예상 · 교차/심층역산 · 통합신호 · Feature）
+        </Button>
+      {showPredictionDetail && (
+        <Stack spacing={1.5}>
+          {engineExtraSlot}
 
       {/* 당첨 예상·심층역산 등 — §⑤ 학습 엔진 본문 */}
       {activeComparison && (

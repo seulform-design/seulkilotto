@@ -7,11 +7,13 @@ import {
   Divider,
   Paper,
   Stack,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material';
 import { useQueries } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useVenusMachineHeight } from '../hooks/useVenusMachineHeight';
 import ComboActions from '../components/ComboActions';
 import SharingBadge from '../components/SharingBadge';
@@ -21,17 +23,35 @@ import MetricChips from '../components/MetricChips';
 import WalkForwardPanel from '../components/WalkForwardPanel';
 import {
   buildComposite,
+  extractPhotoExpectedNumbers,
   simulateDrawMachine,
   GRADE_COLORS,
   GRADE_LABELS,
   SOURCE_LABELS,
   type ConsensusGrade,
+  type DrawMachineMode,
+  type PhotoExpectedNumber,
 } from '../utils/compositeAnalysis';
+import { loadDetailForecast } from '../utils/detailForecastBridge';
 import { v1Api } from '../api/v1Api';
+
+const DRAW_MODE_LABELS: Record<DrawMachineMode, string> = {
+  consensus: '합의 가중',
+  'photo-expected': '지지18 가중',
+  'photo-pool': '지지18 풀',
+};
+
+const DETAIL_SOURCE_LABELS: Record<string, string> = {
+  forecast: '상세·종합예측',
+  predicted: '상세·당첨예상',
+  hero: '상세·확장18커버리지',
+  lines: '양쪽지지 top-18',
+  merged: '양쪽지지+통합신호',
+};
 
 const HONESTY_HEADER =
   '🟡 정직성 선언: 3축(용지 1:1 전수비교·평행회차·미출수) 합의도 당첨 확률(1/8,145,060)을 변경하지 않습니다. ' +
-  '물리 추첨기는 균등 물리이며(시각용), 합의 점수가 높은 6-튜플도 균등 무작위와 동일한 확률입니다.';
+  '물리 추첨기의 용지 예상 가중은 체험용이며, 실제 당첨 확률(1/8,145,060)은 변하지 않습니다.';
 
 const HONESTY_FOOTER =
   '※ 위 5게임은 EPO 필터(합/AC/홀짝/연속)를 통과한 조합이며, 합의 등급을 가중치로 사용합니다. ' +
@@ -68,19 +88,39 @@ export default function ComposedAnalysisPage() {
         },
         staleTime: 60_000,
       },
+      {
+        // 상세분석 종합예측과 같은 통합신호 — 브리지 스냅샷 없을 때 재합성용
+        queryKey: ['composite', 'prediction-signals'],
+        queryFn: async () => {
+          try {
+            return await v1Api.getPredictionSignals('current_round');
+          } catch {
+            return null;
+          }
+        },
+        staleTime: 60_000,
+      },
     ],
   });
 
-  const [machineQuery, parallelQuery, temperatureQuery, photoQuery] = queries;
+  const [machineQuery, parallelQuery, temperatureQuery, photoQuery, signalsQuery] = queries;
 
   const isLoading = queries.some((q) => q.isLoading);
   const isError = queries.every((q) => q.isError);
 
-  // 용지 1:1 소스는 이번회차(current_round) 데이터를 우선하되, 없고 복기(review) 데이터가
-  // 있으면 그걸 쓴다(예전엔 current_round 고정이라 복기만 있는 사용자는 소스가 침묵 누락).
+  // 용지 축: strong_candidates 가 null 이어도 저장 줄이 있으면 이번회차로 본다.
   const photoIntentUsed: 'review' | 'current_round' = useMemo(() => {
-    const cr = photoQuery.data?.by_intent?.current_round?.final_predictions?.strong_candidates?.length ?? 0;
-    const rv = photoQuery.data?.by_intent?.review?.final_predictions?.strong_candidates?.length ?? 0;
+    const sliceScore = (intent: 'current_round' | 'review') => {
+      const s = photoQuery.data?.by_intent?.[intent];
+      const strong = Array.isArray(s?.final_predictions?.strong_candidates)
+        ? s!.final_predictions!.strong_candidates.length
+        : 0;
+      const lines =
+        (s?.saved_auto_lines?.length ?? 0) + (s?.saved_semi_lines?.length ?? 0);
+      return strong + (lines > 0 ? lines : 0);
+    };
+    const cr = sliceScore('current_round');
+    const rv = sliceScore('review');
     return cr === 0 && rv > 0 ? 'review' : 'current_round';
   }, [photoQuery.data]);
 
@@ -97,11 +137,125 @@ export default function ComposedAnalysisPage() {
   );
 
   const [machineSeed, setMachineSeed] = useState(1);
+  const [drawMode, setDrawMode] = useState<DrawMachineMode>('photo-expected');
+  const [venusUseFavor, setVenusUseFavor] = useState(true);
+  const [bridgeTick, setBridgeTick] = useState(0);
   const venusHeight = useVenusMachineHeight();
+
+  // 용지분석 탭에서 상세분석을 본 뒤 돌아오면 스냅샷을 다시 읽는다.
+  useEffect(() => {
+    const bump = () => setBridgeTick((t) => t + 1);
+    window.addEventListener('focus', bump);
+    document.addEventListener('visibilitychange', bump);
+    return () => {
+      window.removeEventListener('focus', bump);
+      document.removeEventListener('visibilitychange', bump);
+    };
+  }, []);
+
+  // ① 용지분석 [상세 분석] 스냅샷(동일 브라우저) → ② 줄빈도+통합신호+평행 재합성
+  const detailBridgeRaw = useMemo(() => loadDetailForecast('current_round'), [
+    photoQuery.dataUpdatedAt,
+    signalsQuery.dataUpdatedAt,
+    bridgeTick,
+  ]);
+  // 지난 회차 스냅샷이 남아 있으면 폐기(롤오버 직후·미정리 대비)
+  const detailBridge = useMemo(() => {
+    if (!detailBridgeRaw) return null;
+    const next = machineQuery.data?.next_round;
+    if (next != null && detailBridgeRaw.round != null && detailBridgeRaw.round !== next) {
+      return null;
+    }
+    return detailBridgeRaw;
+  }, [detailBridgeRaw, machineQuery.data?.next_round]);
+
+  const photoExpected = useMemo((): (PhotoExpectedNumber & { detailSource?: string })[] => {
+    // ① 상세분석 스냅샷 — expand18(커버리지) 우선
+    if (detailBridge && detailBridge.ranked.length >= 6) {
+      const pool =
+        detailBridge.expand18?.length >= 6
+          ? detailBridge.expand18
+          : detailBridge.ranked.map((r) => r.number);
+      const confOf = new Map(detailBridge.ranked.map((r) => [r.number, r.confidence]));
+      return pool.slice(0, 18).map((n, i) => ({
+        number: n,
+        rank: i + 1,
+        score: confOf.get(n) ?? Math.max(1, 18 - i),
+        confidence: confOf.get(n) ?? Math.round(((18 - i) / 18) * 100),
+        auto: 0,
+        semi: 0,
+        support: 0,
+        source: 'lines' as const,
+        detailSource: detailBridge.primarySource,
+      }));
+    }
+
+    // ② 폴백: 양쪽 지지(고정수 제외) top-18 + 통합신호·평행 보조
+    const score: Record<number, number> = {};
+    const add = (n: number, w: number) => {
+      if (!Number.isInteger(n) || n < 1 || n > 45 || w <= 0) return;
+      score[n] = (score[n] ?? 0) + w;
+    };
+    const fromLines = extractPhotoExpectedNumbers(photoQuery.data ?? null, photoIntentUsed, 18);
+    fromLines.forEach((p, i) => add(p.number, Math.max(4, 16 - i)));
+    (signalsQuery.data?.strong_candidates ?? []).forEach((n, i) => add(n, Math.max(1.5, 6 - i * 0.35)));
+    (parallelQuery.data?.parallel_strong ?? []).forEach((n, i) => add(n, Math.max(1, 4 - i * 0.3)));
+    (parallelQuery.data?.parallel_expected ?? []).forEach((n, i) => add(n, Math.max(0.5, 2.5 - i * 0.2)));
+
+    const ranked = Object.keys(score)
+      .map(Number)
+      .map((n) => ({ number: n, score: score[n] }))
+      .sort((a, b) => b.score - a.score || a.number - b.number)
+      .slice(0, 18);
+    if (ranked.length >= 6) {
+      const maxScore = ranked[0].score || 1;
+      const lineMap = new Map(fromLines.map((p) => [p.number, p]));
+      return ranked.map((r, i) => ({
+        number: r.number,
+        rank: i + 1,
+        score: r.score,
+        confidence: Math.round((r.score / maxScore) * 100),
+        auto: lineMap.get(r.number)?.auto ?? 0,
+        semi: lineMap.get(r.number)?.semi ?? 0,
+        support: lineMap.get(r.number)?.support ?? 0,
+        source: (lineMap.has(r.number) ? 'lines' : 'strong_candidates') as PhotoExpectedNumber['source'],
+        detailSource: 'merged',
+        fixedExcluded: fromLines[0]?.fixedExcluded,
+      }));
+    }
+    return fromLines.map((p) => ({ ...p, detailSource: 'lines' }));
+  }, [
+    detailBridge,
+    photoQuery.data,
+    photoIntentUsed,
+    signalsQuery.data,
+    parallelQuery.data,
+  ]);
+
+  const photoExpectedNums = useMemo(() => photoExpected.map((p) => p.number), [photoExpected]);
+  const detailSourceKey = photoExpected[0]?.detailSource ?? 'lines';
+  const targetRound = machineQuery.data?.next_round ?? detailBridge?.round ?? null;
+  const machineId = machineQuery.data?.machine_id ?? 1;
+
+  const effectiveDrawMode: DrawMachineMode =
+    photoExpectedNums.length === 0 && drawMode !== 'consensus' ? 'consensus' : drawMode;
+
   const drawMachine = useMemo(
-    () => simulateDrawMachine(composite, machineQuery.data ?? null, { iterations: 6000, seed: machineSeed }),
-    [composite, machineQuery.data, machineSeed]
+    () =>
+      simulateDrawMachine(composite, machineQuery.data ?? null, {
+        iterations: 6000,
+        seed: machineSeed,
+        mode: effectiveDrawMode,
+        photoExpected: photoExpectedNums,
+      }),
+    [composite, machineQuery.data, machineSeed, effectiveDrawMode, photoExpectedNums]
   );
+
+  // favor = top-18 커버리지 전체(고지지 top-6/12 집중 완화)
+  const venusFavorQuery =
+    venusUseFavor && photoExpectedNums.length >= 6
+      ? `&favor=${photoExpectedNums.slice(0, 18).join(',')}`
+      : '';
 
   const handleRefresh = () => {
     queries.forEach((q) => q.refetch());
@@ -126,7 +280,7 @@ export default function ComposedAnalysisPage() {
         </Button>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        용지 1:1 전수비교 + 평행회차(강수·기대) + 미출수(강수·기대) — 3축 합의 + 🎰 1호기 학습 추첨기
+        용지 1:1 전수비교 + 평행회차(강수·기대) + 미출수(강수·기대) — 3축 합의 + 🎰 용지 예상번호 추첨
       </Typography>
 
       <Alert severity="warning" sx={{ mb: 2 }} icon={false}>
@@ -255,21 +409,105 @@ export default function ComposedAnalysisPage() {
         )}
       </Paper>
 
-      {/* 🎡 물리 추첨기(예상 호기) — 실제 추첨 재현(균등 물리). 학습 예상은 아래. */}
+      {/* 🎯 상세분석 예상번호 → 1호기 물리/학습 추첨기 연동 소스 */}
+      <Paper sx={{ p: 2, mb: 2, border: '1px solid', borderColor: photoExpected.length ? 'success.main' : 'divider' }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+          <Typography variant="subtitle1" fontWeight={700}>
+            🎯 {targetRound ?? '?'}회 상세분석 당첨예상번호 → {machineId}호기 추첨 소스
+          </Typography>
+          {photoExpected.length > 0 && (
+            <Chip
+              size="small"
+              color={detailBridge ? 'success' : 'warning'}
+              label={DETAIL_SOURCE_LABELS[detailSourceKey] ?? detailSourceKey}
+            />
+          )}
+        </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          복기 진단: <strong>양쪽 지지 top-18 커버리지</strong>(반자동 고정수 제외)를 추첨 풀로 씁니다.
+          top-6 집중·자동 빈도는 구조적으로 약합니다.
+          {detailBridge
+            ? ' (상세분석 스냅샷 동기화됨)'
+            : ' (상세분석 미방문 → 양쪽 지지+통합신호 재합성)'}{' '}
+          아래 {machineId}호기에서 가중·풀로 뽑을 수 있습니다.
+        </Typography>
+        {photoExpected.length === 0 && !photoQuery.isLoading && (
+          <Alert severity="info" sx={{ py: 0.5 }}>
+            예상번호가 없습니다. 용지분석 → 이번회차에서 자동/반자동을 등록·저장한 뒤{' '}
+            <strong>[상세 분석 모두 보기]</strong>를 한 번 열어 주세요.
+          </Alert>
+        )}
+        {photoExpected.length > 0 && (
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="flex-start">
+            {photoExpected.slice(0, 18).map((p) => (
+              <Box key={`pe-${p.number}`} sx={{ textAlign: 'center', minWidth: 36 }}>
+                <LottoBall number={p.number} size={34} />
+                <Typography variant="caption" sx={{ display: 'block', fontSize: 9, color: 'text.disabled', lineHeight: 1.1 }}>
+                  #{p.rank} · {p.confidence}%
+                </Typography>
+              </Box>
+            ))}
+            {photoExpectedNums.length >= 6 && (
+              <ComboActions
+                numbers={
+                  detailBridge?.core6?.length === 6
+                    ? detailBridge.core6
+                    : photoExpectedNums.slice(0, 6)
+                }
+                source="unknown"
+                label={`${targetRound ?? '?'}회 커버리지 핵심6`}
+              />
+            )}
+          </Stack>
+        )}
+        {!detailBridge && photoExpected.length > 0 && (
+          <Alert severity="warning" sx={{ mt: 1, py: 0.5 }} icon={false}>
+            상세분석과 순위가 다를 수 있습니다. 용지분석 → 이번회차에서{' '}
+            <strong>[상세 분석 모두 보기]</strong>를 연 뒤 이 페이지를 새로고침하면 동일 데이터로 동기화됩니다.
+          </Alert>
+        )}
+      </Paper>
+
+      {/* 🎡 물리 추첨기 — 1234회 예상 1호기 + 상세예상 favor */}
       {drawMachine && (
         <Paper sx={{ p: 2, mb: 2 }}>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
-            🎡 물리 추첨기 — {drawMachine.nextRound ?? '?'}회 예상 {drawMachine.machineId ?? 1}호기
-          </Typography>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+            <Typography variant="subtitle1" fontWeight={700}>
+              🎡 물리 추첨기 — {targetRound ?? drawMachine.nextRound ?? '?'}회 예상 {machineId}호기
+            </Typography>
+            <Tooltip title={photoExpectedNums.length < 6 ? '상세예상번호 6개 이상 필요' : '상세분석 예상번호를 물리적으로 더 잘 뜨게 함'}>
+              <span>
+                <Button
+                  size="small"
+                  variant={venusUseFavor && photoExpectedNums.length >= 6 ? 'contained' : 'outlined'}
+                  color="warning"
+                  disabled={photoExpectedNums.length < 6}
+                  onClick={() => setVenusUseFavor((v) => !v)}
+                >
+                  {venusUseFavor && photoExpectedNums.length >= 6 ? '상세예상 가중 ON' : '상세예상 가중 OFF'}
+                </Button>
+              </span>
+            </Tooltip>
+          </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            동행복권 추첨기(Editec Venus VIII) 물리 재현 — {drawMachine.machineId ?? 1}호기로 프리셋됨.
-            실제 추첨은 모든 공이 균등하므로 이 물리 추첨은 <strong>무작위 재현(시각용)</strong>이고,
-            <strong> 용지분석 학습 예상은 바로 아래 🎰 학습 추첨</strong>에서 확인하세요.
+            동행복권 추첨기(Editec Venus VIII) — <strong>{machineId}호기</strong> 프리셋
+            {machineQuery.data?.machine_source === 'estimated' ? ' (순환 추정)' : ''}.
+            {venusUseFavor && photoExpectedNums.length >= 6 ? (
+              <>
+                {' '}양쪽 지지 <strong>top-18 커버리지</strong>({photoExpectedNums.slice(0, 6).join(', ')}…)에{' '}
+                <strong>상승·흡입 가중</strong>을 적용합니다(체험용). 실제 당첨 확률은 변하지 않습니다.
+              </>
+            ) : (
+              <>
+                {' '}균등 물리입니다. 상세예상으로 뽑으려면 가중을 켜세요.
+              </>
+            )}
           </Typography>
           <Box sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider', bgcolor: '#111622' }}>
             <iframe
-              title="종합분석 물리 추첨기"
-              src={`/venus-machine.html?v=21&m=${drawMachine.machineId ?? 1}`}
+              key={`venus-${machineId}-${venusFavorQuery}-${detailSourceKey}`}
+              title={`${targetRound ?? '?'}회 ${machineId}호기 물리 추첨기`}
+              src={`/venus-machine.html?v=24&m=${machineId}${venusFavorQuery}`}
               style={{ display: 'block', width: '100%', height: venusHeight, border: 0 }}
               scrolling="no"
             />
@@ -277,7 +515,7 @@ export default function ComposedAnalysisPage() {
           {drawMachine.representative.length === 6 && (
             <Box sx={{ mt: 1, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
               <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                🎯 이 회차 용지분석 학습 예상 (물리 추첨과 대조용) — {drawMachine.machineId ?? 1}호기
+                🎯 학습 추첨 대표 조합 ({DRAW_MODE_LABELS[drawMachine.mode]}) — 물리 추첨과 대조용
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
                 {drawMachine.representative.map((n) => (
@@ -295,21 +533,54 @@ export default function ComposedAnalysisPage() {
         <Paper sx={{ p: 2, mb: 2, border: '1px solid', borderColor: 'warning.main' }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant="subtitle1" fontWeight={700}>
-              🎰 {drawMachine.machineId ?? '1'}호기 학습 추첨 (용지분석 가중)
+              🎰 {drawMachine.machineId ?? '1'}호기 학습 추첨
             </Typography>
             <Button size="small" variant="outlined" onClick={() => setMachineSeed((s) => s + 1)}>
               ↻ 다시 추첨
             </Button>
           </Stack>
+
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={effectiveDrawMode}
+            onChange={(_, v: DrawMachineMode | null) => {
+              if (v) setDrawMode(v);
+            }}
+            sx={{ mb: 1, flexWrap: 'wrap' }}
+          >
+            <ToggleButton value="consensus">합의 가중</ToggleButton>
+            <ToggleButton value="photo-expected" disabled={photoExpectedNums.length === 0}>
+              지지18 가중
+            </ToggleButton>
+            <ToggleButton value="photo-pool" disabled={photoExpectedNums.length < 6}>
+              지지18 풀만
+            </ToggleButton>
+          </ToggleButtonGroup>
+
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            <strong>용지 1:1 전수비교 · 평행회차(강수/기대) · 미출수(강수/기대)</strong>를 <strong>공 무게</strong>로 반영해{' '}
-            {drawMachine.iterations.toLocaleString()}회 몬테카를로 추첨한 결과입니다.{' '}
+            {effectiveDrawMode === 'photo-pool' ? (
+              <>
+                <strong>상세분석 예상번호 {photoExpectedNums.length}개 풀</strong>
+                ({DETAIL_SOURCE_LABELS[detailSourceKey]})에서만 6개를 뽑습니다.
+              </>
+            ) : effectiveDrawMode === 'photo-expected' ? (
+              <>
+                <strong>상세분석 예상번호</strong>({DETAIL_SOURCE_LABELS[detailSourceKey]})를 공 무게로
+                강하게 반영해 {machineId}호기로 추첨합니다.
+              </>
+            ) : (
+              <>
+                <strong>용지 1:1 · 평행회차 · 미출수</strong> 합의를 공 무게로 반영합니다.
+              </>
+            )}{' '}
+            {drawMachine.iterations.toLocaleString()}회 몬테카를로 ·{' '}
             <strong>
-              {drawMachine.nextRound ?? '?'}회
+              {targetRound ?? drawMachine.nextRound ?? '?'}회
               {drawMachine.drawDate ? ` (${drawMachine.drawDate})` : ''}
-              {drawMachine.machineId ? ` · 예상 ${drawMachine.machineId}호기${drawMachine.machineSource === 'estimated' ? '(추정)' : ''}` : ''}
-            </strong>{' '}
-            기준. 무게가 큰 번호가 더 자주 뽑히지만, 실제 추첨은 균등이라 확률은 변하지 않습니다.
+              {` · 예상 ${machineId}호기${machineQuery.data?.machine_source === 'estimated' ? '(추정)' : ''}`}
+            </strong>
+            . 실제 당첨 확률은 변하지 않습니다.
           </Typography>
 
           <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>

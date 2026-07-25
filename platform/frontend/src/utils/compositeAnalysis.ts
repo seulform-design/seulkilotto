@@ -80,7 +80,8 @@ const SOURCE_IDS = {
   photoExcluded: 'photo-excluded',
 } as const;
 
-const PHOTO_TOP_COUNT = 10;
+/** 용지 축·예상번호 풀 — 복기 검증상 top-6 집중은 실패, top-18 커버리지가 유효 */
+const PHOTO_TOP_COUNT = 18;
 
 function emptyConsensus(): Record<number, ConsensusNumber> {
   const out: Record<number, ConsensusNumber> = {};
@@ -261,15 +262,23 @@ export function buildComposite(
   }
 
   // ── 3) 용지 1:1 자동↔반자동 전수비교 (강한 후보) — intent 슬라이스 우선 ──
-  const photoStrong =
+  // 프로덕션에서 final_predictions.strong_candidates 가 null 인 경우가 있음
+  // (줄 데이터 499/488는 존재). 그때는 저장 줄 빈도 TOP 로 용지 축을 복구한다.
+  const rawPhotoStrong =
     photo?.by_intent?.[photoIntent]?.final_predictions?.strong_candidates ??
     photo?.by_intent?.[photoIntent]?.accumulated_combo_patterns?.strong_candidates ??
     photo?.final_predictions?.strong_candidates ??
-    [];
-  const photoExcluded =
+    null;
+  const photoStrong = Array.isArray(rawPhotoStrong) && rawPhotoStrong.length > 0
+    ? rawPhotoStrong.filter((n) => Number.isInteger(n) && n >= 1 && n <= 45)
+    : extractPhotoExpectedNumbers(photo, photoIntent, PHOTO_TOP_COUNT).map((p) => p.number);
+  const rawPhotoExcluded =
     photo?.by_intent?.[photoIntent]?.final_predictions?.excluded_candidates ??
     photo?.final_predictions?.excluded_candidates ??
-    [];
+    null;
+  const photoExcluded = Array.isArray(rawPhotoExcluded)
+    ? rawPhotoExcluded.filter((n) => Number.isInteger(n) && n >= 1 && n <= 45)
+    : [];
 
   if (photoStrong.length) {
     sourcesAvailable.oneToOne = true;
@@ -365,6 +374,132 @@ export interface DrawMachineResult {
   ranked: DrawMachineNumber[];
   representative: number[];
   samples: number[][];
+  /** 추첨 가중 모드 */
+  mode: DrawMachineMode;
+}
+
+/** 학습 추첨기 모드 — consensus=3축 합의, photo-expected=용지 예상 가중, photo-pool=예상번호 풀에서만 */
+export type DrawMachineMode = 'consensus' | 'photo-expected' | 'photo-pool';
+
+export interface PhotoExpectedNumber {
+  number: number;
+  rank: number;
+  score: number;
+  /** 0~100, 1위 대비 상대 점수 */
+  confidence: number;
+  auto: number;
+  semi: number;
+  /** 양쪽 지지 = min(auto, semi_fixed_excluded) */
+  support: number;
+  source: 'lines' | 'strong_candidates';
+  fixedExcluded?: boolean;
+}
+
+/**
+ * 반자동 고정수 감지 — 백엔드 `_detect_fixed_semi` / SemiAutoComparePanel.fixedSemiNumbers 와 동일.
+ * 반자동 줄 ≥minLines 이고 frac(기본 50%) 이상 반복 등장하는 번호.
+ */
+export function detectFixedSemiNumbers(
+  semiLines: number[][],
+  frac = 0.5,
+  minLines = 10,
+): Set<number> {
+  const n = semiLines.length;
+  if (n < minLines) return new Set();
+  const freq: Record<number, number> = {};
+  for (const line of semiLines) {
+    if (!Array.isArray(line)) continue;
+    for (const v of new Set(line)) {
+      if (Number.isInteger(v) && v >= 1 && v <= 45) freq[v] = (freq[v] ?? 0) + 1;
+    }
+  }
+  return new Set(
+    Object.entries(freq)
+      .filter(([, c]) => c / n >= frac)
+      .map(([v]) => Number(v)),
+  );
+}
+
+/**
+ * 이번회차(또는 지정 intent) 용지분석에서 데이터 기반 당첨예상번호 추출.
+ *
+ * 복기 검증 진단:
+ *   - 고지지 최상위(가장 많이 산 번호) ≠ 당첨 → top-6 집중 실패
+ *   - 당첨은 중간 지지대 → top-18 커버리지가 유효
+ *   - '자동 빈도' 최악, '양쪽 지지' 최선
+ *   - 반자동 고정수는 거의 모든 줄에 반복돼 지지 신호를 왜곡 → 제외
+ *
+ * 우선순위: 양쪽 지지(min, 고정수 제외) 랭킹 → strong_candidates 폴백.
+ */
+export function extractPhotoExpectedNumbers(
+  photo: PhotoAnalysisAccumulated | null | undefined,
+  intent: 'review' | 'current_round' = 'current_round',
+  topN = 18,
+): PhotoExpectedNumber[] {
+  if (!photo) return [];
+  const slice = photo.by_intent?.[intent];
+  const autoLines = (slice?.saved_auto_lines ?? []).filter(Array.isArray) as number[][];
+  const semiLines = (slice?.saved_semi_lines ?? []).filter(Array.isArray) as number[][];
+
+  const autoFreq: Record<number, number> = {};
+  const semiFreq: Record<number, number> = {};
+  for (const line of autoLines) {
+    for (const n of new Set(line)) {
+      if (Number.isInteger(n) && n >= 1 && n <= 45) autoFreq[n] = (autoFreq[n] ?? 0) + 1;
+    }
+  }
+  for (const line of semiLines) {
+    for (const n of new Set(line)) {
+      if (Number.isInteger(n) && n >= 1 && n <= 45) semiFreq[n] = (semiFreq[n] ?? 0) + 1;
+    }
+  }
+
+  const fixed = detectFixedSemiNumbers(semiLines);
+  const hasLines = Object.keys(autoFreq).length > 0 && Object.keys(semiFreq).length > 0;
+  if (hasLines) {
+    const cand = new Set<number>([
+      ...Object.keys(autoFreq).map(Number),
+      ...Object.keys(semiFreq).map(Number),
+    ]);
+    const ranked = [...cand]
+      .filter((n) => !fixed.has(n)) // 🔒 반자동 고정수 — 발견 신호에서 제외
+      .map((n) => {
+        const a = autoFreq[n] ?? 0;
+        const s = semiFreq[n] ?? 0;
+        // 양쪽 지지 = min(자동줄수, 반자동줄수) — review_verification.support 와 동일
+        const support = Math.min(a, s);
+        // 동률 깨기: log×log 보조(한쪽만 강하면 support=0 이라 이미 탈락)
+        const score = support > 0 ? support * 100 + Math.log2(a + 1) * Math.log2(s + 1) : 0;
+        return { number: n, score, auto: a, semi: s, support };
+      })
+      .filter((r) => r.score > 0)
+      .sort((a, b) => b.score - a.score || a.number - b.number)
+      .slice(0, topN);
+    const maxScore = ranked[0]?.score ?? 1;
+    return ranked.map((r, i) => ({
+      ...r,
+      rank: i + 1,
+      confidence: Math.round((r.score / maxScore) * 100),
+      source: 'lines' as const,
+      fixedExcluded: fixed.size > 0,
+    }));
+  }
+
+  const strong =
+    slice?.final_predictions?.strong_candidates ??
+    slice?.accumulated_combo_patterns?.strong_candidates ??
+    photo.final_predictions?.strong_candidates ??
+    [];
+  return strong.slice(0, topN).map((n, i) => ({
+    number: n,
+    rank: i + 1,
+    score: Math.max(1, topN - i),
+    confidence: Math.round(((topN - i) / topN) * 100),
+    auto: 0,
+    semi: 0,
+    support: 0,
+    source: 'strong_candidates' as const,
+  }));
 }
 
 function weightedDrawWithoutReplacement(weight: number[], pick: number, rand: () => number): number[] {
@@ -407,10 +542,29 @@ function passesBasicDraw(nums: number[]): boolean {
 export function simulateDrawMachine(
   composite: CompositeAnalysisResult,
   machine: RoundRecommendResponse | null,
-  opts?: { iterations?: number; seed?: number },
+  opts?: {
+    iterations?: number;
+    seed?: number;
+    /** 기본 consensus. photo-* 모드는 photoExpected 필요 */
+    mode?: DrawMachineMode;
+    /** 순위가 앞일수록 무게↑ (extractPhotoExpectedNumbers 결과의 number 배열) */
+    photoExpected?: number[];
+  },
 ): DrawMachineResult | null {
   if (!composite) return null;
   const iterations = opts?.iterations ?? 6000;
+  let mode: DrawMachineMode = opts?.mode ?? 'consensus';
+  const photoExpected = (opts?.photoExpected ?? []).filter(
+    (n) => Number.isInteger(n) && n >= 1 && n <= 45,
+  );
+  // 풀 모드는 후보 6개 미만일 때만 — 부족하면 용지 가중으로 폴백.
+  if (mode === 'photo-pool' && photoExpected.length < 6) {
+    mode = photoExpected.length > 0 ? 'photo-expected' : 'consensus';
+  }
+  if ((mode === 'photo-expected' || mode === 'photo-pool') && photoExpected.length === 0) {
+    mode = 'consensus';
+  }
+
   // 시드 기반 PRNG(mulberry32) — 재현 가능. 버튼으로 seed 바꿔 다른 표본 추첨.
   let a = (opts?.seed ?? 1) >>> 0;
   const rand = () => {
@@ -419,22 +573,44 @@ export function simulateDrawMachine(
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-  // 1호기 학습 추첨기 공 무게 — 세 축을 강수>기대 로 반영. 용지 1:1 최우선.
+
   const hot = new Set((machine?.stats?.hot_top5 ?? []).map((h) => h.number));
   const weight: number[] = new Array(46).fill(1);
-  for (let n = 1; n <= 45; n += 1) {
-    const item = composite.perNumber[n];
-    const has = (id: string) => item.sources.includes(id);
-    let wv = 1;
-    if (has('photo-1to1')) wv += 3.5; // 용지 1:1 전수비교 (핵심)
-    if (has('parallel-strong')) wv += 2.5;
-    if (has('parallel-expected')) wv += 1.2;
-    if (has('missing-strong')) wv += 2.0;
-    if (has('missing-expected')) wv += 1.0;
-    if (hot.has(n)) wv += 1.0; // 1호기 자체 고빈도(엔진 성향)
-    if (item.excluded) wv = 0.2; // 용지 배제 — 거의 안 뽑힘
-    weight[n] = wv;
+  const rankOf = new Map(photoExpected.map((n, i) => [n, i]));
+
+  if (mode === 'photo-pool') {
+    // 예상번호(top-18 커버리지) 풀에서만 추출 — 순위 기울기를 완만히 해 top-6 집중을 완화.
+    for (let n = 1; n <= 45; n += 1) weight[n] = 0.0001;
+    photoExpected.forEach((n, i) => {
+      weight[n] = Math.max(1.4, 7.5 - i * 0.22);
+    });
+  } else if (mode === 'photo-expected') {
+    // 용지 예상(양쪽 지지 top-18)을 가중 — 중간 지지대도 살아남도록 완만한 기울기.
+    for (let n = 1; n <= 45; n += 1) {
+      const item = composite.perNumber[n];
+      let wv = 0.35;
+      const ri = rankOf.get(n);
+      if (ri !== undefined) wv = Math.max(2.2, 9 - ri * 0.28);
+      if (item.excluded) wv *= 0.15;
+      weight[n] = wv;
+    }
+  } else {
+    // 합의 가중 — 세 축을 강수>기대 로 반영. 용지 1:1 최우선.
+    for (let n = 1; n <= 45; n += 1) {
+      const item = composite.perNumber[n];
+      const has = (id: string) => item.sources.includes(id);
+      let wv = 1;
+      if (has('photo-1to1')) wv += 3.5;
+      if (has('parallel-strong')) wv += 2.5;
+      if (has('parallel-expected')) wv += 1.2;
+      if (has('missing-strong')) wv += 2.0;
+      if (has('missing-expected')) wv += 1.0;
+      if (hot.has(n)) wv += 1.0;
+      if (item.excluded) wv = 0.2;
+      weight[n] = wv;
+    }
   }
+
   const count = new Array(46).fill(0);
   const samples: number[][] = [];
   for (let it = 0; it < iterations; it += 1) {
@@ -442,9 +618,11 @@ export function simulateDrawMachine(
     for (const n of drawn) count[n] += 1;
     if (samples.length < 5 && passesBasicDraw(drawn)) samples.push([...drawn].sort((x, y) => x - y));
   }
-  const baseline = (iterations * 6) / 45;
+  const poolSize = mode === 'photo-pool' ? Math.max(6, photoExpected.length) : 45;
+  const baseline = (iterations * 6) / poolSize;
   const ranked: DrawMachineNumber[] = [];
   for (let n = 1; n <= 45; n += 1) {
+    if (mode === 'photo-pool' && !rankOf.has(n) && count[n] === 0) continue;
     ranked.push({
       number: n,
       count: count[n],
@@ -454,7 +632,7 @@ export function simulateDrawMachine(
     });
   }
   ranked.sort((x, y) => y.count - x.count || x.number - y.number);
-  // 대표 조합 — 상위 빈도에서 구간(10단위) 최대 2개 균형으로 6개, 기본 필터 통과 우선.
+  // 대표 조합 — 상위 빈도에서 구간(10단위) 최대 2개 균형으로 6개.
   const rep: number[] = [];
   const dec: Record<number, number> = {};
   for (const r of ranked) {
@@ -478,6 +656,7 @@ export function simulateDrawMachine(
     ranked,
     representative: rep,
     samples,
+    mode,
   };
 }
 

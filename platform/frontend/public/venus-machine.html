@@ -30,6 +30,8 @@
   #sndBtn, #dbgBtn { font-size: 16px; padding: 10px 12px; }
   #status { color: #cfe0f2; font-size: 13.5px; font-weight: 700; height: 18px; text-align: center; }
   #timer { color: #7c8798; font-size: 11.5px; height: 14px; }
+  #favorBadge { display:none; color:#ffe08a; font-size:11.5px; font-weight:700; text-align:center;
+    background:rgba(232,160,40,0.14); border:1px solid rgba(232,160,40,0.35); border-radius:8px; padding:4px 10px; max-width:440px; }
 </style>
 </head>
 <body>
@@ -40,6 +42,7 @@
     <button class="mbtn m3 active" data-m="3">3호기</button>
   </div>
   <canvas id="cv"></canvas>
+  <div id="favorBadge"></div>
   <div id="status">추첨기를 선택하고 [추첨 시작]을 누르세요</div>
   <div id="timer"></div>
   <div id="controls">
@@ -72,6 +75,29 @@
       jet:0.108, jetW:0.24, turb:0.009, spin:1.05, drawInterval:4.8, mixSec:6, waitSec:2 },
   };
   const TOTAL_DRAW = 7;
+
+  // 종합분석 등에서 ?favor=1,5,12… 로 용지 예상번호를 넘기면 해당 공의 상승·흡입을 가중.
+  // (체험용 — 실제 로또는 균등. density↓ + lift/air force↑)
+  const FAVOR = (() => {
+    try {
+      const raw = new URLSearchParams(location.search).get('favor') || '';
+      const set = new Set();
+      raw.split(/[,_\s]+/).forEach((s) => {
+        const n = parseInt(s, 10);
+        if (n >= 1 && n <= 45) set.add(n);
+      });
+      return set;
+    } catch (e) { return new Set(); }
+  })();
+  const favorBoost = (n) => (FAVOR.has(n) ? 2.35 : 1);
+  const favorDensMul = (n) => (FAVOR.has(n) ? 0.72 : 1);
+  (function showFavorBadge(){
+    const el = document.getElementById('favorBadge');
+    if (!el || FAVOR.size === 0) return;
+    const list = [...FAVOR].sort((a,b)=>a-b);
+    el.style.display = 'block';
+    el.textContent = '양쪽지지 top-' + list.length + ' 가중 ON · ' + list.slice(0,18).join(', ') + (list.length>18?'…':'');
+  })();
 
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
@@ -114,23 +140,23 @@
       const per=Math.max(6,Math.floor((this.r*1.5)/(c.ballR*2+2))); let idx=0;
       for(let n=1;n<=45;n++){ const row=Math.floor(idx/per),col=idx%per,span=(per-1)*(c.ballR*2+2);
         const x=this.cx-span/2+col*(c.ballR*2+2)+(Math.random()-0.5)*2, y=this.cy+this.r-c.ballR-6-row*(c.ballR*2+2);
-        const restJ=c.restitution+(Math.random()-0.5)*0.03, densJ=c.density*(1+(Math.random()-0.5)*0.08);
+        const restJ=c.restitution+(Math.random()-0.5)*0.03, densJ=c.density*favorDensMul(n)*(1+(Math.random()-0.5)*0.08);
         if(this.usePhysics){ const body=M.Bodies.circle(x,y,c.ballR,{restitution:restJ,friction:c.friction,frictionAir:c.frictionAir,density:densJ,frictionStatic:0});
-          M.Composite.add(this.world,body); this.balls.push({body,n}); }
-        else this.balls.push({fb:true,n,x,y,vx:0,vy:0,angle:0,av:0,rest:restJ});
+          M.Composite.add(this.world,body); this.balls.push({body,n,favor:FAVOR.has(n)}); }
+        else this.balls.push({fb:true,n,favor:FAVOR.has(n),x,y,vx:0,vy:0,angle:0,av:0,rest:restJ});
         idx++; } }
 
     // ③ 하단 중앙 집중 에어제트 → 공 폭발적 상승·순환
-    applyAirField(b){ const c=this.cfg,p=b.body.position,m=b.body.mass,r=this.r;
+    applyAirField(b){ const c=this.cfg,p=b.body.position,m=b.body.mass,r=this.r,fb=favorBoost(b.n);
       if(Math.abs(p.x-this.cx)<r*c.jetW && p.y>this.cy-r*0.2){ const low=(p.y-(this.cy-r*0.1))/r;
-        M.Body.applyForce(b.body,p,{x:(this.cx-p.x)*0.00005*m, y:-c.jet*Math.max(0.2,low)*m}); }
+        M.Body.applyForce(b.body,p,{x:(this.cx-p.x)*0.00005*m, y:-c.jet*Math.max(0.2,low)*m*fb}); }
       M.Body.applyForce(b.body,p,{x:(Math.random()-0.5)*c.turb*m, y:(Math.random()-0.5)*c.turb*0.5*m}); }
 
     // ⑦⑧ 상단 배출: 배출구로 위로 빨아올림(점진 흡입)
-    applyLift(b){ const p=b.body.position,m=b.body.mass,ex=this.exitPt();
+    applyLift(b){ const p=b.body.position,m=b.body.mass,ex=this.exitPt(),fb=favorBoost(b.n);
       if(p.y>this.cy+this.r*0.4) return;                 // 상부의 공만 대상
       const dx=ex.x-p.x, dy=ex.y-p.y, d=Math.hypot(dx,dy)||1;
-      const s=Math.min(0.9,0.5+40/(d+6))*0.00019;         // 가까울수록 강
+      const s=Math.min(0.9,0.5+40/(d+6))*0.00019*fb;     // 가까울수록 강 · favor 가중
       M.Body.applyForce(b.body,p,{x:dx/d*s*m, y:dy/d*s*m}); }
 
     step(){ const c=this.cfg;
@@ -157,10 +183,17 @@
       for(let k=0;k<4;k++){ const a=-Math.PI/2 - this.wheel + k*Math.PI/2;
         const d=Math.atan2(Math.sin(a-topA),Math.cos(a-topA));
         if(Math.abs(d)<tol){
-          // 중앙관으로 올라온(가장 높은) 공 선택
-          let bi=-1,best=this.cy-this.r*0.05;
-          for(let i=0;i<this.balls.length;i++){ const p=this.ballPose(this.balls[i]); if(p.y<best){best=p.y;bi=i;} }
-          if(bi>=0){ this.capture(bi,k); this.lastCapW=this.wheel; }
+          // 중앙관으로 올라온 공 선택. favor 모드면 상부 후보 중 예상번호를 우선.
+          const ceiling=this.cy-this.r*0.05;
+          let bi=-1, bestY=ceiling, favorBi=-1, favorY=ceiling;
+          for(let i=0;i<this.balls.length;i++){
+            const p=this.ballPose(this.balls[i]);
+            if(p.y<bestY){ bestY=p.y; bi=i; }
+            if(FAVOR.size && FAVOR.has(this.balls[i].n) && p.y<favorY){ favorY=p.y; favorBi=i; }
+          }
+          // favor 공이 상단권(최고점 + 28px)에 있으면 그걸 뽑음
+          const pick=(favorBi>=0 && favorY<=bestY+28)?favorBi:bi;
+          if(pick>=0){ this.capture(pick,k); this.lastCapW=this.wheel; }
           return; } } }
 
     // 포켓 k의 현재 각도/좌표 (테두리와 함께 회전)
@@ -216,6 +249,7 @@
   // ═══ 렌더 ═══
   // 다면체(faceted) 로또 공 — 실제 사진처럼 각진 표면
   function drawBall(x,y,n,r,angle){ const base=ballColor(n); ctx.save(); ctx.translate(x,y); ctx.rotate(angle);
+    if(FAVOR.has(n)){ ctx.beginPath(); ctx.arc(0,0,r+2.2,0,Math.PI*2); ctx.strokeStyle='rgba(255,208,96,0.85)'; ctx.lineWidth=2.2; ctx.stroke(); }
     const N=8;
     for(let i=0;i<N;i++){ const a0=i/N*Math.PI*2, a1=(i+1)/N*Math.PI*2, mid=(a0+a1)/2; const l=0.30*Math.cos(mid+2.3);
       ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,r,a0,a1); ctx.closePath(); ctx.fillStyle=shade(base,l); ctx.fill(); }

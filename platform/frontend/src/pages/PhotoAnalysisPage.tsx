@@ -769,7 +769,6 @@ export default function PhotoAnalysisPage() {
   const [manualLoading, setManualLoading] = useState(false);
   const [isReanalyzing, setIsReanalyzing] = useState(false);
   // 학습·패턴 엔진 상세는 기본 접어둔다(추천은 위 요약·복기 검증으로 충분, 클러터 감소).
-  const [showEngineDetail, setShowEngineDetail] = useState(false);
   // 비동기 작업 중 unmount 가드 (메모리 안정성)
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -1362,45 +1361,59 @@ export default function PhotoAnalysisPage() {
 
   return (
     <Stack spacing={2}>
-      {/* ━━ 헤더 ━━ — 누적 삭제는 §1/§3 각 영역의 추가 세팅으로 분리 */}
-      <Stack spacing={0.25}>
-        <Typography variant="h5" fontWeight={800}>
-          자동번호 용지 분석
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          복기·이번회차 누적 분석 + 반자동 비교 + 백테스트
-        </Typography>
-      </Stack>
-
-      {/* ━━ 회차 탭 ━━ */}
-      <Paper sx={{ px: 1, pt: 1 }}>
-        <Tabs
-          value={activeTab}
-          onChange={(_, v: SheetIntent) => {
-            setActiveTab(v);
-            setError(null);
-            setNotice(null);
-          }}
-          variant="fullWidth"
-        >
-          <Tab
-            value="review"
-            label={`복기 (${displayReviewRound}회 당첨)`}
-            sx={{ fontWeight: activeTab === 'review' ? 700 : 400 }}
-          />
-          <Tab
-            value="current_round"
-            label={
-              roundDrawn
-                ? `이번회차 (${displayCurrentRound}회) ⚠️`
-                : `이번회차 (${displayCurrentRound}회)`
-            }
-            sx={{
-              fontWeight: activeTab === 'current_round' ? 700 : 400,
-              color: roundDrawn && activeTab !== 'current_round' ? 'warning.main' : undefined,
+      {/* ━━ [상단 고정] 회차 상태 ━━ */}
+      <Paper
+        elevation={3}
+        sx={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 20,
+          px: 1.5,
+          pt: 1,
+          pb: 0.5,
+          bgcolor: 'background.paper',
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+        }}
+      >
+        <Stack spacing={0.5}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap>
+            <Typography variant="h6" fontWeight={800}>
+              용지 분석
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+              복기 {displayReviewRound}회 · 이번회차 {displayCurrentRound}회 · 정직성: 확률 불변
+            </Typography>
+          </Stack>
+          <Tabs
+            value={activeTab}
+            onChange={(_, v: SheetIntent) => {
+              setActiveTab(v);
+              setError(null);
+              setNotice(null);
             }}
-          />
-        </Tabs>
+            variant="fullWidth"
+          >
+            <Tab
+              value="review"
+              label={`복기 (${displayReviewRound}회 당첨)`}
+              sx={{ fontWeight: activeTab === 'review' ? 700 : 400, minHeight: 42 }}
+            />
+            <Tab
+              value="current_round"
+              label={
+                roundDrawn
+                  ? `이번회차 (${displayCurrentRound}회) ⚠️`
+                  : `이번회차 (${displayCurrentRound}회)`
+              }
+              sx={{
+                fontWeight: activeTab === 'current_round' ? 700 : 400,
+                minHeight: 42,
+                color: roundDrawn && activeTab !== 'current_round' ? 'warning.main' : undefined,
+              }}
+            />
+          </Tabs>
+        </Stack>
       </Paper>
 
       {/* ━━ 안내 (탭 + 입력 방법 통합) ━━ */}
@@ -1450,15 +1463,10 @@ export default function PhotoAnalysisPage() {
         </Alert>
       )}
 
-      <ParallelRoundPanel
-        targetRound={activeTab === 'review' ? (reviewRound ?? currentRound) : (currentRound ?? latestRound)}
-        modeLabel={activeTab === 'review' ? '복기회차' : '이번회차'}
-      />
-
-      {/* ════════════ § 1. 번호 입력 ════════════ */}
+      {/* ════════════ ① 번호 등록 ════════════ */}
       <Divider textAlign="left" sx={{ mt: 1 }}>
         <Typography variant="overline" fontWeight={800} color="primary.main" sx={{ letterSpacing: 1.2 }}>
-          § 1. 번호 입력
+          ① 번호 등록
         </Typography>
       </Divider>
 
@@ -1732,42 +1740,7 @@ export default function PhotoAnalysisPage() {
       {notice && <Alert severity="info">{notice}</Alert>}
       {error && <Alert severity="error" sx={{ whiteSpace: 'pre-wrap' }}>{error}</Alert>}
 
-      {/* ════════════ § 2. 분석 결과 ════════════ */}
-      <Divider textAlign="left" sx={{ mt: 1 }}>
-        <Typography variant="overline" fontWeight={800} color="primary.main" sx={{ letterSpacing: 1.2 }}>
-          § 2. {activeTab === 'review' ? '복기' : '이번회차'} 분석 결과
-        </Typography>
-      </Divider>
-
-      <NumberFrequencyPanel
-        lines={[
-          ...currentSlipLines.map((line) => line.numbers),
-          ...slipQueue.flatMap((slip) => slip.lines.map((line) => line.numbers)),
-          ...bulkAutoTickets,
-        ]}
-        winningSet={activeTab === 'review' ? activeReviewWinningSet : null}
-        sourceLabel="자동 = 구입번호 직접입력"
-        bodyLabel="자동 (구입번호 직접입력)"
-        emptyHint="자동 데이터가 없습니다. '구입번호 직접입력' 영역에서 줄을 추가하면 여기에 빈도가 표시됩니다."
-      />
-
-      <IntentAccumulatedPanel
-        slice={activeSlice}
-        intent={activeTab}
-        legacyCount={accumulated?.legacy_entry_count}
-        onDeleteEntry={deleteHistoryEntry}
-      />
-      {activeTab === 'current_round' && (activeSlice?.total_analyses ?? 0) === 0 && (
-        <ArchivedCurrentRoundPanel snapshot={archivedCurrentSnapshot} />
-      )}
-
-      {/* ════════════ § 3. 비교 · 백테스트 ════════════ */}
-      <Divider textAlign="left" sx={{ mt: 1 }}>
-        <Typography variant="overline" fontWeight={800} color="primary.main" sx={{ letterSpacing: 1.2 }}>
-          § 3. 반자동 비교 · 백테스트
-        </Typography>
-      </Divider>
-
+      {/* ① 반자동 등록 → ② 분석/1:1 → ③ 복기검증 → ④ 추천 → ⑤ 학습엔진 */}
       <SemiAutoComparePanel
         sheetIntent={activeTab}
         currentRound={currentRound}
@@ -1786,49 +1759,67 @@ export default function PhotoAnalysisPage() {
           })
         }
         onRefreshAccumulated={refreshAccumulated}
+        analysisPrelude={
+          <Stack spacing={1.5}>
+            <NumberFrequencyPanel
+              lines={[
+                ...currentSlipLines.map((line) => line.numbers),
+                ...slipQueue.flatMap((slip) => slip.lines.map((line) => line.numbers)),
+                ...bulkAutoTickets,
+              ]}
+              winningSet={activeTab === 'review' ? activeReviewWinningSet : null}
+              sourceLabel="자동 = 구입번호 직접입력"
+              bodyLabel="자동 (구입번호 직접입력)"
+              emptyHint="자동 데이터가 없습니다. '구입번호 직접입력' 영역에서 줄을 추가하면 여기에 빈도가 표시됩니다."
+            />
+            <IntentAccumulatedPanel
+              slice={activeSlice}
+              intent={activeTab}
+              legacyCount={accumulated?.legacy_entry_count}
+              onDeleteEntry={deleteHistoryEntry}
+            />
+            {activeTab === 'current_round' && (activeSlice?.total_analyses ?? 0) === 0 && (
+              <ArchivedCurrentRoundPanel snapshot={archivedCurrentSnapshot} />
+            )}
+            <RoundDataBreakdownPanel accumulated={accumulated} onAccumulatedChange={setAccumulated} />
+          </Stack>
+        }
+        verificationSlot={
+          <Stack spacing={1.5}>
+            <Divider textAlign="left">
+              <Typography variant="overline" fontWeight={800} color="primary.main" sx={{ letterSpacing: 1.2 }}>
+                ③ 복기 검증 — 아래 추천의 근거
+              </Typography>
+            </Divider>
+            <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
+              <Typography variant="caption">
+                이 검증 결과(신호 성적표·다회차 백테스트·놓친 당첨·구간 커버리지)가{' '}
+                <strong>바로 아래 ④ 번호 추천</strong>의 근거입니다. 확률은 변하지 않습니다.
+              </Typography>
+            </Alert>
+            <ReviewVerificationPanel />
+            {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
+          </Stack>
+        }
+        engineExtraSlot={
+          <Stack spacing={1.5}>
+            <ParallelRoundPanel
+              targetRound={activeTab === 'review' ? (reviewRound ?? currentRound) : (currentRound ?? latestRound)}
+              modeLabel={activeTab === 'review' ? '복기회차' : '이번회차'}
+              defaultOpen={false}
+            />
+            <FeatureLearningPanel />
+            <PatternMiningPanel />
+            <RoundLearningPanel />
+            <OverlapPatternLearnPanel accumulated={accumulated} />
+          </Stack>
+        }
       />
 
-      {/* 🗂 회차별 용지 데이터 — 복기 저장분 vs 롤오버 보관분 분리 표시 */}
-      <RoundDataBreakdownPanel accumulated={accumulated} onAccumulatedChange={setAccumulated} />
-
-      {/* 🔬 복기 역산 검증 — 복기 먼저 검증(신호 성적표·다회차 커버리지) → 이번회차 반영 */}
-      <ReviewVerificationPanel />
-
-      {/* 🔬 학습·패턴 엔진 상세 — 기본 접힘(추천 요약은 위 핵심추천·복기검증으로 충분) */}
-      <Box sx={{ mb: 1.5 }}>
-        <Button
-          fullWidth
-          variant="outlined"
-          color="inherit"
-          onClick={() => setShowEngineDetail((v) => !v)}
-          sx={{ justifyContent: 'space-between', textTransform: 'none' }}
-          endIcon={<span>{showEngineDetail ? '▲' : '▼'}</span>}
-        >
-          🔬 학습·패턴 엔진 상세 {showEngineDetail ? '접기' : '펼치기'} (Feature · Pattern Mining · 다회차 · 줄겹침)
-        </Button>
-      </Box>
-      {showEngineDetail && (
-        <>
-          {/* 🧠 복기 Feature 자동 생성·검증·학습 — WF/Random 통과분만 추천·기여도 */}
-          <FeatureLearningPanel />
-
-          {/* 🔍 복기 Pattern Mining — 전수 학습·Cluster·설명가능 추천 */}
-          <PatternMiningPanel />
-
-          {/* 🎓 다회차 용지 학습 — 보관 회차(누수 없음) 캘리브레이션 → 이번회차 적용 */}
-          <RoundLearningPanel />
-
-          {/* 🔎 줄겹침 패턴 역산 학습 — 복기 당첨일치 겹침 구조로 이번회차 후보 채점 */}
-          <OverlapPatternLearnPanel accumulated={accumulated} />
-        </>
-      )}
-
-      {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
-
-      {/* ════════════ § 4. 고급 설정 ════════════ */}
+      {/* ════════════ 고급 설정 ════════════ */}
       <Divider textAlign="left" sx={{ mt: 1 }}>
         <Typography variant="overline" fontWeight={800} color="text.secondary" sx={{ letterSpacing: 1.2 }}>
-          § 4. 고급 설정
+          고급 설정
         </Typography>
       </Divider>
 
@@ -1896,7 +1887,7 @@ export default function PhotoAnalysisPage() {
         )}
       </Paper>
 
-      {/* ════════════ § 5. 분석 이력 (페이지 최하단) ════════════ */}
+      {/* ════════════ 분석 이력 (페이지 최하단) ════════════ */}
       {activeSlice?.entries_summary?.length ? (
         <>
           <Divider textAlign="left" sx={{ mt: 1 }}>
@@ -1906,7 +1897,7 @@ export default function PhotoAnalysisPage() {
               color="text.secondary"
               sx={{ letterSpacing: 1.2 }}
             >
-              § 5. {activeTab === 'review' ? '복기' : '이번회차'} 분석 이력
+              {activeTab === 'review' ? '복기' : '이번회차'} 분석 이력
             </Typography>
           </Divider>
           <HistoryEntriesPanel slice={activeSlice} onDeleteEntry={deleteHistoryEntry} />

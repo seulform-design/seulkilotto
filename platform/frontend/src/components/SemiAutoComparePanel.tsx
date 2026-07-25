@@ -28,7 +28,7 @@ import {
   Typography,
 } from '@mui/material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import BulkLineInputDialog, { lineKey } from './BulkLineInputDialog';
 import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
@@ -528,6 +528,12 @@ interface SemiAutoComparePanelProps {
   onRemoveBulkAutoTicket?: (idx: number) => void;
   /** 서버 누적·당첨번호 재조회 (재분석 버튼). */
   onRefreshAccumulated?: () => Promise<void>;
+  /** ① 등록 후·② 분석 전 — 자동 빈도/누적/회차분해 등 */
+  analysisPrelude?: ReactNode;
+  /** ③ 복기 검증 — 추천(④) 바로 위에 렌더 */
+  verificationSlot?: ReactNode;
+  /** ⑤ 학습 엔진 접힘 안 — 평행회차·Feature 등 */
+  engineExtraSlot?: ReactNode;
 }
 
 type PickType = 'user' | 'auto';
@@ -1087,6 +1093,9 @@ export default function SemiAutoComparePanel({
   onRemoveCurrentLine,
   onRemoveBulkAutoTicket,
   onRefreshAccumulated,
+  analysisPrelude = null,
+  verificationSlot = null,
+  engineExtraSlot = null,
 }: SemiAutoComparePanelProps) {
   const { confirm, ConfirmDialog } = useConfirm();
   const lineMatchingRef = useRef<HTMLDivElement | null>(null);
@@ -1132,8 +1141,9 @@ export default function SemiAutoComparePanel({
    * (샘플링/상위 N장 없음 — 분석 왜곡 방지)
    */
   const [forceDetailedComparison, setForceDetailedComparison] = useState(false);
-  // 🎯 요약/상세 보기 — 추천번호 리스트가 여러 개라 기본은 '핵심 추천'만 보여주고,
-  // 상세 분석(심층역산·교차검증·강수기대·최종종합·1:1매칭 등)은 접어둔다(기능은 유지).
+  // ② 분석 결과·1:1 — 기본 펼침, 접기 가능
+  const [showAnalysisSection, setShowAnalysisSection] = useState(true);
+  // ⑤ 학습·패턴 엔진 — 기본 접힘 (평행·심층역산·통합신호·Feature…)
   const [showPredictionDetail, setShowPredictionDetail] = useState(false);
 
   // 탭 전환 시 해당 탭 전용 localStorage 로드
@@ -3434,11 +3444,13 @@ export default function SemiAutoComparePanel({
   const resetBulk = () => setBulkTickets([]);
 
   return (
-    <Paper sx={{ p: 2 }}>
+    <Stack spacing={2}>
+      {/* ════════ ① 반자동 번호 등록 ════════ */}
+      <Paper sx={{ p: 2 }}>
       <Stack direction="row" alignItems="flex-start" justifyContent="space-between" sx={{ mb: 1 }}>
         <Box>
           <Typography variant="subtitle1" fontWeight={700}>
-            🔄 반자동 비교
+            ① 반자동 줄 입력
           </Typography>
           <Typography variant="caption" color="text.secondary">
             {compareWinning
@@ -3881,7 +3893,22 @@ export default function SemiAutoComparePanel({
         );
       })()}
 
-      {/* 반자동 누적 기반 빈도 — 자동(§2) 과 분리, 반자동 누적만 카운트 */}
+      </Paper>
+
+      {/* ════════ ② 번호 분석 결과 & 1:1 전수비교 ════════ */}
+      <Paper sx={{ p: 2 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+          <Typography variant="subtitle1" fontWeight={800}>
+            ② 번호 분석 결과 &amp; 1:1 전수비교
+          </Typography>
+          <Button size="small" variant="outlined" onClick={() => setShowAnalysisSection((v) => !v)}>
+            {showAnalysisSection ? '접기 ▲' : '펼치기 ▼'}
+          </Button>
+        </Stack>
+        {showAnalysisSection && (
+        <>
+      {analysisPrelude}
+      {/* 반자동 누적 기반 빈도 — 자동 분석과 분리, 반자동 누적만 카운트 */}
       {(semiCurrentLines.length > 0 || semiSlipQueue.length > 0) && (
         <Box sx={{ mb: 1.5 }}>
           <NumberFrequencyPanel
@@ -4040,21 +4067,554 @@ export default function SemiAutoComparePanel({
         </>
       )}
 
-      {/* 🎯 핵심 추천 (한눈에) — 복기 검증 → 이번회차 추천 요약. 상세는 토글로 접어둠. */}
+      {/* 1:1 전수비교 그룹 — ② 분석 섹션 */}
+      {canRenderLineMatching && (
+
+            <Box ref={lineMatchingRef}>
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+                🔀 자동 ↔ 반자동 줄 1:1 매칭 (공통 번호 2~6개)
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                자동 {groupLineMatching.autoLineCount}줄
+                {groupLineMatching.autoDupRemoved > 0 && (
+                  <> (중복 <strong>{groupLineMatching.autoDupRemoved}건</strong> 제외)</>
+                )}
+                {' × '}반자동 {groupLineMatching.semiLineCount}줄
+                {groupLineMatching.semiDupRemoved > 0 && (
+                  <> (중복 <strong>{groupLineMatching.semiDupRemoved}건</strong> 제외)</>
+                )}
+                {' = '}전수 비교 {groupLineMatching.totalPairCount}개 페어 가운데 공통 번호 ≥2 인
+                페어 {groupLineMatching.rawPairCount}건. <strong>같은 매치 번호를 가진 자동/반자동 줄들</strong>은
+                한 카드로 통합 (자동 list + 반자동 list) → 화면 카드 {groupLineMatching.groupCount}건. 일치 개수
+                (6 → 5 → 4 → 3 → 2) 순으로 모두 노출.
+              </Typography>
+              {groupLineMatching.strongAvailable && (
+                <Box sx={{ mb: 1, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+                  <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.3 }}>
+                    🎯 {intentSectionLabel} 자동 누적 강한 후보 ({groupLineMatching.strongCandidateCount}개) 기반 통계 — 그룹별 매치 번호와의 일치 분포
+                  </Typography>
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                    {[0, 1, 2, 3, 4, 5, 6].map((k) => {
+                      const cnt = groupLineMatching.strongDist[k] ?? 0;
+                      if (cnt === 0 && k > 0) return null;
+                      const pct =
+                        groupLineMatching.groupCount > 0
+                          ? (cnt / groupLineMatching.groupCount) * 100
+                          : 0;
+                      return (
+                        <Chip
+                          key={k}
+                          size="small"
+                          color={k >= 3 ? 'success' : k >= 2 ? 'warning' : 'default'}
+                          variant={k >= 2 ? 'filled' : 'outlined'}
+                          label={`강한 후보 ${k}개 일치: ${cnt}건 (${pct.toFixed(1)}%)`}
+                          sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                        />
+                      );
+                    })}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.3 }}>
+                    ※ 정렬은 {winningSet ? '당첨번호 일치 → ' : ''}강한 후보 일치 개수 내림차순. 위쪽 카드일수록 강한 후보가 많이 겹친 매치.
+                  </Typography>
+                </Box>
+              )}
+              {(groupLineMatching.autoDupRemoved > 0 || groupLineMatching.semiDupRemoved > 0) && (
+                <Alert severity="info" sx={{ mb: 1, fontSize: 11 }}>
+                  같은 6번호 줄이 그룹 안에 2개 이상 들어가 있어 첫 번째 줄로 통합했습니다.
+                  {groupLineMatching.autoDupSamples.length > 0 && (
+                    <>
+                      <br />
+                      <strong>자동 중복 예시:</strong> {groupLineMatching.autoDupSamples.join(' · ')}
+                      {groupLineMatching.autoDupRemoved > groupLineMatching.autoDupSamples.length &&
+                        ` 외 ${groupLineMatching.autoDupRemoved - groupLineMatching.autoDupSamples.length}건`}
+                    </>
+                  )}
+                  {groupLineMatching.semiDupSamples.length > 0 && (
+                    <>
+                      <br />
+                      <strong>반자동 중복 예시:</strong> {groupLineMatching.semiDupSamples.join(' · ')}
+                      {groupLineMatching.semiDupRemoved > groupLineMatching.semiDupSamples.length &&
+                        ` 외 ${groupLineMatching.semiDupRemoved - groupLineMatching.semiDupSamples.length}건`}
+                    </>
+                  )}
+                </Alert>
+              )}
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={1}
+                alignItems={{ xs: 'stretch', sm: 'center' }}
+                sx={{ mb: 1.25 }}
+              >
+                <TextField
+                  size="small"
+                  label="매치 번호 검색"
+                  value={lineMatchNumberFilter}
+                  onChange={(e) => setLineMatchNumberFilter(e.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="예: 29"
+                  sx={{ width: { xs: '100%', sm: 140 } }}
+                />
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                  {(['all', 6, 5, 4, 3, 2] as const).map((value) => (
+                    <Chip
+                      key={`match-filter-${value}`}
+                      size="small"
+                      clickable
+                      color={lineMatchFilter === value ? 'primary' : 'default'}
+                      variant={lineMatchFilter === value ? 'filled' : 'outlined'}
+                      label={value === 'all' ? '전체' : `${value}개 일치`}
+                      onClick={() => setLineMatchFilter(value)}
+                    />
+                  ))}
+                </Stack>
+                <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>반자동 일치줄:</Typography>
+                  {([
+                    ['none', '기본순'],
+                    ['desc', '많은순 ▼'],
+                    ['asc', '적은순 ▲'],
+                  ] as const).map(([val, lbl]) => (
+                    <Chip
+                      key={`semi-sort-${val}`}
+                      size="small"
+                      clickable
+                      color={semiLineSort === val ? 'secondary' : 'default'}
+                      variant={semiLineSort === val ? 'filled' : 'outlined'}
+                      label={lbl}
+                      onClick={() => setSemiLineSort(val)}
+                    />
+                  ))}
+                </Stack>
+                {(lineMatchFilter !== 'all' || lineMatchNumberFilter) && (
+                  <Button
+                    type="button"
+                    size="small"
+                    color="inherit"
+                    onClick={() => {
+                      setLineMatchFilter('all');
+                      setLineMatchNumberFilter('');
+                    }}
+                  >
+                    초기화
+                  </Button>
+                )}
+              </Stack>
+              {(() => {
+                const matchedSet = (matched: number[]): Set<number> => new Set(matched);
+                const renderGroupSection = (
+                  label: string,
+                  color: 'warning' | 'success' | 'error' | 'primary' | 'info',
+                  groups: typeof groupLineMatching.groups6
+                ) => {
+                  if (groups.length === 0) return null;
+                  // 반자동 측 일치 줄 수(semiList)로 정렬 — 기본(none)은 원래 순서(matchCount·지지).
+                  const sorted =
+                    semiLineSort === 'none'
+                      ? groups
+                      : [...groups].sort((a, b) =>
+                          semiLineSort === 'desc'
+                            ? b.semiList.length - a.semiList.length || a.key.localeCompare(b.key)
+                            : a.semiList.length - b.semiList.length || a.key.localeCompare(b.key),
+                        );
+                  return (
+                    <Box sx={{ mb: 1.5 }}>
+                      <Typography
+                        variant="caption"
+                        color={`${color}.light`}
+                        sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
+                      >
+                        {label} — {groups.length}건
+                      </Typography>
+                      <Box
+                        sx={{
+                          maxHeight: 480,
+                          overflowY: 'auto',
+                          bgcolor: 'action.hover',
+                          borderRadius: 1,
+                          p: 0.75,
+                        }}
+                      >
+                        <Stack spacing={0.75}>
+                          {sorted.slice(0, groupShowLimit).map((g, idx) => {
+                            const mset = matchedSet(g.matchedNumbers);
+                            return (
+                              <Box
+                                key={g.key}
+                                sx={{
+                                  p: 0.5,
+                                  borderRadius: 1,
+                                  bgcolor: 'background.paper',
+                                }}
+                              >
+                                <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                  <Typography variant="caption" sx={{ minWidth: 32, color: 'text.secondary', fontWeight: 600 }}>
+                                    #{idx + 1}
+                                  </Typography>
+                                  <Chip
+                                    size="small"
+                                    color={color}
+                                    label={`${g.matchCount}개 일치`}
+                                    sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                                  />
+                                  <Chip
+                                    size="small"
+                                    variant="outlined"
+                                    label={`매치: ${g.matchedNumbers.join(', ')}`}
+                                    sx={{ height: 18, fontSize: 11 }}
+                                  />
+                                  <Chip
+                                    size="small"
+                                    color="success"
+                                    variant="outlined"
+                                    label={`자동 ${g.autoList.length}줄`}
+                                    sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                                  />
+                                  <Chip
+                                    size="small"
+                                    color="primary"
+                                    variant="outlined"
+                                    label={`반자동 ${g.semiList.length}줄`}
+                                    sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                                  />
+                                  {winningSet && (() => {
+                                    const w = g.matchedNumbers.filter((n) => winningSet.has(n)).length;
+                                    return w > 0 ? (
+                                      <Chip
+                                        size="small"
+                                        color="warning"
+                                        label={`🎯 당첨 ${w}개`}
+                                        sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                                      />
+                                    ) : null;
+                                  })()}
+                                  {groupLineMatching.strongAvailable && (() => {
+                                    const sm = g.matchedNumbers.filter((n) =>
+                                      resolvedStrongCandidates.includes(n)
+                                    ).length;
+                                    return (
+                                      <Chip
+                                        size="small"
+                                        color={sm >= 3 ? 'success' : sm >= 2 ? 'warning' : 'default'}
+                                        variant={sm >= 2 ? 'filled' : 'outlined'}
+                                        label={`강한 후보 ${sm}개 일치`}
+                                        sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                                      />
+                                    );
+                                  })()}
+                                </Stack>
+                                <Box sx={{ mt: 0.4, pl: 0.5 }}>
+                                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.2 }}>
+                                    자동 측 일치 줄 ({g.autoList.length}):
+                                    {winningSet && ' — 당첨번호만 컬러, 나머지 회색'}
+                                  </Typography>
+                                  <Stack spacing={0.2}>
+                                    {g.autoList.slice(0, lineRenderCap).map((a) => (
+                                      <Stack
+                                        key={`ga-${g.key}-${a.idx}`}
+                                        direction="row"
+                                        alignItems="center"
+                                        spacing={0.4}
+                                        flexWrap="wrap"
+                                        useFlexGap
+                                      >
+                                        <Chip
+                                          size="small"
+                                          color="success"
+                                          variant="outlined"
+                                          label={
+                                            winningSet
+                                              ? `자동 #${a.idx} · ${a.label} · 당첨 ${a.numbers.filter((n) => winningSet.has(n)).length}/6`
+                                              : `자동 #${a.idx} · ${a.label}`
+                                          }
+                                          sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                                        />
+                                        {a.numbers.map((n) => (
+                                          <LottoBall
+                                            key={`ga-${g.key}-${a.idx}-${n}`}
+                                            number={n}
+                                            size={20}
+                                            dimmed={winningSet ? !winningSet.has(n) : !mset.has(n)}
+                                          />
+                                        ))}
+                                      </Stack>
+                                    ))}
+                                    {g.autoList.length > lineRenderCap && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        …외 자동 {g.autoList.length - lineRenderCap}줄
+                                      </Typography>
+                                    )}
+                                  </Stack>
+                                </Box>
+                                <Box sx={{ mt: 0.4, pl: 0.5 }}>
+                                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.2 }}>
+                                    반자동 측 일치 줄 ({g.semiList.length}):
+                                    {winningSet && ' — 당첨번호만 컬러, 나머지 회색'}
+                                  </Typography>
+                                  <Stack spacing={0.2}>
+                                    {g.semiList.slice(0, lineRenderCap).map((s) => (
+                                      <Stack
+                                        key={`gs-${g.key}-${s.idx}`}
+                                        direction="row"
+                                        alignItems="center"
+                                        spacing={0.4}
+                                        flexWrap="wrap"
+                                        useFlexGap
+                                      >
+                                        <Chip
+                                          size="small"
+                                          color="primary"
+                                          variant="outlined"
+                                          label={
+                                            winningSet
+                                              ? `반자동 #${s.idx} · ${s.label} · 당첨 ${s.numbers.filter((n) => winningSet.has(n)).length}/6`
+                                              : `반자동 #${s.idx} · ${s.label}`
+                                          }
+                                          sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                                        />
+                                        {s.numbers.map((n) => (
+                                          <LottoBall
+                                            key={`gs-${g.key}-${s.idx}-${n}`}
+                                            number={n}
+                                            size={20}
+                                            dimmed={winningSet ? !winningSet.has(n) : !mset.has(n)}
+                                          />
+                                        ))}
+                                      </Stack>
+                                    ))}
+                                    {g.semiList.length > lineRenderCap && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        …외 반자동 {g.semiList.length - lineRenderCap}줄
+                                      </Typography>
+                                    )}
+                                  </Stack>
+                                </Box>
+                              </Box>
+                            );
+                          })}
+                        </Stack>
+                      </Box>
+                      {groups.length > groupShowLimit && (
+                        <Button
+                          type="button"
+                          size="small"
+                          variant="text"
+                          onClick={() => setGroupShowLimit((v) => v + (IS_CONSTRAINED_DEVICE ? 10 : 60))}
+                          sx={{ mt: 0.25 }}
+                        >
+                          더 보기 (+{Math.min(IS_CONSTRAINED_DEVICE ? 10 : 60, groups.length - groupShowLimit)} · 남은 {groups.length - groupShowLimit}건)
+                        </Button>
+                      )}
+                    </Box>
+                  );
+                };
+                if (groupLineMatching.groupCount === 0) {
+                  return (
+                    <Alert severity="info">
+                      공통 번호 2개 이상인 줄 페어가 없습니다. 자동 또는 반자동 한쪽에 데이터가 부족하거나 두 그룹이 완전히 다른 번호를 사용했습니다.
+                    </Alert>
+                  );
+                }
+                return (
+                  <>
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={`통합 카드 총 ${groupLineMatching.groupCount}건 (현재 표시 ${visibleGroupMatchTotal}건 / 원본 페어 ${groupLineMatching.rawPairCount}건)`}
+                        sx={{ fontWeight: 700 }}
+                      />
+                      {visibleGroupMatch6.length > 0 && (
+                        <Chip size="small" color="error" label={`6개 일치: ${visibleGroupMatch6.length}건`} sx={{ fontWeight: 700 }} />
+                      )}
+                      {visibleGroupMatch5.length > 0 && (
+                        <Chip size="small" color="warning" label={`5개 일치: ${visibleGroupMatch5.length}건`} sx={{ fontWeight: 700 }} />
+                      )}
+                      {visibleGroupMatch4.length > 0 && (
+                        <Chip size="small" color="success" label={`4개 일치: ${visibleGroupMatch4.length}건`} sx={{ fontWeight: 700 }} />
+                      )}
+                      {visibleGroupMatch3.length > 0 && (
+                        <Chip size="small" color="primary" label={`3개 일치: ${visibleGroupMatch3.length}건`} sx={{ fontWeight: 700 }} />
+                      )}
+                      {visibleGroupMatch2.length > 0 && (
+                        <Chip size="small" color="info" label={`2개 일치: ${visibleGroupMatch2.length}건`} sx={{ fontWeight: 700 }} />
+                      )}
+                    </Stack>
+                    {visibleGroupMatchTotal === 0 && (
+                      <Alert severity="info" sx={{ mb: 1 }}>
+                        현재 필터 조건에 맞는 1:1 전수비교 카드가 없습니다.
+                      </Alert>
+                    )}
+                    {renderGroupSection('🟣 6개 일치 (한 줄 통째 일치 — 매우 희귀)', 'error', visibleGroupMatch6)}
+                    {renderGroupSection('🔴 5개 일치 (희귀)', 'warning', visibleGroupMatch5)}
+                    {renderGroupSection('🟠 4개 일치', 'success', visibleGroupMatch4)}
+                    {renderGroupSection('🟢 3개 일치', 'primary', visibleGroupMatch3)}
+                    {renderGroupSection('🟡 2개 일치 (가장 많음)', 'info', visibleGroupMatch2)}
+                  </>
+                );
+              })()}
+            </Paper>
+            </Box>
+          )}
+
+      {picked.length === 6 && activeComparison && (
+        <>
+          {/* ── 누적 자동 페어/트리플 콤보 교집합 ──────────────── */}
+          {activeComparison.comboDataAvailable && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+                🔗 자동 누적 페어/트리플 콤보 교집합
+              </Typography>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                <Chip
+                  size="small"
+                  color="primary"
+                  label={`평균 페어 매치 ${activeComparison.avgPairMatches.toFixed(2)} / 티켓`}
+                  sx={{ fontWeight: 700 }}
+                />
+                <Chip
+                  size="small"
+                  color="primary"
+                  label={`평균 트리플 매치 ${activeComparison.avgTripleMatches.toFixed(3)} / 티켓`}
+                  variant="outlined"
+                />
+              </Stack>
+              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 600 }}>
+                페어 매치 분포 (티켓 안에 자동 누적의 자주-페어가 통째로 들어 있는지):
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                {Object.entries(activeComparison.pairMatchDistribution)
+                  .map(([k, v]) => [Number(k), v] as [number, number])
+                  .sort((a, b) => a[0] - b[0])
+                  .map(([k, v]) => {
+                    const pct = activeComparison.ticketCount > 0
+                      ? (v / activeComparison.ticketCount) * 100
+                      : 0;
+                    return (
+                      <Chip
+                        key={`pair-${k}`}
+                        size="small"
+                        label={`${k}개 페어: ${v}장 (${pct.toFixed(1)}%)`}
+                        color={k >= 2 ? 'success' : k >= 1 ? 'primary' : 'default'}
+                        variant={k >= 1 ? 'filled' : 'outlined'}
+                      />
+                    );
+                  })}
+              </Stack>
+              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 600 }}>
+                트리플 매치 분포:
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                {Object.entries(activeComparison.tripleMatchDistribution)
+                  .map(([k, v]) => [Number(k), v] as [number, number])
+                  .sort((a, b) => a[0] - b[0])
+                  .map(([k, v]) => {
+                    const pct = activeComparison.ticketCount > 0
+                      ? (v / activeComparison.ticketCount) * 100
+                      : 0;
+                    return (
+                      <Chip
+                        key={`triple-${k}`}
+                        size="small"
+                        label={`${k}개 트리플: ${v}장 (${pct.toFixed(1)}%)`}
+                        color={k >= 1 ? 'success' : 'default'}
+                        variant={k >= 1 ? 'filled' : 'outlined'}
+                      />
+                    );
+                  })}
+              </Stack>
+            </Paper>
+          )}
+
+          {/* ── 콤보 점수 상위 5장 ─────────────────────────────── */}
+          {activeComparison.bestComboTickets.length > 0 && (
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+              <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>
+                🥇 누적 자동과 가장 잘 맞은 티켓 5장 (페어 1점 · 트리플 3점 · 쿼드 6점)
+              </Typography>
+              <Stack spacing={0.75}>
+                {activeComparison.bestComboTickets.map((t) => (
+                  <Stack
+                    key={`combo-best-${t.index}`}
+                    direction="row"
+                    alignItems="center"
+                    spacing={0.75}
+                    flexWrap="wrap"
+                    useFlexGap
+                  >
+                    <Chip
+                      size="small"
+                      label={`#${t.index + 1}`}
+                      variant="outlined"
+                      sx={{ minWidth: 48 }}
+                    />
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      {t.ticket.map((n) => (
+                        <LottoBall
+                          key={n}
+                          number={n}
+                          size={22}
+                          dimmed={winningSet ? !winningSet.has(n) : false}
+                        />
+                      ))}
+                    </Stack>
+                    <Chip
+                      size="small"
+                      color="success"
+                      label={`점수 ${t.comboScore}`}
+                      sx={{ fontWeight: 700 }}
+                    />
+                    {t.matchedPairCount > 0 && (
+                      <Chip size="small" label={`페어 ${t.matchedPairCount}`} variant="outlined" />
+                    )}
+                    {t.matchedTripleCount > 0 && (
+                      <Chip
+                        size="small"
+                        label={`트리플 ${t.matchedTripleCount}`}
+                        color="warning"
+                      />
+                    )}
+                    {t.vsStrongMatch.length >= 2 && (
+                      <Chip
+                        size="small"
+                        label={`강한후보 ${t.vsStrongMatch.length}`}
+                        color="primary"
+                      />
+                    )}
+                  </Stack>
+                ))}
+              </Stack>
+            </Paper>
+          )}
+
+          <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block' }}>
+            ※ 위 매치율은 과거 회차에 대한 측정값이며, 다음 회차의 당첨 확률(1/8,145,060)을 변경하지 않습니다.
+            누적 자동과의 콤보 교집합은 사용자의 픽이 군중의 강한 패턴에 얼마나 정렬되는지 보여주는 관찰 도구입니다.
+          </Typography>
+        </>
+      )}
+        </>
+        )}
+      </Paper>
+
+      {/* ════════ ③ 복기 검증 (추천 바로 위) ════════ */}
+      {verificationSlot}
+
+      {/* ════════ ④ 번호 추천 (결론) ════════ */}
+      <Paper sx={{ p: 2 }}>
+      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+        <Typography variant="subtitle1" fontWeight={800}>
+          ④ 번호 추천
+        </Typography>
+        <Chip size="small" color="success" label="위 복기 검증 기준" sx={{ height: 22, fontWeight: 700 }} />
+      </Stack>
+      {/* 🎯 핵심 추천 — ③ 복기 검증 직후 */}
       {heroRecommendation.ready && (
-        <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
+        <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant="body1" fontWeight={800}>
-              🎯 {currentRound ?? effectiveRound ?? '?'}회 이번회차 핵심 추천 (복기 검증 기반)
+              🎯 {currentRound ?? effectiveRound ?? '?'}회 이번회차 핵심 추천
             </Typography>
-            <Button
-              size="small"
-              variant={showPredictionDetail ? 'outlined' : 'contained'}
-              color="warning"
-              onClick={() => setShowPredictionDetail((v) => !v)}
-            >
-              {showPredictionDetail ? '🔬 학습 엔진 접기 ▲' : '🔬 학습 엔진·상세 역산 ▼'}
-            </Button>
+            <Chip size="small" variant="outlined" color="success" label="위 복기 검증 기준" sx={{ height: 20, fontSize: 10, fontWeight: 700 }} />
           </Stack>
           {heroRecommendation.reviewRounds > 0 && (
             <Alert severity="success" icon={false} sx={{ py: 0.5, mb: 1 }}>
@@ -4104,7 +4664,7 @@ export default function SemiAutoComparePanel({
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
             핵심 6 = 집중 픽 · 확장 18 = 넓은 그물(복기상 더 잘 잡음) · 분산 최적 = 공동당첨 회피(확률 동일).
             {' '}바로 아래 <strong>강수·기대수(구간별)</strong>가 메인입니다. 나머지 상세 근거(심층역산·교차검증·패턴학습·1:1매칭·통합신호)는{' '}
-            <strong>[🔬 학습 엔진·상세 역산]</strong>으로 접어뒀습니다. 1등 확률(1/8,145,060)은 어떤 분석으로도 변하지 않습니다.
+            <strong>⑤ 분석·패턴 학습 엔진</strong>으로 접어뒀습니다. 1등 확률(1/8,145,060)은 어떤 분석으로도 변하지 않습니다.
           </Typography>
         </Paper>
       )}
@@ -4289,9 +4849,26 @@ export default function SemiAutoComparePanel({
               )}
         </>
       )}
-      {/* 🎯 이번회차 종합 예측 대시보드 — 이번회차 탭 전용. 티켓 없어도 통합·평행
-          신호로 예측이 나오고, 이번회차 용지를 올리면 용지 교차검증이 주 축으로 가세. */}
-      {showPredictionDetail && currentRoundForecast && (
+      </Paper>
+
+      {/* ════════ ⑤ 분석·패턴 학습 엔진 (기본 접힘) ════════ */}
+      <Box>
+        <Button
+          fullWidth
+          variant="outlined"
+          color="inherit"
+          onClick={() => setShowPredictionDetail((v) => !v)}
+          sx={{ justifyContent: 'space-between', textTransform: 'none', mb: 1 }}
+          endIcon={<span>{showPredictionDetail ? '▲' : '▼'}</span>}
+        >
+          ⑤ 분석·패턴 학습 엔진 {showPredictionDetail ? '접기' : '펼치기'}
+          （평행회차 · 예상번호 · 교차검증 · 심층역산 · 통합신호 · Feature）
+        </Button>
+      {showPredictionDetail && (
+        <Stack spacing={1.5}>
+          {engineExtraSlot}
+      {/* 🎯 이번회차 종합 예측 대시보드 */}
+      {currentRoundForecast && (
         <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'primary.main', borderWidth: 2 }}>
           <Stack direction="row" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant="body2" fontWeight={800}>
@@ -4356,7 +4933,7 @@ export default function SemiAutoComparePanel({
       )}
 
       {/* ─── 대량 비교 결과 ─────────────────────────────────────── */}
-      {showPredictionDetail && activeComparison && (
+      {activeComparison && (
         <>
           <Divider sx={{ my: 2 }} />
           {!compareWinning && (
@@ -5672,533 +6249,9 @@ export default function SemiAutoComparePanel({
         </>
       )}
 
-      {/* ── 자동 ↔ 반자동 줄 페어 1:1 매칭 — 상세 토글 안으로(무거운 카드 렌더=모바일 부담) ── */}
-      {showPredictionDetail && canRenderLineMatching && (
-            <Box ref={lineMatchingRef}>
-            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'secondary.main' }}>
-              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-                🔀 자동 ↔ 반자동 줄 1:1 매칭 (공통 번호 2~6개)
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                자동 {groupLineMatching.autoLineCount}줄
-                {groupLineMatching.autoDupRemoved > 0 && (
-                  <> (중복 <strong>{groupLineMatching.autoDupRemoved}건</strong> 제외)</>
-                )}
-                {' × '}반자동 {groupLineMatching.semiLineCount}줄
-                {groupLineMatching.semiDupRemoved > 0 && (
-                  <> (중복 <strong>{groupLineMatching.semiDupRemoved}건</strong> 제외)</>
-                )}
-                {' = '}전수 비교 {groupLineMatching.totalPairCount}개 페어 가운데 공통 번호 ≥2 인
-                페어 {groupLineMatching.rawPairCount}건. <strong>같은 매치 번호를 가진 자동/반자동 줄들</strong>은
-                한 카드로 통합 (자동 list + 반자동 list) → 화면 카드 {groupLineMatching.groupCount}건. 일치 개수
-                (6 → 5 → 4 → 3 → 2) 순으로 모두 노출.
-              </Typography>
-              {groupLineMatching.strongAvailable && (
-                <Box sx={{ mb: 1, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
-                  <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.3 }}>
-                    🎯 {intentSectionLabel} 자동 누적 강한 후보 ({groupLineMatching.strongCandidateCount}개) 기반 통계 — 그룹별 매치 번호와의 일치 분포
-                  </Typography>
-                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                    {[0, 1, 2, 3, 4, 5, 6].map((k) => {
-                      const cnt = groupLineMatching.strongDist[k] ?? 0;
-                      if (cnt === 0 && k > 0) return null;
-                      const pct =
-                        groupLineMatching.groupCount > 0
-                          ? (cnt / groupLineMatching.groupCount) * 100
-                          : 0;
-                      return (
-                        <Chip
-                          key={k}
-                          size="small"
-                          color={k >= 3 ? 'success' : k >= 2 ? 'warning' : 'default'}
-                          variant={k >= 2 ? 'filled' : 'outlined'}
-                          label={`강한 후보 ${k}개 일치: ${cnt}건 (${pct.toFixed(1)}%)`}
-                          sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                        />
-                      );
-                    })}
-                  </Stack>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.3 }}>
-                    ※ 정렬은 {winningSet ? '당첨번호 일치 → ' : ''}강한 후보 일치 개수 내림차순. 위쪽 카드일수록 강한 후보가 많이 겹친 매치.
-                  </Typography>
-                </Box>
-              )}
-              {(groupLineMatching.autoDupRemoved > 0 || groupLineMatching.semiDupRemoved > 0) && (
-                <Alert severity="info" sx={{ mb: 1, fontSize: 11 }}>
-                  같은 6번호 줄이 그룹 안에 2개 이상 들어가 있어 첫 번째 줄로 통합했습니다.
-                  {groupLineMatching.autoDupSamples.length > 0 && (
-                    <>
-                      <br />
-                      <strong>자동 중복 예시:</strong> {groupLineMatching.autoDupSamples.join(' · ')}
-                      {groupLineMatching.autoDupRemoved > groupLineMatching.autoDupSamples.length &&
-                        ` 외 ${groupLineMatching.autoDupRemoved - groupLineMatching.autoDupSamples.length}건`}
-                    </>
-                  )}
-                  {groupLineMatching.semiDupSamples.length > 0 && (
-                    <>
-                      <br />
-                      <strong>반자동 중복 예시:</strong> {groupLineMatching.semiDupSamples.join(' · ')}
-                      {groupLineMatching.semiDupRemoved > groupLineMatching.semiDupSamples.length &&
-                        ` 외 ${groupLineMatching.semiDupRemoved - groupLineMatching.semiDupSamples.length}건`}
-                    </>
-                  )}
-                </Alert>
-              )}
-              <Stack
-                direction={{ xs: 'column', sm: 'row' }}
-                spacing={1}
-                alignItems={{ xs: 'stretch', sm: 'center' }}
-                sx={{ mb: 1.25 }}
-              >
-                <TextField
-                  size="small"
-                  label="매치 번호 검색"
-                  value={lineMatchNumberFilter}
-                  onChange={(e) => setLineMatchNumberFilter(e.target.value.replace(/[^\d]/g, ''))}
-                  placeholder="예: 29"
-                  sx={{ width: { xs: '100%', sm: 140 } }}
-                />
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                  {(['all', 6, 5, 4, 3, 2] as const).map((value) => (
-                    <Chip
-                      key={`match-filter-${value}`}
-                      size="small"
-                      clickable
-                      color={lineMatchFilter === value ? 'primary' : 'default'}
-                      variant={lineMatchFilter === value ? 'filled' : 'outlined'}
-                      label={value === 'all' ? '전체' : `${value}개 일치`}
-                      onClick={() => setLineMatchFilter(value)}
-                    />
-                  ))}
-                </Stack>
-                <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>반자동 일치줄:</Typography>
-                  {([
-                    ['none', '기본순'],
-                    ['desc', '많은순 ▼'],
-                    ['asc', '적은순 ▲'],
-                  ] as const).map(([val, lbl]) => (
-                    <Chip
-                      key={`semi-sort-${val}`}
-                      size="small"
-                      clickable
-                      color={semiLineSort === val ? 'secondary' : 'default'}
-                      variant={semiLineSort === val ? 'filled' : 'outlined'}
-                      label={lbl}
-                      onClick={() => setSemiLineSort(val)}
-                    />
-                  ))}
-                </Stack>
-                {(lineMatchFilter !== 'all' || lineMatchNumberFilter) && (
-                  <Button
-                    type="button"
-                    size="small"
-                    color="inherit"
-                    onClick={() => {
-                      setLineMatchFilter('all');
-                      setLineMatchNumberFilter('');
-                    }}
-                  >
-                    초기화
-                  </Button>
-                )}
-              </Stack>
-              {(() => {
-                const matchedSet = (matched: number[]): Set<number> => new Set(matched);
-                const renderGroupSection = (
-                  label: string,
-                  color: 'warning' | 'success' | 'error' | 'primary' | 'info',
-                  groups: typeof groupLineMatching.groups6
-                ) => {
-                  if (groups.length === 0) return null;
-                  // 반자동 측 일치 줄 수(semiList)로 정렬 — 기본(none)은 원래 순서(matchCount·지지).
-                  const sorted =
-                    semiLineSort === 'none'
-                      ? groups
-                      : [...groups].sort((a, b) =>
-                          semiLineSort === 'desc'
-                            ? b.semiList.length - a.semiList.length || a.key.localeCompare(b.key)
-                            : a.semiList.length - b.semiList.length || a.key.localeCompare(b.key),
-                        );
-                  return (
-                    <Box sx={{ mb: 1.5 }}>
-                      <Typography
-                        variant="caption"
-                        color={`${color}.light`}
-                        sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}
-                      >
-                        {label} — {groups.length}건
-                      </Typography>
-                      <Box
-                        sx={{
-                          maxHeight: 480,
-                          overflowY: 'auto',
-                          bgcolor: 'action.hover',
-                          borderRadius: 1,
-                          p: 0.75,
-                        }}
-                      >
-                        <Stack spacing={0.75}>
-                          {sorted.slice(0, groupShowLimit).map((g, idx) => {
-                            const mset = matchedSet(g.matchedNumbers);
-                            return (
-                              <Box
-                                key={g.key}
-                                sx={{
-                                  p: 0.5,
-                                  borderRadius: 1,
-                                  bgcolor: 'background.paper',
-                                }}
-                              >
-                                <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
-                                  <Typography variant="caption" sx={{ minWidth: 32, color: 'text.secondary', fontWeight: 600 }}>
-                                    #{idx + 1}
-                                  </Typography>
-                                  <Chip
-                                    size="small"
-                                    color={color}
-                                    label={`${g.matchCount}개 일치`}
-                                    sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                                  />
-                                  <Chip
-                                    size="small"
-                                    variant="outlined"
-                                    label={`매치: ${g.matchedNumbers.join(', ')}`}
-                                    sx={{ height: 18, fontSize: 11 }}
-                                  />
-                                  <Chip
-                                    size="small"
-                                    color="success"
-                                    variant="outlined"
-                                    label={`자동 ${g.autoList.length}줄`}
-                                    sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                                  />
-                                  <Chip
-                                    size="small"
-                                    color="primary"
-                                    variant="outlined"
-                                    label={`반자동 ${g.semiList.length}줄`}
-                                    sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                                  />
-                                  {winningSet && (() => {
-                                    const w = g.matchedNumbers.filter((n) => winningSet.has(n)).length;
-                                    return w > 0 ? (
-                                      <Chip
-                                        size="small"
-                                        color="warning"
-                                        label={`🎯 당첨 ${w}개`}
-                                        sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                                      />
-                                    ) : null;
-                                  })()}
-                                  {groupLineMatching.strongAvailable && (() => {
-                                    const sm = g.matchedNumbers.filter((n) =>
-                                      resolvedStrongCandidates.includes(n)
-                                    ).length;
-                                    return (
-                                      <Chip
-                                        size="small"
-                                        color={sm >= 3 ? 'success' : sm >= 2 ? 'warning' : 'default'}
-                                        variant={sm >= 2 ? 'filled' : 'outlined'}
-                                        label={`강한 후보 ${sm}개 일치`}
-                                        sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                                      />
-                                    );
-                                  })()}
-                                </Stack>
-                                <Box sx={{ mt: 0.4, pl: 0.5 }}>
-                                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.2 }}>
-                                    자동 측 일치 줄 ({g.autoList.length}):
-                                    {winningSet && ' — 당첨번호만 컬러, 나머지 회색'}
-                                  </Typography>
-                                  <Stack spacing={0.2}>
-                                    {g.autoList.slice(0, lineRenderCap).map((a) => (
-                                      <Stack
-                                        key={`ga-${g.key}-${a.idx}`}
-                                        direction="row"
-                                        alignItems="center"
-                                        spacing={0.4}
-                                        flexWrap="wrap"
-                                        useFlexGap
-                                      >
-                                        <Chip
-                                          size="small"
-                                          color="success"
-                                          variant="outlined"
-                                          label={
-                                            winningSet
-                                              ? `자동 #${a.idx} · ${a.label} · 당첨 ${a.numbers.filter((n) => winningSet.has(n)).length}/6`
-                                              : `자동 #${a.idx} · ${a.label}`
-                                          }
-                                          sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
-                                        />
-                                        {a.numbers.map((n) => (
-                                          <LottoBall
-                                            key={`ga-${g.key}-${a.idx}-${n}`}
-                                            number={n}
-                                            size={20}
-                                            dimmed={winningSet ? !winningSet.has(n) : !mset.has(n)}
-                                          />
-                                        ))}
-                                      </Stack>
-                                    ))}
-                                    {g.autoList.length > lineRenderCap && (
-                                      <Typography variant="caption" color="text.secondary">
-                                        …외 자동 {g.autoList.length - lineRenderCap}줄
-                                      </Typography>
-                                    )}
-                                  </Stack>
-                                </Box>
-                                <Box sx={{ mt: 0.4, pl: 0.5 }}>
-                                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.2 }}>
-                                    반자동 측 일치 줄 ({g.semiList.length}):
-                                    {winningSet && ' — 당첨번호만 컬러, 나머지 회색'}
-                                  </Typography>
-                                  <Stack spacing={0.2}>
-                                    {g.semiList.slice(0, lineRenderCap).map((s) => (
-                                      <Stack
-                                        key={`gs-${g.key}-${s.idx}`}
-                                        direction="row"
-                                        alignItems="center"
-                                        spacing={0.4}
-                                        flexWrap="wrap"
-                                        useFlexGap
-                                      >
-                                        <Chip
-                                          size="small"
-                                          color="primary"
-                                          variant="outlined"
-                                          label={
-                                            winningSet
-                                              ? `반자동 #${s.idx} · ${s.label} · 당첨 ${s.numbers.filter((n) => winningSet.has(n)).length}/6`
-                                              : `반자동 #${s.idx} · ${s.label}`
-                                          }
-                                          sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
-                                        />
-                                        {s.numbers.map((n) => (
-                                          <LottoBall
-                                            key={`gs-${g.key}-${s.idx}-${n}`}
-                                            number={n}
-                                            size={20}
-                                            dimmed={winningSet ? !winningSet.has(n) : !mset.has(n)}
-                                          />
-                                        ))}
-                                      </Stack>
-                                    ))}
-                                    {g.semiList.length > lineRenderCap && (
-                                      <Typography variant="caption" color="text.secondary">
-                                        …외 반자동 {g.semiList.length - lineRenderCap}줄
-                                      </Typography>
-                                    )}
-                                  </Stack>
-                                </Box>
-                              </Box>
-                            );
-                          })}
-                        </Stack>
-                      </Box>
-                      {groups.length > groupShowLimit && (
-                        <Button
-                          type="button"
-                          size="small"
-                          variant="text"
-                          onClick={() => setGroupShowLimit((v) => v + (IS_CONSTRAINED_DEVICE ? 10 : 60))}
-                          sx={{ mt: 0.25 }}
-                        >
-                          더 보기 (+{Math.min(IS_CONSTRAINED_DEVICE ? 10 : 60, groups.length - groupShowLimit)} · 남은 {groups.length - groupShowLimit}건)
-                        </Button>
-                      )}
-                    </Box>
-                  );
-                };
-                if (groupLineMatching.groupCount === 0) {
-                  return (
-                    <Alert severity="info">
-                      공통 번호 2개 이상인 줄 페어가 없습니다. 자동 또는 반자동 한쪽에 데이터가 부족하거나 두 그룹이 완전히 다른 번호를 사용했습니다.
-                    </Alert>
-                  );
-                }
-                return (
-                  <>
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label={`통합 카드 총 ${groupLineMatching.groupCount}건 (현재 표시 ${visibleGroupMatchTotal}건 / 원본 페어 ${groupLineMatching.rawPairCount}건)`}
-                        sx={{ fontWeight: 700 }}
-                      />
-                      {visibleGroupMatch6.length > 0 && (
-                        <Chip size="small" color="error" label={`6개 일치: ${visibleGroupMatch6.length}건`} sx={{ fontWeight: 700 }} />
-                      )}
-                      {visibleGroupMatch5.length > 0 && (
-                        <Chip size="small" color="warning" label={`5개 일치: ${visibleGroupMatch5.length}건`} sx={{ fontWeight: 700 }} />
-                      )}
-                      {visibleGroupMatch4.length > 0 && (
-                        <Chip size="small" color="success" label={`4개 일치: ${visibleGroupMatch4.length}건`} sx={{ fontWeight: 700 }} />
-                      )}
-                      {visibleGroupMatch3.length > 0 && (
-                        <Chip size="small" color="primary" label={`3개 일치: ${visibleGroupMatch3.length}건`} sx={{ fontWeight: 700 }} />
-                      )}
-                      {visibleGroupMatch2.length > 0 && (
-                        <Chip size="small" color="info" label={`2개 일치: ${visibleGroupMatch2.length}건`} sx={{ fontWeight: 700 }} />
-                      )}
-                    </Stack>
-                    {visibleGroupMatchTotal === 0 && (
-                      <Alert severity="info" sx={{ mb: 1 }}>
-                        현재 필터 조건에 맞는 1:1 전수비교 카드가 없습니다.
-                      </Alert>
-                    )}
-                    {renderGroupSection('🟣 6개 일치 (한 줄 통째 일치 — 매우 희귀)', 'error', visibleGroupMatch6)}
-                    {renderGroupSection('🔴 5개 일치 (희귀)', 'warning', visibleGroupMatch5)}
-                    {renderGroupSection('🟠 4개 일치', 'success', visibleGroupMatch4)}
-                    {renderGroupSection('🟢 3개 일치', 'primary', visibleGroupMatch3)}
-                    {renderGroupSection('🟡 2개 일치 (가장 많음)', 'info', visibleGroupMatch2)}
-                  </>
-                );
-              })()}
-            </Paper>
-            </Box>
-          )}
 
-      {picked.length === 6 && activeComparison && (
-        <>
-          {/* ── 누적 자동 페어/트리플 콤보 교집합 ──────────────── */}
-          {activeComparison.comboDataAvailable && (
-            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
-              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-                🔗 자동 누적 페어/트리플 콤보 교집합
-              </Typography>
-              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-                <Chip
-                  size="small"
-                  color="primary"
-                  label={`평균 페어 매치 ${activeComparison.avgPairMatches.toFixed(2)} / 티켓`}
-                  sx={{ fontWeight: 700 }}
-                />
-                <Chip
-                  size="small"
-                  color="primary"
-                  label={`평균 트리플 매치 ${activeComparison.avgTripleMatches.toFixed(3)} / 티켓`}
-                  variant="outlined"
-                />
-              </Stack>
-              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 600 }}>
-                페어 매치 분포 (티켓 안에 자동 누적의 자주-페어가 통째로 들어 있는지):
-              </Typography>
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-                {Object.entries(activeComparison.pairMatchDistribution)
-                  .map(([k, v]) => [Number(k), v] as [number, number])
-                  .sort((a, b) => a[0] - b[0])
-                  .map(([k, v]) => {
-                    const pct = activeComparison.ticketCount > 0
-                      ? (v / activeComparison.ticketCount) * 100
-                      : 0;
-                    return (
-                      <Chip
-                        key={`pair-${k}`}
-                        size="small"
-                        label={`${k}개 페어: ${v}장 (${pct.toFixed(1)}%)`}
-                        color={k >= 2 ? 'success' : k >= 1 ? 'primary' : 'default'}
-                        variant={k >= 1 ? 'filled' : 'outlined'}
-                      />
-                    );
-                  })}
-              </Stack>
-              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 600 }}>
-                트리플 매치 분포:
-              </Typography>
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                {Object.entries(activeComparison.tripleMatchDistribution)
-                  .map(([k, v]) => [Number(k), v] as [number, number])
-                  .sort((a, b) => a[0] - b[0])
-                  .map(([k, v]) => {
-                    const pct = activeComparison.ticketCount > 0
-                      ? (v / activeComparison.ticketCount) * 100
-                      : 0;
-                    return (
-                      <Chip
-                        key={`triple-${k}`}
-                        size="small"
-                        label={`${k}개 트리플: ${v}장 (${pct.toFixed(1)}%)`}
-                        color={k >= 1 ? 'success' : 'default'}
-                        variant={k >= 1 ? 'filled' : 'outlined'}
-                      />
-                    );
-                  })}
-              </Stack>
-            </Paper>
-          )}
 
-          {/* ── 콤보 점수 상위 5장 ─────────────────────────────── */}
-          {activeComparison.bestComboTickets.length > 0 && (
-            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
-              <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>
-                🥇 누적 자동과 가장 잘 맞은 티켓 5장 (페어 1점 · 트리플 3점 · 쿼드 6점)
-              </Typography>
-              <Stack spacing={0.75}>
-                {activeComparison.bestComboTickets.map((t) => (
-                  <Stack
-                    key={`combo-best-${t.index}`}
-                    direction="row"
-                    alignItems="center"
-                    spacing={0.75}
-                    flexWrap="wrap"
-                    useFlexGap
-                  >
-                    <Chip
-                      size="small"
-                      label={`#${t.index + 1}`}
-                      variant="outlined"
-                      sx={{ minWidth: 48 }}
-                    />
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      {t.ticket.map((n) => (
-                        <LottoBall
-                          key={n}
-                          number={n}
-                          size={22}
-                          dimmed={winningSet ? !winningSet.has(n) : false}
-                        />
-                      ))}
-                    </Stack>
-                    <Chip
-                      size="small"
-                      color="success"
-                      label={`점수 ${t.comboScore}`}
-                      sx={{ fontWeight: 700 }}
-                    />
-                    {t.matchedPairCount > 0 && (
-                      <Chip size="small" label={`페어 ${t.matchedPairCount}`} variant="outlined" />
-                    )}
-                    {t.matchedTripleCount > 0 && (
-                      <Chip
-                        size="small"
-                        label={`트리플 ${t.matchedTripleCount}`}
-                        color="warning"
-                      />
-                    )}
-                    {t.vsStrongMatch.length >= 2 && (
-                      <Chip
-                        size="small"
-                        label={`강한후보 ${t.vsStrongMatch.length}`}
-                        color="primary"
-                      />
-                    )}
-                  </Stack>
-                ))}
-              </Stack>
-            </Paper>
-          )}
-
-          <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block' }}>
-            ※ 위 매치율은 과거 회차에 대한 측정값이며, 다음 회차의 당첨 확률(1/8,145,060)을 변경하지 않습니다.
-            누적 자동과의 콤보 교집합은 사용자의 픽이 군중의 강한 패턴에 얼마나 정렬되는지 보여주는 관찰 도구입니다.
-          </Typography>
-        </>
-      )}
-
-      {/* 📡 통합 예측 신호 + 신호 성적표 — 학습 엔진(상세)으로 접어둠 */}
-      {showPredictionDetail && (
+      {/* 📡 통합 예측 신호 + 신호 성적표 — ⑤ 학습 엔진 안 */}
       <>
       <Divider sx={{ my: 2 }} />
       <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'info.main' }}>
@@ -6374,7 +6427,10 @@ export default function SemiAutoComparePanel({
         );
       })()}
       </>
+
+        </Stack>
       )}
+      </Box>
 
       <BulkLineInputDialog
         open={bulkOpen}
@@ -6385,6 +6441,6 @@ export default function SemiAutoComparePanel({
         existingKeys={existingSemiKeys}
       />
       {ConfirmDialog}
-    </Paper>
+    </Stack>
   );
 }

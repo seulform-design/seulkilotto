@@ -1150,11 +1150,10 @@ export default function SemiAutoComparePanel({
    * (샘플링/상위 N장 없음 — 분석 왜곡 방지)
    */
   const [forceDetailedComparison, setForceDetailedComparison] = useState(false);
-  // 모든 섹션 접힘/펼침 가능 — ①·③만 기본 펼침
+  // 섹션 접힘/펼침 — ①·③ 기본 펼침. ③ 안 추천 상세(강수·기대·종합)는 접기 없음.
   const [showRegister, setShowRegister] = useState(true);
   const [showAnalysisSection, setShowAnalysisSection] = useState(false);
   const [showRecommendSection, setShowRecommendSection] = useState(true);
-  const [showRecommendDetail, setShowRecommendDetail] = useState(false);
   const [showPredictionDetail, setShowPredictionDetail] = useState(false);
   const [showTicketCompare, setShowTicketCompare] = useState(false);
   /** 1:1 전수비교 상세(매칭 카드) — 요약만 기본, 상세 보기로 펼침 */
@@ -3471,14 +3470,17 @@ export default function SemiAutoComparePanel({
       <Paper sx={{ p: 2 }}>
       <Stack direction="row" alignItems="flex-start" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showRegister ? 1 : 0 }} spacing={1}>
         <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography variant="subtitle1" fontWeight={800}>
-            ① 번호 등록
-          </Typography>
+          <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
+            <Typography variant="subtitle1" fontWeight={800}>
+              ① 번호 등록
+            </Typography>
+            <Chip size="small" variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`} sx={{ height: 20, fontSize: 10 }} />
+          </Stack>
           <Typography variant="caption" color="text.secondary">
-            자동·반자동 용지를 한곳에서 등록합니다.{' '}
+            자동·반자동 용지 등록 → 저장하면 ② 분석·③ 추천에 반영됩니다.{' '}
             {compareWinning
-              ? '복기 — 당첨번호·누적 강한후보·교집합 통계 비교'
-              : '이번회차 — 줄간 겹침·강한 후보 분석 (당첨번호 미사용)'}
+              ? '복기 — 당첨번호·누적 강한후보·교집합과 대조합니다.'
+              : '이번회차 — 당첨번호 없이 줄간 겹침·강한 후보만 봅니다.'}
           </Typography>
         </Box>
         <Stack direction="row" spacing={0.75} flexShrink={0}>
@@ -3935,16 +3937,27 @@ export default function SemiAutoComparePanel({
 
       {/* ════════ ② 번호 분석 결과 & 1:1 전수비교 ════════ */}
       <Paper sx={{ p: 2 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-          <Typography variant="subtitle1" fontWeight={800}>
-            ② 번호 분석 결과 &amp; 1:1 전수비교
-          </Typography>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showAnalysisSection ? 1 : 0 }} spacing={1}>
+          <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
+            <Typography variant="subtitle1" fontWeight={800}>
+              ② 번호 분석 · 1:1 전수비교
+            </Typography>
+            <Chip size="small" variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`} sx={{ height: 20, fontSize: 10 }} />
+          </Stack>
           <Button size="small" variant="outlined" onClick={() => setShowAnalysisSection((v) => !v)}>
             {showAnalysisSection ? '접기 ▲' : '펼치기 ▼'}
           </Button>
         </Stack>
+        {!showAnalysisSection && (
+          <Typography variant="caption" color="text.secondary">
+            빈도·1:1 요약·매칭 상세·누적/회차별 데이터
+          </Typography>
+        )}
         {showAnalysisSection && (
         <>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.25 }}>
+        빈도 → 1:1 요약/상세 → 누적·회차별 데이터 순으로 봅니다. 추천·검증은 ③·④로 이어집니다.
+      </Typography>
       {analysisPrelude}
       {/* 반자동 누적 기반 빈도 — 자동 분석과 분리, 반자동 누적만 카운트 */}
       {(semiCurrentLines.length > 0 || semiSlipQueue.length > 0) && (
@@ -4141,9 +4154,9 @@ export default function SemiAutoComparePanel({
                 )}
               </Stack>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                {intentSectionLabel} 탭 기준으로 자동 누적 줄과 반자동 누적 줄을 전수 비교해 공통 번호 2개 이상인 매치를 찾습니다.
+                {intentSectionLabel} · {effectiveRound ?? '?'}회 — 자동↔반자동 줄을 전수 비교해 공통 번호 2개 이상 매치를 집계합니다.
                 {canRenderLineMatching && !showLineMatchDetail
-                  ? ' 상세 매칭 카드·필터는 [상세 보기]에서 펼칩니다.'
+                  ? ' 매칭 카드·필터는 [상세 보기]에서 엽니다.'
                   : ''}
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
@@ -4709,20 +4722,25 @@ export default function SemiAutoComparePanel({
         )}
       </Paper>
 
-      {/* ════════ ③ 번호 추천 (기본 펼침 · 접기 가능) ════════ */}
+      {/* ════════ ③ 번호 추천 (기본 펼침 · 추천 상세는 항상 표시) ════════ */}
       <Paper sx={{ p: 2 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showRecommendSection ? 1 : 0 }} spacing={1}>
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <Typography variant="subtitle1" fontWeight={800}>
             ③ 번호 추천
           </Typography>
-          <Chip size="small" color="success" label="기본 펼침" sx={{ height: 22, fontWeight: 700 }} />
-          <Chip size="small" variant="outlined" label="복기검증은 ④ 엔진" sx={{ height: 22 }} />
+          <Chip size="small" color={compareWinning ? 'primary' : 'secondary'} label={`${intentSectionLabel} ${effectiveRound ?? currentRound ?? '?'}회`} sx={{ height: 22, fontWeight: 700 }} />
+          <Chip size="small" variant="outlined" label="검증·후속·미출 → ④" sx={{ height: 22 }} />
         </Stack>
         <Button size="small" variant="outlined" onClick={() => setShowRecommendSection((v) => !v)}>
           {showRecommendSection ? '접기 ▲' : '펼치기 ▼'}
         </Button>
       </Stack>
+      {!showRecommendSection && (
+        <Typography variant="caption" color="text.secondary">
+          핵심 추천 · 용지 통계 5세트 · 강수·기대수 · 종합 예측
+        </Typography>
+      )}
       {showRecommendSection && (
       <>
       {/* 🎯 핵심 추천 */}
@@ -4789,7 +4807,7 @@ export default function SemiAutoComparePanel({
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
             핵심 6 = 집중 픽 · 확장 18 = 넓은 그물(복기상 더 잘 잡음) · 분산 최적 = 공동당첨 회피(확률 동일).
-            {' '}용지 통계 5세트는 바로 아래. 상세(강수·미출·종합)는 펼침. 후속·미출·검증은 <strong>④ 단일 엔진</strong> 탭. 1등 확률(1/8,145,060)은 불변.
+            {' '}아래: 용지 통계 5세트 → 강수·기대·종합 예측. 후속·미출·검증은 <strong>④ 엔진</strong>. 1등 확률(1/8,145,060)은 불변.
           </Typography>
         </Paper>
       )}
@@ -4797,7 +4815,7 @@ export default function SemiAutoComparePanel({
 
         {/* 🎲 용지 통계 종합 추천 — ③ 번호 추천 */}
         <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }} spacing={1}>
             <Typography variant="body2" fontWeight={700}>
               🎲 용지 통계 종합 추천 조합{compareWinning ? ' (복기 검증)' : ` (${currentRound ?? effectiveRound ?? '?'}회 예상)`}
             </Typography>
@@ -4817,6 +4835,7 @@ export default function SemiAutoComparePanel({
             </Button>
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            바로 아래 <strong>강수·기대수 · 종합 예측</strong>과 함께 보세요.{' '}
             <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차(강수·기대수)</strong> ·{' '}
             <strong>🧬 학습된 당첨 프로파일 매칭</strong>({learnedPattern?.round ?? '복기'}회 당첨 구조 학습·전이) —
             <strong> ✅ 검증 학습 {learningBridgeStatus.validatedCount}개</strong>(Feature·다회차·겹침·커버리지) —
@@ -4881,33 +4900,28 @@ export default function SemiAutoComparePanel({
           )}
         </Paper>
 
-      <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mt: 1, mb: showRecommendDetail ? 1 : 0 }} spacing={1}>
+      <Divider textAlign="left" sx={{ mt: 2, mb: 1.5 }}>
         <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
-          <Typography variant="body2" fontWeight={700} color="text.secondary">
-            추천 상세 (강수·기대수 · 종합 예측)
+          <Typography variant="caption" fontWeight={800} color="text.secondary">
+            추천 상세 · 강수·기대수 · 종합 예측
           </Typography>
           <Chip
             size="small"
             variant="outlined"
             label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`}
-            sx={{ height: 20, fontSize: 10 }}
+            sx={{ height: 18, fontSize: 9 }}
           />
         </Stack>
-        <Button size="small" variant="outlined" onClick={() => setShowRecommendDetail((v) => !v)}>
-          {showRecommendDetail ? '접기 ▲' : '펼치기 ▼'}
-        </Button>
-      </Stack>
-      {showRecommendDetail && (
-      <>
-      {/* 🎯 강수·기대수 (구간별) — 메인 뷰. 상세 역산·학습은 [학습 엔진]으로 접어둔다. */}
+      </Divider>
+      {/* 강수·기대수 · 최종합의 — ③ 추천 상세 (항상 표시) */}
       {activeComparison && (
         <>
               {/* ★ 1:1 강수 & 기대수 (구간별) — 평행회차와 동일 레이아웃, 1:1 반복도 기반 */}
               {decadePattern && (
-                <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+                <Box sx={{ mt: 0.5, p: 1.25, borderRadius: 1, bgcolor: 'action.hover' }}>
                   <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
                     <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      <Typography variant="caption" fontWeight={700}>
+                      <Typography variant="caption" fontWeight={800}>
                         ★ 1:1 강수 &amp; 기대수 (구간별)
                       </Typography>
                       <Chip size="small" variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회 · 전수비교 반복도`} sx={{ height: 18, fontSize: 9 }} />
@@ -5167,8 +5181,6 @@ export default function SemiAutoComparePanel({
       )}
       </>
       )}
-      </>
-      )}
       </Paper>
 
       {/* ════════ ④ 패턴 분석 엔진 (기본 접힘 · 복기검증/백테스트 포함) ════════ */}
@@ -5198,6 +5210,10 @@ export default function SemiAutoComparePanel({
             <Tab value="aux" label="후속·미출" />
             <Tab value="verify" label="검증·백테스트" />
           </Tabs>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            하나의 분석 엔진입니다. 탭만 바꾸면 역산·학습·후속/미출·검증을 이어서 볼 수 있습니다.
+            {' '}대상: <strong>{intentSectionLabel} {effectiveRound ?? '?'}회</strong>
+          </Typography>
           <Stack spacing={1.5}>
           {engineTab === 'learn' && engineExtraSlot}
 

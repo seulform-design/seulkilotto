@@ -30,6 +30,9 @@ const TONE_BORDER: Record<EngineTone, string> = {
 /** 엔진 전역 Chip 규격 */
 export const ENGINE_CHIP_SX = { height: 20, fontSize: 10, fontWeight: 700 } as const;
 
+/** 엔진 안 공 크기 규격 — 테이블/목록/강조 */
+export const ENGINE_BALL = { table: 18, list: 22, emphasis: 28, hero: 34 } as const;
+
 export function EngineStatusChip({ sx, ...props }: ChipProps) {
   return <Chip size="small" {...props} sx={{ ...ENGINE_CHIP_SX, ...(sx as object) }} />;
 }
@@ -72,7 +75,17 @@ export function EngineSection({
   };
 
   return (
-    <Paper id={id} variant="outlined" sx={{ p: 1.5, borderColor: TONE_BORDER[tone], ...((sx as object) ?? {}) }}>
+    <Paper
+      id={id}
+      variant="outlined"
+      sx={{
+        p: 1.5,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: TONE_BORDER[tone],
+        ...((sx as object) ?? {}),
+      }}
+    >
       <Stack
         direction="row"
         alignItems="flex-start"
@@ -83,7 +96,7 @@ export function EngineSection({
         sx={{ mb: isOpen && (intent || children) ? 0.75 : 0 }}
       >
         <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ minWidth: 0, flex: 1 }}>
-          <Typography variant="body2" fontWeight={800} component="div">
+          <Typography variant="body2" fontWeight={800} component="div" sx={{ lineHeight: 1.35 }}>
             {title}
           </Typography>
           {chips}
@@ -91,14 +104,14 @@ export function EngineSection({
         <Stack direction="row" alignItems="center" spacing={0.75} flexShrink={0}>
           {actions}
           {collapsible && (
-            <Button size="small" variant="outlined" onClick={toggle}>
+            <Button size="small" variant="outlined" onClick={toggle} sx={{ minWidth: 72, height: 28 }}>
               {isOpen ? '접기 ▲' : '펼치기 ▼'}
             </Button>
           )}
         </Stack>
       </Stack>
       {isOpen && intent != null && intent !== false && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: children ? 1 : 0 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: children ? 1 : 0, lineHeight: 1.45 }}>
           {intent}
         </Typography>
       )}
@@ -108,7 +121,7 @@ export function EngineSection({
   );
 }
 
-/** 섹션 안 하위 블록 — 왼쪽 톤 바 + hover 배경으로 계층만 표시 */
+/** 섹션 안 하위 블록 — Stack spacing 으로 간격 맞출 것(기본 mt 0) */
 export function EngineSubBlock({
   title,
   chips,
@@ -119,25 +132,26 @@ export function EngineSubBlock({
   title?: ReactNode;
   chips?: ReactNode;
   tone?: EngineTone;
-  children: ReactNode;
+  children?: ReactNode;
   sx?: SxProps<Theme>;
 }) {
   return (
     <Box
       sx={{
-        mt: 1,
         p: 1.25,
         borderRadius: 1,
         bgcolor: 'action.hover',
+        border: '1px solid',
+        borderColor: 'divider',
         borderLeft: '3px solid',
         borderLeftColor: tone === 'neutral' ? 'text.disabled' : TONE_BORDER[tone],
         ...((sx as object) ?? {}),
       }}
     >
       {(title != null || chips != null) && (
-        <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+        <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: children ? 0.75 : 0 }}>
           {title != null && (
-            <Typography variant="caption" fontWeight={800}>
+            <Typography variant="caption" fontWeight={800} sx={{ lineHeight: 1.35 }}>
               {title}
             </Typography>
           )}

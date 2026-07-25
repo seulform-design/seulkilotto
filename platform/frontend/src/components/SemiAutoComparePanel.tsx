@@ -43,6 +43,7 @@ import {
 import NumberFrequencyPanel from './NumberFrequencyPanel';
 import EngineAuxSignalsPanel from './EngineAuxSignalsPanel';
 import {
+  ENGINE_BALL,
   EngineSection,
   EngineStatusChip,
   EngineSubBlock,
@@ -1002,39 +1003,40 @@ function SignalExplanationPanel({
 
   const renderItems = (
     title: string,
+    tone: 'success' | 'warning',
     items: PredictionSignalNumber[],
     emptyHint: string,
   ) => (
-    <Box sx={{ flex: 1, minWidth: 0 }}>
-      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.75 }}>
-        {title}
-      </Typography>
+    <EngineSubBlock
+      tone={tone}
+      title={title}
+      chips={<EngineStatusChip variant="outlined" label={`${items.length}개`} />}
+      sx={{ flex: 1, minWidth: 0 }}
+    >
       {items.length === 0 ? (
         <Typography variant="caption" color="text.secondary">
           {emptyHint}
         </Typography>
       ) : (
-        <Stack spacing={1}>
+        <Stack spacing={0.75}>
           {items.map((item) => (
             <Box
               key={`explain-${title}-${item.number}`}
               sx={{
                 p: 1,
                 borderRadius: 1,
-                bgcolor: 'action.hover',
+                bgcolor: 'background.paper',
                 border: '1px solid',
                 borderColor: 'divider',
               }}
             >
-              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-                <LottoBall number={item.number} size={28} />
-                <Chip
-                  size="small"
+              <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                <LottoBall number={item.number} size={ENGINE_BALL.emphasis} />
+                <EngineStatusChip
                   label={`${item.grade} · 점수 ${item.score.toFixed(1)}`}
                   sx={{
                     bgcolor: GRADE_COLORS[item.grade],
                     color: item.grade === 'C' ? 'text.primary' : '#fff',
-                    fontWeight: 700,
                   }}
                 />
                 <Typography variant="caption" color="text.secondary">
@@ -1043,9 +1045,8 @@ function SignalExplanationPanel({
               </Stack>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                 {item.sources.map((src) => (
-                  <Chip
+                  <EngineStatusChip
                     key={`src-${item.number}-${src}`}
-                    size="small"
                     variant="outlined"
                     label={
                       predictionSignals?.source_weights?.[src] != null
@@ -1055,9 +1056,8 @@ function SignalExplanationPanel({
                   />
                 ))}
                 {item.excluded_by.map((src) => (
-                  <Chip
+                  <EngineStatusChip
                     key={`exc-${item.number}-${src}`}
-                    size="small"
                     color="error"
                     variant="outlined"
                     label={`${signalSourceLabel(src)} (배제)`}
@@ -1068,27 +1068,30 @@ function SignalExplanationPanel({
           ))}
         </Stack>
       )}
-    </Box>
+    </EngineSubBlock>
   );
 
   return (
-    <Box sx={{ mt: 1.5 }}>
-      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.75 }}>
-        왜 이 번호가 나왔나요?
-      </Typography>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+    <Stack spacing={1.25} sx={{ mt: 1.25 }}>
+      <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
+        <Typography variant="caption" fontWeight={800}>
+          왜 이 번호가 나왔나요?
+        </Typography>
+        <EngineStatusChip variant="outlined" label="근거 분해" />
+      </Stack>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
         강한 후보는 점수·계열 합의로, 배제 후보는 exclusion 신호가 붙은 번호로 설명합니다.
       </Typography>
       {usingFallback && (
-        <Alert severity="info" sx={{ mb: 1 }}>
+        <Alert severity="info" sx={{ py: 0.5 }}>
           통합 신호 상세가 비어 있어 현재 화면에서 사용 중인 강한 후보를 로컬/누적 기준으로 설명합니다.
         </Alert>
       )}
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
-        {renderItems('강한 후보 근거', strongItems, '표시할 강한 후보 근거가 없습니다.')}
-        {renderItems('배제 후보 근거', excludedItems, '표시할 배제 후보 근거가 없습니다.')}
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25}>
+        {renderItems('강한 후보 근거', 'success', strongItems, '표시할 강한 후보 근거가 없습니다.')}
+        {renderItems('배제 후보 근거', 'warning', excludedItems, '표시할 배제 후보 근거가 없습니다.')}
       </Stack>
-    </Box>
+    </Stack>
   );
 }
 
@@ -5831,24 +5834,24 @@ export default function SemiAutoComparePanel({
                 </>
               }
             >
+              <Stack spacing={1.25}>
               {/* 🎯 최종 예측 조합 (구간 균형) + 구조 서술 — 이 섹션의 결론 */}
               <EngineSubBlock
                 tone="warning"
                 title="🎯 최종 예측 조합 6개 (핵심 상위 + 구간 10단위 최대 2개 균형)"
-                sx={{ mt: 0, mb: 1 }}
+                chips={
+                  deepAnalysis.finalWin != null ? (
+                    <EngineStatusChip
+                      color={deepAnalysis.finalWin >= 3 ? 'success' : deepAnalysis.finalWin >= 2 ? 'warning' : 'default'}
+                      label={`당첨 ${deepAnalysis.finalWin}/6`}
+                    />
+                  ) : undefined
+                }
               >
                 <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
                   {deepAnalysis.finalPick.map((n) => (
-                    <LottoBall key={`fp-${n}`} number={n} size={34} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
+                    <LottoBall key={`fp-${n}`} number={n} size={ENGINE_BALL.hero} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
                   ))}
-                  {deepAnalysis.finalWin != null && (
-                    <Chip
-                      size="small"
-                      color={deepAnalysis.finalWin >= 3 ? 'success' : deepAnalysis.finalWin >= 2 ? 'warning' : 'default'}
-                      label={`당첨 ${deepAnalysis.finalWin}/6`}
-                      sx={{ fontWeight: 700 }}
-                    />
-                  )}
                 </Stack>
                 {deepAnalysis.reserve.length > 0 && (
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10 }}>
@@ -5863,102 +5866,103 @@ export default function SemiAutoComparePanel({
                   제외 {deepAnalysis.exclude.map((e) => e.number).join('·') || '-'}
                 </Typography>
               </EngineSubBlock>
+              {/* ① 핵심 TOP15 */}
+              <EngineSubBlock
+                tone="info"
+                title="① 핵심번호 TOP15"
+                chips={
+                  deepAnalysis.winCheck ? (
+                    <EngineStatusChip
+                      color={deepAnalysis.winCheck.top6 >= 3 ? 'success' : deepAnalysis.winCheck.top6 >= 2 ? 'warning' : 'default'}
+                      label={`TOP6 당첨 ${deepAnalysis.winCheck.top6} · TOP15 ${deepAnalysis.winCheck.top15}`}
+                    />
+                  ) : (
+                    <EngineStatusChip variant="outlined" label="빈도0.5·가중0.3·세트0.1·허브0.1" />
+                  )
+                }
+              >
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                  {deepAnalysis.composite.slice(0, 15).map((c, i) => (
+                    <Box key={`comp-${c.number}`} sx={{ textAlign: 'center', minWidth: 34 }}>
+                      <LottoBall number={c.number} size={ENGINE_BALL.emphasis} dimmed={compareWinning && winningSet ? !c.winning : false} />
+                      <Typography variant="caption" sx={{ display: 'block', fontSize: 9, color: 'text.disabled', lineHeight: 1.1 }}>
+                        {i + 1}위·{c.score}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10 }}>
+                  근거 분해(상위 6): {deepAnalysis.composite.slice(0, 6).map((c) => `${c.number}[빈${c.cFreq}·가${c.cWeight}·세${c.cSet}·허${c.cHub}]`).join(' ')}
+                </Typography>
+              </EngineSubBlock>
 
-              {/* ⑩ 최종 핵심 TOP15 (종합 합성) */}
-              <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.25, mt: 0.5 }}>
-                ① 핵심번호 TOP15 (양쪽빈도 0.5 + 가중치 0.3 + 세트 0.1 + 허브 0.1)
-              </Typography>
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-                {deepAnalysis.composite.slice(0, 15).map((c, i) => (
-                  <Box key={`comp-${c.number}`} sx={{ textAlign: 'center', minWidth: 34 }}>
-                    <LottoBall number={c.number} size={30} dimmed={compareWinning && winningSet ? !c.winning : false} />
-                    <Typography variant="caption" sx={{ display: 'block', fontSize: 8, color: 'text.disabled', lineHeight: 1 }}>
-                      {i + 1}위·{c.score}
+              {/* 백테스트 · 안정성 */}
+              <EngineSubBlock
+                tone="secondary"
+                title="🧪 백테스트 · 안정성"
+                chips={
+                  deepAnalysis.stability ? (
+                    <EngineStatusChip
+                      color={deepAnalysis.stability.jaccard >= 50 ? 'success' : deepAnalysis.stability.jaccard >= 30 ? 'warning' : 'default'}
+                      label={`안정성 ${deepAnalysis.stability.jaccard}%`}
+                    />
+                  ) : undefined
+                }
+              >
+                {deepAnalysis.stability && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                    짝/홀 줄 분할 TOP12 겹침 {deepAnalysis.stability.jaccard}%
+                    {deepAnalysis.stability.jaccard >= 50 ? ' — 견고' : deepAnalysis.stability.jaccard >= 30 ? ' — 중간' : ' — 낮음(노이즈 가능)'}
+                  </Typography>
+                )}
+                {deepAnalysis.backtest ? (
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.25 }}>
+                      당첨 {deepAnalysis.backtest.W}개 대비 TOP-K — lift=적중/기대, p&lt;0.05면 유의(★)
+                    </Typography>
+                    <Stack direction="row" sx={{ fontSize: 10, fontWeight: 700, color: 'text.secondary', px: 0.5 }}>
+                      <Box sx={{ width: 44 }}>랭킹</Box>
+                      <Box sx={{ flex: 1, textAlign: 'right' }}>TOP6</Box>
+                      <Box sx={{ flex: 1, textAlign: 'right' }}>TOP15</Box>
+                    </Stack>
+                    {deepAnalysis.backtest.methods.map((m) => {
+                      const fmt = (r: { hit: number; exp: number; lift: number; p: number }) =>
+                        `${r.hit}/${r.exp}·×${r.lift}·p${r.p}${r.p < 0.05 ? '★' : ''}`;
+                      return (
+                        <Stack key={`bt-${m.key}`} direction="row" alignItems="center" sx={{ fontSize: 10, px: 0.5, py: 0.15 }}>
+                          <Box sx={{ width: 44, fontWeight: 700 }}>{m.key}</Box>
+                          <Box sx={{ flex: 1, textAlign: 'right', color: m.k6.p < 0.05 ? 'success.light' : 'text.secondary', fontWeight: m.k6.p < 0.05 ? 700 : 400 }}>{fmt(m.k6)}</Box>
+                          <Box sx={{ flex: 1, textAlign: 'right', color: m.k15.p < 0.05 ? 'success.light' : 'text.secondary', fontWeight: m.k15.p < 0.05 ? 700 : 400 }}>{fmt(m.k15)}</Box>
+                        </Stack>
+                      );
+                    })}
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.5 }}>
+                      ※ {effectiveRound ?? '?'}회 1회차 검증. 여러 회차에서 lift&gt;1·p&lt;0.05가 꾸준해야 신호입니다.
                     </Typography>
                   </Box>
-                ))}
-              </Stack>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mb: 0.5 }}>
-                근거 분해(상위 6, 0~100): {deepAnalysis.composite.slice(0, 6).map((c) => `${c.number}[빈${c.cFreq}·가${c.cWeight}·세${c.cSet}·허${c.cHub}]`).join(' ')}
-              </Typography>
-              {deepAnalysis.winCheck && (
-                <Chip
-                  size="small"
-                  color={deepAnalysis.winCheck.top6 >= 3 ? 'success' : deepAnalysis.winCheck.top6 >= 2 ? 'warning' : 'default'}
-                  label={`복기 검증 — 핵심 TOP6 중 당첨 ${deepAnalysis.winCheck.top6}개 · TOP15 중 ${deepAnalysis.winCheck.top15}개 (무작위 기대 TOP6≈0.8·TOP15≈2)`}
-                  sx={{ fontWeight: 700, mb: 1, height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.25 } }}
-                />
-              )}
-
-              <Divider sx={{ my: 1 }} />
-              {/* 🧪 백테스트 검증 — 유의성(초기하분포 p값) + 안정성(분할 겹침) */}
-              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                🧪 백테스트 검증 (방법이 우연보다 나은가)
-              </Typography>
-              {deepAnalysis.stability && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-                  안정성(짝/홀 줄 분할 TOP12 겹침): <strong style={{ color: deepAnalysis.stability.jaccard >= 50 ? '#66bb6a' : deepAnalysis.stability.jaccard >= 30 ? '#ffa726' : '#bbb' }}>{deepAnalysis.stability.jaccard}%</strong>{' '}
-                  {deepAnalysis.stability.jaccard >= 50 ? '— 패턴이 견고(표본 절반이 바뀌어도 상위가 유지)' : deepAnalysis.stability.jaccard >= 30 ? '— 중간(부분적으로만 안정)' : '— 낮음(표본 노이즈 가능성, 예측력 약함)'}
-                </Typography>
-              )}
-              {deepAnalysis.backtest ? (
-                <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, p: 0.5, mb: 0.5 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.25 }}>
-                    당첨 {deepAnalysis.backtest.W}개 대비 각 랭킹 TOP-K 적중 — <strong>lift</strong>=적중/기대, <strong>p</strong>&lt;0.05 면 우연 대비 유의(★)
+                ) : (
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                    이번회차는 당첨 미정이라 유의성 검증 불가 — 안정성만 참고. 복기 탭에서 회차별 검증.
                   </Typography>
-                  <Stack direction="row" sx={{ fontSize: 10, fontWeight: 700, color: 'text.secondary', px: 0.5 }}>
-                    <Box sx={{ width: 44 }}>랭킹</Box>
-                    <Box sx={{ flex: 1, textAlign: 'right' }}>TOP6 적중/기대·lift·p</Box>
-                    <Box sx={{ flex: 1, textAlign: 'right' }}>TOP15 적중/기대·lift·p</Box>
-                  </Stack>
-                  {deepAnalysis.backtest.methods.map((m) => {
-                    const fmt = (r: { hit: number; exp: number; lift: number; p: number }) =>
-                      `${r.hit}/${r.exp}·×${r.lift}·p${r.p}${r.p < 0.05 ? '★' : ''}`;
-                    return (
-                      <Stack key={`bt-${m.key}`} direction="row" alignItems="center" sx={{ fontSize: 10, px: 0.5, py: 0.1 }}>
-                        <Box sx={{ width: 44, fontWeight: 700 }}>{m.key}</Box>
-                        <Box sx={{ flex: 1, textAlign: 'right', color: m.k6.p < 0.05 ? 'success.light' : 'text.secondary', fontWeight: m.k6.p < 0.05 ? 700 : 400 }}>{fmt(m.k6)}</Box>
-                        <Box sx={{ flex: 1, textAlign: 'right', color: m.k15.p < 0.05 ? 'success.light' : 'text.secondary', fontWeight: m.k15.p < 0.05 ? 700 : 400 }}>{fmt(m.k15)}</Box>
-                      </Stack>
-                    );
-                  })}
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.25 }}>
-                    ※ 이건 {effectiveRound ?? '?'}회 <strong>1회차</strong> 검증입니다. ★가 떠도 여러 방법을 동시에 본 탓일 수 있어(다중비교),
-                    회차를 누적해 매번 lift&gt;1·p&lt;0.05 가 <strong>꾸준</strong>해야 진짜 신호입니다. 1회 유의는 우연일 수 있음.
-                  </Typography>
-                </Box>
-              ) : (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-                  ※ 이번회차 탭은 당첨 미정이라 유의성 검증 불가 — 안정성(위)만 참고. 복기 탭에서 회차별로 검증하세요.
-                </Typography>
-              )}
+                )}
+              </EngineSubBlock>
 
-              <Divider sx={{ my: 1 }} />
-              {/* 🔬 번호 추출 역산 — 대상(복기=당첨/이번회차=예상)이 각 신호에서 몇 위였나 */}
-              <Box sx={{ p: 1, mb: 1, borderRadius: 1, border: '1px dashed', borderColor: 'warning.main' }}>
-                <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                  🔬 번호 추출 역산 —{' '}
-                  {deepAnalysis.isReviewTarget
-                    ? `${effectiveRound ?? '?'}회 당첨번호가 1:1 데이터에서 어떻게 추출될 수 있었나`
-                    : '예상번호가 어느 신호로 추출됐나 (당첨 역산 예측)'}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-                  {deepAnalysis.isReviewTarget
-                    ? '실제 당첨번호'
-                    : '예상 6개'}
-                  가 각 1:1 신호(양쪽빈도·가중치·허브·세트)에서 몇 위였는지 — <strong>상위 15위 안이면 그 신호로 추출 가능</strong>.
-                  {deepAnalysis.isReviewTarget
-                    ? ` 이걸로 "${effectiveRound ?? '?'}회를 데이터로 예측할 수 있었나"를 판정합니다.`
-                    : ' 예상번호도 복기와 동일한 추출 논리로 만들어졌음을 보여줍니다.'}
-                </Typography>
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-                  <Chip
-                    size="small"
+              {/* 🔬 번호 추출 역산 */}
+              <EngineSubBlock
+                tone="warning"
+                title={deepAnalysis.isReviewTarget
+                  ? `🔬 번호 추출 역산 — ${effectiveRound ?? '?'}회 당첨이 1:1에서 몇 위였나`
+                  : '🔬 번호 추출 역산 — 예상번호가 어느 신호로 추출됐나'}
+                chips={
+                  <EngineStatusChip
                     color={deepAnalysis.extractSummary.inCompTop15 >= Math.ceil(deepAnalysis.extractSummary.total * 0.6) ? 'success' : deepAnalysis.extractSummary.inCompTop15 >= 2 ? 'warning' : 'default'}
-                    label={`${deepAnalysis.isReviewTarget ? '당첨' : '예상'} ${deepAnalysis.extractSummary.total}개 중 · 종합 상위15 ${deepAnalysis.extractSummary.inCompTop15}개(상위6 ${deepAnalysis.extractSummary.inCompTop6}개) · 어느 신호로든 추출가능 ${deepAnalysis.extractSummary.extractable}개 · 데이터 등장 ${deepAnalysis.extractSummary.present}개`}
-                    sx={{ fontWeight: 700, height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.25 } }}
+                    label={`종합15 ${deepAnalysis.extractSummary.inCompTop15}/${deepAnalysis.extractSummary.total} · 추출가능 ${deepAnalysis.extractSummary.extractable}`}
                   />
-                </Stack>
+                }
+              >
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                  상위 15위 안이면 그 신호로 추출 가능. ★=상위15.
+                </Typography>
                 <Stack direction="row" sx={{ fontSize: 9, fontWeight: 700, color: 'text.secondary', px: 0.5 }}>
                   <Box sx={{ width: 30 }}>번호</Box>
                   <Box sx={{ width: 52, textAlign: 'right' }}>양쪽빈도</Box>
@@ -5971,9 +5975,9 @@ export default function SemiAutoComparePanel({
                 {deepAnalysis.extraction.map((e) => {
                   const cell = (r: number | null) => (r == null ? '—' : r <= 15 ? `${r}★` : `${r}`);
                   return (
-                    <Stack key={`ext-${e.number}`} direction="row" alignItems="center" sx={{ fontSize: 10, px: 0.5, py: 0.1 }}>
+                    <Stack key={`ext-${e.number}`} direction="row" alignItems="center" sx={{ fontSize: 10, px: 0.5, py: 0.15 }}>
                       <Box sx={{ width: 30 }}>
-                        <LottoBall number={e.number} size={18} />
+                        <LottoBall number={e.number} size={ENGINE_BALL.table} />
                       </Box>
                       <Box sx={{ width: 52, textAlign: 'right', color: (e.ranks.freq ?? 999) <= 15 ? 'success.light' : 'text.secondary' }}>{cell(e.ranks.freq)}</Box>
                       <Box sx={{ width: 44, textAlign: 'right', color: (e.ranks.weight ?? 999) <= 15 ? 'success.light' : 'text.secondary' }}>{cell(e.ranks.weight)}</Box>
@@ -5986,104 +5990,98 @@ export default function SemiAutoComparePanel({
                     </Stack>
                   );
                 })}
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.25 }}>
-                  ★=상위15위 안. {deepAnalysis.isReviewTarget
-                    ? '‘미등장/상위밖’ 당첨번호는 내 티켓에 거의 없어(우연) 어떤 방법으로도 데이터에서 못 뽑았다는 뜻 — 예측 한계를 정직하게 보여줌.'
-                    : '예상번호는 정의상 종합 상위라 대부분 ★. 참고: 이건 예측 근거일 뿐 당첨 보장 아님.'}
-                </Typography>
-              </Box>
+              </EngineSubBlock>
 
-              <Divider sx={{ my: 1 }} />
-              {/* ② 허브 TOP10 (네트워크 중심성) */}
-              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                ② 허브번호 TOP10 (공출현 연결강도 = 중심성)
-              </Typography>
-              <Stack spacing={0.3} sx={{ mb: 1 }}>
-                {deepAnalysis.hubRank.slice(0, 10).map((h, i) => (
-                  <Stack key={`hub-${h.number}`} direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
-                    <Typography variant="caption" sx={{ fontSize: 10, minWidth: 16, color: 'text.disabled' }}>{i + 1}</Typography>
-                    <LottoBall number={h.number} size={22} dimmed={compareWinning && winningSet ? !h.winning : false} />
-                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                      연결강도 {h.degree} · {h.links}개 연결 · 허브세트 →{' '}
-                      {h.topPartners.map((p) => (
-                        <Box component="span" key={p} sx={{ color: compareWinning && winningSet?.has(p) ? 'success.light' : 'inherit', fontWeight: compareWinning && winningSet?.has(p) ? 700 : 400 }}>{p} </Box>
+              {/* ② 허브 */}
+              <EngineSubBlock tone="info" title="② 허브번호 TOP10 (공출현 중심성)">
+                <Stack spacing={0.35}>
+                  {deepAnalysis.hubRank.slice(0, 10).map((h, i) => (
+                    <Stack key={`hub-${h.number}`} direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      <Typography variant="caption" sx={{ fontSize: 10, minWidth: 16, color: 'text.disabled' }}>{i + 1}</Typography>
+                      <LottoBall number={h.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !h.winning : false} />
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                        연결 {h.degree} · {h.links}개 →{' '}
+                        {h.topPartners.map((p) => (
+                          <Box component="span" key={p} sx={{ color: compareWinning && winningSet?.has(p) ? 'success.light' : 'inherit', fontWeight: compareWinning && winningSet?.has(p) ? 700 : 400 }}>{p} </Box>
+                        ))}
+                      </Typography>
+                    </Stack>
+                  ))}
+                </Stack>
+              </EngineSubBlock>
+
+              {/* ③ 강한 세트 */}
+              <EngineSubBlock
+                tone="success"
+                title={`③ 가장 강한 세트 (2·3·4번호)${compareWinning ? ' — 밝은 배경: 전부 당첨' : ''}`}
+              >
+                {([
+                  { label: '2번호', items: crossSetPatterns.pairs.slice(0, 4) },
+                  { label: '3번호', items: crossSetPatterns.triples.slice(0, 4) },
+                  { label: '4번호', items: deepAnalysis.sets4.slice(0, 4) },
+                ] as const).map(({ label, items }) =>
+                  items.length > 0 ? (
+                    <Stack key={label} direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.35 }}>
+                      <EngineStatusChip variant="outlined" label={label} sx={{ minWidth: 52 }} />
+                      {items.map((s, idx) => (
+                        <Box key={`${label}-${idx}`} component="span"
+                          sx={{ px: 0.6, py: 0.15, borderRadius: 0.5, bgcolor: s.winning ? 'success.main' : 'background.paper', border: '1px solid', borderColor: 'divider', fontSize: 10 }}>
+                          {s.numbers.join('·')} <Box component="span" sx={{ color: 'text.disabled' }}>×{s.groupCount}</Box>
+                        </Box>
                       ))}
-                    </Typography>
-                  </Stack>
-                ))}
-              </Stack>
+                    </Stack>
+                  ) : null,
+                )}
+              </EngineSubBlock>
 
-              <Divider sx={{ my: 1 }} />
-              {/* ③④⑤ 강한 세트 */}
-              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                ③ 가장 강한 세트 (2·3·4번호 반복){compareWinning ? ' — 밝은 공: 전부 당첨' : ''}
-              </Typography>
-              {([
-                { label: '2번호', items: crossSetPatterns.pairs.slice(0, 4) },
-                { label: '3번호', items: crossSetPatterns.triples.slice(0, 4) },
-                { label: '4번호', items: deepAnalysis.sets4.slice(0, 4) },
-              ] as const).map(({ label, items }) =>
-                items.length > 0 ? (
-                  <Stack key={label} direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.3 }}>
-                    <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700, minWidth: 34 }}>{label}</Typography>
-                    {items.map((s, idx) => (
-                      <Box key={`${label}-${idx}`} component="span"
-                        sx={{ px: 0.5, py: 0.1, borderRadius: 0.5, bgcolor: s.winning ? 'success.main' : 'action.hover', fontSize: 10 }}>
-                        {s.numbers.join('·')} <Box component="span" sx={{ color: 'text.disabled' }}>×{s.groupCount}</Box>
-                      </Box>
-                    ))}
-                  </Stack>
-                ) : null,
-              )}
-
-              <Divider sx={{ my: 1 }} />
-              {/* ⑥ 자동·반자동 공통 + ⑦ 숨은 강수 */}
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                <Box sx={{ flex: 1 }}>
-                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>④ 자동·반자동 공통 핵심</Typography>
-                  <Stack direction="row" spacing={0.3} flexWrap="wrap" useFlexGap>
+              {/* ④⑤ 공통·숨은 */}
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
+                <EngineSubBlock tone="primary" title="④ 자동·반자동 공통 핵심" sx={{ flex: 1 }}>
+                  <Stack direction="row" spacing={0.35} flexWrap="wrap" useFlexGap>
                     {deepAnalysis.both.slice(0, 10).map((n) => (
-                      <LottoBall key={`both-${n}`} number={n} size={20} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
+                      <LottoBall key={`both-${n}`} number={n} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
                     ))}
-                    {deepAnalysis.both.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>없음</Typography>}
+                    {deepAnalysis.both.length === 0 && <Typography variant="caption" color="text.disabled">없음</Typography>}
                   </Stack>
-                </Box>
-                <Box sx={{ flex: 1 }}>
-                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>⑤ 숨은 강수 (등장↓·큰매치↑)</Typography>
-                  <Stack direction="row" spacing={0.3} flexWrap="wrap" useFlexGap>
+                </EngineSubBlock>
+                <EngineSubBlock tone="secondary" title="⑤ 숨은 강수 (등장↓·큰매치↑)" sx={{ flex: 1 }}>
+                  <Stack direction="row" spacing={0.35} flexWrap="wrap" useFlexGap>
                     {deepAnalysis.hidden.map((h) => (
-                      <Box key={`hid-${h.number}`} sx={{ textAlign: 'center', minWidth: 22 }}>
-                        <LottoBall number={h.number} size={20} dimmed={compareWinning && winningSet ? !h.winning : false} />
-                        <Typography variant="caption" sx={{ display: 'block', fontSize: 8, color: 'text.disabled', lineHeight: 1 }}>최대{h.maxMatch}</Typography>
+                      <Box key={`hid-${h.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
+                        <LottoBall number={h.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !h.winning : false} />
+                        <Typography variant="caption" sx={{ display: 'block', fontSize: 9, color: 'text.disabled', lineHeight: 1.1 }}>최대{h.maxMatch}</Typography>
                       </Box>
                     ))}
-                    {deepAnalysis.hidden.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>없음</Typography>}
+                    {deepAnalysis.hidden.length === 0 && <Typography variant="caption" color="text.disabled">없음</Typography>}
                   </Stack>
-                </Box>
+                </EngineSubBlock>
               </Stack>
 
+              {/* ⑥ 제외 후보 */}
               {deepAnalysis.exclude.length > 0 && (
-                <Box sx={{ mt: 0.75 }}>
-                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                    ⑥ 제외 후보 (한쪽만 강함 — 양쪽 합의 약함){compareWinning ? ' · 주황=실제론 당첨(제외 주의)' : ''}
+                <EngineSubBlock
+                  tone="warning"
+                  title={`⑥ 제외 후보 (한쪽만 강함 — 양쪽 합의 약함)${compareWinning ? ' · 주황 라벨=실제 당첨(제외 주의)' : ''}`}
+                  chips={<EngineStatusChip variant="outlined" label={`${deepAnalysis.exclude.length}개`} />}
+                >
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+                    심층역산 합의에서 제외한 번호입니다. 아래 통합 신호의 강한 후보와 겹칠 수 있습니다(축이 다름).
                   </Typography>
                   <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
                     {deepAnalysis.exclude.map((e) => (
                       <Box key={`exc-${e.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                        <LottoBall number={e.number} size={20} dimmed />
-                        <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: compareWinning && e.winning ? 'warning.light' : 'text.disabled' }}>
+                        <LottoBall number={e.number} size={ENGINE_BALL.list} dimmed />
+                        <Typography variant="caption" sx={{ display: 'block', fontSize: 9, lineHeight: 1.1, color: compareWinning && e.winning ? 'warning.light' : 'text.disabled' }}>
                           {e.side}
                         </Typography>
                       </Box>
                     ))}
                   </Stack>
-                </Box>
+                </EngineSubBlock>
               )}
 
-              <Divider sx={{ my: 1 }} />
-              {/* ① 빈도표 + ② 가중치표 */}
-              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>⑦ 빈도·가중치 TOP12 (번호 · 자동 · 반자동 · 전체 · 가중치)</Typography>
-              <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, p: 0.5, mb: 1 }}>
+              {/* ⑦ 빈도·가중치 */}
+              <EngineSubBlock tone="neutral" title="⑦ 빈도·가중치 TOP12" chips={<EngineStatusChip variant="outlined" label="번호·자동·반자동·전체·가중치" />}>
                 <Stack direction="row" sx={{ fontSize: 10, fontWeight: 700, color: 'text.secondary', px: 0.5, mb: 0.25 }}>
                   <Box sx={{ width: 42 }}>번호</Box>
                   <Box sx={{ width: 40, textAlign: 'right' }}>자동</Box>
@@ -6098,10 +6096,10 @@ export default function SemiAutoComparePanel({
                       key={`ft-${f.number}`}
                       direction="row"
                       alignItems="center"
-                      sx={{ fontSize: 11, px: 0.5, py: 0.1, borderRadius: 0.5, bgcolor: compareWinning && f.winning ? 'success.main' : undefined }}
+                      sx={{ fontSize: 11, px: 0.5, py: 0.15, borderRadius: 0.5, bgcolor: compareWinning && f.winning ? 'rgba(46,125,50,0.28)' : 'transparent' }}
                     >
                       <Box sx={{ width: 42, display: 'flex', alignItems: 'center' }}>
-                        <LottoBall number={f.number} size={18} dimmed={compareWinning && winningSet ? !f.winning : false} />
+                        <LottoBall number={f.number} size={ENGINE_BALL.table} dimmed={compareWinning && winningSet ? !f.winning : false} />
                       </Box>
                       <Box sx={{ width: 40, textAlign: 'right' }}>{f.auto}</Box>
                       <Box sx={{ width: 48, textAlign: 'right' }}>{f.semi}</Box>
@@ -6112,11 +6110,11 @@ export default function SemiAutoComparePanel({
                     </Stack>
                   );
                 })}
-              </Box>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10 }}>
-                ※ 네트워크 요약: 허브(중심)번호를 축으로 강한 세트가 뭉치고, 숨은 강수가 큰 매치에서만 연결됩니다.
-                이 구조가 다음 회차에도 반복되면 신호, 회차마다 흔들리면 우연입니다. 로또는 무작위라 확률 자체는 불변.
-              </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mt: 0.75 }}>
+                  ※ 허브를 축으로 강한 세트가 뭉치고, 숨은 강수가 큰 매치에서만 연결됩니다. 회차마다 흔들리면 우연 — 확률은 불변.
+                </Typography>
+              </EngineSubBlock>
+              </Stack>
             </EngineSection>
           )}
 
@@ -6155,54 +6153,48 @@ export default function SemiAutoComparePanel({
         {/* 강한 후보 개수·번호 — 통합 신호 로딩/실패와 무관하게 항상 노출
             (resolvedStrongCandidates 는 통합규칙 없으면 누적/로컬로 폴백). */}
         {resolvedStrongCandidates.length > 0 && (
-          <Box sx={{ mb: 1 }}>
-            <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-              <Chip
-                size="small"
-                color="primary"
-                label={`강한 후보 ${resolvedStrongCandidates.length}개`}
-                sx={{ fontWeight: 700 }}
+          <EngineSubBlock
+            tone="primary"
+            title={`강한 후보 ${resolvedStrongCandidates.length}개`}
+            chips={
+              <EngineStatusChip
+                variant="outlined"
+                label={strongCandidateSource === 'unified-rules' ? '통합 규칙' : '누적/로컬'}
               />
-              <Typography variant="caption" color="text.secondary">
-                {strongCandidateSource === 'unified-rules' ? '통합 규칙 기준' : '누적/로컬 기준'}
-              </Typography>
-            </Stack>
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+            }
+            sx={{ mb: 1.25 }}
+          >
+            <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
               {resolvedStrongCandidates.map((n) => (
-                <LottoBall key={`strong-${n}`} number={n} size={24} />
+                <LottoBall key={`strong-${n}`} number={n} size={ENGINE_BALL.list} />
               ))}
             </Stack>
-          </Box>
+          </EngineSubBlock>
         )}
         {predictionSignals ? (
           <>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-              <Chip
-                size="small"
+              <EngineStatusChip
                 color={predictionSignals.sources.machine.available ? 'success' : 'default'}
                 label={`추첨기 ${predictionSignals.sources.machine.available ? '✓' : '—'}`}
                 variant="outlined"
               />
-              <Chip
-                size="small"
+              <EngineStatusChip
                 color={predictionSignals.sources.post_occurrence.available ? 'success' : 'default'}
                 label={`후속출현 ${predictionSignals.sources.post_occurrence.available ? '✓' : '—'}`}
                 variant="outlined"
               />
-              <Chip
-                size="small"
+              <EngineStatusChip
                 color={predictionSignals.sources.classic.available ? 'success' : 'default'}
                 label={`클래식 ${predictionSignals.sources.classic.available ? '✓' : '—'}`}
                 variant="outlined"
               />
-              <Chip
-                size="small"
+              <EngineStatusChip
                 color={predictionSignals.sources.photo_sheet.available ? 'success' : 'default'}
                 label={`용지 ${predictionSignals.sources.photo_sheet.available ? `✓ ${predictionSignals.sources.photo_sheet.total_analyses ?? 0}건` : '—'}`}
                 variant="outlined"
               />
-              <Chip
-                size="small"
+              <EngineStatusChip
                 color={predictionSignals.sources.parallel_round?.available ? 'success' : 'default'}
                 label={
                   predictionSignals.sources.parallel_round?.available
@@ -6211,8 +6203,7 @@ export default function SemiAutoComparePanel({
                 }
                 variant="outlined"
               />
-              <Chip
-                size="small"
+              <EngineStatusChip
                 color={predictionSignals.sources.decade_gap?.available ? 'success' : 'default'}
                 label={
                   predictionSignals.sources.decade_gap?.available
@@ -6224,26 +6215,21 @@ export default function SemiAutoComparePanel({
             </Stack>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
               {(['S', 'A', 'B'] as const).map((g) => (
-                <Chip
+                <EngineStatusChip
                   key={g}
-                  size="small"
                   label={`${GRADE_LABELS[g].split('·')[0].trim()} ${predictionSignals.by_grade[g]?.length ?? 0}개`}
-                  sx={{ bgcolor: GRADE_COLORS[g], color: '#fff', fontWeight: 700 }}
+                  sx={{ bgcolor: GRADE_COLORS[g], color: '#fff' }}
                 />
               ))}
             </Stack>
             <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
               {predictionSignals.ranked_numbers.slice(0, 12).map((r) => (
-                <Chip
+                <EngineStatusChip
                   key={`sig-${r.number}`}
-                  size="small"
                   label={`${r.number}·${r.grade}`}
                   sx={{
                     bgcolor: GRADE_COLORS[r.grade],
                     color: r.grade === 'C' ? 'text.primary' : '#fff',
-                    fontWeight: 700,
-                    height: 22,
-                    fontSize: 11,
                   }}
                 />
               ))}

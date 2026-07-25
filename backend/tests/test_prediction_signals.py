@@ -66,11 +66,12 @@ def test_prediction_signals_uses_intent_photo_slice(monkeypatch, tmp_path):
 
 
 def test_prediction_signals_review_mode_enables_signals_and_accuracy():
-    """복기 탭: 통계 신호를 최신 전체 데이터로 계산하고(다음 회차 대상),
-    신호원별 적중률 백테스트를 함께 제공한다."""
+    """복기 탭: 대상은 최신 추첨 회차(+그 호기). 신호원별 적중률 백테스트 동봉."""
     out = build_prediction_signals(intent="review")
-    # 복기도 다음 회차 통계예측을 보여준다 (과거엔 비활성이었음)
-    assert out["target_round"] == out["latest_round"] + 1
+    # 복기 = 이미 추첨된 회차 (이번회차 next 와 분리)
+    assert out["target_round"] == out["latest_round"]
+    assert out["target_round"] != out["next_round"]
+    assert out["machine_id"] in (1, 2, 3)
     assert out["sources"]["photo_sheet"]["intent"] == "review"
     assert out["sources"]["machine"]["available"] is True
     assert out["sources"]["classic"]["available"] is True
@@ -88,7 +89,21 @@ def test_prediction_signals_review_mode_enables_signals_and_accuracy():
     assert acc["strongest_source"] in by_source
 
 
+def test_prediction_signals_review_and_current_use_different_targets():
+    """복기 회차·호기와 이번회차 회차·호기는 달라야 한다."""
+    review = build_prediction_signals(intent="review")
+    current = build_prediction_signals(intent="current_round")
+    assert review["target_round"] == review["latest_round"]
+    assert current["target_round"] == current["next_round"]
+    assert review["target_round"] != current["target_round"]
+    # 호기 순환상 인접 회차는 보통 다른 호기(확정 기록 기준). 같으면 스킵하지 않고
+    # 최소한 machine_id 필드가 채워져 있는지만 본다.
+    assert review["machine_id"] in (1, 2, 3)
+    assert current["machine_id"] in (1, 2, 3)
+
+
 def test_prediction_signals_current_round_has_no_backtest():
     """이번회차는 적중률 백테스트를 동봉하지 않는다 (복기 전용)."""
     out = build_prediction_signals(intent="current_round")
     assert "signal_accuracy" not in out
+    assert out["target_round"] == out["next_round"]

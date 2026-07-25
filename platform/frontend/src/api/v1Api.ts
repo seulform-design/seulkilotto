@@ -612,9 +612,16 @@ export const v1Api = {
       timeoutMs: 60_000,
     }),
 
-  getPredictionSignals: (intent: 'review' | 'current_round' = 'current_round', seed?: number) => {
+  getPredictionSignals: (
+    intent: 'review' | 'current_round' = 'current_round',
+    seed?: number,
+    targetRound?: number,
+  ) => {
     const q = new URLSearchParams({ intent });
     if (seed != null) q.set('seed', String(seed));
+    if (targetRound != null && Number.isFinite(targetRound) && targetRound > 0) {
+      q.set('target_round', String(targetRound));
+    }
     return fetchJson<PredictionSignalsResponse>(`/api/v1/prediction/signals?${q.toString()}`, {
       timeoutMs: 60_000,
     });
@@ -1580,8 +1587,12 @@ export interface PredictionSignalsResponse {
   target_round: number;
   target_draw_date: string;
   latest_round: number;
+  /** 미추첨 다음 회차(참고). 복기 target 와 다를 수 있음. */
+  next_round?: number;
   intent: 'review' | 'current_round';
   machine_id: number;
+  machine_source?: 'confirmed' | 'estimated' | string;
+  auto_machine_id?: number;
   source_weights: Record<string, number>;
   strong_candidates: number[];
   excluded_candidates: number[];

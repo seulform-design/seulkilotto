@@ -1375,9 +1375,16 @@ export default function SemiAutoComparePanel({
     [accumulated, sheetIntent, autoOnlyLines]
   );
 
+  // 통합 신호: 복기=검증 회차·그 호기 / 이번회차=미추첨 회차·그 호기 (예: 1234·1호기 vs 1235·2호기)
   const predictionSignalsQuery = useQuery({
-    queryKey: ['v1-prediction-signals', sheetIntent],
-    queryFn: () => v1Api.getPredictionSignals(sheetIntent),
+    queryKey: ['v1-prediction-signals', sheetIntent, effectiveRound ?? 'auto'],
+    queryFn: () =>
+      v1Api.getPredictionSignals(
+        sheetIntent,
+        undefined,
+        effectiveRound ?? undefined,
+      ),
+    enabled: effectiveRound != null || sheetIntent === 'current_round' || sheetIntent === 'review',
     staleTime: 120_000,
     retry: 1,
   });
@@ -6157,8 +6164,16 @@ export default function SemiAutoComparePanel({
               label={predictionSignals ? '신호 ON' : '로딩/대기'}
             />
             <EngineStatusChip
+              color={compareWinning ? 'primary' : 'secondary'}
+              label={`${intentSectionLabel} ${predictionSignals?.target_round ?? effectiveRound ?? '?'}회`}
+            />
+            <EngineStatusChip
               variant="outlined"
-              label={`${predictionSignals?.target_round ?? effectiveRound ?? '?'}회`}
+              label={
+                predictionSignals?.machine_id != null
+                  ? `${predictionSignals.machine_id}호기${predictionSignals.machine_source === 'confirmed' ? '' : predictionSignals.machine_source === 'estimated' ? '(추정)' : ''}`
+                  : '호기 —'
+              }
             />
           </>
         }
@@ -6166,7 +6181,14 @@ export default function SemiAutoComparePanel({
         intent={
           <>
             추첨기 + 후속출현 + 클래식 + 용지({intentSectionLabel}) + 평행회차 — 가중 합산.
-            {predictionSignals?.machine_id ? ` · ${predictionSignals.machine_id}호기` : ''}
+            {' '}대상 회차·호기는 탭과 동일합니다
+            {compareWinning
+              ? ` (복기 ${predictionSignals?.target_round ?? effectiveRound ?? '?'}회 · 당첨 호기).`
+              : ` (이번회차 ${predictionSignals?.target_round ?? effectiveRound ?? '?'}회 · 예정 호기).`}
+            {predictionSignals?.next_round != null &&
+            predictionSignals.target_round !== predictionSignals.next_round
+              ? ` 미추첨 다음 회차는 ${predictionSignals.next_round}회입니다.`
+              : ''}
           </>
         }
       >

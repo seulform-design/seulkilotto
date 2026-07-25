@@ -451,10 +451,71 @@ def backtest_signal_accuracy(df, latest_round: int, *, rounds: int = 12, top_k: 
     return result
 
 
+def _resolve_signal_target(
+    *,
+    intent: str,
+    df,
+    latest_round: int,
+    next_round: int,
+    next_date: str,
+    next_machine: int,
+    accumulated: Dict[str, Any],
+    target_round: Optional[int],
+) -> Tuple[int, str, int, str]:
+    """intent별 대상 회차·호기 결정.
+
+    - current_round → 다음(미추첨) 회차 + 그 회차 호기 (예: 1235 · 2호기)
+    - review → 복기 슬라이스/최신 추첨 회차 + 그 회차 호기 (예: 1234 · 1호기)
+
+    Returns: (target_round, target_draw_date, machine_id, machine_source)
+    """
+    from datetime import date as date_cls
+
+    import pandas as pd
+
+    from .machine_registry import resolve
+
+    if target_round is not None:
+        target = int(target_round)
+    elif intent == "review":
+        slice_out = (accumulated.get("by_intent") or {}).get("review") or {}
+        raw = slice_out.get("ticket_round")
+        slice_round: Optional[int] = None
+        if raw is not None:
+            try:
+                slice_round = int(str(raw))
+            except (TypeError, ValueError):
+                slice_round = None
+        # 복기는 '이미 추첨된' 회차가 대상 — 슬라이스 회차, 없으면 latest
+        target = slice_round if slice_round and slice_round > 0 else latest_round
+        if target > latest_round:
+            target = latest_round
+    else:
+        target = next_round
+
+    if target == next_round:
+        return target, next_date, int(next_machine), resolve(next_round, None)[1]
+
+    # 과거(복기) 회차 — 당첨일자·확정 호기로 해석
+    rows = df.loc[df["round"].astype(int) == int(target)]
+    draw_d: Optional[date_cls] = None
+    target_date = ""
+    if len(rows) > 0 and "draw_date" in rows.columns:
+        try:
+            draw_d = pd.to_datetime(rows.iloc[0]["draw_date"]).date()
+            target_date = draw_d.isoformat()
+        except (TypeError, ValueError):
+            draw_d = None
+            target_date = ""
+    machine_id, machine_source = resolve(int(target), draw_d)
+    return int(target), target_date, int(machine_id), machine_source
+
+
 def build_prediction_signals(
     *,
     intent: str = "current_round",
     seed: Optional[int] = None,
+    target_round: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     5개 신호 통합:
@@ -463,6 +524,9 @@ def build_prediction_signals(
     - 클래식 추천 (classic blend + wilson/huygens/fermat)
     - 용지 분석 intent 슬라이스 (photo line_overlap + votes)
     - 평행회차 분석 (동일 끝2자리 회차군)
+
+    복기(intent=review)와 이번회차(current_round)는 대상 회차·호기가 다르다.
+    예: 복기 1234회·1호기 / 이번회차 1235회·2호기.
     """
     if intent not in ("review", "current_round"):
         intent = "current_round"
@@ -472,32 +536,62 @@ def build_prediction_signals(
         return {"error": "당첨 데이터가 없습니다."}
 
     latest_round = int(df["round"].max())
+    next_round, next_date, auto_machine = predict_next_round(df)
+    accumulated = build_accumulated()
+    target, target_date, machine_id, machine_source = _resolve_signal_target(
+        intent=intent,
+        df=df,
+        latest_round=latest_round,
+        next_round=next_round,
+        next_date=next_date,
+        next_machine=auto_machine,
+        accumulated=accumulated,
+        target_round=target_round,
+    )
 
-    # 캐시 조회 — 같은 입력이면 즉시 반환 (반복·동시 호출 시 재계산 회피)
-    cache_key = (intent, seed, latest_round, store_signature())
+    # 캐시 조회 — intent·대상회차·저장소가 같으면 재사용
+    cache_key = (intent, seed, latest_round, target, machine_id, store_signature())
     now = time.monotonic()
     cached = _SIGNAL_CACHE.get(cache_key)
     if cached is not None and now - cached[0] < _SIGNAL_CACHE_TTL_SEC:
         return cached[1]
 
-    next_round, next_date, auto_machine = predict_next_round(df)
-
     scores: Dict[int, float] = defaultdict(float)
     sources: Dict[int, List[str]] = defaultdict(list)
     excluded: Dict[int, List[str]] = defaultdict(list)
-    accumulated = build_accumulated()
     photo_src = _apply_photo_signals(scores, sources, excluded, intent, accumulated)
-    # 통계 4신호(추첨기·후속·클래식·평행)는 복기/이번회차 모두 최신 전체
-    # 데이터로 계산한다. 복기 탭은 이 통계예측 + 신호원별 적중률(백테스트)을
-    # 함께 보고 약한 신호를 이번회차 보정에 활용한다.
-    machine_payload = build_round_recommendation(df, machine_id=auto_machine, seed=seed, with_backtest=False)
-    post_payload = run_post_occurrence_analysis(df, trigger_round=latest_round)
-    classic_payload = build_classic_recommendation(df, method="blend", seed=seed)
+
+    # 복기(이미 추첨된 회차)는 누수 방지로 해당 회차 이전 데이터만 사용.
+    # 이번회차(미추첨)는 최신 전체 이력 사용.
+    if intent == "review" and target <= latest_round:
+        df_signal = df.loc[df["round"].astype(int) < int(target)].copy()
+        if df_signal.empty:
+            df_signal = df
+        post_trigger = max(1, int(target) - 1)
+    else:
+        df_signal = df
+        post_trigger = latest_round
+
+    machine_payload = build_round_recommendation(
+        df_signal, machine_id=machine_id, seed=seed, with_backtest=False
+    )
+    # 응답 메타는 실제 대상 회차/호기로 덮어쓴다(build_round_recommendation 은
+    # 내부적으로 next_round 메타를 붙이므로 표시용으로 교정).
+    machine_payload = {
+        **machine_payload,
+        "machine_id": machine_id,
+        "auto_machine_id": auto_machine,
+        "machine_source": machine_source,
+        "next_round": target,
+        "next_draw_date": target_date,
+    }
+    post_payload = run_post_occurrence_analysis(df_signal, trigger_round=post_trigger)
+    classic_payload = build_classic_recommendation(df_signal, method="blend", seed=seed)
     machine_src = _apply_machine_signals(scores, sources, machine_payload)
     post_src = _apply_post_signals(scores, sources, post_payload)
     classic_src = _apply_classic_signals(scores, sources, classic_payload)
-    parallel_src = _apply_parallel_signals(scores, sources, df, next_round)
-    decade_src = _apply_decade_gap_signals(scores, sources, df)
+    parallel_src = _apply_parallel_signals(scores, sources, df_signal, target)
+    decade_src = _apply_decade_gap_signals(scores, sources, df_signal)
 
     ranked: List[Dict[str, Any]] = []
     for n in range(1, 46):
@@ -533,11 +627,14 @@ def build_prediction_signals(
 
     out = {
         "rules_version": RULES_VERSION,
-        "target_round": next_round,
-        "target_draw_date": next_date,
+        "target_round": target,
+        "target_draw_date": target_date,
         "latest_round": latest_round,
+        "next_round": next_round,
         "intent": intent,
-        "machine_id": machine_src.get("machine_id"),
+        "machine_id": machine_id,
+        "machine_source": machine_source,
+        "auto_machine_id": auto_machine,
         "source_weights": SOURCE_WEIGHTS,
         "strong_candidates": strong_candidates,
         "excluded_candidates": excluded_candidates,
@@ -554,8 +651,9 @@ def build_prediction_signals(
             "decade_gap": decade_src,
         },
         "disclaimer": (
-            "강한 후보는 5개 독립 통계 신호의 가중 합산입니다. "
-            "수학적 1등 확률(1/8,145,060)은 변하지 않습니다."
+            "강한 후보는 독립 통계 신호의 가중 합산입니다. "
+            f"대상은 {'복기 ' + str(target) + '회' if intent == 'review' else '이번회차 ' + str(target) + '회'} "
+            f"({machine_id}호기). 수학적 1등 확률(1/8,145,060)은 변하지 않습니다."
         ),
     }
 
@@ -566,7 +664,7 @@ def build_prediction_signals(
     # 통합 신호(6소스 가중합)를 이번회차 파생 데이터로 영속화 → 롤오버 시 스냅숏에
     # 아카이브된다. 그래야 추후 백테스트가 '용지 전용 votes' 가 아니라 '라이브로 보여준
     # 통합 18' 을 그대로 평가한다(라이브=백테스트 일원화, 강한후보 불일치 해소).
-    if intent == "current_round":
+    if intent == "current_round" and target == next_round:
         try:
             from .video_analysis.store import record_current_rule_engine_output
 
@@ -579,6 +677,7 @@ def build_prediction_signals(
                     "excluded_candidates": list(excluded_candidates),
                     "by_grade": by_grade,
                     "rules_version": RULES_VERSION,
+                    "machine_id": machine_id,
                 },
                 rule_snapshot={"rules_version": RULES_VERSION, "source": "prediction_signals"},
             )

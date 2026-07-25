@@ -43,6 +43,12 @@ import {
 import NumberFrequencyPanel from './NumberFrequencyPanel';
 import EngineAuxSignalsPanel from './EngineAuxSignalsPanel';
 import {
+  EngineSection,
+  EngineStatusChip,
+  EngineSubBlock,
+  EngineTabBanner,
+} from './EngineSection';
+import {
   generateScoredRecommendations,
   type ScoredRecommendation,
   type ValidatedLearningSignal,
@@ -5203,19 +5209,57 @@ export default function SemiAutoComparePanel({
             onChange={(_, v) => setEngineTab(v)}
             variant="scrollable"
             scrollButtons="auto"
-            sx={{ mb: 1.5, minHeight: 36, '& .MuiTab-root': { minHeight: 36, py: 0.5, textTransform: 'none', fontWeight: 700, fontSize: 12 } }}
+            sx={{ mb: 1, minHeight: 36, '& .MuiTab-root': { minHeight: 36, py: 0.5, textTransform: 'none', fontWeight: 700, fontSize: 12 } }}
           >
             <Tab value="signals" label="역산·신호" />
             <Tab value="learn" label="학습" />
             <Tab value="aux" label="후속·미출" />
             <Tab value="verify" label="검증·백테스트" />
           </Tabs>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            하나의 분석 엔진입니다. 탭만 바꾸면 역산·학습·후속/미출·검증을 이어서 볼 수 있습니다.
-            {' '}대상: <strong>{intentSectionLabel} {effectiveRound ?? '?'}회</strong>
-          </Typography>
+          {/* 엔진 공통 상태 — 탭과 무관하게 진단 포인트 고정 노출 */}
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1.25 }}>
+            <EngineStatusChip variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`} />
+            <EngineStatusChip
+              color={canRenderLineMatching ? 'success' : 'warning'}
+              label={canRenderLineMatching ? '1:1 ON' : '1:1 OFF'}
+            />
+            <EngineStatusChip
+              color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}
+              label={`학습연동 ${learningBridgeStatus.validatedCount}`}
+            />
+            <EngineStatusChip
+              color={predictionSignals ? 'info' : 'default'}
+              label={predictionSignals ? '통합신호 ON' : '통합신호 —'}
+            />
+            <EngineStatusChip
+              color={(decadePattern?.missingCount ?? 0) > 0 ? 'warning' : 'default'}
+              label={`용지미출 ${decadePattern?.missingCount ?? 0}`}
+            />
+          </Stack>
           <Stack spacing={1.5}>
-          {engineTab === 'learn' && engineExtraSlot}
+          {engineTab === 'learn' && (
+            <>
+              <EngineTabBanner
+                title="학습 — 검증 통과분만 추천에 주입"
+                chips={
+                  <>
+                    <EngineStatusChip
+                      color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}
+                      label={`검증 ${learningBridgeStatus.validatedCount}개`}
+                    />
+                    <EngineStatusChip variant="outlined" label="평행·Feature·Pattern·다회차·겹침" />
+                  </>
+                }
+                intent={
+                  <>
+                    각 패널 헤더 칩으로 <strong>채택/제외·신뢰도·표본</strong>을 먼저 보고, 펼쳐서 표·기여도를 확인하세요.
+                    미검증·평탄 신호는 추천에 넣지 않습니다.
+                  </>
+                }
+              />
+              {engineExtraSlot}
+            </>
+          )}
 
           {engineTab === 'aux' && (
             <EngineAuxSignalsPanel
@@ -5232,34 +5276,54 @@ export default function SemiAutoComparePanel({
 
       {engineTab === 'signals' && (
       <>
+      <EngineTabBanner
+        title="역산·신호 — 문제 진단 순서"
+        chips={
+          <>
+            <EngineStatusChip
+              color={canRenderLineMatching ? 'success' : 'warning'}
+              label={canRenderLineMatching ? '1:1 축 활성' : '1:1 미적용(평행단독)'}
+            />
+            <EngineStatusChip
+              color={predictedNumbers.length > 0 ? 'success' : 'default'}
+              label={predictedNumbers.length > 0 ? `예상 ${Math.min(10, predictedNumbers.length)}위` : '예상 없음'}
+            />
+            <EngineStatusChip
+              color={predictionSignals ? 'info' : 'default'}
+              label={predictionSignals ? '통합신호' : '통합신호 대기'}
+            />
+          </>
+        }
+        intent={
+          <>
+            <strong>1)</strong> 예상번호 축이 1:1인지 평행단독인지 확인 → <strong>2)</strong> 교차검증·심층역산 결론 →{' '}
+            <strong>3)</strong> 통합 신호·성적표. 당첨번호는 계산에 쓰지 않고 복기에서만 대조합니다.
+          </>
+        }
+      />
       {/* 당첨 예상·심층역산·통합신호 — 엔진 탭 */}
       {activeComparison && (
         <>
           {/* 🎯 당첨 예상번호 — 전수비교 심층 역산(주) + 평행회차(보조). 호기 제외. */}
           {predictedNumbers.length > 0 && (
-            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main' }}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-                <Typography variant="body2" fontWeight={700}>
-                  {/* 1:1 축이 죽었으면 '전수비교' 라고 부르면 안 된다(평행회차 단독 결과). */}
-                  🎯 {effectiveRound ?? '?'}회 당첨 예상번호 — {compareWinning ? '복기 검증' : '예측'}{' '}
-                  ({canRenderLineMatching ? '전수비교 심층 역산' : '⚠ 평행회차 단독 — 1:1 미적용'})
-                </Typography>
-                <Chip
-                  size="small"
+            <EngineSection
+              tone="warning"
+              title={`🎯 ${effectiveRound ?? '?'}회 당첨 예상번호 — ${compareWinning ? '복기 검증' : '예측'} (${canRenderLineMatching ? '전수비교 심층 역산' : '⚠ 평행회차 단독 — 1:1 미적용'})`}
+              chips={
+                <EngineStatusChip
                   variant="outlined"
-                  label={`자동 ${groupLineMatching.autoLineCount}줄 ↔ 반자동 ${groupLineMatching.semiLineCount}줄 · 매치그룹 ${groupLineMatching.groupCount}건`}
-                  sx={{ fontWeight: 700, height: 20, fontSize: 10 }}
+                  label={`자동 ${groupLineMatching.autoLineCount}줄 ↔ 반자동 ${groupLineMatching.semiLineCount}줄 · 매치 ${groupLineMatching.groupCount}건`}
                 />
-              </Stack>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                <strong>자동↔반자동 1:1 전수비교</strong>를 전수 분석 — 두 줄의 공통 번호 개수(matchCount)가
-                클수록(무작위 기대≈0.8개 → 3개+ 는 유의) 강하게, <strong>여러 그룹에 반복</strong> 등장할수록
-                강하게 가중해 <strong>자동·반자동이 함께 계속 가리킨 번호</strong>를 상위로 올립니다. 평행회차·세트 중복도 반영.
-                <strong>당첨번호를 전혀 쓰지 않으므로</strong>(순수 반복도), 당첨을 모르는 <strong>이번회차 탭에서도 동일</strong>하게
-                반복 출현 번호를 찾습니다. {compareWinning
-                  ? '복기 탭은 아래에서 실제 당첨과 ‘대조’만 합니다.'
-                  : `이 순위가 ${effectiveRound ?? '?'}회 예측입니다 — 복기 탭에서 검증된 same 로직.`}
-              </Typography>
+              }
+              intent={
+                <>
+                  <strong>자동↔반자동 1:1</strong> 반복도(+평행·세트)로 순위를 올립니다. 당첨번호 미사용.
+                  {compareWinning
+                    ? ' 복기는 아래에서 실제 당첨과 대조만 합니다.'
+                    : ` ${effectiveRound ?? '?'}회 예측 — 복기와 동일 로직.`}
+                </>
+              }
+            >
               <Alert severity="info" sx={{ mb: 1, py: 0.5 }}>
                 <Typography variant="caption">
                   ✅ 복기 학습 연동 (Feature 채택 {learningBridgeStatus.adoptedFeatures} · Pattern 채택 {learningBridgeStatus.adoptedPatterns}
@@ -5309,27 +5373,22 @@ export default function SemiAutoComparePanel({
 
               {/* 🔗 전수비교 × 심층역산 교차 검증 — 양쪽 신호가 함께 가리키는 번호 + 근거(몇 줄) */}
               {crossValidation && crossValidation.scored.length > 0 && (
-                <Box sx={{ mt: 0.5, mb: 1, p: 1.25, borderRadius: 1, bgcolor: 'action.hover', border: '1px dashed', borderColor: 'info.main' }}>
-                  <Stack direction="row" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-                    <Typography variant="caption" fontWeight={800}>
-                      🔗 전수비교 × 심층역산 교차 검증 (양쪽 등장 {crossValidation.total}개 중 상위 {crossValidation.scored.length})
-                    </Typography>
-                    {compareWinning && crossValidation.backtest && (
-                      <Chip
-                        size="small"
+                <EngineSubBlock
+                  tone="info"
+                  title={`🔗 전수비교 × 심층역산 교차 검증 (양쪽 등장 ${crossValidation.total}개 중 상위 ${crossValidation.scored.length})`}
+                  chips={
+                    compareWinning && crossValidation.backtest ? (
+                      <EngineStatusChip
                         color={crossValidation.backtest.top6Hits >= 3 ? 'success' : crossValidation.backtest.top6Hits >= 2 ? 'warning' : 'default'}
-                        label={`상위6 당첨 ${crossValidation.backtest.top6Hits}개 · 상위10 ${crossValidation.backtest.top10Hits}개 (기대 ${crossValidation.backtest.exp6}/${crossValidation.backtest.exp10})`}
-                        sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                        label={`상위6 당첨 ${crossValidation.backtest.top6Hits}개 · 상위10 ${crossValidation.backtest.top10Hits}개`}
                       />
-                    )}
-                  </Stack>
+                    ) : undefined
+                  }
+                  sx={{ mt: 0.5, mb: 1 }}
+                >
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
-                    <strong>1:1 전수비교(자동·반자동 양쪽 줄 등장·최대일치)</strong> 지지와 <strong>심층역산 점수</strong>가
-                    함께 높은 번호만 추립니다. 각 번호가 <strong>몇 줄·어떤 데이터</strong>로 뒷받침되는지 표시.
-                    <br />↔ <strong>위 심층역산 순위와 순서가 다를 수 있습니다</strong>: 심층역산은 반복도(자동·반자동 빈도 곱)를 그대로
-                    쓰지만, 여기선 <strong>양쪽 균형(√ 기하평균) + 최대일치</strong>를 더 반영해요 → 한쪽에 치우친 번호(예: 자동만 많음)는
-                    내려가고, 균형·고일치 번호가 올라갑니다.
-                    {compareWinning ? ` 복기(${effectiveRound ?? '?'})는 실제 당첨과 대조(검증).` : ` ${effectiveRound ?? '?'}회 이번회차 데이터 기반 예측.`}
+                    <strong>1:1 + 심층역산</strong>이 함께 높은 번호. 양쪽 균형(√기하평균)·최대일치를 더 반영해 순위가 심층과 다를 수 있습니다.
+                    {compareWinning ? ` 복기(${effectiveRound ?? '?'})는 실제 당첨과 대조.` : ` ${effectiveRound ?? '?'}회 예측.`}
                   </Typography>
                   {(() => {
                     const boosted = crossValidation.scored.filter((x) => x.validated);
@@ -5370,7 +5429,7 @@ export default function SemiAutoComparePanel({
                   <Typography variant="caption" sx={{ display: 'block', mt: 0.5, fontStyle: 'italic', color: 'text.disabled', fontSize: 10 }}>
                     ⚠️ {compareWinning ? '복기 검증은 같은 회차 대조라 낙관적입니다(일관성 확인용).' : '표본이 적으면 참고용입니다.'} 1등 확률(1/8,145,060)은 불변.
                   </Typography>
-                </Box>
+                </EngineSubBlock>
               )}
 
               {/* 예상 조합 6개 — 상위 순위에서 구간(10단위) 최대 2개 균형. 양 탭 공통. */}
@@ -5748,26 +5807,36 @@ export default function SemiAutoComparePanel({
                   )}
                 </Box>
               )}
-            </Paper>
+            </EngineSection>
           )}
 
           {/* 🧠 심층 역산 분석 — 네트워크·허브·가중치·구조 */}
           {deepAnalysis && (
-            <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'info.main' }}>
-              <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-                🧠 심층 역산 분석 (빈도·가중치·허브·네트워크·구조)
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                단순 빈도가 아니라 <strong>일치개수 가중치</strong>(6개×10·5×8·4×6·3×4·2×2) · <strong>공출현 네트워크
-                허브(중심성)</strong> · <strong>세트 반복</strong> · <strong>숨은 강수</strong>를 합성해 당첨 구조를 역산합니다.
-                당첨번호는 계산에 넣지 않습니다(복기는 밝은 공으로 대조만).
-              </Typography>
-
+            <EngineSection
+              tone="info"
+              title="🧠 심층 역산 분석 (빈도·가중치·허브·네트워크·구조)"
+              chips={
+                deepAnalysis.finalWin != null ? (
+                  <EngineStatusChip
+                    color={deepAnalysis.finalWin >= 3 ? 'success' : deepAnalysis.finalWin >= 2 ? 'warning' : 'default'}
+                    label={`최종픽 당첨 ${deepAnalysis.finalWin}/6`}
+                  />
+                ) : (
+                  <EngineStatusChip variant="outlined" label="당첨 미대조" />
+                )
+              }
+              intent={
+                <>
+                  일치개수 가중치 · 공출현 허브 · 세트 반복 · 숨은 강수를 합성합니다. 당첨번호는 계산에 넣지 않습니다(복기는 밝은 공으로 대조만).
+                </>
+              }
+            >
               {/* 🎯 최종 예측 조합 (구간 균형) + 구조 서술 — 이 섹션의 결론 */}
-              <Box sx={{ p: 1, mb: 1, borderRadius: 1, border: '2px solid', borderColor: 'warning.main' }}>
-                <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                  🎯 최종 예측 조합 6개 (핵심 상위 + 구간 10단위 최대 2개 균형)
-                </Typography>
+              <EngineSubBlock
+                tone="warning"
+                title="🎯 최종 예측 조합 6개 (핵심 상위 + 구간 10단위 최대 2개 균형)"
+                sx={{ mt: 0, mb: 1 }}
+              >
                 <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
                   {deepAnalysis.finalPick.map((n) => (
                     <LottoBall key={`fp-${n}`} number={n} size={34} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
@@ -5793,10 +5862,10 @@ export default function SemiAutoComparePanel({
                   보조 {deepAnalysis.composite.slice(3, 8).map((c) => c.number).join('·')} ·{' '}
                   제외 {deepAnalysis.exclude.map((e) => e.number).join('·') || '-'}
                 </Typography>
-              </Box>
+              </EngineSubBlock>
 
               {/* ⑩ 최종 핵심 TOP15 (종합 합성) */}
-              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+              <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.25, mt: 0.5 }}>
                 ① 핵심번호 TOP15 (양쪽빈도 0.5 + 가중치 0.3 + 세트 0.1 + 허브 0.1)
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
@@ -6048,7 +6117,7 @@ export default function SemiAutoComparePanel({
                 ※ 네트워크 요약: 허브(중심)번호를 축으로 강한 세트가 뭉치고, 숨은 강수가 큰 매치에서만 연결됩니다.
                 이 구조가 다음 회차에도 반복되면 신호, 회차마다 흔들리면 우연입니다. 로또는 무작위라 확률 자체는 불변.
               </Typography>
-            </Paper>
+            </EngineSection>
           )}
 
 
@@ -6060,19 +6129,29 @@ export default function SemiAutoComparePanel({
 
       {/* 📡 통합 예측 신호 + 신호 성적표 — ④ 학습 엔진 안 */}
       <>
-      <Divider sx={{ my: 2 }} />
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'info.main' }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
-          <Typography variant="body2" fontWeight={700}>
-            📡 통합 예측 신호 (규칙 v{predictionSignals?.rules_version ?? '…'})
-          </Typography>
-          {predictionSignalsQuery.isFetching && <CircularProgress size={16} />}
-        </Stack>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          추첨기 + 후속출현 + 클래식 + 용지({intentSectionLabel}) + 평행회차 — 가중 합산으로 강한 후보 산출.
-          대상 회차: <strong>{predictionSignals?.target_round ?? effectiveRound ?? '?'}</strong>회
-          {predictionSignals?.machine_id ? ` · ${predictionSignals.machine_id}호기` : ''}.
-        </Typography>
+      <EngineSection
+        tone="info"
+        title={`📡 통합 예측 신호 (규칙 v${predictionSignals?.rules_version ?? '…'})`}
+        chips={
+          <>
+            <EngineStatusChip
+              color={predictionSignals ? 'success' : 'default'}
+              label={predictionSignals ? '신호 ON' : '로딩/대기'}
+            />
+            <EngineStatusChip
+              variant="outlined"
+              label={`${predictionSignals?.target_round ?? effectiveRound ?? '?'}회`}
+            />
+          </>
+        }
+        actions={predictionSignalsQuery.isFetching ? <CircularProgress size={16} /> : undefined}
+        intent={
+          <>
+            추첨기 + 후속출현 + 클래식 + 용지({intentSectionLabel}) + 평행회차 — 가중 합산.
+            {predictionSignals?.machine_id ? ` · ${predictionSignals.machine_id}호기` : ''}
+          </>
+        }
+      >
         {/* 강한 후보 개수·번호 — 통합 신호 로딩/실패와 무관하게 항상 노출
             (resolvedStrongCandidates 는 통합규칙 없으면 누적/로컬로 폴백). */}
         {resolvedStrongCandidates.length > 0 && (
@@ -6185,7 +6264,7 @@ export default function SemiAutoComparePanel({
             통합 신호 로딩 중… 이번회차는 계산에 시간이 걸릴 수 있습니다.
           </Alert>
         )}
-      </Paper>
+      </EngineSection>
 
       {(() => {
         const acc = predictionSignals?.signal_accuracy;
@@ -6196,14 +6275,26 @@ export default function SemiAutoComparePanel({
           parallel: '평행회차',
         };
         return (
-          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main' }}>
-            <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
-              🎯 신호원별 적중률 (최근 {acc.rounds}회차 백테스트)
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              각 신호의 상위 {acc.top_k}개 예측이 실제 당첨 6개를 평균 몇 개 맞췄는지(walk-forward).
-              무작위 기대치 <strong>{acc.random_baseline}</strong>개보다 낮으면 약한 신호 → 이번회차 가중치 보정 참고.
-            </Typography>
+          <EngineSection
+            tone="warning"
+            title={`🎯 신호원별 적중률 (최근 ${acc.rounds}회차 백테스트)`}
+            chips={
+              <EngineStatusChip
+                variant="outlined"
+                label={`TOP${acc.top_k} · 기대 ${acc.random_baseline}`}
+              />
+            }
+            intent={
+              <>
+                walk-forward 평균 적중. 무작위 기대 <strong>{acc.random_baseline}</strong>보다 낮으면 약한 신호 → 가중치 보정 참고.
+              </>
+            }
+            footer={
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, fontStyle: 'italic' }}>
+                ※ {acc.note}
+              </Typography>
+            }
+          >
             <Stack spacing={0.5}>
               {Object.entries(acc.by_source).map(([src, v]) => {
                 if (!v.available) return null;
@@ -6211,26 +6302,21 @@ export default function SemiAutoComparePanel({
                 const strong = src === acc.strongest_source;
                 return (
                   <Stack key={src} direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-                    <Chip size="small" label={SRC_LABEL[src] ?? src} variant="outlined" sx={{ minWidth: 76 }} />
+                    <EngineStatusChip label={SRC_LABEL[src] ?? src} variant="outlined" sx={{ minWidth: 76 }} />
                     <Typography variant="caption">
                       평균 {v.avg_hits.toFixed(2)}개 · 3개+ {v.rounds_3plus}/{v.rounds_tested}회
                     </Typography>
-                    <Chip
-                      size="small"
+                    <EngineStatusChip
                       color={v.lift_vs_random > 0 ? 'success' : v.lift_vs_random < 0 ? 'error' : 'default'}
                       label={`무작위 대비 ${v.lift_vs_random >= 0 ? '+' : ''}${v.lift_vs_random.toFixed(2)}`}
-                      sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
                     />
-                    {weak && <Chip size="small" color="error" label="약한 신호 ↓보정" sx={{ height: 18, fontSize: 11, fontWeight: 700 }} />}
-                    {strong && <Chip size="small" color="success" label="강한 신호" sx={{ height: 18, fontSize: 11, fontWeight: 700 }} />}
+                    {weak && <EngineStatusChip color="error" label="약한 신호 ↓보정" />}
+                    {strong && <EngineStatusChip color="success" label="강한 신호" />}
                   </Stack>
                 );
               })}
             </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, fontStyle: 'italic' }}>
-              ※ {acc.note}
-            </Typography>
-          </Paper>
+          </EngineSection>
         );
       })()}
       </>
@@ -6241,36 +6327,44 @@ export default function SemiAutoComparePanel({
 
       {engineTab === 'verify' && (
       <>
-      {/* ── 복기 검증 · 백테스트 — 엔진 검증 탭 ── */}
-      <Divider textAlign="left">
-        <Typography variant="caption" fontWeight={800} color="text.secondary">
-          복기 검증 · 백테스트
-        </Typography>
-      </Divider>
+      <EngineTabBanner
+        title="검증·백테스트 — ③ 추천 사후 점검"
+        chips={
+          <>
+            <EngineStatusChip color="info" label="복기 역산 검증" />
+            <EngineStatusChip variant="outlined" label="백테스트 · 티켓 당첨 대조" />
+          </>
+        }
+        intent={
+          <>
+            신호 성적·다회차 백테스트·놓친 당첨·구간 커버리지로 상단 <strong>③ 번호 추천</strong>을 점검합니다.
+            후속·미출은 <strong>후속·미출</strong> 탭. 확률은 변하지 않습니다.
+          </>
+        }
+      />
       {verificationSlot}
 
       {/* ── 용지 티켓 당첨 대조 (④ 엔진 · 복기 검증) ── */}
       {activeComparison && (
-        <Paper sx={{ p: 2 }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showTicketCompare ? 1 : 0 }} spacing={1}>
-            <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-              <Typography variant="subtitle1" fontWeight={800}>
-                용지 티켓 당첨 대조
-              </Typography>
-              <Chip size="small" color="info" label="④ 엔진 · 복기검증" sx={{ height: 22, fontWeight: 700 }} />
-              <Chip size="small" variant="outlined" label={`${activeComparison.ticketCount}장`} sx={{ height: 22 }} />
-            </Stack>
-            <Button size="small" variant="outlined" onClick={() => setShowTicketCompare((v) => !v)}>
-              {showTicketCompare ? '접기 ▲' : '펼치기 ▼'}
-            </Button>
-          </Stack>
-          {showTicketCompare && (
-          <>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            등록한 자동·반자동 줄이 비교 회차 당첨과 얼마나 맞는지 측정합니다(적중률·분포·티켓 목록).
-            상단 <strong>③ 번호 추천</strong>의 사후 점검(엔진 안)입니다. 확률(1/8,145,060)은 변하지 않습니다.
-            1:1 구조 분석은 위 <strong>②</strong>에 있습니다.
-          </Typography>
+        <EngineSection
+          tone="primary"
+          title="용지 티켓 당첨 대조"
+          chips={
+            <>
+              <EngineStatusChip color="info" label="④ 엔진 · 복기검증" />
+              <EngineStatusChip variant="outlined" label={`${activeComparison.ticketCount}장`} />
+            </>
+          }
+          collapsible
+          open={showTicketCompare}
+          onToggle={() => setShowTicketCompare((v) => !v)}
+          intent={
+            <>
+              등록한 자동·반자동 줄이 비교 회차 당첨과 얼마나 맞는지 측정합니다(적중률·분포·티켓 목록).
+              상단 <strong>③ 번호 추천</strong>의 사후 점검입니다. 1:1 구조는 <strong>②</strong>에 있습니다.
+            </>
+          }
+        >
           {!compareWinning && (
             <Alert severity="info" sx={{ mb: 1.5 }}>
               <strong>이번회차 모드</strong> — 당첨번호·적중률 비교는 표시하지 않습니다.
@@ -6626,9 +6720,7 @@ export default function SemiAutoComparePanel({
             </Alert>
           )}
 
-          </>
-          )}
-        </Paper>
+        </EngineSection>
       )}
       </>
       )}

@@ -1012,6 +1012,16 @@ export interface ArchivedCurrentRoundSnapshot {
 }
 
 /** 복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였나 + 커버리지 곡선. */
+/** 넓은 그물(expand18)의 구간(10단위) 균형 진단. */
+export interface DecadeBalance {
+  /** 보정 세트의 구간별 개수. */
+  spread: Record<string, number>;
+  /** 보정 전 상위18이 놓쳤다가 보정으로 채운 구간. */
+  filled_decades: string[];
+  /** 티켓에 후보가 아예 없는(구조적 미포착) 구간. */
+  empty_decades: string[];
+}
+
 export interface ReviewVerificationResponse {
   ok: boolean;
   reason?: string;
@@ -1036,6 +1046,8 @@ export interface ReviewVerificationResponse {
     selected_by?: 'multi_round' | 'single_round';
     core6: number[];
     expand18: number[];
+    expand18_raw?: number[];
+    decade_balance?: DecadeBalance;
   };
   /** 다중신호 합의 커버리지 — 검증 통과 신호들이 함께 가리키는 번호(단일 신호보다 강건). */
   consensus_coverage?: {
@@ -1045,6 +1057,13 @@ export interface ReviewVerificationResponse {
     expand18?: number[];
     agreement?: Record<string, number>;
     need?: number;
+    decade_balance?: DecadeBalance;
+  };
+  /** 구간(10단위)별 당첨 커버리지 진단 — 어느 구간이 덜 잡혔나(복기 회차 집계). */
+  decade_catch?: {
+    rounds: number;
+    per_decade: { decade: string; winning: number; caught_top18: number; catch_rate: number | null }[];
+    weak_decades: string[];
   };
   /** 놓친 당첨 분석 — 어떤 신호로도 못 잡은 당첨(예측 천장). */
   missed_winner_analysis?: {

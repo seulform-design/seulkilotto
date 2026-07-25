@@ -232,6 +232,41 @@ export default function ReviewVerificationPanel() {
         );
       })()}
 
+      {/* 📊 구간(10단위) 균형 커버리지 진단 — 어느 구간 당첨이 덜 잡혔나 */}
+      {d.decade_catch && d.decade_catch.rounds > 0 && (
+        <Box sx={{ mb: 1.5, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'info.dark' }}>
+          <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
+            📊 구간(10단위) 커버리지 진단 ({d.decade_catch.rounds}개 회차 집계)
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+            구간별 당첨번호를 <strong>양쪽 지지 상위18</strong>이 얼마나 담았나(잡음/당첨) — 낮은 구간은 넓은 그물이 놓치던 곳입니다.
+          </Typography>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+            {d.decade_catch.per_decade.map((r) => {
+              const weak = d.decade_catch!.weak_decades.includes(r.decade);
+              return (
+                <Chip
+                  key={r.decade}
+                  size="small"
+                  color={r.winning === 0 ? 'default' : weak ? 'warning' : 'success'}
+                  variant={r.winning === 0 ? 'outlined' : 'filled'}
+                  label={`${r.decade}: ${r.caught_top18}/${r.winning}${r.catch_rate != null ? ` (${Math.round(r.catch_rate * 100)}%)` : ''}`}
+                  sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }}
+                />
+              );
+            })}
+          </Stack>
+          {d.decade_catch.weak_decades.length > 0 && (
+            <Typography variant="caption" color="warning.main" sx={{ display: 'block', fontSize: 9.5 }}>
+              ⚠️ 덜 잡힌 구간: {d.decade_catch.weak_decades.join(', ')} — 이번회차 넓은 그물이 이 구간을 반드시 포함하도록 보정했습니다.
+            </Typography>
+          )}
+          <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontSize: 9, mt: 0.3, fontStyle: 'italic' }}>
+            ⚠️ 로또는 i.i.d. — 구간별 당첨 '확률'은 동일합니다(표본 적어 편차는 대개 우연). 이 진단은 확률 비교가 아니라 그물이 빠뜨린 구간을 찾아 커버리지를 넓히기 위한 것입니다.
+          </Typography>
+        </Box>
+      )}
+
       {/* 이번회차 커버리지 세트 */}
       {d.current_coverage_set && (d.current_coverage_set.expand18?.length ?? 0) > 0 && (
         <Box sx={{ p: 1.25, borderRadius: 1, border: '1px dashed', borderColor: 'primary.main' }}>
@@ -261,6 +296,20 @@ export default function ReviewVerificationPanel() {
                 <LottoBall key={`e18-${n}`} number={n} size={20} />
               ))}
           </Stack>
+          {d.current_coverage_set.decade_balance && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.5 }}>
+              🧩 구간 균형:{' '}
+              {Object.entries(d.current_coverage_set.decade_balance.spread)
+                .map(([k, v]) => `${k}(${v})`)
+                .join(' · ')}
+              {d.current_coverage_set.decade_balance.filled_decades.length > 0
+                ? ` · 보정으로 채운 구간: ${d.current_coverage_set.decade_balance.filled_decades.join(', ')}`
+                : ' · 5개 구간 모두 커버'}
+              {d.current_coverage_set.decade_balance.empty_decades.length > 0
+                ? ` · 티켓 후보 없는 구간: ${d.current_coverage_set.decade_balance.empty_decades.join(', ')}`
+                : ''}
+            </Typography>
+          )}
         </Box>
       )}
 

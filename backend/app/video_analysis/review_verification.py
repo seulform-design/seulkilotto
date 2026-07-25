@@ -23,6 +23,98 @@ def _rank_signal(values: Dict[int, float]) -> List[int]:
     return sorted(range(1, 46), key=lambda n: (-values.get(n, 0.0), n))
 
 
+# 구간(10단위) — 균형 커버리지의 기준. balanced 신호와 동일 관례(min(4,(n-1)//10)):
+# d0=1~10, d1=11~20, d2=21~30, d3=31~40, d4=41~45.
+DECADE_LABELS = ["1~10", "11~20", "21~30", "31~40", "41~45"]
+
+
+def _decade(n: int) -> int:
+    return min(4, (int(n) - 1) // 10)
+
+
+def _balance_expand(
+    order: List[int], core: List[int], present: set, size: int = 18
+) -> List[int]:
+    """확장(넓은 그물) 세트가 티켓에 후보가 있는 5개 구간을 모두 커버하도록 보정한다.
+    core 는 항상 포함(core ⊂ expand 유지) → 아직 대표 없는 '후보 있는 구간'을 랭킹 상위로
+    1개씩 채운 뒤 → 나머지는 신호 랭킹 순으로 채운다. 확률을 올리지 않는다 — 당첨이 어느
+    구간에 떨어져도 그물이 비지 않게 하는 '커버리지 폭(분산)' 보정. 티켓에 아예 없는 구간은
+    억지로 채우지 않는다(그 구간은 티켓 기반으론 못 잡음 = 정직한 한계)."""
+    result: List[int] = [n for n in order if n in core]  # 랭킹에 있는 core 우선
+    seen = set(result)
+    covered = {_decade(n) for n in result if n in present}
+    for d in range(5):  # 1차 — 후보 있는데 대표 없는 구간을 랭킹 상위로 1개씩
+        if d in covered:
+            continue
+        for n in order:
+            if n not in seen and n in present and _decade(n) == d:
+                result.append(n)
+                seen.add(n)
+                covered.add(d)
+                break
+    for n in order:  # 2차 — 남은 자리를 랭킹 순으로
+        if len(result) >= size:
+            break
+        if n not in seen:
+            result.append(n)
+            seen.add(n)
+    return result[:size]
+
+
+def _decade_balance_info(
+    balanced: List[int], raw: List[int], present: set
+) -> Dict[str, Any]:
+    """구간 균형 진단 — 보정 세트의 구간 분포 + 보정으로 새로 채운 구간 + 티켓에
+    후보가 아예 없는(구조적 미포착) 구간."""
+    present_decades = {_decade(n) for n in present}
+    raw_decades = {_decade(n) for n in raw}
+    bal_decades = {_decade(n) for n in balanced}
+    return {
+        "spread": {DECADE_LABELS[d]: sum(1 for n in balanced if _decade(n) == d) for d in range(5)},
+        "filled_decades": [
+            DECADE_LABELS[d] for d in range(5)
+            if d in present_decades and d not in raw_decades and d in bal_decades
+        ],
+        "empty_decades": [DECADE_LABELS[d] for d in range(5) if d not in present_decades],
+    }
+
+
+def _decade_catch(samples=None) -> Dict[str, Any]:
+    """복기 보관 회차에서 '구간별 당첨번호를 최선 신호(양쪽 지지) 상위18이 얼마나
+    잡았나' 를 집계 — 어느 구간이 커버리지에서 덜 잡혔는지 정직하게 보여준다.
+    ⚠️ 로또는 i.i.d. — 구간별 당첨 '확률' 은 동일하다. 표본(회차) 이 적어 구간별 편차는
+    대개 우연이다. 이 진단의 목적은 확률 비교가 아니라, 넓은 그물이 어느 구간을 구조적으로
+    빠뜨렸는지 찾아 커버리지를 보정하는 것이다. 과거(추첨완료) 회차만 사용(누수 없음)."""
+    from .feature_learning_engine import collect_round_samples
+
+    if samples is None:
+        samples = collect_round_samples()
+    per_decade = {d: {"winning": 0, "caught_top18": 0} for d in range(5)}
+    rounds = 0
+    for s in samples:
+        sigs = _signals(s.auto_lines, s.semi_lines)
+        pos = {n: i + 1 for i, n in enumerate(_rank_signal(sigs["support"]))}
+        for w in s.winning:
+            d = _decade(w)
+            per_decade[d]["winning"] += 1
+            if pos.get(w, 99) <= 18:
+                per_decade[d]["caught_top18"] += 1
+        rounds += 1
+    out = []
+    for d in range(5):
+        win = per_decade[d]["winning"]
+        caught = per_decade[d]["caught_top18"]
+        out.append({
+            "decade": DECADE_LABELS[d],
+            "winning": win,
+            "caught_top18": caught,
+            "catch_rate": round(caught / win, 3) if win else None,
+        })
+    # 가장 덜 잡힌 구간(당첨은 있었는데 커버리지가 낮음) — '보완 대상' 후보.
+    weak = [r["decade"] for r in out if r["winning"] > 0 and (r["catch_rate"] or 0) < 0.5]
+    return {"rounds": rounds, "per_decade": out, "weak_decades": weak}
+
+
 def _line_freq(lines: List[List[int]]) -> Counter:
     c: Counter = Counter()
     for ln in lines:
@@ -259,7 +351,10 @@ def _consensus_coverage(
     core = [n for n in order if agree[n] >= need][:6]
     if len(core) < 6:
         core = order[:6]
-    expand = order[:18]
+    raw_expand = order[:18]
+    # 넓은 그물이 티켓 후보 있는 5개 구간을 모두 커버하도록 보정(core ⊂ expand 유지).
+    present = {n for n in range(1, 46) if cur_signals.get("total_freq", {}).get(n, 0) > 0}
+    expand = _balance_expand(order, core, present, 18)
     return {
         "good_signal_count": len(good),
         "good_signals": good,
@@ -267,6 +362,7 @@ def _consensus_coverage(
         "expand18": expand,
         "agreement": {str(n): agree[n] for n in expand},
         "need": need,
+        "decade_balance": _decade_balance_info(expand, raw_expand, present),
     }
 
 
@@ -376,12 +472,17 @@ def build_review_verification() -> Dict[str, Any]:
         multi_key = leaderboard.get("best_signal_multi")
         bkey = multi_key or analysis.get("best_signal_key") or "support"
         ranked = _rank_signal(csig.get(bkey, csig["support"]))
+        cur_present = {n for n in range(1, 46) if csig["total_freq"].get(n, 0) > 0}
+        raw_expand = ranked[:18]
+        bal_expand = _balance_expand(ranked, ranked[:6], cur_present, 18)
         current_coverage_set = {
             "signal": bkey,
             "signal_label": _SIGNAL_LABELS.get(bkey, bkey),
             "selected_by": "multi_round" if multi_key else "single_round",
             "core6": ranked[:6],
-            "expand18": ranked[:18],
+            "expand18": bal_expand,
+            "expand18_raw": raw_expand,
+            "decade_balance": _decade_balance_info(bal_expand, raw_expand, cur_present),
         }
         # 다중신호 합의 — 검증 통과 신호들이 함께 가리키는 번호(단일 신호보다 강건).
         consensus_coverage = _consensus_coverage(csig, leaderboard)
@@ -409,6 +510,7 @@ def build_review_verification() -> Dict[str, Any]:
         "multi_round_backtest": _multi_round_backtest(_samples),
         "signal_leaderboard": leaderboard,
         "missed_winner_analysis": _missed_winner_analysis(_samples),
+        "decade_catch": _decade_catch(_samples),
         "summary": {
             "best_top6": t6,
             "best_top18": t18,

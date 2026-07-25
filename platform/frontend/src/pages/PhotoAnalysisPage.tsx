@@ -39,6 +39,7 @@ import SavedLinesPanel, {
 } from '../components/SavedLinesPanel';
 import SemiAutoComparePanel, { clearSemiAutoLocal } from '../components/SemiAutoComparePanel';
 import { useConfirm } from '../components/useConfirm';
+import { clearDetailForecast } from '../utils/detailForecastBridge';
 import {
   v1Api,
   type ArchivedCurrentRoundSnapshot,
@@ -961,6 +962,7 @@ export default function PhotoAnalysisPage() {
       // (예상번호·심층역산·종합추천·1:1매칭)이 전부 죽는다 — 이번회차가 '제 기능을
       // 못하던' 실제 원인.
       clearSemiAutoLocal('current_round');
+      clearDetailForecast(); // 지난 회차 상세예상 → 종합분석 추첨기 오염 방지
       // 복기 재하이드레이션 유도 — 방금 이동된 데이터가 복기 탭에 채워지도록.
       hydratedAutoRef.current.review = false;
       setNotice(
@@ -970,6 +972,36 @@ export default function PhotoAnalysisPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRound, manualByIntent, accumulated]);
+
+  // 복기 회차 롤오버 자기치유 — 새 회차가 추첨되면 서버 복기 슬라이스도 다음 회차로
+  // 넘어간다(예: 1233→1234). 그런데 복기 로컬 드래프트는 intent 로만 키잉돼 옛 회차
+  // (1233) 자동 용지·stamp 가 그대로 남고, 하이드레이션 가드(localAutoEmpty)가 서버
+  // 최신(1234)을 안 불러온다 → 옛 1233 용지를 1234 당첨번호와 대조해 '아직 1233'·
+  // '구간 당첨률 저조'로 보인다. 이미 저장된 복기 로컬이 현재 복기 회차보다 과거이면
+  // 정리하고 서버 최신 복기(saved_auto_lines)로 재하이드레이션한다(반자동은
+  // SemiAutoComparePanel 이 자체 자기치유).
+  const reviewRolloverHealedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (reviewRound == null) return;
+    const draft = manualByIntent.review;
+    const hasContent =
+      draft.bulkAutoTickets.length + draft.currentSlipLines.length + draft.slipQueue.length > 0;
+    // 미저장(lastSavedAt 없음)은 작업 중 입력일 수 있어 건드리지 않는다.
+    if (!hasContent || draft.lastSavedAt == null) return;
+    const stampStale = draft.roundNo != null && draft.roundNo < reviewRound;
+    if (stampStale && reviewRolloverHealedRef.current !== reviewRound) {
+      reviewRolloverHealedRef.current = reviewRound;
+      const staleLabel = `${draft.roundNo}회`;
+      setManualByIntent((prev) => ({ ...prev, review: emptyManualDraft() }));
+      // 서버 최신 복기로 재하이드레이션 유도.
+      hydratedAutoRef.current.review = false;
+      setNotice(
+        `🔄 복기 회차가 ${reviewRound}회로 넘어가 이전 회차(${staleLabel}) 복기 로컬을 정리하고 ` +
+          `${reviewRound}회 서버 데이터로 새로 불러옵니다.`
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewRound, manualByIntent, accumulated]);
 
   const currentLabel = GAME_LABELS[currentSlipLines.length] ?? 'A';
 

@@ -34,6 +34,10 @@ import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
 import SharingBadge from './SharingBadge';
 import { optimizeForSharing } from '../utils/jackpotSharing';
+import {
+  buildDetailForecastSnapshot,
+  saveDetailForecast,
+} from '../utils/detailForecastBridge';
 import NumberFrequencyPanel from './NumberFrequencyPanel';
 import {
   generateScoredRecommendations,
@@ -1255,6 +1259,42 @@ export default function SemiAutoComparePanel({
     effectiveRound != null &&
     localRoundNo !== effectiveRound &&
     localLineTotal > 0;
+
+  // 복기 회차 롤오버 자기치유 — 새 회차가 추첨되면 서버 복기 슬라이스는 다음 회차로
+  // 넘어가는데(예: 1233→1234) 브라우저의 반자동 복기 localStorage 는 intent 로만
+  // 키잉돼 옛 회차(1233) 용지·회차 stamp 가 그대로 남는다. 그러면 하이드레이션
+  // 가드(localEmpty)가 서버 최신(1234)을 안 불러오고, 옛 1233 용지를 새 회차(1234)
+  // 당첨번호와 대조해 '아직 1233 데이터'·'특정 구간 당첨률 저조'로 보인다(실제 사고).
+  // 이미 저장된(lastSavedAt) 로컬이 서버 복기 회차보다 과거이면 서버 최신으로 교체한다.
+  const rolloverHealedRef = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    if (sheetIntent !== 'review') return;
+    const serverRound = reviewDataRound;
+    const serverLines = accumulated?.by_intent?.review?.saved_semi_lines ?? [];
+    const staleBehind =
+      localRoundNo != null &&
+      serverRound != null &&
+      localRoundNo < serverRound &&
+      lastSavedAt != null &&
+      localLineTotal > 0;
+    if (!staleBehind || rolloverHealedRef.current[sheetIntent]) return;
+    rolloverHealedRef.current[sheetIntent] = true;
+    // 이후 기기간 하이드레이션도 중복 실행 안 되게 잠근다(여기서 서버분을 채운다).
+    hydratedIntentRef.current[sheetIntent] = true;
+    const prevRound = localRoundNo;
+    setBulkTickets(serverLines.map((a) => [...a]));
+    setSemiSlipQueue([]);
+    setSemiCurrentLines([]);
+    setPicked([]);
+    setLocalRoundNo(serverRound);
+    setLastSavedAt(serverLines.length ? new Date().toISOString() : null);
+    setSaveNotice(
+      serverLines.length
+        ? `♻ 복기 회차가 ${serverRound}회로 넘어가 이전 회차(${prevRound}회) 반자동 로컬을 서버 최신 ${serverLines.length}줄로 교체했습니다.`
+        : `♻ 복기 회차가 ${serverRound}회로 넘어가 이전 회차(${prevRound}회) 반자동 로컬을 비웠습니다.`
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accumulated, sheetIntent, reviewDataRound, localRoundNo, lastSavedAt, localLineTotal]);
 
   const autoOnlyLines = useMemo(
     () => collectAutoOnlyLines(currentSlipLines, slipQueue, bulkAutoTickets),
@@ -2522,6 +2562,34 @@ export default function SemiAutoComparePanel({
       agreement: source === 'consensus' ? agreement : {},
     };
   }, [reviewVerificationQuery.data, currentRoundForecast, predictedNumbers]);
+
+  // 종합분석 1호기 물리/학습 추첨기용 — 상세분석 산출 스냅샷 영속.
+  // (strong_candidates 가 null 이어도 화면의 종합예측·당첨예상을 그대로 넘긴다.)
+  useEffect(() => {
+    if (sheetIntent !== 'current_round') return;
+    const snap = buildDetailForecastSnapshot({
+      intent: 'current_round',
+      round: effectiveRound ?? currentRound ?? null,
+      forecastRanked: currentRoundForecast?.ranked ?? null,
+      predictedRanked: predictedNumbers.map((p) => ({
+        number: p.number,
+        confidence: p.confidence,
+        sources: p.sources,
+      })),
+      core6: heroRecommendation.core6,
+      expand18: heroRecommendation.expand18,
+      representative: currentRoundForecast?.representative ?? heroRecommendation.core6,
+    });
+    if (snap) saveDetailForecast(snap);
+  }, [
+    sheetIntent,
+    effectiveRound,
+    currentRound,
+    currentRoundForecast,
+    predictedNumbers,
+    heroRecommendation.core6,
+    heroRecommendation.expand18,
+  ]);
 
   // ★ 1:1 강수·기대수 (구간별) — 평행회차 패널과 같은 레이아웃을 1:1 전수비교
   // 반복도(predictedNumbers 순위)로 생성. 강수=구간(단/10/20/30/40번대) 내 반복도

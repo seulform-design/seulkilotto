@@ -4789,7 +4789,7 @@ export default function SemiAutoComparePanel({
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
             핵심 6 = 집중 픽 · 확장 18 = 넓은 그물(복기상 더 잘 잡음) · 분산 최적 = 공동당첨 회피(확률 동일).
-            {' '}상세(강수·종합예측)는 아래 펼침. 1:1은 <strong>②</strong>, 복기검증·백테스트·심층역산은 <strong>④ 패턴 분석 엔진</strong>. 1등 확률(1/8,145,060)은 변하지 않습니다.
+            {' '}용지 통계 5세트는 바로 아래. 상세(강수·미출·종합)는 펼침. 후속·미출·검증은 <strong>④ 단일 엔진</strong> 탭. 1등 확률(1/8,145,060)은 불변.
           </Typography>
         </Paper>
       )}

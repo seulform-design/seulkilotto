@@ -1807,9 +1807,9 @@ export default function PhotoAnalysisPage() {
           <Stack spacing={1.5}>
             <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
               <Typography variant="caption">
-                ④ 패턴 분석 엔진 안 — 신호 성적표·다회차 백테스트·놓친 당첨·구간 커버리지와{' '}
+                ④ 엔진 <strong>검증·백테스트</strong> 탭 — 신호 성적표·다회차 백테스트·놓친 당첨·구간 커버리지와{' '}
                 <strong>용지 티켓 당첨 대조</strong>로 상단 <strong>③ 번호 추천</strong>을 사후 점검합니다.
-                확률은 변하지 않습니다.
+                후속·미출은 같은 엔진의 <strong>후속·미출</strong> 탭에 있습니다. 확률은 변하지 않습니다.
               </Typography>
             </Alert>
             <ReviewVerificationPanel />

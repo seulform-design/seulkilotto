@@ -21,6 +21,8 @@ import {
   Chip,
   CircularProgress,
   Divider,
+  Tab,
+  Tabs,
   IconButton,
   Paper,
   Stack,
@@ -39,6 +41,7 @@ import {
   saveDetailForecast,
 } from '../utils/detailForecastBridge';
 import NumberFrequencyPanel from './NumberFrequencyPanel';
+import EngineAuxSignalsPanel from './EngineAuxSignalsPanel';
 import {
   generateScoredRecommendations,
   type ScoredRecommendation,
@@ -1156,6 +1159,7 @@ export default function SemiAutoComparePanel({
   const [showTicketCompare, setShowTicketCompare] = useState(false);
   /** 1:1 전수비교 상세(매칭 카드) — 요약만 기본, 상세 보기로 펼침 */
   const [showLineMatchDetail, setShowLineMatchDetail] = useState(false);
+  const [engineTab, setEngineTab] = useState<'signals' | 'learn' | 'aux' | 'verify'>('signals');
 
   // 탭 전환 시 해당 탭 전용 localStorage 로드
   useEffect(() => {
@@ -4791,6 +4795,92 @@ export default function SemiAutoComparePanel({
       )}
 
 
+        {/* 🎲 용지 통계 종합 추천 — ③ 번호 추천 */}
+        <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+            <Typography variant="body2" fontWeight={700}>
+              🎲 용지 통계 종합 추천 조합{compareWinning ? ' (복기 검증)' : ` (${currentRound ?? effectiveRound ?? '?'}회 예상)`}
+            </Typography>
+            <Button
+              type="button"
+              size="small"
+              variant="contained"
+              color="success"
+              onClick={generateRecommendations}
+              disabled={
+                combinedTickets.length === 0 &&
+                parallelStrong.length === 0 &&
+                machineStrong.length === 0
+              }
+            >
+              추천 5세트 생성
+            </Button>
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차(강수·기대수)</strong> ·{' '}
+            <strong>🧬 학습된 당첨 프로파일 매칭</strong>({learnedPattern?.round ?? '복기'}회 당첨 구조 학습·전이) —
+            <strong> ✅ 검증 학습 {learningBridgeStatus.validatedCount}개</strong>(Feature·다회차·겹침·커버리지) —
+            미검증 신호는 제외 · 구간 분산·커버리지로 top-6 과적합 완화.
+            이 세 축을 핵심으로 6번호 5세트를 생성합니다.
+            (강한 후보·호기 추정값은 사용하지 않습니다.)
+            {compareWinning
+              ? ' 당첨 일치 개수는 점수에 넣지 않고 결과 카드에 표시만 합니다(예측 정합성 평가용).'
+              : ''}
+            {/* ⚠️ combinedTickets 만 보면 '반자동만 있는' 상태에서도 '분석 대상 N줄'
+                이라고 표시돼, 1:1 축과 학습 프로파일 축이 죽은 사실이 감춰진다.
+                실제로 3축이 살아있는지는 canRenderLineMatching(자동>0 && 반자동>0)로 판정. */}
+            {combinedTickets.length === 0
+              ? (parallelStrong.length > 0
+                  ? ' ※ 입력 줄이 없어 평행회차 신호만으로 생성합니다.'
+                  : ' ※ [재분석]으로 평행회차 신호를 먼저 불러오세요.')
+              : !canRenderLineMatching
+                ? ` ⚠️ 자동 ${groupLineMatching.autoLineCount}줄 · 반자동 ${groupLineMatching.semiLineCount}줄 — 한쪽이 비어 1:1 전수비교와 학습 프로파일 축이 동작하지 않습니다. 현재는 평행회차 신호만 반영됩니다.`
+                : ` 분석 대상 ${combinedTickets.length}줄 (자동 ${groupLineMatching.autoLineCount}·반자동 ${groupLineMatching.semiLineCount} — 3축 정상).`}
+            {' '}정직성: 수학적 당첨 확률(1/8,145,060)은 동일하며, 통계적으로 1등에 거의 없는
+            조합(합 극단·전부 홀짝·4연속 등)을 제외합니다.
+          </Typography>
+          {recommendations.length > 0 && (
+            <Stack spacing={0.75}>
+              {recommendations.map((rec, idx) => (
+                <Stack
+                  key={`rec-${idx}`}
+                  direction="row"
+                  alignItems="center"
+                  spacing={0.5}
+                  flexWrap="wrap"
+                  useFlexGap
+                >
+                  <Chip size="small" label={`${idx + 1}`} variant="outlined" sx={{ minWidth: 32, fontWeight: 700 }} />
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                    {rec.combo.map((n) => (
+                      <LottoBall key={n} number={n} size={28} dimmed={winningSet ? !winningSet.has(n) : false} />
+                    ))}
+                  </Stack>
+                  {compareWinning && winningSet && (
+                    <Chip
+                      size="small"
+                      color={rec.winMatch >= 3 ? 'success' : rec.winMatch >= 2 ? 'warning' : 'default'}
+                      label={`당첨 ${rec.winMatch}/6`}
+                      sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                    />
+                  )}
+                  {rec.signals.length > 0 && (
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={rec.signals.slice(0, 4).join(' · ')}
+                      sx={{ height: 18, fontSize: 10 }}
+                    />
+                  )}
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                    점수 {rec.totalScore.toFixed(0)}
+                  </Typography>
+                </Stack>
+              ))}
+            </Stack>
+          )}
+        </Paper>
+
       <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mt: 1, mb: showRecommendDetail ? 1 : 0 }} spacing={1}>
         <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
           <Typography variant="body2" fontWeight={700} color="text.secondary">
@@ -5009,6 +5099,7 @@ export default function SemiAutoComparePanel({
         </>
       )}
 
+
       {/* 이번회차 종합 예측 — ③ 추천 상세 (복기 탭에서는 currentRoundForecast=null) */}
       {currentRoundForecast && (
         <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'primary.main', borderWidth: 2 }}>
@@ -5091,13 +5182,41 @@ export default function SemiAutoComparePanel({
           endIcon={<span>{showPredictionDetail ? '▲' : '▼'}</span>}
         >
           ④ 패턴 분석 엔진 {showPredictionDetail ? '접기' : '펼치기'}
-          （복기검증 · 백테스트 · 평행회차 · 심층역산 · 통합신호 · Feature）
+          （역산·신호 · 학습 · 후속·미출 · 검증 — 단일 엔진）
         </Button>
       {showPredictionDetail && (
-        <Stack spacing={1.5}>
-          {engineExtraSlot}
+        <Paper variant="outlined" sx={{ p: 1.5 }}>
+          <Tabs
+            value={engineTab}
+            onChange={(_, v) => setEngineTab(v)}
+            variant="scrollable"
+            scrollButtons="auto"
+            sx={{ mb: 1.5, minHeight: 36, '& .MuiTab-root': { minHeight: 36, py: 0.5, textTransform: 'none', fontWeight: 700, fontSize: 12 } }}
+          >
+            <Tab value="signals" label="역산·신호" />
+            <Tab value="learn" label="학습" />
+            <Tab value="aux" label="후속·미출" />
+            <Tab value="verify" label="검증·백테스트" />
+          </Tabs>
+          <Stack spacing={1.5}>
+          {engineTab === 'learn' && engineExtraSlot}
 
-      {/* 당첨 예상·심층역산 등 — §④ 학습 엔진 본문 */}
+          {engineTab === 'aux' && (
+            <EngineAuxSignalsPanel
+              intentLabel={intentSectionLabel}
+              roundNo={effectiveRound}
+              compareWinning={compareWinning}
+              missingBands={decadePattern?.byBand.map((b) => ({ label: b.label, missing: b.missing })) ?? null}
+              missingCount={decadePattern?.missingCount ?? 0}
+              missingWinDist={decadePattern?.distribution?.missing ?? null}
+              postOccurrence={predictionSignals?.sources?.post_occurrence ?? null}
+              decadeGap={predictionSignals?.sources?.decade_gap ?? null}
+            />
+          )}
+
+      {engineTab === 'signals' && (
+      <>
+      {/* 당첨 예상·심층역산·통합신호 — 엔진 탭 */}
       {activeComparison && (
         <>
           {/* 🎯 당첨 예상번호 — 전수비교 심층 역산(주) + 평행회차(보조). 호기 제외. */}
@@ -5916,91 +6035,6 @@ export default function SemiAutoComparePanel({
             </Paper>
           )}
 
-          {/* 추천 조합 — 복기 탭 통계 종합 스코어링 */}
-          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-              <Typography variant="body2" fontWeight={700}>
-                🎲 용지 통계 종합 추천 조합{compareWinning ? ' (복기 검증)' : ` (${effectiveRound ?? '?'}회 예상)`}
-              </Typography>
-              <Button
-                type="button"
-                size="small"
-                variant="contained"
-                color="success"
-                onClick={generateRecommendations}
-                disabled={
-                  combinedTickets.length === 0 &&
-                  parallelStrong.length === 0 &&
-                  machineStrong.length === 0
-                }
-              >
-                추천 5세트 생성
-              </Button>
-            </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차(강수·기대수)</strong> ·{' '}
-              <strong>🧬 학습된 당첨 프로파일 매칭</strong>({learnedPattern?.round ?? '복기'}회 당첨 구조 학습·전이) —
-              <strong> ✅ 검증 학습 {learningBridgeStatus.validatedCount}개</strong>(Feature·다회차·겹침·커버리지) —
-              미검증 신호는 제외 · 구간 분산·커버리지로 top-6 과적합 완화.
-              이 세 축을 핵심으로 6번호 5세트를 생성합니다.
-              (강한 후보·호기 추정값은 사용하지 않습니다.)
-              {compareWinning
-                ? ' 당첨 일치 개수는 점수에 넣지 않고 결과 카드에 표시만 합니다(예측 정합성 평가용).'
-                : ''}
-              {/* ⚠️ combinedTickets 만 보면 '반자동만 있는' 상태에서도 '분석 대상 N줄'
-                  이라고 표시돼, 1:1 축과 학습 프로파일 축이 죽은 사실이 감춰진다.
-                  실제로 3축이 살아있는지는 canRenderLineMatching(자동>0 && 반자동>0)로 판정. */}
-              {combinedTickets.length === 0
-                ? (parallelStrong.length > 0
-                    ? ' ※ 입력 줄이 없어 평행회차 신호만으로 생성합니다.'
-                    : ' ※ [재분석]으로 평행회차 신호를 먼저 불러오세요.')
-                : !canRenderLineMatching
-                  ? ` ⚠️ 자동 ${groupLineMatching.autoLineCount}줄 · 반자동 ${groupLineMatching.semiLineCount}줄 — 한쪽이 비어 1:1 전수비교와 학습 프로파일 축이 동작하지 않습니다. 현재는 평행회차 신호만 반영됩니다.`
-                  : ` 분석 대상 ${combinedTickets.length}줄 (자동 ${groupLineMatching.autoLineCount}·반자동 ${groupLineMatching.semiLineCount} — 3축 정상).`}
-              {' '}정직성: 수학적 당첨 확률(1/8,145,060)은 동일하며, 통계적으로 1등에 거의 없는
-              조합(합 극단·전부 홀짝·4연속 등)을 제외합니다.
-            </Typography>
-            {recommendations.length > 0 && (
-              <Stack spacing={0.75}>
-                {recommendations.map((rec, idx) => (
-                  <Stack
-                    key={`rec-${idx}`}
-                    direction="row"
-                    alignItems="center"
-                    spacing={0.5}
-                    flexWrap="wrap"
-                    useFlexGap
-                  >
-                    <Chip size="small" label={`${idx + 1}`} variant="outlined" sx={{ minWidth: 32, fontWeight: 700 }} />
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      {rec.combo.map((n) => (
-                        <LottoBall key={n} number={n} size={28} dimmed={winningSet ? !winningSet.has(n) : false} />
-                      ))}
-                    </Stack>
-                    {compareWinning && winningSet && (
-                      <Chip
-                        size="small"
-                        color={rec.winMatch >= 3 ? 'success' : rec.winMatch >= 2 ? 'warning' : 'default'}
-                        label={`당첨 ${rec.winMatch}/6`}
-                        sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
-                      />
-                    )}
-                    {rec.signals.length > 0 && (
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label={rec.signals.slice(0, 4).join(' · ')}
-                        sx={{ height: 18, fontSize: 10 }}
-                      />
-                    )}
-                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                      점수 {rec.totalScore.toFixed(0)}
-                    </Typography>
-                  </Stack>
-                ))}
-              </Stack>
-            )}
-          </Paper>
 
 
         </>
@@ -6186,7 +6220,12 @@ export default function SemiAutoComparePanel({
       </>
 
 
-      {/* ── 복기 검증 · 백테스트 — ④ 패턴 분석 엔진 안 ── */}
+      </>
+      )}
+
+      {engineTab === 'verify' && (
+      <>
+      {/* ── 복기 검증 · 백테스트 — 엔진 검증 탭 ── */}
       <Divider textAlign="left">
         <Typography variant="caption" fontWeight={800} color="text.secondary">
           복기 검증 · 백테스트
@@ -6575,9 +6614,11 @@ export default function SemiAutoComparePanel({
           )}
         </Paper>
       )}
-
+      </>
+      )}
 
         </Stack>
+        </Paper>
       )}
       </Box>
 

@@ -1384,46 +1384,41 @@ export default function PhotoAnalysisPage() {
           top: 0,
           zIndex: 20,
           px: 1.5,
-          pt: 1,
+          pt: 0.5,
           pb: 0.5,
           bgcolor: 'background.paper',
           borderBottom: '1px solid',
           borderColor: 'divider',
         }}
       >
-        <Stack spacing={0.5}>
-          <Typography variant="h6" fontWeight={800}>
-            용지 분석
-          </Typography>
-          {/* 탭은 의도만(복기/이번회차). 회차는 탭 문구에 넣지 않음 */}
-          <Tabs
-            value={activeTab}
-            onChange={(_, v: SheetIntent) => {
-              setActiveTab(v);
-              setError(null);
-              setNotice(null);
-            }}
-            variant="fullWidth"
+        {/* 탭만 고정 — 페이지 제목은 내비에 있으므로 sticky에서 중복 제거 */}
+        <Tabs
+          value={activeTab}
+          onChange={(_, v: SheetIntent) => {
+            setActiveTab(v);
+            setError(null);
+            setNotice(null);
+          }}
+          variant="fullWidth"
+          sx={{
+            minHeight: 42,
+            '& .MuiTab-root': { minHeight: 42, textTransform: 'none', fontSize: 15, fontWeight: 600 },
+          }}
+        >
+          <Tab
+            value="review"
+            label="복기"
+            sx={{ fontWeight: activeTab === 'review' ? 800 : 500 }}
+          />
+          <Tab
+            value="current_round"
+            label={roundDrawn ? '이번회차 ⚠' : '이번회차'}
             sx={{
-              minHeight: 42,
-              '& .MuiTab-root': { minHeight: 42, textTransform: 'none', fontSize: 15, fontWeight: 600 },
+              fontWeight: activeTab === 'current_round' ? 800 : 500,
+              color: roundDrawn && activeTab !== 'current_round' ? 'warning.main' : undefined,
             }}
-          >
-            <Tab
-              value="review"
-              label="복기"
-              sx={{ fontWeight: activeTab === 'review' ? 800 : 500 }}
-            />
-            <Tab
-              value="current_round"
-              label={roundDrawn ? '이번회차 ⚠' : '이번회차'}
-              sx={{
-                fontWeight: activeTab === 'current_round' ? 800 : 500,
-                color: roundDrawn && activeTab !== 'current_round' ? 'warning.main' : undefined,
-              }}
-            />
-          </Tabs>
-        </Stack>
+          />
+        </Tabs>
       </Paper>
 
       {/* ━━ 안내 (탭 + 입력 방법 통합) ━━ */}

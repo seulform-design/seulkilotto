@@ -1544,27 +1544,112 @@ export default function SemiAutoComparePanel({
     const coverageConf = covWired
       ? Math.round(Math.max(0, Math.min(1, (bestTop18 - randomExp18) / (6 - randomExp18))) * 100)
       : 0;
+    const countSrc = (src: ValidatedLearningSignal['source']) =>
+      validatedLearning.filter((v) => v.source === src).length;
+    const forwardOnly = sheetIntent === 'current_round';
+    const ovFlat = Boolean(overlapLearningQuery.data?.ok && overlapLearningQuery.data.calibration_flat);
+    const coFlat = carryoverQuery.data?.ok ? (carryoverQuery.data.calibration_flat ?? true) : true;
+    /** 디렉터용 주입 맵 — L10 패널 ↔ 실제 점수 경로 */
+    const injectRows: {
+      id: string;
+      label: string;
+      status: 'on' | 'off' | 'direct' | 'display';
+      count: number;
+      note: string;
+    }[] = [
+      {
+        id: 'L10-A',
+        label: '평행회차',
+        status: parallelStrong.length > 0 || parallelExpected.length > 0 ? 'direct' : 'off',
+        count: parallelStrong.length + parallelExpected.length,
+        note: 'validatedLearning 아님 → L1 평행가산 · ③ 5세트 parallelStrong 직접',
+      },
+      {
+        id: 'L10-B',
+        label: 'Feature',
+        status: forwardOnly && countSrc('feature') > 0 ? 'on' : 'off',
+        count: countSrc('feature'),
+        note: forwardOnly ? '이번회차만 주입' : '복기 탭 미주입(탭 분리)',
+      },
+      {
+        id: 'L10-C',
+        label: 'Pattern',
+        status: forwardOnly && countSrc('pattern') > 0 ? 'on' : 'off',
+        count: countSrc('pattern'),
+        note: forwardOnly ? '이번회차만 주입' : '복기 탭 미주입(탭 분리)',
+      },
+      {
+        id: 'L10-D',
+        label: '다회차',
+        status: forwardOnly && countSrc('round') > 0 ? 'on' : 'off',
+        count: countSrc('round'),
+        note: forwardOnly ? 'lift≥1.05만' : '복기 탭 미주입',
+      },
+      {
+        id: '겹침API',
+        label: '겹침학습(서버)',
+        status: forwardOnly && !ovFlat && countSrc('overlap') > 0 ? 'on' : 'off',
+        count: countSrc('overlap'),
+        note: ovFlat
+          ? '평탄→미주입'
+          : forwardOnly
+            ? 'L10-E(화면)와 별개 API'
+            : '복기 탭 미주입',
+      },
+      {
+        id: 'L10-E',
+        label: '줄겹침(화면)',
+        status: 'display',
+        count: 0,
+        note: 'UI 분석만 · 점수 미주입(서버 겹침API가 담당)',
+      },
+      {
+        id: '커버리지',
+        label: '커버리지',
+        status: countSrc('coverage') > 0 ? 'on' : 'off',
+        count: countSrc('coverage'),
+        note: compareWinning ? '복기 용지 세트' : '이번회차 용지 세트',
+      },
+      {
+        id: '이월',
+        label: '이월',
+        status: forwardOnly && !coFlat && countSrc('carryover') > 0 ? 'on' : 'off',
+        count: countSrc('carryover'),
+        note: coFlat ? '평탄→참고 배지만' : forwardOnly ? '이번회차만' : '복기 탭 미주입',
+      },
+    ];
     return {
       validatedCount: validatedLearning.length,
       adoptedFeatures: featureLearningQuery.data?.adopted_count ?? 0,
       adoptedPatterns: patternMiningQuery.data?.adopted_count ?? 0,
       roundLearningRounds: roundLearningQuery.data?.ok ? (roundLearningQuery.data.round_count ?? 0) : 0,
       overlapRounds: overlapLearningQuery.data?.ok ? (overlapLearningQuery.data.round_count ?? 0) : 0,
-      overlapFlat: Boolean(overlapLearningQuery.data?.ok && overlapLearningQuery.data.calibration_flat),
+      overlapFlat: ovFlat,
       coverageWired: covWired,
       coverageConf,
       carryoverPairs: carryoverQuery.data?.ok ? (carryoverQuery.data.backtest?.pairs ?? 0) : 0,
-      carryoverFlat: carryoverQuery.data?.ok ? (carryoverQuery.data.calibration_flat ?? true) : true,
+      carryoverFlat: coFlat,
+      forwardOnly,
+      injectRows,
+      destinations: [
+        'L1-B 교차검증(+소량)',
+        '③ 최종 강수·기대 재정렬',
+        '③ 추천 5세트(generateScoredRecommendations)',
+      ] as const,
+      notInjected: ['L1-A 상위순위(순수 1:1)', 'L9 통합신호(서버 독립)', '히어로 핵심6(커버리지 서버)'] as const,
     };
   }, [
     compareWinning,
-    validatedLearning.length,
+    sheetIntent,
+    validatedLearning,
     featureLearningQuery.data,
     patternMiningQuery.data,
     roundLearningQuery.data,
     overlapLearningQuery.data,
     reviewVerificationQuery.data,
     carryoverQuery.data,
+    parallelStrong.length,
+    parallelExpected.length,
   ]);
 
   const resolvedStrongCandidates = useMemo(() => {
@@ -4941,16 +5026,13 @@ export default function SemiAutoComparePanel({
             </Button>
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            바로 아래 <strong>강수·기대수 · 종합 예측</strong>과 함께 보세요.{' '}
-            <strong>자동↔반자동 1:1 전수비교</strong> · <strong>평행회차(강수·기대수)</strong> ·{' '}
-            <strong>🧬 학습된 당첨 프로파일 매칭</strong>({learnedPattern?.round ?? '복기'}회 당첨 구조 학습·전이) —
-            <strong> ✅ 검증 학습 {learningBridgeStatus.validatedCount}개</strong>(Feature·다회차·겹침·커버리지) —
-            미검증 신호는 제외 · 구간 분산·커버리지로 top-6 과적합 완화.
-            이 세 축을 핵심으로 6번호 5세트를 생성합니다.
-            (강한 후보·호기 추정값은 사용하지 않습니다.)
+            <strong>주입 경로:</strong> 1:1 전수비교 · 평행(L10-A 직접) · 프로파일 매칭(L2) ·
+            validatedLearning <strong>{learningBridgeStatus.validatedCount}개</strong>
+            (Feature/Pattern/다회차/겹침API/커버리지/이월 — ④ 주입 맵 참고).
+            미검증·평탄 제외. 강한후보·호기 추정 미사용.
             {compareWinning
-              ? ' 당첨 일치 개수는 점수에 넣지 않고 결과 카드에 표시만 합니다(예측 정합성 평가용).'
-              : ''}
+              ? ' 복기: forward 학습 OFF·커버리지·평행만. 당첨 일치는 표시만.'
+              : ' 이번회차: forward 학습 ON.'}
             {/* ⚠️ combinedTickets 만 보면 '반자동만 있는' 상태에서도 '분석 대상 N줄'
                 이라고 표시돼, 1:1 축과 학습 프로파일 축이 죽은 사실이 감춰진다.
                 실제로 3축이 살아있는지는 canRenderLineMatching(자동>0 && 반자동>0)로 판정. */}
@@ -5352,14 +5434,16 @@ export default function SemiAutoComparePanel({
         }
         intent={
           <>
-            <strong>L1~L8</strong> 용지 1:1 역산 → <strong>L9</strong> 통합신호(+신호원 적중률) → <strong>L10</strong> 검증학습 주입 → ③ 추천.
-            대상: {intentSectionLabel} {effectiveRound ?? '?'}회. 당첨은 복기에서만 밝은 공/회색 대조.
+            <strong>L1~L8</strong> 용지 역산(진단) → <strong>L9</strong> 통합신호 → <strong>L10</strong> 검증학습.
+            점수 주입은 아래 <strong>주입 맵</strong> 기준(전부가 ③에 들어가는 것은 아님).
+            대상: {intentSectionLabel} {effectiveRound ?? '?'}회.
           </>
         }
       />
       <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
         {(
           [
+            ['learn-inject-map', '주입맵'],
             ['learn-l1', 'L1'],
             ['learn-l2', 'L2'],
             ['learn-l3', 'L3'],
@@ -5381,18 +5465,90 @@ export default function SemiAutoComparePanel({
           />
         ))}
       </Stack>
-      <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
-        <Typography variant="caption">
-          <strong>연동 상태</strong> — Feature 채택 {learningBridgeStatus.adoptedFeatures} · Pattern {learningBridgeStatus.adoptedPatterns}
-          · 다회차 {learningBridgeStatus.roundLearningRounds}회 · 겹침 {learningBridgeStatus.overlapRounds}회
-          {learningBridgeStatus.overlapFlat ? '(평탄→미주입)' : ''}
-          · 이월 {learningBridgeStatus.carryoverPairs}전이
-          {learningBridgeStatus.carryoverFlat ? '(평탄→참고만)' : '(신호)'}
-          · 커버리지 {learningBridgeStatus.coverageWired ? `신뢰도 ${learningBridgeStatus.coverageConf}%` : 'OFF'}
-          → ③·교차검증에 <strong>{learningBridgeStatus.validatedCount}개</strong>만 가산
-          {compareWinning ? ' (복기)' : ' (이번회차)'}. L1 순위는 순수 1:1 반복도.
+      <EngineSection
+        id="learn-inject-map"
+        tone="success"
+        collapsible
+        defaultOpen
+        title="주입 맵 — L10·검증학습이 어디로 가는지"
+        chips={
+          <>
+            <EngineStatusChip
+              color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}
+              label={`validated ${learningBridgeStatus.validatedCount}`}
+            />
+            <EngineStatusChip
+              color={learningBridgeStatus.forwardOnly ? 'secondary' : 'primary'}
+              label={learningBridgeStatus.forwardOnly ? '이번회차=forward ON' : '복기=커버리지만'}
+            />
+            <EngineStatusChip variant="outlined" label={`Feature채택 ${learningBridgeStatus.adoptedFeatures}`} />
+            <EngineStatusChip variant="outlined" label={`Pattern채택 ${learningBridgeStatus.adoptedPatterns}`} />
+            <EngineStatusChip
+              variant="outlined"
+              label={
+                learningBridgeStatus.coverageWired
+                  ? `커버리지 ${learningBridgeStatus.coverageConf}%`
+                  : '커버리지 OFF'
+              }
+            />
+          </>
+        }
+        intent={
+          <>
+            <strong>목적지:</strong> {learningBridgeStatus.destinations.join(' · ')}.
+            {' '}<strong>미주입(설계):</strong> {learningBridgeStatus.notInjected.join(' · ')}.
+          </>
+        }
+      >
+        <Stack spacing={0.5}>
+          {learningBridgeStatus.injectRows.map((row) => (
+            <Stack
+              key={row.id}
+              direction="row"
+              alignItems="center"
+              spacing={0.75}
+              flexWrap="wrap"
+              useFlexGap
+            >
+              <EngineStatusChip
+                variant="outlined"
+                label={row.id}
+                sx={{ minWidth: 64 }}
+              />
+              <EngineStatusChip
+                color={
+                  row.status === 'on'
+                    ? 'success'
+                    : row.status === 'direct'
+                      ? 'warning'
+                      : row.status === 'display'
+                        ? 'info'
+                        : 'default'
+                }
+                label={
+                  row.status === 'on'
+                    ? `주입 ${row.count}`
+                    : row.status === 'direct'
+                      ? `직접 ${row.count}`
+                      : row.status === 'display'
+                        ? '화면만'
+                        : 'OFF'
+                }
+              />
+              <Typography variant="caption" fontWeight={700} sx={{ minWidth: 72, fontSize: 11 }}>
+                {row.label}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                {row.note}
+              </Typography>
+            </Stack>
+          ))}
+        </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, fontSize: 10 }}>
+          ※ 복기 탭에서는 Feature/Pattern/다회차/겹침/이월 forward 주입을 끕니다(양 탭 추천 동일화 방지).
+          커버리지·평행 직접 경로만 동작합니다. L1-A 상위순위는 의도적으로 순수 1:1입니다.
         </Typography>
-      </Alert>
+      </EngineSection>
       {/* L1~L9 역산·신호 — 학습 엔진 본문 */}
       {activeComparison && (
         <>
@@ -5473,6 +5629,14 @@ export default function SemiAutoComparePanel({
                   chips={
                     <>
                       <EngineStatusChip variant="outlined" label={`양쪽 ${crossValidation.total}→상위 ${crossValidation.scored.length}`} />
+                      <EngineStatusChip
+                        color={crossValidation.scored.some((x) => x.validated) ? 'success' : 'default'}
+                        label={
+                          crossValidation.scored.some((x) => x.validated)
+                            ? `검증학습 가산 ${crossValidation.scored.filter((x) => x.validated).length}`
+                            : '검증학습 가산 0'
+                        }
+                      />
                       {compareWinning && crossValidation.backtest ? (
                         <EngineStatusChip
                           color={crossValidation.backtest.top6Hits >= 3 ? 'success' : crossValidation.backtest.top6Hits >= 2 ? 'warning' : 'default'}
@@ -6509,19 +6673,23 @@ export default function SemiAutoComparePanel({
         </Stack>
       </EngineSection>
 
-      {/* L10. 학습 소스 — 검증 통과분만 ③ 추천에 주입 */}
+      {/* L10. 학습 소스 — 패널 열람 + 주입은 상단 주입 맵 기준 */}
       <Box id="learn-l10">
       <Divider textAlign="left" sx={{ my: 0.5 }}>
         <Typography variant="caption" fontWeight={800} color="text.secondary">
-          L10. 학습 소스 — A 평행 · B Feature · C Pattern · D 다회차 · E 줄겹침
+          L10. 학습 소스 — A 평행 · B Feature · C Pattern · D 다회차 · E 줄겹침(화면)
         </Typography>
       </Divider>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-        L1~L9 위에 얹는 검증 학습(L10-A~E). 헤더 칩으로 <strong>채택/제외·신뢰도·표본</strong>을 확인하세요.
-        {compareWinning
-          ? ` 복기 ${effectiveRound ?? '?'}회.`
-          : ` 이번회차 ${effectiveRound ?? '?'}회.`}
-      </Typography>
+      <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 1 }}>
+        <Typography variant="caption">
+          <strong>주입 요약</strong> — A 평행=<strong>직접</strong>(L1·③) · B/C/D·겹침API·이월=
+          <strong>{learningBridgeStatus.forwardOnly ? '이번회차 ON' : '복기 OFF'}</strong>
+          · 커버리지=<strong>{learningBridgeStatus.injectRows.find((r) => r.id === '커버리지')?.count ?? 0}</strong>
+          · E 줄겹침=<strong>화면만</strong>(점수 미주입).
+          상세는 상단 <strong>주입 맵</strong>. validated {learningBridgeStatus.validatedCount}개 →{' '}
+          {learningBridgeStatus.destinations.join(' / ')}.
+        </Typography>
+      </Alert>
       {engineExtraSlot}
       </Box>
       </>

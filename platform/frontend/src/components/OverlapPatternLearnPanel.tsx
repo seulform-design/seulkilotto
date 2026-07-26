@@ -83,8 +83,8 @@ export default function OverlapPatternLearnPanel({
       }
       intent={
         <>
-          복기 줄겹침(2·3·4) 중 <strong>당첨 완전일치</strong> 구조를 역산 → 이번회차 겹침 조합을 같은 기준으로 채점·정렬합니다.
-          ③ 추천 주입은 검증 통과·비평탄일 때만(별도 게이트).
+          복기 줄겹침(2·3·4) 중 <strong>당첨 완전일치</strong> 구조를 역산해 이번회차 후보를 <strong>화면에서</strong> 채점합니다.
+          ⚠️ 이 패널은 <strong>점수 미주입</strong>(display). ③·교차검증 주입은 서버 겹침학습 API(주입 맵「겹침API」)가 담당합니다.
         </>
       }
     >

@@ -156,8 +156,8 @@ export default function ParallelRoundPanel({
       }
       intent={
         data
-          ? `${modeLabel} · ${data.summary} · 평행 고정수 힌트(상위3) ${data.semi_auto_fixed_hint.join(', ') || '—'}. 표에서 밝은 공=평행 강수 TOP6.`
-          : `${modeLabel} 대상 회차의 끝2자리 동일 회차군 당첨 패턴을 봅니다.`
+          ? `${modeLabel} · ${data.summary} · 고정수 힌트 ${data.semi_auto_fixed_hint.join(', ') || '—'}. 밝은 공=강수 TOP6. 주입: validatedLearning 아님 → L1 평행가산·③ 5세트에 직접.`
+          : `${modeLabel} 끝2자리 동일 회차군. 주입 경로는 상단 주입 맵(L10-A=직접) 참고.`
       }
     >
       {query.isError && (

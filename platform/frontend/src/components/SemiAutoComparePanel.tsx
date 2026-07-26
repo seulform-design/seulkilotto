@@ -4850,26 +4850,23 @@ export default function SemiAutoComparePanel({
           )}
           <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>핵심 6</Typography>
-            {heroRecommendation.core6.map((n) => (
-              <Box
-                key={`hero-c-${n}`}
-                sx={{
-                  textAlign: 'center',
-                  minWidth: 30,
-                  opacity:
-                    heroRecommendation.showWinning && winningSet && winningSet.size > 0 && !winningSet.has(n)
-                      ? 0.45
-                      : 1,
-                }}
-              >
-                <LottoBall number={n} size={ENGINE_BALL.list} />
-                {heroRecommendation.agreement[String(n)] != null && (
-                  <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
-                    {heroRecommendation.agreement[String(n)]}신호
-                  </Typography>
-                )}
-              </Box>
-            ))}
+            {heroRecommendation.core6.map((n) => {
+              const isWin = Boolean(heroRecommendation.showWinning && winningSet?.has(n));
+              return (
+                <Box key={`hero-c-${n}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                  <LottoBall
+                    number={n}
+                    size={ENGINE_BALL.list}
+                    dimmed={Boolean(heroRecommendation.showWinning && winningSet && !isWin)}
+                  />
+                  {heroRecommendation.agreement[String(n)] != null && (
+                    <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
+                      {heroRecommendation.agreement[String(n)]}신호
+                    </Typography>
+                  )}
+                </Box>
+              );
+            })}
             <SharingBadge numbers={heroRecommendation.core6} />
             <ComboActions numbers={heroRecommendation.core6} source="unknown" label="핵심6 추천" />
           </Stack>
@@ -4877,17 +4874,12 @@ export default function SemiAutoComparePanel({
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
               <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>분산 최적</Typography>
               {heroRecommendation.shareOpt.map((n) => (
-                <Box
+                <LottoBall
                   key={`hero-s-${n}`}
-                  sx={{
-                    opacity:
-                      heroRecommendation.showWinning && winningSet && winningSet.size > 0 && !winningSet.has(n)
-                        ? 0.45
-                        : 1,
-                  }}
-                >
-                  <LottoBall number={n} size={ENGINE_BALL.list} />
-                </Box>
+                  number={n}
+                  size={ENGINE_BALL.list}
+                  dimmed={Boolean(heroRecommendation.showWinning && winningSet && !winningSet.has(n))}
+                />
               ))}
               <SharingBadge numbers={heroRecommendation.shareOpt} />
               <ComboActions numbers={heroRecommendation.shareOpt} source="unknown" label="분산최적 추천" />
@@ -4896,23 +4888,20 @@ export default function SemiAutoComparePanel({
           <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap>
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>확장 18</Typography>
             {heroRecommendation.expand18.map((n) => (
-              <Box
+              <LottoBall
                 key={`hero-e-${n}`}
-                sx={{
-                  opacity:
-                    heroRecommendation.showWinning && winningSet && winningSet.size > 0 && !winningSet.has(n)
-                      ? 0.45
-                      : 1,
-                }}
-              >
-                <LottoBall number={n} size={ENGINE_BALL.list} />
-              </Box>
+                number={n}
+                size={ENGINE_BALL.list}
+                dimmed={Boolean(heroRecommendation.showWinning && winningSet && !winningSet.has(n))}
+              />
             ))}
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
-            {compareWinning
-              ? '복기 탭: 이 회차 용지 기준 추천 · 흐린 공=비당첨. '
-              : '이번회차 탭: 미추첨 회차 용지 기준 추천. '}
+            {compareWinning && winningSet && winningSet.size > 0
+              ? `밝은 공 = ${effectiveRound ?? '?'}회 실제 당첨 · 회색 = 비당첨. `
+              : compareWinning
+                ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다. '
+                : '이번회차 탭: 미추첨이라 당첨 대조 없음. '}
             핵심 6 = 집중 픽 · 확장 18 = 넓은 그물 · 분산 최적 = 공동당첨 회피.
             {' '}아래: 용지 통계 5세트 → 강수·기대·종합 예측. 후속·미출·검증은 <strong>④ 엔진</strong>.
           </Typography>

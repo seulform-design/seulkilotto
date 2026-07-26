@@ -4789,7 +4789,16 @@ export default function SemiAutoComparePanel({
             ③ 번호 추천
           </Typography>
           <Chip size="small" color={compareWinning ? 'primary' : 'secondary'} label={intentSectionLabel} sx={{ height: 22, fontWeight: 700 }} />
-          <Chip size="small" variant="outlined" label="학습 엔진 → ④" sx={{ height: 22 }} />
+          <Chip
+            size="small"
+            variant="outlined"
+            label="학습 엔진 → ④"
+            onClick={() => {
+              setShowPredictionDetail(true);
+              setEngineTab('learn');
+            }}
+            sx={{ height: 22, cursor: 'pointer' }}
+          />
         </Stack>
         <Button size="small" variant="outlined" onClick={() => setShowRecommendSection((v) => !v)}>
           {showRecommendSection ? '접기 ▲' : '펼치기 ▼'}

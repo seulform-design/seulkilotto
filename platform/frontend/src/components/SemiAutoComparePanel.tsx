@@ -1167,7 +1167,8 @@ export default function SemiAutoComparePanel({
   const [showTicketCompare, setShowTicketCompare] = useState(false);
   /** 1:1 전수비교 상세(매칭 카드) — 요약만 기본, 상세 보기로 펼침 */
   const [showLineMatchDetail, setShowLineMatchDetail] = useState(false);
-  const [engineTab, setEngineTab] = useState<'signals' | 'learn' | 'aux' | 'verify'>('signals');
+  /** 학습 엔진(역산·통합신호·검증학습) | 후속·gap | 검증 — 용지미출 탭/섹션 없음 */
+  const [engineTab, setEngineTab] = useState<'learn' | 'aux' | 'verify'>('learn');
 
   // 탭 전환 시 해당 탭 전용 localStorage 로드
   useEffect(() => {
@@ -4788,7 +4789,7 @@ export default function SemiAutoComparePanel({
             ③ 번호 추천
           </Typography>
           <Chip size="small" color={compareWinning ? 'primary' : 'secondary'} label={intentSectionLabel} sx={{ height: 22, fontWeight: 700 }} />
-          <Chip size="small" variant="outlined" label="검증·후속·미출 → ④" sx={{ height: 22 }} />
+          <Chip size="small" variant="outlined" label="학습 엔진 → ④" sx={{ height: 22 }} />
         </Stack>
         <Button size="small" variant="outlined" onClick={() => setShowRecommendSection((v) => !v)}>
           {showRecommendSection ? '접기 ▲' : '펼치기 ▼'}
@@ -4903,7 +4904,7 @@ export default function SemiAutoComparePanel({
                 ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다. '
                 : '이번회차 탭: 미추첨이라 당첨 대조 없음. '}
             핵심 6 = 집중 픽 · 확장 18 = 넓은 그물 · 분산 최적 = 공동당첨 회피.
-            {' '}아래: 용지 통계 5세트 → 강수·기대·종합 예측. 후속·미출·검증은 <strong>④ 엔진</strong>.
+            {' '}아래: 용지 통계 5세트 → 강수·기대·종합 예측. 역산·학습·검증은 <strong>④ 엔진</strong>.
           </Typography>
         </Paper>
       )}
@@ -5061,29 +5062,6 @@ export default function SemiAutoComparePanel({
                             </Typography>
                           </Box>
                         ))}
-                        {b.missing.length > 0 && (
-                          <>
-                            <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5, color: 'warning.light' }}>미출</Typography>
-                            {b.missing.map((m) => (
-                              <Box
-                                key={`ms-${m.number}`}
-                                component="span"
-                                sx={{
-                                  fontSize: 10,
-                                  px: 0.4,
-                                  py: 0.1,
-                                  borderRadius: 0.5,
-                                  border: '1px dashed',
-                                  borderColor: compareWinning && m.winning ? 'success.main' : 'divider',
-                                  color: compareWinning && m.winning ? 'success.light' : 'text.disabled',
-                                  fontWeight: compareWinning && m.winning ? 700 : 400,
-                                }}
-                              >
-                                {m.number}
-                              </Box>
-                            ))}
-                          </>
-                        )}
                       </Stack>
                     ))}
                     <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
@@ -5094,15 +5072,16 @@ export default function SemiAutoComparePanel({
                     </Stack>
                   </Stack>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5 }}>
-                    미출 = 자동·반자동 어느 줄에도 없는 번호 {decadePattern.missingCount}개 — 티켓 기반으론 추출 불가 영역.
                     {compareWinning && decadePattern.distribution ? (
                       <>
-                        {' '}<strong>당첨 분포 비교</strong>: 강수 {decadePattern.distribution.strong}개 · 기대 {decadePattern.distribution.expected}개 ·
-                        그외 등장 {decadePattern.distribution.etc}개 · <strong style={{ color: decadePattern.distribution.missing > 0 ? '#ffa726' : 'inherit' }}>미출 {decadePattern.distribution.missing}개</strong>
-                        {decadePattern.distribution.missing > 0 ? ' (미출에서 나온 당첨은 어떤 티켓 분석으로도 못 잡음)' : ' (전부 데이터 안에서 나옴 — 추출 가능 회차)'}
+                        <strong>당첨 분포</strong>: 강수 {decadePattern.distribution.strong}개 · 기대 {decadePattern.distribution.expected}개 ·
+                        그외 등장 {decadePattern.distribution.etc}개
+                        {decadePattern.distribution.missing > 0
+                          ? ` · 티켓 밖 ${decadePattern.distribution.missing}개(용지 분석 한계 — 학습 신호 제외)`
+                          : ' · 전부 티켓 안(추출 가능 회차)'}
                       </>
                     ) : (
-                      ' 미출수가 많을수록 이번 회차를 티켓 데이터로 커버 못 하는 범위가 큽니다.'
+                      '강수·기대만 표시합니다. 용지 미출현은 학습 엔진 신호에서 제외합니다.'
                     )}
                   </Typography>
                 </Box>
@@ -5290,7 +5269,7 @@ export default function SemiAutoComparePanel({
           endIcon={<span>{showPredictionDetail ? '▲' : '▼'}</span>}
         >
           ④ 패턴 분석 엔진 {showPredictionDetail ? '접기' : '펼치기'}
-          （역산·신호 · 학습 · 후속·미출 · 검증 — 단일 엔진）
+          （학습 엔진 · 후속·gap · 검증 — 단일 엔진）
         </Button>
       {showPredictionDetail && (
         <Paper variant="outlined" sx={{ p: 1.5 }}>
@@ -5301,14 +5280,16 @@ export default function SemiAutoComparePanel({
             scrollButtons="auto"
             sx={{ mb: 1, minHeight: 36, '& .MuiTab-root': { minHeight: 36, py: 0.5, textTransform: 'none', fontWeight: 700, fontSize: 12 } }}
           >
-            <Tab value="signals" label="역산·신호" />
-            <Tab value="learn" label="학습" />
-            <Tab value="aux" label="후속·미출" />
+            <Tab value="learn" label="학습 엔진" />
+            <Tab value="aux" label="후속·gap" />
             <Tab value="verify" label="검증·백테스트" />
           </Tabs>
           {/* 엔진 공통 상태 — 탭과 무관하게 진단 포인트 고정 노출 */}
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1.25 }}>
-            <EngineStatusChip variant="outlined" label={intentSectionLabel} />
+            <EngineStatusChip
+              color={compareWinning ? 'primary' : 'secondary'}
+              label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`}
+            />
             <EngineStatusChip
               color={canRenderLineMatching ? 'success' : 'warning'}
               label={canRenderLineMatching ? '1:1 ON' : '1:1 OFF'}
@@ -5321,55 +5302,27 @@ export default function SemiAutoComparePanel({
               color={predictionSignals ? 'info' : 'default'}
               label={predictionSignals ? '통합신호 ON' : '통합신호 —'}
             />
-            <EngineStatusChip
-              color={(decadePattern?.missingCount ?? 0) > 0 ? 'warning' : 'default'}
-              label={`용지미출 ${decadePattern?.missingCount ?? 0}`}
-            />
           </Stack>
           <Stack spacing={1.5}>
-          {engineTab === 'learn' && (
-            <>
-              <EngineTabBanner
-                title="학습 — 검증 통과분만 추천에 주입"
-                chips={
-                  <>
-                    <EngineStatusChip
-                      color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}
-                      label={`검증 ${learningBridgeStatus.validatedCount}개`}
-                    />
-                    <EngineStatusChip variant="outlined" label="평행·Feature·Pattern·다회차·겹침" />
-                  </>
-                }
-                intent={
-                  <>
-                    각 패널 헤더 칩으로 <strong>채택/제외·신뢰도·표본</strong>을 먼저 보고, 펼쳐서 표·기여도를 확인하세요.
-                    미검증·평탄 신호는 추천에 넣지 않습니다.
-                  </>
-                }
-              />
-              {engineExtraSlot}
-            </>
-          )}
-
           {engineTab === 'aux' && (
             <EngineAuxSignalsPanel
               intentLabel={intentSectionLabel}
               roundNo={effectiveRound}
-              compareWinning={compareWinning}
-              missingBands={decadePattern?.byBand.map((b) => ({ label: b.label, missing: b.missing })) ?? null}
-              missingCount={decadePattern?.missingCount ?? 0}
-              missingWinDist={decadePattern?.distribution?.missing ?? null}
               postOccurrence={predictionSignals?.sources?.post_occurrence ?? null}
               decadeGap={predictionSignals?.sources?.decade_gap ?? null}
             />
           )}
 
-      {engineTab === 'signals' && (
+      {engineTab === 'learn' && (
       <>
       <EngineTabBanner
-        title="역산·신호 — 문제 진단 순서"
+        title="학습 엔진 — 역산 · 검증학습 · 추천 주입"
         chips={
           <>
+            <EngineStatusChip
+              color={compareWinning ? 'primary' : 'secondary'}
+              label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`}
+            />
             <EngineStatusChip
               color={canRenderLineMatching ? 'success' : 'warning'}
               label={canRenderLineMatching ? '1:1 축 활성' : '1:1 미적용(평행단독)'}
@@ -5379,6 +5332,10 @@ export default function SemiAutoComparePanel({
               label={predictedNumbers.length > 0 ? `예상 ${Math.min(10, predictedNumbers.length)}위` : '예상 없음'}
             />
             <EngineStatusChip
+              color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}
+              label={`주입 ${learningBridgeStatus.validatedCount}`}
+            />
+            <EngineStatusChip
               color={predictionSignals ? 'info' : 'default'}
               label={predictionSignals ? '통합신호' : '통합신호 대기'}
             />
@@ -5386,11 +5343,25 @@ export default function SemiAutoComparePanel({
         }
         intent={
           <>
-            <strong>1)</strong> 예상번호 축이 1:1인지 평행단독인지 확인 → <strong>2)</strong> 교차검증·심층역산 결론 →{' '}
-            <strong>3)</strong> 통합 신호·성적표. 당첨번호는 계산에 쓰지 않고 복기에서만 대조합니다.
+            <strong>파이프라인:</strong> ① 1:1·심층 역산 진단 → ② 교차검증(검증학습 가산) → ③ 통합 신호 → ④ 아래 학습 소스(평행·Feature·Pattern·다회차·겹침).
+            복기/이번회차 대상 회차는 탭과 동일합니다. 용지 미출현은 학습 신호에서 제외했습니다.
+            당첨번호는 계산에 쓰지 않고 복기에서만 대조합니다.
           </>
         }
       />
+      <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
+        <Typography variant="caption">
+          <strong>연동 상태</strong> — Feature 채택 {learningBridgeStatus.adoptedFeatures} · Pattern {learningBridgeStatus.adoptedPatterns}
+          · 다회차 {learningBridgeStatus.roundLearningRounds}회 · 겹침 {learningBridgeStatus.overlapRounds}회
+          {learningBridgeStatus.overlapFlat ? '(평탄→미주입)' : ''}
+          · 이월 {learningBridgeStatus.carryoverPairs}전이
+          {learningBridgeStatus.carryoverFlat ? '(평탄→참고만)' : '(신호)'}
+          · 커버리지 {learningBridgeStatus.coverageWired ? `신뢰도 ${learningBridgeStatus.coverageConf}%` : 'OFF'}
+          → ③ 추천·교차검증에 <strong>{learningBridgeStatus.validatedCount}개</strong>만 가산
+          {compareWinning ? ' (복기 용지 커버리지)' : ' (이번회차 용지 커버리지)'}.
+          예상번호 balls 순위는 순수 1:1 반복도(자기검증 순환 방지).
+        </Typography>
+      </Alert>
       {/* 당첨 예상·심층역산·통합신호 — 엔진 탭 */}
       {activeComparison && (
         <>
@@ -5414,17 +5385,6 @@ export default function SemiAutoComparePanel({
                 </>
               }
             >
-              <Alert severity="info" sx={{ mb: 1, py: 0.5 }}>
-                <Typography variant="caption">
-                  ✅ 복기 학습 연동 (Feature 채택 {learningBridgeStatus.adoptedFeatures} · Pattern 채택 {learningBridgeStatus.adoptedPatterns}
-                  · 다회차 {learningBridgeStatus.roundLearningRounds}회 · 겹침 {learningBridgeStatus.overlapRounds}회{learningBridgeStatus.overlapFlat ? '(평탄→미주입)' : ''}
-                  · 이월 {learningBridgeStatus.carryoverPairs}전이{learningBridgeStatus.carryoverFlat ? '(평탄→참고만)' : '(신호)'}
-                  · 커버리지 {learningBridgeStatus.coverageWired ? `신뢰도 ${learningBridgeStatus.coverageConf}%` : 'OFF'})
-                  — 검증 통과분만 <strong>아래 ‘🔗 교차검증’에 가산</strong>됩니다(현재 {learningBridgeStatus.validatedCount}개 신호).
-                  위 <strong>예상번호 balls·복기 백테스트는 순수 반복도 그대로</strong> 두어 자기검증 순환을 막습니다.
-                  미검증 Feature/Pattern·평탄 신호는 넣지 않으며, <strong>3개 회차로는 채택이 거의 0</strong>이라 지금 영향은 작고 회차가 쌓일수록 커집니다. 1등 확률은 불변.
-                </Typography>
-              </Alert>
               {fixedSemiNumbers.list.length > 0 && (
                 <Alert severity="warning" icon={false} sx={{ mb: 1, py: 0.5 }}>
                   <Typography variant="caption">
@@ -5433,10 +5393,8 @@ export default function SemiAutoComparePanel({
                     {fixedSemiNumbers.list.slice(0, 12).map((f) => `${f.number}(${Math.round(f.frac * 100)}%)`).join(' · ')}
                     {fixedSemiNumbers.list.length > 12 ? ' …' : ''}
                     <br />
-                    반자동은 <strong>고정수(사용자 지정) + 자동fill</strong> 구조라 고정수가 거의 모든 줄에 반복돼
-                    빈도·지지·1:1 통계를 왜곡합니다(고정수는 반자동 쪽이 항상 최대치 → 강수로 둔갑).
-                    → 위 고정수는 <strong>강수·기대·예상·교차검증에서 분리</strong>했습니다(자동fill·자동용지 기반으로만 신호 산출).
-                    복기·이번회차 동일 적용. 확률 불변.
+                    고정수가 빈도·1:1을 왜곡하므로 <strong>강수·기대·예상·교차검증에서 분리</strong>했습니다.
+                    복기·이번회차 동일 적용.
                   </Typography>
                 </Alert>
               )}
@@ -6409,7 +6367,19 @@ export default function SemiAutoComparePanel({
       })()}
       </>
 
-
+      {/* 학습 소스 패널 — 검증 통과분만 ③ 추천에 주입 (PhotoAnalysisPage engineExtraSlot) */}
+      <Divider textAlign="left" sx={{ my: 0.5 }}>
+        <Typography variant="caption" fontWeight={800} color="text.secondary">
+          학습 소스 — 평행 · Feature · Pattern · 다회차 · 겹침
+        </Typography>
+      </Divider>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+        각 패널 헤더 칩으로 <strong>채택/제외·신뢰도·표본</strong>을 확인하세요. 미검증·평탄 신호는 추천에 넣지 않습니다.
+        {compareWinning
+          ? ` 복기 ${effectiveRound ?? '?'}회 기준.`
+          : ` 이번회차 ${effectiveRound ?? '?'}회 적용.`}
+      </Typography>
+      {engineExtraSlot}
       </>
       )}
 
@@ -6426,7 +6396,7 @@ export default function SemiAutoComparePanel({
         intent={
           <>
             신호 성적·다회차 백테스트·놓친 당첨·구간 커버리지로 상단 <strong>③ 번호 추천</strong>을 점검합니다.
-            후속·미출은 <strong>후속·미출</strong> 탭. 확률은 변하지 않습니다.
+            역산·학습 주입은 <strong>학습 엔진</strong> · 후속·gap은 <strong>후속·gap</strong> 탭.
           </>
         }
       />

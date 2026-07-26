@@ -1,15 +1,10 @@
 /**
- * ④ 패턴 분석 엔진 — 후속출현 · 미출현 통합 패널.
- * 기능 누락 없이 엔진 한곳에 모은다(전체 후속 탭은 심화 분석용으로 유지).
+ * ④ 패턴 분석 엔진 — 후속출현 · 구간 gap 패널.
+ * 용지 미출현(티켓에 없는 번호)은 학습 엔진에서 제외 — 티켓 기반 추출 한계 표시일 뿐 학습 신호가 아님.
  */
-import { Alert, Box, Stack, Typography } from '@mui/material';
+import { Alert, Stack, Typography } from '@mui/material';
 import LottoBall from './LottoBall';
 import { ENGINE_BALL, EngineSection, EngineStatusChip, EngineTabBanner } from './EngineSection';
-
-export type MissingBand = {
-  label: string;
-  missing: { number: number; winning: boolean }[];
-};
 
 type PostSource = {
   available: boolean;
@@ -28,19 +23,11 @@ type DecadeGapSource = {
 export default function EngineAuxSignalsPanel({
   intentLabel,
   roundNo,
-  compareWinning,
-  missingBands,
-  missingCount,
-  missingWinDist,
   postOccurrence,
   decadeGap,
 }: {
   intentLabel: string;
   roundNo: number | null | undefined;
-  compareWinning: boolean;
-  missingBands: MissingBand[] | null;
-  missingCount: number;
-  missingWinDist: number | null;
   postOccurrence?: PostSource | null;
   decadeGap?: DecadeGapSource | null;
 }) {
@@ -52,7 +39,7 @@ export default function EngineAuxSignalsPanel({
   return (
     <Stack spacing={1.5}>
       <EngineTabBanner
-        title="후속·미출 — 빈틈 진단"
+        title="후속·gap — 보조 신호"
         chips={
           <>
             <EngineStatusChip
@@ -63,17 +50,13 @@ export default function EngineAuxSignalsPanel({
               color={decadeGap?.available ? 'info' : 'default'}
               label={decadeGap?.available ? `gap ${decadeGap.pool_size ?? gapPool.length}` : 'gap OFF'}
             />
-            <EngineStatusChip
-              color={missingCount > 0 ? 'warning' : 'success'}
-              label={missingCount > 0 ? `용지미출 ${missingCount}` : '용지미출 0'}
-            />
             <EngineStatusChip variant="outlined" label={`${intentLabel} ${roundNo ?? '?'}회`} />
           </>
         }
         intent={
           <>
-            후속출현·구간 gap·용지 미출현을 한 화면에서 봅니다. 더 깊은 표·전략은 앱 상단{' '}
-            <strong>후속 출현 통계</strong> 탭. 1등 확률(1/8,145,060)은 불변.
+            후속출현·구간 gap만 봅니다(용지 미출현 제외). 더 깊은 표·전략은 앱 상단{' '}
+            <strong>후속 출현 통계</strong> 탭. 역산·학습 주입은 <strong>학습 엔진</strong> 탭.
           </>
         }
       />
@@ -164,61 +147,6 @@ export default function EngineAuxSignalsPanel({
                     sx={{ height: 18, fontSize: 9, fontWeight: 600 }}
                   />
                 ))}
-              </Stack>
-            ))}
-          </Stack>
-        )}
-      </EngineSection>
-
-      <EngineSection
-        title="🕳 용지 미출현 번호"
-        tone="warning"
-        chips={
-          <>
-            <EngineStatusChip variant="outlined" label={`${missingCount}개`} />
-            {compareWinning && missingWinDist != null && (
-              <EngineStatusChip
-                color={missingWinDist > 0 ? 'warning' : 'default'}
-                label={`당첨 ${missingWinDist}개 (티켓으로 못 잡음)`}
-              />
-            )}
-          </>
-        }
-        intent={
-          <>
-            자동·반자동 어느 줄에도 없는 번호 — 티켓 빈도/1:1로는 추출 불가 영역입니다.
-            {compareWinning
-              ? ` ${roundNo ?? '?'}회 당첨이 여기 있으면 그 회차는 용지 분석만으로 못 잡습니다.`
-              : ' 이번회차(미추첨) — 당첨 대조 없음.'}
-          </>
-        }
-      >
-        {!missingBands || missingCount === 0 ? (
-          <Alert severity="success" sx={{ py: 0.5 }}>
-            용지 미출현이 없습니다(1~45가 티켓에 모두 등장).
-          </Alert>
-        ) : (
-          <Stack spacing={0.5}>
-            {missingBands.map((b) => (
-              <Stack key={b.label} direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
-                <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>
-                  {b.label}
-                </Typography>
-                {b.missing.length === 0 ? (
-                  <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>
-                    —
-                  </Typography>
-                ) : (
-                  b.missing.map((m) => (
-                    <Box key={`miss-${m.number}`} sx={{ textAlign: 'center' }}>
-                      <LottoBall
-                        number={m.number}
-                        size={ENGINE_BALL.list}
-                        dimmed={compareWinning ? !m.winning : true}
-                      />
-                    </Box>
-                  ))
-                )}
               </Stack>
             ))}
           </Stack>

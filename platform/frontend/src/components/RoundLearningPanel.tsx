@@ -32,7 +32,7 @@ export default function RoundLearningPanel() {
 
   if (q.isLoading) {
     return (
-      <EngineSection tone="primary" title="🎓 다회차 용지 학습" sx={{ mb: 2 }}>
+      <EngineSection tone="primary" title="L10-D. 다회차 용지 학습" sx={{ mb: 2 }}>
         <LinearProgress />
       </EngineSection>
     );
@@ -40,7 +40,7 @@ export default function RoundLearningPanel() {
   // 실패 시 조용히 사라지지 않도록 오류를 표면화(구버전은 null 반환으로 섹션이 증발).
   if (q.isError) {
     return (
-      <EngineSection tone="primary" title="🎓 다회차 용지 학습" sx={{ mb: 2 }}>
+      <EngineSection tone="primary" title="L10-D. 다회차 용지 학습" sx={{ mb: 2 }}>
         <Alert severity="error">
           학습 데이터를 불러오지 못했습니다: {q.error instanceof Error ? q.error.message : '서버 오류'}
         </Alert>
@@ -52,7 +52,7 @@ export default function RoundLearningPanel() {
 
   if (!d.ok) {
     return (
-      <EngineSection tone="primary" title="🎓 다회차 용지 학습" sx={{ mb: 2 }}>
+      <EngineSection tone="primary" title="L10-D. 다회차 용지 학습" sx={{ mb: 2 }}>
         <Alert severity="info">{d.reason ?? '학습할 보관 회차가 아직 없습니다.'}</Alert>
       </EngineSection>
     );
@@ -66,7 +66,8 @@ export default function RoundLearningPanel() {
   return (
     <EngineSection
       tone="primary"
-      title={`🎓 다회차 용지 학습 (${d.round_count}개 회차)`}
+      title={`L10-D. 다회차 용지 학습 (${d.round_count}개 회차)`}
+      id="learn-l10d"
       collapsible
       open={open}
       onToggle={() => setOpen((v) => !v)}

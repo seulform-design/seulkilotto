@@ -6513,11 +6513,11 @@ export default function SemiAutoComparePanel({
       <Box id="learn-l10">
       <Divider textAlign="left" sx={{ my: 0.5 }}>
         <Typography variant="caption" fontWeight={800} color="text.secondary">
-          L10. 학습 소스 — 평행 · Feature · Pattern · 다회차 · 겹침
+          L10. 학습 소스 — A 평행 · B Feature · C Pattern · D 다회차 · E 줄겹침
         </Typography>
       </Divider>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-        L1~L9 위에 얹는 검증 학습입니다. 헤더 칩으로 <strong>채택/제외·신뢰도·표본</strong>을 확인하세요.
+        L1~L9 위에 얹는 검증 학습(L10-A~E). 헤더 칩으로 <strong>채택/제외·신뢰도·표본</strong>을 확인하세요.
         {compareWinning
           ? ` 복기 ${effectiveRound ?? '?'}회.`
           : ` 이번회차 ${effectiveRound ?? '?'}회.`}

@@ -1803,13 +1803,16 @@ export default function PhotoAnalysisPage() {
           <Stack spacing={1.5}>
             <ParallelRoundPanel
               targetRound={activeTab === 'review' ? (reviewRound ?? currentRound) : (currentRound ?? latestRound)}
-              modeLabel={activeTab === 'review' ? '복기회차' : '이번회차'}
+              modeLabel={activeTab === 'review' ? '복기' : '이번회차'}
               defaultOpen={false}
             />
             <FeatureLearningPanel />
             <PatternMiningPanel />
             <RoundLearningPanel />
-            <OverlapPatternLearnPanel accumulated={accumulated} />
+            <OverlapPatternLearnPanel
+              accumulated={accumulated}
+              modeLabel={activeTab === 'review' ? '복기' : '이번회차'}
+            />
           </Stack>
         }
       />

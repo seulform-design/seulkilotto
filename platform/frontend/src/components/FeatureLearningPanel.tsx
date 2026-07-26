@@ -46,7 +46,7 @@ export default function FeatureLearningPanel() {
 
   if (q.isLoading) {
     return (
-      <EngineSection tone="info" title="🧠 복기 Feature 학습 엔진" sx={{ mb: 2 }}>
+      <EngineSection tone="info" title="L10-B. Feature 학습" sx={{ mb: 2 }}>
         <LinearProgress />
         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
           Feature 생성 · Walk-Forward / Bootstrap / Permutation / Monte Carlo 검증 중…
@@ -57,7 +57,7 @@ export default function FeatureLearningPanel() {
 
   if (q.isError) {
     return (
-      <EngineSection tone="info" title="🧠 복기 Feature 학습 엔진" sx={{ mb: 2 }}>
+      <EngineSection tone="info" title="L10-B. Feature 학습" sx={{ mb: 2 }}>
         <Alert severity="error">
           학습 엔진을 불러오지 못했습니다:{' '}
           {q.error instanceof Error ? q.error.message : '서버 오류'}
@@ -71,7 +71,7 @@ export default function FeatureLearningPanel() {
 
   if (!d.ok) {
     return (
-      <EngineSection tone="info" title="🧠 복기 Feature 학습 엔진" sx={{ mb: 2 }}>
+      <EngineSection tone="info" title="L10-B. Feature 학습" sx={{ mb: 2 }}>
         <Alert severity="info">{d.reason ?? '학습할 보관 회차가 아직 없습니다.'}</Alert>
       </EngineSection>
     );
@@ -83,7 +83,8 @@ export default function FeatureLearningPanel() {
   return (
     <EngineSection
       tone="info"
-      title={`🧠 복기 Feature 학습 엔진 (${d.round_count}개 회차)`}
+      title={`L10-B. Feature 학습 (${d.round_count}개 회차)`}
+      id="learn-l10b"
       collapsible
       open={open}
       onToggle={() => setOpen((v) => !v)}

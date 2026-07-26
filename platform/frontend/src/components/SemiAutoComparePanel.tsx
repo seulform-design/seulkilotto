@@ -1290,12 +1290,12 @@ export default function SemiAutoComparePanel({
   }, [effectiveRound, localRoundNo, bulkTickets.length, semiSlipQueue.length, semiCurrentLines.length]);
 
   const intentSectionLabel = sheetIntent === 'review' ? '복기' : '이번회차';
-  /** 복기 탭 히어로도 '다음 회차용 픽'이므로 회차 칩은 이번회차. 검증 근거 회차는 Alert에만. */
+  /** 복기=그 회차 용지 추천(당첨 대조) / 이번회차=미추첨 회차 추천 — 탭별로 대상·픽이 다름. */
   const recommendHeroTitle = compareWinning
-    ? '🎯 복기 검증 기반 · 다음 회차 추천'
+    ? `🎯 복기 ${effectiveRound ?? '?'}회 검증 추천`
     : `🎯 ${currentRound ?? effectiveRound ?? '?'}회 이번회차 핵심 추천`;
   const recommendHeroHint = compareWinning
-    ? `복기 ${effectiveRound ?? '?'}회 당첨 대조로 검증한 신호입니다. 아래 픽은 다음 회차(${currentRound ?? '?'})용 — 이번회차 탭과 동일 축.`
+    ? `복기 ${effectiveRound ?? '?'}회 용지·신호로 만든 추천입니다. 당첨번호와 대조합니다(이번회차 ${currentRound ?? '?'}회 픽과 다름).`
     : `복기 검증을 근거로 ${currentRound ?? effectiveRound ?? '?'}회 이번회차 추천을 만듭니다.`;
 
   // 로컬 누적이 '지난 회차 기준' 인지 판정 — 회차가 넘어간 뒤 그대로 재저장하면
@@ -1453,8 +1453,11 @@ export default function SemiAutoComparePanel({
       out.push({ number: n, weight: Math.max(0, Math.min(1, weight)), source, label });
     };
 
+    // 이번회차 전용 학습(다음 회차 적용) — 복기 탭에 넣으면 양 탭 추천이 같아진다.
+    const forwardLearning = sheetIntent === 'current_round';
+
     const feat = featureLearningQuery.data;
-    if (feat?.ok && feat.recommendation?.ok) {
+    if (forwardLearning && feat?.ok && feat.recommendation?.ok) {
       const nums = feat.recommendation.numbers ?? [];
       const maxAbs = Math.max(0.01, ...nums.map((x) => Math.abs(x.score)));
       for (const row of nums.slice(0, 18)) {
@@ -1463,7 +1466,7 @@ export default function SemiAutoComparePanel({
     }
 
     const rl = roundLearningQuery.data;
-    if (rl?.ok && (rl.current_scores?.length ?? 0) > 0) {
+    if (forwardLearning && rl?.ok && (rl.current_scores?.length ?? 0) > 0) {
       const maxScore = Math.max(1, ...rl.current_scores!.map((s) => s.score));
       for (const s of rl.current_scores!.slice(0, 15)) {
         if ((s.learned_lift ?? 1) < 1.05) continue;
@@ -1474,7 +1477,7 @@ export default function SemiAutoComparePanel({
     const ov = overlapLearningQuery.data;
     // calibration_flat(신호 없음/표본 부족)이면 겹침학습을 주입하지 않는다 —
     // round-learning 의 learned_lift 게이트와 대칭. 소표본 우연을 신호로 넣지 않기 위함.
-    if (ov?.ok && !ov.calibration_flat && (ov.current_scores?.length ?? 0) > 0) {
+    if (forwardLearning && ov?.ok && !ov.calibration_flat && (ov.current_scores?.length ?? 0) > 0) {
       const maxScore = Math.max(1, ...ov.current_scores!.map((s) => s.score));
       for (const s of ov.current_scores!.slice(0, 12)) {
         push(s.number, 0.3 + 0.7 * (s.score / maxScore), 'overlap', '겹침학습');
@@ -1482,7 +1485,8 @@ export default function SemiAutoComparePanel({
     }
 
     const rv = reviewVerificationQuery.data;
-    const cov = rv?.current_coverage_set;
+    // 탭별 커버리지: 복기=복기 용지 세트 / 이번회차=다음 회차 세트.
+    const cov = forwardLearning ? rv?.current_coverage_set : rv?.review_coverage_set;
     if (rv?.ok && cov) {
       // 커버리지 신뢰도 = 복기 회차에서 '넓은 그물(top-18)'이 무작위 기대(≈2.4)를 얼마나
       // 초과해 당첨을 담았나. best_signal 은 1개 회차로 고른 값이므로, 그 신호가 무작위
@@ -1500,7 +1504,7 @@ export default function SemiAutoComparePanel({
     }
 
     const pm = patternMiningQuery.data;
-    if (pm?.ok && pm.recommendation?.ok) {
+    if (forwardLearning && pm?.ok && pm.recommendation?.ok) {
       const nums = pm.recommendation.numbers ?? [];
       const maxScore = Math.max(0.01, ...nums.map((x) => Math.abs(x.score)));
       for (const row of nums.slice(0, 15)) {
@@ -1512,7 +1516,7 @@ export default function SemiAutoComparePanel({
     // 이월(carryover)은 재현되는 초과(lift≥1.15, calibration_flat=false)가 있을 때만
     // 순위 가산 — 평탄(무작위 수준)이면 넣지 않는다(overlap 게이트와 대칭). 로또는
     // 독립시행이라 대개 평탄이며, 그땐 '참고' 섹션에만 표시하고 점수엔 미반영.
-    if (co?.ok && !co.calibration_flat && (co.current_candidates?.length ?? 0) > 0) {
+    if (forwardLearning && co?.ok && !co.calibration_flat && (co.current_candidates?.length ?? 0) > 0) {
       for (const c of co.current_candidates!.slice(0, 12)) {
         push(c.number, 0.3 + 0.5 * c.score, 'carryover', '이월');
       }
@@ -1520,6 +1524,7 @@ export default function SemiAutoComparePanel({
 
     return out.sort((a, b) => b.weight - a.weight);
   }, [
+    sheetIntent,
     featureLearningQuery.data,
     roundLearningQuery.data,
     overlapLearningQuery.data,
@@ -1532,7 +1537,10 @@ export default function SemiAutoComparePanel({
     const rv = reviewVerificationQuery.data;
     const bestTop18 = rv?.ok ? (rv.summary?.best_top18 ?? 0) : 0;
     const randomExp18 = (18 * 6) / 45;
-    const coverageConf = rv?.current_coverage_set
+    const covWired = Boolean(
+      compareWinning ? rv?.review_coverage_set : rv?.current_coverage_set
+    );
+    const coverageConf = covWired
       ? Math.round(Math.max(0, Math.min(1, (bestTop18 - randomExp18) / (6 - randomExp18))) * 100)
       : 0;
     return {
@@ -1542,12 +1550,13 @@ export default function SemiAutoComparePanel({
       roundLearningRounds: roundLearningQuery.data?.ok ? (roundLearningQuery.data.round_count ?? 0) : 0,
       overlapRounds: overlapLearningQuery.data?.ok ? (overlapLearningQuery.data.round_count ?? 0) : 0,
       overlapFlat: Boolean(overlapLearningQuery.data?.ok && overlapLearningQuery.data.calibration_flat),
-      coverageWired: Boolean(rv?.current_coverage_set),
+      coverageWired: covWired,
       coverageConf,
       carryoverPairs: carryoverQuery.data?.ok ? (carryoverQuery.data.backtest?.pairs ?? 0) : 0,
       carryoverFlat: carryoverQuery.data?.ok ? (carryoverQuery.data.calibration_flat ?? true) : true,
     };
   }, [
+    compareWinning,
     validatedLearning.length,
     featureLearningQuery.data,
     patternMiningQuery.data,
@@ -2573,18 +2582,25 @@ export default function SemiAutoComparePanel({
     };
   }, [compareWinning, crossValidation, predictionSignals, resolvedStrongCandidates, parallelStrong, parallelExpected, groupLineMatching.autoLineCount, groupLineMatching.semiLineCount]);
 
-  // 🎯 핵심 추천 (한눈에) — 여러 추천 리스트를 하나로 요약한다. 복기 검증(신호 성적표·
-  // 다회차 커버리지)을 근거로, 이번회차 '핵심 6 + 확장 18(넓은 그물) + 분산 최적'을 낸다.
-  // 우선순위: 복기 다회차 best 신호 커버리지 세트 → (없으면) currentRoundForecast/반복도 폴백.
+  // 🎯 핵심 추천 — 탭별 대상 회차가 다름.
+  // 복기: 복기 회차 용지 커버리지(당첨 대조) / 이번회차: 미추첨 회차 커버리지.
   const heroRecommendation = useMemo(() => {
     const rv = reviewVerificationQuery.data;
-    const consensus = rv?.ok ? rv.consensus_coverage : undefined;
-    const cov = rv?.ok ? rv.current_coverage_set : undefined;
+    const consensus = rv?.ok
+      ? compareWinning
+        ? rv.review_consensus_coverage
+        : rv.consensus_coverage
+      : undefined;
+    const cov = rv?.ok
+      ? compareWinning
+        ? rv.review_coverage_set
+        : rv.current_coverage_set
+      : undefined;
     const lb = rv?.ok ? rv.signal_leaderboard : undefined;
     const best = lb?.leaderboard?.[0];
     const clean = (arr: number[] | undefined) =>
       Array.from(new Set((arr ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= 45)));
-    // 우선순위: ①다중신호 합의(consensus, 가장 강건) → ②다회차 best 신호 커버리지 → ③로컬 폴백.
+    // 우선순위: ①다중신호 합의 → ②다회차 best 신호 커버리지 → ③로컬 폴백.
     let core6 = clean(consensus?.core6);
     let expand18 = clean(consensus?.expand18);
     let source: 'consensus' | 'coverage' | 'forecast' | 'repeat' = 'consensus';
@@ -2594,17 +2610,21 @@ export default function SemiAutoComparePanel({
       source = 'coverage';
     }
     if (core6.length < 6 || expand18.length < 6) {
-      // 폴백 — 서버 커버리지가 없으면(이번회차 용지 없음) 로컬 신호로 채운다.
-      const rep = currentRoundForecast?.representative ?? [];
+      // 폴백 — 서버 커버리지가 없으면 해당 탭 로컬 신호로 채운다.
+      const rep = !compareWinning ? (currentRoundForecast?.representative ?? []) : [];
       const predTop = predictedNumbers.map((p) => p.number);
-      core6 = clean(rep.length >= 6 ? rep : predTop.slice(0, 6));
-      expand18 = clean(predTop.slice(0, 18));
+      // 통합 예측 신호(탭별 target_round)도 폴백에 반영.
+      const signalTop = (predictionSignals?.strong_candidates ?? []).filter(
+        (n) => Number.isInteger(n) && n >= 1 && n <= 45
+      );
+      const pool = predTop.length >= 6 ? predTop : signalTop.length >= 6 ? signalTop : predTop;
+      core6 = clean(rep.length >= 6 ? rep : pool.slice(0, 6));
+      expand18 = clean(pool.slice(0, 18));
       source = rep.length >= 6 ? 'forecast' : 'repeat';
     }
     const ready = core6.length >= 6 && expand18.length >= 6;
     const shareResult = ready ? optimizeForSharing(expand18, Math.min(18, expand18.length)) : null;
     const shareOpt = shareResult ? shareResult.numbers.slice(0, 6) : [];
-    // 추천 picks 는 '이번회차(미추첨)' 대상이므로 어느 탭에서든 당첨 대조·dim 하지 않는다.
     const agreement = consensus?.agreement ?? {};
     return {
       ready,
@@ -2618,8 +2638,16 @@ export default function SemiAutoComparePanel({
       reviewRounds: lb?.rounds ?? 0,
       goodSignalCount: source === 'consensus' ? (consensus?.good_signal_count ?? 0) : 0,
       agreement: source === 'consensus' ? agreement : {},
+      // 복기 탭만 당첨 대조(같은 회차 추천 vs 실제 당첨).
+      showWinning: compareWinning,
     };
-  }, [reviewVerificationQuery.data, currentRoundForecast, predictedNumbers]);
+  }, [
+    compareWinning,
+    reviewVerificationQuery.data,
+    currentRoundForecast,
+    predictedNumbers,
+    predictionSignals?.strong_candidates,
+  ]);
 
   // 종합분석 1호기 물리/학습 추첨기용 — 상세분석 산출 스냅샷 영속.
   // (strong_candidates 가 null 이어도 화면의 종합예측·당첨예상을 그대로 넘긴다.)
@@ -4786,19 +4814,26 @@ export default function SemiAutoComparePanel({
                 color={compareWinning ? 'primary' : 'secondary'}
                 label={
                   compareWinning
-                    ? `검증 ${effectiveRound ?? '?'}회 · 대상 ${currentRound ?? '?'}회`
+                    ? `복기 ${effectiveRound ?? '?'}회`
                     : `이번회차 ${currentRound ?? '?'}회`
                 }
                 sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
               />
             </Stack>
-            <Chip size="small" variant="outlined" color="success" label="④ 엔진 복기검증 참고" sx={{ height: 20, fontSize: 10, fontWeight: 700 }} />
+            <Chip
+              size="small"
+              variant="outlined"
+              color="success"
+              label={compareWinning ? '④ 엔진 · 복기 용지' : '④ 엔진 · 이번회차 용지'}
+              sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+            />
           </Stack>
           {heroRecommendation.reviewRounds > 0 && (
             <Alert severity="success" icon={false} sx={{ py: 0.5, mb: 1 }}>
               <Typography variant="caption">
                 ✅ <strong>복기 {heroRecommendation.reviewRounds}회차 검증 완료</strong>
-                {compareWinning && effectiveRound != null ? ` (기준 ${effectiveRound}회)` : ''}
+                {compareWinning && effectiveRound != null ? ` (이 추천 = ${effectiveRound}회)` : ''}
+                {!compareWinning && currentRound != null ? ` → 적용 대상 ${currentRound}회` : ''}
                 {' '}— 당첨을 가장 잘 잡은 신호는{' '}
                 <strong>{heroRecommendation.signalLabel}</strong>{heroRecommendation.selectedByMulti ? '(다회차 1위)' : ''}
                 {heroRecommendation.bestTop18 != null ? `, 상위18에 평균 ${heroRecommendation.bestTop18}/6 담음` : ''}.
@@ -4806,14 +4841,27 @@ export default function SemiAutoComparePanel({
                 {heroRecommendation.goodSignalCount > 0
                   ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다(공에 '몇 신호').`
                   : ''}{' '}
-                <strong>top-6 집중보다 넓은 그물이 유효</strong>(확률 불변).
+                <strong>top-6 집중보다 넓은 그물이 유효</strong>.
+                {heroRecommendation.showWinning && winningSet && winningSet.size > 0
+                  ? ` 핵심6 당첨 ${heroRecommendation.core6.filter((n) => winningSet.has(n)).length}/6 · 확장18 당첨 ${heroRecommendation.expand18.filter((n) => winningSet.has(n)).length}/6.`
+                  : ''}
               </Typography>
             </Alert>
           )}
           <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>핵심 6</Typography>
             {heroRecommendation.core6.map((n) => (
-              <Box key={`hero-c-${n}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+              <Box
+                key={`hero-c-${n}`}
+                sx={{
+                  textAlign: 'center',
+                  minWidth: 30,
+                  opacity:
+                    heroRecommendation.showWinning && winningSet && winningSet.size > 0 && !winningSet.has(n)
+                      ? 0.45
+                      : 1,
+                }}
+              >
                 <LottoBall number={n} size={ENGINE_BALL.list} />
                 {heroRecommendation.agreement[String(n)] != null && (
                   <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
@@ -4829,7 +4877,17 @@ export default function SemiAutoComparePanel({
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
               <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>분산 최적</Typography>
               {heroRecommendation.shareOpt.map((n) => (
-                <LottoBall key={`hero-s-${n}`} number={n} size={ENGINE_BALL.list} />
+                <Box
+                  key={`hero-s-${n}`}
+                  sx={{
+                    opacity:
+                      heroRecommendation.showWinning && winningSet && winningSet.size > 0 && !winningSet.has(n)
+                        ? 0.45
+                        : 1,
+                  }}
+                >
+                  <LottoBall number={n} size={ENGINE_BALL.list} />
+                </Box>
               ))}
               <SharingBadge numbers={heroRecommendation.shareOpt} />
               <ComboActions numbers={heroRecommendation.shareOpt} source="unknown" label="분산최적 추천" />
@@ -4838,12 +4896,25 @@ export default function SemiAutoComparePanel({
           <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap>
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>확장 18</Typography>
             {heroRecommendation.expand18.map((n) => (
-              <LottoBall key={`hero-e-${n}`} number={n} size={ENGINE_BALL.list} />
+              <Box
+                key={`hero-e-${n}`}
+                sx={{
+                  opacity:
+                    heroRecommendation.showWinning && winningSet && winningSet.size > 0 && !winningSet.has(n)
+                      ? 0.45
+                      : 1,
+                }}
+              >
+                <LottoBall number={n} size={ENGINE_BALL.list} />
+              </Box>
             ))}
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
-            핵심 6 = 집중 픽 · 확장 18 = 넓은 그물(복기상 더 잘 잡음) · 분산 최적 = 공동당첨 회피(확률 동일).
-            {' '}아래: 용지 통계 5세트 → 강수·기대·종합 예측. 후속·미출·검증은 <strong>④ 엔진</strong>. 1등 확률(1/8,145,060)은 불변.
+            {compareWinning
+              ? '복기 탭: 이 회차 용지 기준 추천 · 흐린 공=비당첨. '
+              : '이번회차 탭: 미추첨 회차 용지 기준 추천. '}
+            핵심 6 = 집중 픽 · 확장 18 = 넓은 그물 · 분산 최적 = 공동당첨 회피.
+            {' '}아래: 용지 통계 5세트 → 강수·기대·종합 예측. 후속·미출·검증은 <strong>④ 엔진</strong>.
           </Typography>
         </Paper>
       )}

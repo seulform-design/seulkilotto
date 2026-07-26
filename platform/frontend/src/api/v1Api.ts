@@ -1047,6 +1047,26 @@ export interface ReviewVerificationResponse {
   current_round_no?: number;
   review_fixed_semi?: number[];
   current_fixed_semi?: number[];
+  /** 복기 회차 용지 기준 커버리지 (당첨 대조용). 이번회차 세트와 분리. */
+  review_coverage_set?: {
+    signal: string;
+    signal_label: string;
+    selected_by?: 'multi_round' | 'single_round';
+    core6: number[];
+    expand18: number[];
+    expand18_raw?: number[];
+    decade_balance?: DecadeBalance;
+  };
+  /** 복기 회차 다중신호 합의 커버리지. */
+  review_consensus_coverage?: {
+    good_signal_count?: number;
+    good_signals?: string[];
+    core6?: number[];
+    expand18?: number[];
+    agreement?: Record<string, number>;
+    need?: number;
+    decade_balance?: DecadeBalance;
+  };
   current_coverage_set?: {
     signal: string;
     signal_label: string;
@@ -1056,7 +1076,7 @@ export interface ReviewVerificationResponse {
     expand18_raw?: number[];
     decade_balance?: DecadeBalance;
   };
-  /** 다중신호 합의 커버리지 — 검증 통과 신호들이 함께 가리키는 번호(단일 신호보다 강건). */
+  /** 이번회차 다중신호 합의 커버리지 — 검증 통과 신호들이 함께 가리키는 번호. */
   consensus_coverage?: {
     good_signal_count?: number;
     good_signals?: string[];

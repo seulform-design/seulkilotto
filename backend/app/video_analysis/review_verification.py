@@ -318,10 +318,32 @@ def _signal_leaderboard(samples=None) -> Dict[str, Any]:
     }
 
 
+def _coverage_set_from_signals(
+    sigs: Dict[str, Dict[int, float]],
+    *,
+    signal_key: str,
+    selected_by: str,
+) -> Dict[str, Any]:
+    """단일 신호 랭킹으로 core6 + 구간균형 expand18 커버리지 세트를 만든다."""
+    ranked = _rank_signal(sigs.get(signal_key, sigs["support"]))
+    present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
+    raw_expand = ranked[:18]
+    bal_expand = _balance_expand(ranked, ranked[:6], present, 18)
+    return {
+        "signal": signal_key,
+        "signal_label": _SIGNAL_LABELS.get(signal_key, signal_key),
+        "selected_by": selected_by,
+        "core6": ranked[:6],
+        "expand18": bal_expand,
+        "expand18_raw": raw_expand,
+        "decade_balance": _decade_balance_info(bal_expand, raw_expand, present),
+    }
+
+
 def _consensus_coverage(
     cur_signals: Dict[str, Dict[int, float]], leaderboard: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """이번회차 커버리지를 '검증 통과 신호들의 합의'로 만든다 — 단일 신호가 아니라, 복기서
+    """커버리지를 '검증 통과 신호들의 합의'로 만든다 — 단일 신호가 아니라, 복기서
     당첨을 무작위 이상으로 잡았던 신호들이 **함께** 상위로 가리키는 번호를 위로 올린다.
 
     good 신호 = 다회차 상위18 평균이 무작위 기대(2.4) 초과. 각 번호가 몇 개 good 신호의
@@ -457,8 +479,19 @@ def build_review_verification() -> Dict[str, Any]:
 
     _samples = collect_round_samples()
     leaderboard = _signal_leaderboard(_samples)
+    multi_key = leaderboard.get("best_signal_multi")
+    bkey = multi_key or analysis.get("best_signal_key") or "support"
+    selected_by = "multi_round" if multi_key else "single_round"
 
-    # 이번회차 — 같은 신호로 '커버리지 세트' 를 제시(집중 top-6 + 확장 top-18).
+    # 복기 회차 커버리지 — 그 회차 용지 신호로 core6/expand18 (당첨 대조용).
+    # 이번회차 세트와 분리해야 탭별로 추천이 달라진다.
+    review_sigs = _signals(auto, semi)
+    review_coverage_set = _coverage_set_from_signals(
+        review_sigs, signal_key=bkey, selected_by=selected_by
+    )
+    review_consensus_coverage = _consensus_coverage(review_sigs, leaderboard)
+
+    # 이번회차 — 같은 신호 기준으로 '다음 회차' 커버리지 세트.
     cur = _load_current_raw()
     cur_entries = list(cur.get("entries") or [])
     cur_auto = _manual_saved_lines(cur_entries, "자동", include_photo=True)
@@ -467,24 +500,9 @@ def build_review_verification() -> Dict[str, Any]:
     consensus_coverage: Dict[str, Any] = {}
     if cur_auto or cur_semi:
         csig = _signals(cur_auto, cur_semi)
-        # 커버리지 신호를 '다회차 성적'(당첨을 가장 잘 잡은 신호)으로 선택 — 단일회차 best
-        # 는 우연에 흔들린다. 폴백: 단일회차 best → support.
-        multi_key = leaderboard.get("best_signal_multi")
-        bkey = multi_key or analysis.get("best_signal_key") or "support"
-        ranked = _rank_signal(csig.get(bkey, csig["support"]))
-        cur_present = {n for n in range(1, 46) if csig["total_freq"].get(n, 0) > 0}
-        raw_expand = ranked[:18]
-        bal_expand = _balance_expand(ranked, ranked[:6], cur_present, 18)
-        current_coverage_set = {
-            "signal": bkey,
-            "signal_label": _SIGNAL_LABELS.get(bkey, bkey),
-            "selected_by": "multi_round" if multi_key else "single_round",
-            "core6": ranked[:6],
-            "expand18": bal_expand,
-            "expand18_raw": raw_expand,
-            "decade_balance": _decade_balance_info(bal_expand, raw_expand, cur_present),
-        }
-        # 다중신호 합의 — 검증 통과 신호들이 함께 가리키는 번호(단일 신호보다 강건).
+        current_coverage_set = _coverage_set_from_signals(
+            csig, signal_key=bkey, selected_by=selected_by
+        )
         consensus_coverage = _consensus_coverage(csig, leaderboard)
 
     # 정직한 요약 — top-6 vs top-18 커버리지 대비.
@@ -505,6 +523,8 @@ def build_review_verification() -> Dict[str, Any]:
         "signals": analysis["signals"],
         "best_signal_key": analysis["best_signal_key"],
         "current_round_no": int(get_current_round_no()),
+        "review_coverage_set": review_coverage_set,
+        "review_consensus_coverage": review_consensus_coverage,
         "current_coverage_set": current_coverage_set,
         "consensus_coverage": consensus_coverage,
         "multi_round_backtest": _multi_round_backtest(_samples),

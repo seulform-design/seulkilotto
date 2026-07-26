@@ -5352,9 +5352,8 @@ export default function SemiAutoComparePanel({
         }
         intent={
           <>
-            <strong>파이프라인:</strong> ① 1:1·심층 역산 진단 → ② 교차검증(검증학습 가산) → ③ 통합 신호 → ④ 아래 학습 소스(평행·Feature·Pattern·다회차·겹침).
-            복기/이번회차 대상 회차는 탭과 동일합니다. 용지 미출현은 학습 신호에서 제외했습니다.
-            당첨번호는 계산에 쓰지 않고 복기에서만 대조합니다.
+            <strong>L1~L9 역산·신호</strong> → 하단 학습 소스(평행·Feature·Pattern·다회차·겹침) → ③ 추천 주입.
+            대상: {intentSectionLabel} {effectiveRound ?? '?'}회. 당첨번호는 복기에서만 밝은 공/회색 대조(계산 미사용).
           </>
         }
       />
@@ -5366,31 +5365,38 @@ export default function SemiAutoComparePanel({
           · 이월 {learningBridgeStatus.carryoverPairs}전이
           {learningBridgeStatus.carryoverFlat ? '(평탄→참고만)' : '(신호)'}
           · 커버리지 {learningBridgeStatus.coverageWired ? `신뢰도 ${learningBridgeStatus.coverageConf}%` : 'OFF'}
-          → ③ 추천·교차검증에 <strong>{learningBridgeStatus.validatedCount}개</strong>만 가산
-          {compareWinning ? ' (복기 용지 커버리지)' : ' (이번회차 용지 커버리지)'}.
-          예상번호 balls 순위는 순수 1:1 반복도(자기검증 순환 방지).
+          → ③·교차검증에 <strong>{learningBridgeStatus.validatedCount}개</strong>만 가산
+          {compareWinning ? ' (복기)' : ' (이번회차)'}. L1 순위는 순수 1:1 반복도.
         </Typography>
       </Alert>
-      {/* 당첨 예상·심층역산·통합신호 — 엔진 탭 */}
+      {/* L1~L9 역산·신호 — 학습 엔진 본문 */}
       {activeComparison && (
         <>
-          {/* 🎯 당첨 예상번호 — 전수비교 심층 역산(주) + 평행회차(보조). 호기 제외. */}
           {predictedNumbers.length > 0 && (
             <EngineSection
               tone="warning"
-              title={`🎯 ${effectiveRound ?? '?'}회 당첨 예상번호 — ${compareWinning ? '복기 검증' : '예측'} (${canRenderLineMatching ? '전수비교 심층 역산' : '⚠ 평행회차 단독 — 1:1 미적용'})`}
+              id="learn-l1"
+              title={`L1. ${effectiveRound ?? '?'}회 당첨 예상번호`}
               chips={
-                <EngineStatusChip
-                  variant="outlined"
-                  label={`자동 ${groupLineMatching.autoLineCount}줄 ↔ 반자동 ${groupLineMatching.semiLineCount}줄 · 매치 ${groupLineMatching.groupCount}건`}
-                />
+                <>
+                  <EngineStatusChip
+                    color={compareWinning ? 'primary' : 'secondary'}
+                    label={compareWinning ? '복기 검증' : '예측'}
+                  />
+                  <EngineStatusChip
+                    variant="outlined"
+                    label={canRenderLineMatching ? '전수비교 심층 역산' : '평행단독'}
+                  />
+                  <EngineStatusChip
+                    variant="outlined"
+                    label={`자동 ${groupLineMatching.autoLineCount}↔반자동 ${groupLineMatching.semiLineCount} · 매치 ${groupLineMatching.groupCount}`}
+                  />
+                </>
               }
               intent={
                 <>
-                  <strong>자동↔반자동 1:1</strong> 반복도(+평행·세트)로 순위를 올립니다. 당첨번호 미사용.
-                  {compareWinning
-                    ? ' 복기는 아래에서 실제 당첨과 대조만 합니다.'
-                    : ` ${effectiveRound ?? '?'}회 예측 — 복기와 동일 로직.`}
+                  자동↔반자동 1:1 반복도(+평행·세트) 순위. 당첨번호 미사용.
+                  {compareWinning ? ' 복기는 밝은 공=당첨 · 회색=비당첨.' : ` ${effectiveRound ?? '?'}회 예측.`}
                 </>
               }
             >
@@ -5571,24 +5577,24 @@ export default function SemiAutoComparePanel({
                   ※ 상위 6~8개 중 6개를 골라 조합하세요. 로또는 무작위라 확률 자체는 오르지 않습니다.
                 </Typography>
               )}
+            </EngineSection>
+          )}
 
-
-              {/* 🧬 당첨 패턴 학습 → 프로파일 매칭 — 1231 프로파일 통계화 후 현재 탭에 적용 */}
+              {/* L2. 당첨 패턴 학습 → 적합도 */}
               {learnedPattern && patternMatched && (
-                <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'info.main' }}>
-                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                    🧬 {learnedPattern.round ?? '복기'}회 당첨 패턴 학습 → {compareWinning ? '적합도 확인' : `${effectiveRound ?? '?'}회 프로파일 매칭 예상`}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-                    <strong>학습된 당첨 프로파일</strong> ({learnedPattern.round ?? '복기'}회 당첨 6개가 1:1 데이터{' '}
-                    자동 {learnedPattern.autoCount}줄↔반자동 {learnedPattern.semiCount}줄에서 가진 통계):{' '}
-                    반복도 백분위 평균 <strong>상위 {Math.round((1 - learnedPattern.centroid.pct) * 100)}%</strong> ·{' '}
-                    자동 등장률 {Math.round(learnedPattern.centroid.aShare * 100)}% · 반자동 등장률 {Math.round(learnedPattern.centroid.sShare * 100)}% ·{' '}
-                    3+일치 보유 {Math.round(learnedPattern.centroid.deep * 6)}/6개 ·{' '}
-                    <strong>조합 구조</strong>: 합계 {learnedPattern.structure.sum} · 홀수 {learnedPattern.structure.odd}개 ·
-                    구간 {learnedPattern.structure.decades}개 분산 · 최장연속 {learnedPattern.structure.consec}.
-                    이 프로파일과 가장 닮은 번호순으로 정렬하고, 추천 조합은 이 구조에 가까울수록 '구조' 신호를 받습니다.
-                  </Typography>
+                <EngineSection
+                  id="learn-l2"
+                  tone="info"
+                  title={`L2. ${learnedPattern.round ?? '복기'}회 당첨 패턴 학습 → ${compareWinning ? '적합도 확인' : '프로파일 매칭'}`}
+                  chips={<EngineStatusChip variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`} />}
+                  intent={
+                    <>
+                      학습 프로파일: 반복도 상위 {Math.round((1 - learnedPattern.centroid.pct) * 100)}% · 자동 {Math.round(learnedPattern.centroid.aShare * 100)}% · 반자동 {Math.round(learnedPattern.centroid.sShare * 100)}% ·
+                      구조 합{learnedPattern.structure.sum}/홀{learnedPattern.structure.odd}/구간{learnedPattern.structure.decades}/연속{learnedPattern.structure.consec}
+                      (자동 {learnedPattern.autoCount}↔반자동 {learnedPattern.semiCount}줄).
+                    </>
+                  }
+                >
                   <Stack direction="row" spacing={0.6} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
                     {patternMatched.list.map((m, i) => (
                       <Box key={`pm-${m.number}`} sx={{ textAlign: 'center', minWidth: 34 }}>
@@ -5618,19 +5624,23 @@ export default function SemiAutoComparePanel({
                     <br />
                     ※ 위 Top10은 <strong>현재 유사도 순위</strong>이고, 이 줄은 학습 표본(당첨 6개)의 복기 빈도 순위입니다 — 서로 다른 축입니다.
                   </Typography>
-                </Box>
+                </EngineSection>
               )}
 
-              {/* 📌 당첨번호 출현 패턴 (복기 전용, 당첨번호로 역산) */}
+              {/* L3. 당첨번호 출현 패턴 (복기 전용) */}
               {winningPatternAnalysis && (
-                <Box sx={{ mt: 1.25, p: 1, border: '1px solid', borderColor: 'success.dark', borderRadius: 1 }}>
-                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                    📌 {effectiveRound ?? '?'}회 당첨번호 출현 패턴 (복기 전용 — 실제 당첨으로 역산)
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-                    실제 당첨번호가 전수비교에서 '어느 레벨에 얼마나 반복' 나왔는지 + <strong>순수 반복도 전체 {winningPatternAnalysis.totalNumbers}개 중 몇 위</strong>였는지.
-                    이 순위가 높을수록 → 반복도 방식이 당첨을 잘 포착 → 다음 회차 예상번호로 쓰는 근거.
-                  </Typography>
+                <EngineSection
+                  id="learn-l3"
+                  tone="success"
+                  title={`L3. ${effectiveRound ?? '?'}회 당첨번호 출현 패턴`}
+                  chips={<EngineStatusChip color="success" label="복기 전용" />}
+                  intent={
+                    <>
+                      실제 당첨이 전수비교에서 어느 레벨·몇 위였는지 역산합니다(반복도 전체 {winningPatternAnalysis.totalNumbers}개 기준).
+                      순위가 높을수록 반복도 방식이 당첨을 잘 포착했다는 근거입니다.
+                    </>
+                  }
+                >
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
                     <Chip
                       size="small"
@@ -5669,16 +5679,27 @@ export default function SemiAutoComparePanel({
                         .join(' · ')}
                     </Typography>
                   )}
-                </Box>
+                </EngineSection>
               )}
 
-              {/* 🔬 번호별 반복 출현 정밀 역산 (당첨 무관) — 이번회차 예측 근거 */}
+              {/* L4. 번호별 반복 출현 정밀 역산 */}
               {predictedNumbers.length > 0 && (
-                <Box sx={{ mt: 1.25 }}>
-                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
-                    🔬 번호별 반복 출현 정밀 역산 (당첨번호 무관 · 이번회차에도 동일)
-                    {compareWinning ? ' — 밝은 공: 실제 당첨 · 회색: 비당첨' : ''}
-                  </Typography>
+                <EngineSection
+                  id="learn-l4"
+                  tone="neutral"
+                  title="L4. 번호별 반복 출현 정밀 역산"
+                  chips={
+                    <>
+                      <EngineStatusChip variant="outlined" label="당첨번호 무관" />
+                      {compareWinning && (
+                        <EngineStatusChip color="primary" label="밝은 공=당첨 · 회색=비당첨" />
+                      )}
+                    </>
+                  }
+                  intent="그룹·레벨·동반 출현 상세. 복기·이번회차 동일 로직(계산에 당첨 미사용)."
+                  collapsible
+                  defaultOpen
+                >
                   <Box
                     sx={{
                       maxHeight: 260,
@@ -5711,16 +5732,27 @@ export default function SemiAutoComparePanel({
                       })}
                     </Stack>
                   </Box>
-                </Box>
+                </EngineSection>
               )}
 
-              {/* 전수비교 강한 패턴 — matchCount 3+ 그룹(우연 초과의 실제 겹침) 상세 */}
+              {/* L5. 전수비교 강한 패턴 */}
               {topPatterns.length > 0 && (
-                <Box sx={{ mt: 1.25 }}>
-                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
-                    🔎 전수비교 강한 패턴 (공통 3개+ 그룹 · 자동↔반자동 양쪽 겹침)
-                    {compareWinning ? ' — 밝은 공: 전부 당첨번호였던 패턴' : ''}
-                  </Typography>
+                <EngineSection
+                  id="learn-l5"
+                  tone="secondary"
+                  title="L5. 전수비교 강한 패턴"
+                  chips={
+                    <>
+                      <EngineStatusChip variant="outlined" label="공통 3개+ · 자동↔반자동" />
+                      {compareWinning && (
+                        <EngineStatusChip color="success" label="밝은 공=전부 당첨이었던 패턴" />
+                      )}
+                    </>
+                  }
+                  intent="우연 초과 겹침 그룹. 복기에서는 밝은 공=패턴 번호가 모두 당첨."
+                  collapsible
+                  defaultOpen
+                >
                   <Box
                     sx={{
                       maxHeight: topPatterns.length > 8 ? 240 : undefined,
@@ -5765,16 +5797,27 @@ export default function SemiAutoComparePanel({
                       ))}
                     </Stack>
                   </Box>
-                </Box>
+                </EngineSection>
               )}
 
-              {/* 일치 개수별(6·5·4·3·2) 겹침 번호 역산 — 레벨마다 반복 겹친 번호 */}
+              {/* L6. 일치 개수별 겹침 역산 */}
               {levelBreakdown.length > 0 && (
-                <Box sx={{ mt: 1.25 }}>
-                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
-                    📊 일치 개수별 겹침 번호 역산 (6·5·4·3·2개 각 레벨 · 숫자 아래 = 등장 그룹 수)
-                    {compareWinning ? ' — 밝은 공: 실제 당첨 · 회색: 비당첨' : ''}
-                  </Typography>
+                <EngineSection
+                  id="learn-l6"
+                  tone="neutral"
+                  title="L6. 일치 개수별 겹침 번호 역산"
+                  chips={
+                    <>
+                      <EngineStatusChip variant="outlined" label="6·5·4·3·2 레벨" />
+                      {compareWinning && (
+                        <EngineStatusChip color="primary" label="밝은 공=당첨 · 회색=비당첨" />
+                      )}
+                    </>
+                  }
+                  intent="숫자 아래 = 해당 레벨 등장 그룹 수."
+                  collapsible
+                  defaultOpen
+                >
                   <Stack spacing={0.75}>
                     {levelBreakdown.map((lv) => (
                       <Box key={`lv-${lv.mc}`}>
@@ -5801,20 +5844,27 @@ export default function SemiAutoComparePanel({
                       </Box>
                     ))}
                   </Stack>
-                </Box>
+                </EngineSection>
               )}
 
-              {/* 🔁 세트 중복 역산 — 모든 일치 그룹 교차, 2·3개 세트 반복 패턴 */}
+              {/* L7. 세트 중복 역산 */}
               {(crossSetPatterns.pairs.length > 0 || crossSetPatterns.triples.length > 0) && (
-                <Box sx={{ mt: 1.25 }}>
-                  <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-                    🔁 세트 중복 역산 (모든 일치 그룹 교차 — 2·3개 세트가 반복 등장)
-                    {compareWinning ? ' — 밝은 공: 전부 당첨번호였던 세트' : ''}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-                    여러 그룹(6·5·4·3·2일치)에 걸쳐 자동·반자동이 함께 가리킨 번호 세트 —
-                    반복 그룹 수·지지(Σ 자동+반자동 줄)가 높을수록 강한 패턴. 예상번호 상위에도 가산됩니다.
-                  </Typography>
+                <EngineSection
+                  id="learn-l7"
+                  tone="secondary"
+                  title="L7. 세트 중복 역산"
+                  chips={
+                    <>
+                      <EngineStatusChip variant="outlined" label="2·3개 세트 반복" />
+                      {compareWinning && (
+                        <EngineStatusChip color="success" label="밝은 공=전부 당첨 세트" />
+                      )}
+                    </>
+                  }
+                  intent="여러 일치 그룹 교차에서 반복되는 세트. 지지·반복이 높을수록 강함(L1 순위에 가산)."
+                  collapsible
+                  defaultOpen
+                >
                   {([
                     { label: '2개 세트', items: crossSetPatterns.pairs },
                     { label: '3개 세트', items: crossSetPatterns.triples },
@@ -5862,31 +5912,31 @@ export default function SemiAutoComparePanel({
                       </Box>
                     ) : null,
                   )}
-                </Box>
+                </EngineSection>
               )}
-            </EngineSection>
-          )}
 
-          {/* 🧠 심층 역산 분석 — 네트워크·허브·가중치·구조 */}
+          {/* L8. 심층 역산 분석 */}
           {deepAnalysis && (
             <EngineSection
+              id="learn-l8"
               tone="info"
-              title="🧠 심층 역산 분석 (빈도·가중치·허브·네트워크·구조)"
+              title="L8. 심층 역산 분석"
               chips={
-                deepAnalysis.finalWin != null ? (
-                  <EngineStatusChip
-                    color={deepAnalysis.finalWin >= 3 ? 'success' : deepAnalysis.finalWin >= 2 ? 'warning' : 'default'}
-                    label={`최종픽 당첨 ${deepAnalysis.finalWin}/6`}
-                  />
-                ) : (
-                  <EngineStatusChip variant="outlined" label="당첨 미대조" />
-                )
-              }
-              intent={
                 <>
-                  일치개수 가중치 · 공출현 허브 · 세트 반복 · 숨은 강수를 합성합니다. 당첨번호는 계산에 넣지 않습니다(복기는 밝은 공으로 대조만).
+                  <EngineStatusChip variant="outlined" label="빈도·가중·허브·네트워크" />
+                  {deepAnalysis.finalWin != null ? (
+                    <EngineStatusChip
+                      color={deepAnalysis.finalWin >= 3 ? 'success' : deepAnalysis.finalWin >= 2 ? 'warning' : 'default'}
+                      label={`최종픽 당첨 ${deepAnalysis.finalWin}/6`}
+                    />
+                  ) : (
+                    <EngineStatusChip variant="outlined" label="당첨 미대조" />
+                  )}
                 </>
               }
+              intent="일치 가중·공출현 허브·세트 반복·숨은 강수 합성. 당첨번호는 계산 미사용(복기는 밝은 공 대조만)."
+              collapsible
+              defaultOpen
             >
               <Stack spacing={1.25}>
               {/* 🎯 최종 예측 조합 (구간 균형) + 구조 서술 — 이 섹션의 결론 */}
@@ -6179,11 +6229,12 @@ export default function SemiAutoComparePanel({
 
 
 
-      {/* 📡 통합 예측 신호 + 신호 성적표 — ④ 학습 엔진 안 */}
+      {/* L9. 통합 예측 신호 */}
       <>
       <EngineSection
+        id="learn-l9"
         tone="info"
-        title={`📡 통합 예측 신호 (규칙 v${predictionSignals?.rules_version ?? '…'})`}
+        title={`L9. 통합 예측 신호 (규칙 v${predictionSignals?.rules_version ?? '…'})`}
         chips={
           <>
             <EngineStatusChip
@@ -6376,17 +6427,17 @@ export default function SemiAutoComparePanel({
       })()}
       </>
 
-      {/* 학습 소스 패널 — 검증 통과분만 ③ 추천에 주입 (PhotoAnalysisPage engineExtraSlot) */}
+      {/* L10. 학습 소스 — 검증 통과분만 ③ 추천에 주입 */}
       <Divider textAlign="left" sx={{ my: 0.5 }}>
         <Typography variant="caption" fontWeight={800} color="text.secondary">
-          학습 소스 — 평행 · Feature · Pattern · 다회차 · 겹침
+          L10. 학습 소스 — 평행 · Feature · Pattern · 다회차 · 겹침
         </Typography>
       </Divider>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-        각 패널 헤더 칩으로 <strong>채택/제외·신뢰도·표본</strong>을 확인하세요. 미검증·평탄 신호는 추천에 넣지 않습니다.
+        L1~L9 역산 위에 얹는 검증 학습입니다. 헤더 칩으로 <strong>채택/제외·신뢰도·표본</strong>을 확인하세요.
         {compareWinning
-          ? ` 복기 ${effectiveRound ?? '?'}회 기준.`
-          : ` 이번회차 ${effectiveRound ?? '?'}회 적용.`}
+          ? ` 복기 ${effectiveRound ?? '?'}회.`
+          : ` 이번회차 ${effectiveRound ?? '?'}회.`}
       </Typography>
       {engineExtraSlot}
       </>
@@ -6782,7 +6833,7 @@ export default function SemiAutoComparePanel({
             <Alert severity="warning" sx={{ mb: 1.5 }}>
               현재 <strong>자동 {groupLineMatching.autoLineCount}줄 · 반자동{' '}
               {groupLineMatching.semiLineCount}줄</strong>입니다. ②의 <strong>1:1 전수비교</strong>와
-              ④ 엔진 → <strong>역산·신호</strong>의 심층 역산·당첨 예상은 자동↔반자동 <strong>양쪽</strong>이 있어야 동작합니다.
+              ④ <strong>학습 엔진</strong> L1~L8 역산은 자동↔반자동 <strong>양쪽</strong>이 있어야 동작합니다.
               비어 있는 쪽을 등록하면 활성화됩니다.
             </Alert>
           )}

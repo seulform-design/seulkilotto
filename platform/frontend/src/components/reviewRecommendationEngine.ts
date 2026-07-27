@@ -47,7 +47,7 @@ export interface ValidatedLearningSignal {
   number: number;
   /** 0~1 정규화 가중 (검증 통과분만). */
   weight: number;
-  source: 'feature' | 'round' | 'overlap' | 'coverage' | 'pattern' | 'carryover';
+  source: 'feature' | 'round' | 'overlap' | 'coverage' | 'pattern' | 'carryover' | 'deep';
   label: string;
 }
 
@@ -130,7 +130,8 @@ function buildNumberScores(ctx: RecommendationContext): Record<number, number> {
   for (const v of ctx.validatedLearning ?? []) {
     const w = Math.max(0, Math.min(1, v.weight));
     if (w <= 0) continue;
-    const scale = v.source === 'coverage' ? 14 : v.source === 'feature' ? 22 : 16;
+    const scale =
+      v.source === 'coverage' ? 14 : v.source === 'feature' ? 22 : v.source === 'deep' ? 18 : 16;
     bump(scores, v.number, w * scale);
   }
 

@@ -1,6 +1,6 @@
 /**
- * L10-A. 평행회차 분석 — 끝2자리 동일 회차군의 당첨 패턴.
- * 학습 엔진 규격: EngineSection + SubBlock + StatusChip + LottoBall.
+ * 엔진② 평행회차 — 끝2자리 동일 회차군의 당첨 패턴.
+ * 용지 역산(L1~L9)·검증학습과 별개 축. L1·③에 직접 주입(validatedLearning 아님).
  */
 import {
   Alert,
@@ -131,8 +131,8 @@ export default function ParallelRoundPanel({
   return (
     <EngineSection
       tone="warning"
-      id="learn-l10a"
-      title="L10-A. 평행회차 분석"
+      id="engine-parallel-panel"
+      title="엔진② 평행회차 분석"
       collapsible
       open={open}
       onToggle={() => setOpen((v) => !v)}
@@ -156,8 +156,8 @@ export default function ParallelRoundPanel({
       }
       intent={
         data
-          ? `${modeLabel} · ${data.summary} · 고정수 힌트 ${data.semi_auto_fixed_hint.join(', ') || '—'}. 밝은 공=강수 TOP6. 주입: validatedLearning 아님 → L1 평행가산·③ 5세트에 직접.`
-          : `${modeLabel} 끝2자리 동일 회차군. 주입 경로는 상단 주입 맵(L10-A=직접) 참고.`
+          ? `${modeLabel} · ${data.summary} · 고정수 힌트 ${data.semi_auto_fixed_hint.join(', ') || '—'}. 밝은 공=강수 TOP6. 주입: L1 평행가산·③ 5세트에 직접(검증학습 경로 아님).`
+          : `${modeLabel} 끝2자리 동일 회차군. 엔진② 단독 축 · L1·③ 직접 주입.`
       }
     >
       {query.isError && (

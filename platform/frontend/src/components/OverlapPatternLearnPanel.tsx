@@ -1,6 +1,6 @@
 /**
- * L10-E. 줄겹침 패턴 역산 학습 — 복기 당첨 일치 겹침 구조를 역산해 이번회차 겹침을 채점.
- * 학습 엔진 규격: 항상 EngineSection 노출(빈 상태 포함) + SubBlock + StatusChip.
+ * V4-B. 줄겹침 (복기 프로파일) — 복기 당첨 일치 겹침 구조를 역산해 이번회차 겹침을 채점.
+ * 서버 다회차 겹침API가 평탄/부재일 때 클라이언트 프로파일이 약한 fallback 주입을 담당할 수 있다.
  */
 import { Alert, Box, Stack, Tooltip, Typography } from '@mui/material';
 import { useMemo, useState } from 'react';
@@ -32,10 +32,13 @@ const DIR_ARROW: Record<Discriminator['dir'], string> = { higher: '▲ 높음', 
 export default function OverlapPatternLearnPanel({
   accumulated,
   modeLabel = '학습',
+  injectHint,
 }: {
   accumulated: PhotoAnalysisAccumulated | null;
   /** 복기/이번회차 탭 라벨 — 표시용 */
   modeLabel?: string;
+  /** 상위(SemiAuto)에서 계산한 주입 상태 한 줄 */
+  injectHint?: string;
 }) {
   const [open, setOpen] = useState(false);
   const review = accumulated?.by_intent?.review ?? null;
@@ -57,12 +60,13 @@ export default function OverlapPatternLearnPanel({
 
   const hasSample = Boolean(review && profile.totalCombos > 0 && winningNumbers?.length);
   const topCombo = ranked.slice(0, 6).map((r) => r.number).sort((a, b) => a - b);
+  const canSoftInject = profile.confidence !== 'none' && ranked.length > 0;
 
   return (
     <EngineSection
-      id="learn-l10e"
+      id="learn-v4b"
       tone="success"
-      title="L10-E. 줄겹침 패턴 역산 학습"
+      title="V4-B. 줄겹침 (복기 프로파일)"
       collapsible
       open={open}
       onToggle={() => setOpen((v) => !v)}
@@ -72,6 +76,13 @@ export default function OverlapPatternLearnPanel({
           <EngineStatusChip
             color={hasSample ? CONF_COLOR[profile.confidence] : 'default'}
             label={hasSample ? CONF_LABEL[profile.confidence] : '표본 없음'}
+          />
+          {profile.usedPartialFallback && (
+            <EngineStatusChip color="warning" label="부분일치 보강" />
+          )}
+          <EngineStatusChip
+            color={canSoftInject ? 'info' : 'default'}
+            label={canSoftInject ? '서버 평탄 시 fallback' : '주입 대기'}
           />
           {reviewRound != null && (
             <EngineStatusChip variant="outlined" label={`학습 ${reviewRound}회`} />
@@ -83,8 +94,10 @@ export default function OverlapPatternLearnPanel({
       }
       intent={
         <>
-          복기 줄겹침(2·3·4) 중 <strong>당첨 완전일치</strong> 구조를 역산해 이번회차 후보를 <strong>화면에서</strong> 채점합니다.
-          ⚠️ 이 패널은 <strong>점수 미주입</strong>(display). ③·교차검증 주입은 서버 겹침학습 API(주입 맵「겹침API」)가 담당합니다.
+          복기 줄겹침(2·3·4)의 <strong>완전·부분 당첨일치</strong> 구조를 역산해 이번회차를 채점합니다.
+          V4-A 서버가 살아 있으면 그쪽이 우선이고, <strong>평탄/부재일 때만</strong> 이 프로파일이
+          약한 fallback 주입을 합니다. 엔진① L7(현재 1:1 세트)과 축이 다릅니다.
+          {injectHint ? <> · {injectHint}</> : null}
         </>
       }
     >
@@ -93,9 +106,9 @@ export default function OverlapPatternLearnPanel({
           {!review
             ? '복기 슬라이스가 없어 학습할 수 없습니다. 복기 용지를 등록하세요.'
             : !winningNumbers?.length
-              ? '복기 당첨번호가 없어 완전일치 표본을 만들 수 없습니다.'
+              ? '복기 당첨번호가 없어 일치 표본을 만들 수 없습니다.'
               : profile.totalCombos === 0
-                ? '복기 겹침 조합이 없습니다. 자동·반자동 줄이 쌓이면 채워집니다.'
+                ? '복기 겹침 조합이 없습니다. 자동·반자동 줄이 2줄 이상 쌓이면 채워집니다.'
                 : '학습 표본이 부족합니다.'}
         </Alert>
       ) : (
@@ -108,19 +121,20 @@ export default function OverlapPatternLearnPanel({
                 <EngineStatusChip variant="outlined" label={`전체 ${profile.totalCombos}`} />
                 <EngineStatusChip color="success" label={`완전일치 ${profile.winningCombos}`} />
                 <EngineStatusChip variant="outlined" label={`부분 ${profile.partialCombos}`} />
+                <EngineStatusChip variant="outlined" label={`양성 ${profile.positiveCombos}`} />
               </>
             }
           >
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-              {reviewRound ?? '?'}회 겹침 조합에서 당첨 6개와 구조가 맞는 표본만 프로파일로 씁니다.
+              {reviewRound ?? '?'}회 겹침 조합. 완전일치가 드물면(정상) 부분일치(절반+)로 프로파일을 보강합니다.
             </Typography>
           </EngineSubBlock>
 
           {profile.win && profile.rest && (
-            <EngineSubBlock tone="info" title="B. 판별 특성 (당첨일치 vs 나머지)">
+            <EngineSubBlock tone="info" title="B. 판별 특성 (양성 vs 나머지)">
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                 {profile.discriminators.map((d) => (
-                  <Tooltip key={d.key} title={`당첨일치 평균 ${d.win} · 나머지 평균 ${d.rest}`} arrow>
+                  <Tooltip key={d.key} title={`양성 평균 ${d.win} · 나머지 평균 ${d.rest}`} arrow>
                     <Box component="span">
                       <EngineStatusChip
                         variant={d.dir === 'flat' ? 'outlined' : 'filled'}
@@ -132,6 +146,11 @@ export default function OverlapPatternLearnPanel({
                   </Tooltip>
                 ))}
               </Stack>
+              {profile.discriminators.every((d) => d.dir === 'flat') && (
+                <Alert severity="info" sx={{ mt: 0.75, py: 0.25 }}>
+                  판별 특성이 모두 평탄합니다 — 채점은 lift·줄수 약한 프록시로 후보만 보여 줍니다.
+                </Alert>
+              )}
             </EngineSubBlock>
           )}
 
@@ -173,8 +192,8 @@ export default function OverlapPatternLearnPanel({
             ) : (
               <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
                 {profile.win
-                  ? '이번회차 겹침 조합이 없습니다. 이번회차 자동 용지를 등록하면 채점됩니다.'
-                  : '복기에 완전 당첨 겹침 조합이 없어 프로파일을 못 만들었습니다(드묾·정상). 회차가 쌓이면 채점됩니다.'}
+                  ? '이번회차 겹침 조합이 없습니다. 이번회차 자동 용지(2줄+)를 등록하면 채점됩니다.'
+                  : '양성 표본이 없어 프로파일을 못 만들었습니다. 회차·줄이 쌓이면 채점됩니다.'}
               </Typography>
             )}
           </EngineSubBlock>

@@ -46,7 +46,7 @@ export default function PatternMiningPanel() {
 
   if (q.isLoading) {
     return (
-      <EngineSection tone="secondary" title="L10-C. Pattern Mining" sx={{ mb: 2 }}>
+      <EngineSection tone="secondary" title="V2. Pattern Mining" sx={{ mb: 2 }}>
         <LinearProgress />
         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
           전수 학습 · Pattern 탐색 · WF/Rolling/Time-Split 검증 · Cluster · Feature 선택 중…
@@ -57,7 +57,7 @@ export default function PatternMiningPanel() {
 
   if (q.isError) {
     return (
-      <EngineSection tone="secondary" title="L10-C. Pattern Mining" sx={{ mb: 2 }}>
+      <EngineSection tone="secondary" title="V2. Pattern Mining" sx={{ mb: 2 }}>
         <Alert severity="error">
           엔진을 불러오지 못했습니다: {q.error instanceof Error ? q.error.message : '서버 오류'}
         </Alert>
@@ -69,7 +69,7 @@ export default function PatternMiningPanel() {
   if (!d) return null;
   if (!d.ok) {
     return (
-      <EngineSection tone="secondary" title="L10-C. Pattern Mining" sx={{ mb: 2 }}>
+      <EngineSection tone="secondary" title="V2. Pattern Mining" sx={{ mb: 2 }}>
         <Alert severity="info">{d.reason ?? '학습할 보관 회차가 없습니다.'}</Alert>
       </EngineSection>
     );
@@ -80,8 +80,8 @@ export default function PatternMiningPanel() {
   return (
     <EngineSection
       tone="secondary"
-      title={`L10-C. Pattern Mining (${d.round_count}개 회차)`}
-      id="learn-l10c"
+      title={`V2. Pattern Mining (${d.round_count}개 회차)`}
+      id="learn-v2"
       collapsible
       open={open}
       onToggle={() => setOpen((v) => !v)}

@@ -49,6 +49,7 @@ export function EngineSection({
   onToggle,
   defaultOpen = true,
   collapsible = false,
+  nested = false,
   actions,
   footer,
   children,
@@ -63,6 +64,8 @@ export function EngineSection({
   onToggle?: () => void;
   defaultOpen?: boolean;
   collapsible?: boolean;
+  /** 상위 엔진 셸 안 단계 — Paper 무게를 줄여 한 엔진처럼 보이게 */
+  nested?: boolean;
   actions?: ReactNode;
   footer?: ReactNode;
   children?: ReactNode;
@@ -82,10 +85,12 @@ export function EngineSection({
       id={id}
       variant="outlined"
       sx={{
-        p: 1.5,
+        p: nested ? 1.25 : 1.5,
         borderWidth: 1,
-        borderStyle: 'solid',
+        borderStyle: nested ? 'dashed' : 'solid',
         borderColor: TONE_BORDER[tone],
+        bgcolor: nested ? 'action.hover' : undefined,
+        boxShadow: 'none',
         ...((sx as object) ?? {}),
       }}
     >

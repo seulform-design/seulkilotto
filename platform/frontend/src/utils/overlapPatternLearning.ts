@@ -33,6 +33,8 @@ interface NormCombo {
   z: number;
   winOverlap: number; // 조합 번호 중 당첨번호 개수(복기)
   fullyWinning: boolean; // 조합 번호 전부가 당첨번호
+  /** 절반 이상 당첨 겹침 — 완전일치가 드물 때 프로파일 보조 표본 */
+  partialHit: boolean;
 }
 
 interface FeatureAvg {
@@ -56,11 +58,15 @@ export interface LearnedOverlapProfile {
   totalCombos: number;
   winningCombos: number; // 전부 당첨(fullyWinning)
   partialCombos: number; // 절반 이상 겹침
+  /** 프로파일에 실제 사용된 양성 표본(완전 + 부분 가중) */
+  positiveCombos: number;
   win: FeatureAvg | null;
   rest: FeatureAvg | null;
   discriminators: Discriminator[];
   confidence: LearnConfidence;
   note: string;
+  /** 완전일치 부족으로 부분일치 표본을 썼는지 */
+  usedPartialFallback: boolean;
 }
 
 export interface RankedCandidate {
@@ -85,6 +91,12 @@ function normalize(patterns: ComboPatternsLike | null | undefined, winningSet: S
       const numbers = (c.numbers ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= 45);
       if (numbers.length < 2) continue;
       const winOverlap = winningSet ? numbers.filter((n) => winningSet.has(n)).length : 0;
+      const fullyWinning = winningSet != null && numbers.length > 0 && winOverlap === numbers.length;
+      // 2번호: 1개+, 3·4번호: 절반 이상
+      const partialHit =
+        !fullyWinning &&
+        winningSet != null &&
+        (numbers.length <= 2 ? winOverlap >= 1 : winOverlap * 2 >= numbers.length);
       out.push({
         numbers,
         size: c.size ?? numbers.length,
@@ -92,7 +104,8 @@ function normalize(patterns: ComboPatternsLike | null | undefined, winningSet: S
         lift: c.lift ?? 0,
         z: c.z ?? 0,
         winOverlap,
-        fullyWinning: winningSet != null && numbers.length > 0 && winOverlap === numbers.length,
+        fullyWinning,
+        partialHit,
       });
     }
   }
@@ -123,8 +136,7 @@ const round2 = (x: number) => Math.round(x * 100) / 100;
 
 /**
  * 복기 겹침 조합 + 당첨번호 → 학습 프로파일.
- * @param reviewPatterns 복기 accumulated_combo_patterns
- * @param winningNumbers 복기 회차 실제 당첨번호(6개)
+ * 완전일치가 드물면(로또 정상) 부분일치 표본으로 프로파일을 보강한다.
  */
 export function learnOverlapProfile(
   reviewPatterns: ComboPatternsLike | null | undefined,
@@ -134,11 +146,15 @@ export function learnOverlapProfile(
     winningNumbers && winningNumbers.length ? new Set(winningNumbers.filter((n) => n >= 1 && n <= 45)) : null;
   const combos = normalize(reviewPatterns, winningSet);
   const winning = combos.filter((c) => c.fullyWinning);
-  const partial = combos.filter((c) => !c.fullyWinning && c.winOverlap * 2 >= c.size);
-  const rest = combos.filter((c) => !c.fullyWinning);
+  const partial = combos.filter((c) => c.partialHit);
+  const rest = combos.filter((c) => !c.fullyWinning && !c.partialHit);
 
-  const winAvg = avg(winning);
-  const restAvg = avg(rest);
+  // 완전일치 3건 미만이면 부분일치를 양성 표본에 합침(가중은 완전 > 부분).
+  const usedPartialFallback = winning.length < 3 && partial.length > 0;
+  const positive = usedPartialFallback ? [...winning, ...partial] : winning;
+
+  const winAvg = avg(positive);
+  const restAvg = avg(rest.length ? rest : combos.filter((c) => !c.fullyWinning));
 
   const discriminators: Discriminator[] = [];
   if (winAvg && restAvg) {
@@ -154,25 +170,34 @@ export function learnOverlapProfile(
   }
 
   const winningCount = winning.length;
-  const confidence: LearnConfidence =
-    winningCount >= 6 ? 'medium' : winningCount >= 3 ? 'low' : 'none';
+  const positiveCount = positive.length;
+  // 완전일치 위주면 medium, 부분 보조면 상한을 low.
+  let confidence: LearnConfidence = 'none';
+  if (winningCount >= 6) confidence = 'medium';
+  else if (winningCount >= 3) confidence = 'low';
+  else if (positiveCount >= 6 && usedPartialFallback) confidence = 'low';
+  else if (positiveCount >= 3 && usedPartialFallback) confidence = 'low';
 
   const note =
     confidence === 'none'
-      ? '당첨과 완전히 겹친 조합이 3건 미만이라 학습 신뢰도가 매우 낮습니다(서술 참고용). 복기 회차가 쌓일수록 정확해집니다.'
-      : confidence === 'low'
-        ? '표본이 적어(당첨 일치 조합 3~5건) 경향 참고용입니다. 복기 회차 누적을 권장합니다.'
-        : '복기 겹침 조합의 당첨 일치 경향을 반영했습니다(그래도 확률은 불변).';
+      ? '당첨과 겹친 조합(완전·부분)이 3건 미만이라 학습 신뢰도가 매우 낮습니다. 복기 회차·줄이 쌓일수록 채워집니다.'
+      : usedPartialFallback
+        ? '완전일치 표본이 적어 부분일치(절반+)로 프로파일을 보강했습니다. 경향 참고용이며 확률은 불변입니다.'
+        : confidence === 'low'
+          ? '표본이 적어(당첨 일치 조합 3~5건) 경향 참고용입니다. 복기 회차 누적을 권장합니다.'
+          : '복기 겹침 조합의 당첨 일치 경향을 반영했습니다(그래도 확률은 불변).';
 
   return {
     totalCombos: combos.length,
     winningCombos: winningCount,
     partialCombos: partial.length,
+    positiveCombos: positiveCount,
     win: winAvg,
     rest: restAvg,
     discriminators,
     confidence,
     note,
+    usedPartialFallback,
   };
 }
 
@@ -189,27 +214,29 @@ export function rankCurrentByProfile(
   if (!combos.length || !profile.win) return [];
 
   const active = profile.discriminators.filter((d) => d.dir !== 'flat');
+  // 판별 특성이 전부 flat이면 점수 분산이 없어 후보가 비게 됨 → lift·줄수 약한 프록시.
   const scoreByNumber = new Map<number, number>();
   const supportByNumber = new Map<number, number>();
 
   for (const c of combos) {
-    // 각 판별 특성에서 win 방향에 얼마나 부합하는지 0~1 로 환산해 평균.
-    let match = 0;
-    let used = 0;
-    for (const d of active) {
-      const val = d.key === 'lineCount' ? c.lineCount : d.key === 'lift' ? c.lift : d.key === 'z' ? c.z : c.size;
-      const target = d.win;
-      const ref = profile.rest ? profile.rest[d.key] : 0;
-      const span = Math.abs(target - ref) || 1;
-      // win 방향으로 target 이상이면 1, ref 이하면 0, 사이는 선형.
-      let m: number;
-      if (d.dir === 'higher') m = clamp01((val - ref) / span);
-      else m = clamp01((ref - val) / span);
-      match += m;
-      used += 1;
+    let comboScore = 0;
+    if (active.length) {
+      let match = 0;
+      for (const d of active) {
+        const val = d.key === 'lineCount' ? c.lineCount : d.key === 'lift' ? c.lift : d.key === 'z' ? c.z : c.size;
+        const target = d.win;
+        const ref = profile.rest ? profile.rest[d.key] : 0;
+        const span = Math.abs(target - ref) || 1;
+        let m: number;
+        if (d.dir === 'higher') m = clamp01((val - ref) / span);
+        else m = clamp01((ref - val) / span);
+        match += m;
+      }
+      comboScore = match / active.length;
+    } else {
+      // 폴백: 강한 겹침(줄 수·lift) 우선 — 프로파일이 평탄할 때도 후보가 보이게
+      comboScore = clamp01((c.lineCount - 1) / 3) * 0.6 + clamp01((c.lift - 1) / 2) * 0.4;
     }
-    const comboScore = used ? match / used : 0;
-    // 크기 가중(3·4번호 겹침이 2번호보다 신호가 강함) + lift 살짝 반영.
     const weight = comboScore * (1 + 0.3 * (c.size - 2)) * (1 + 0.1 * Math.max(0, c.lift - 1));
     if (weight <= 0) continue;
     for (const n of c.numbers) {

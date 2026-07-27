@@ -26,6 +26,7 @@ import NumberFrequencyPanel from '../components/NumberFrequencyPanel';
 import ParallelRoundPanel from '../components/ParallelRoundPanel';
 import PhotoBacktestPanel from '../components/PhotoBacktestPanel';
 import OverlapPatternLearnPanel from '../components/OverlapPatternLearnPanel';
+import OverlapLearningServerPanel from '../components/OverlapLearningServerPanel';
 import RoundDataBreakdownPanel from '../components/RoundDataBreakdownPanel';
 import RoundLearningPanel from '../components/RoundLearningPanel';
 import ReviewVerificationPanel from '../components/ReviewVerificationPanel';
@@ -1799,16 +1800,19 @@ export default function PhotoAnalysisPage() {
             {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
           </Stack>
         }
-        engineExtraSlot={
+        parallelEngineSlot={
+          <ParallelRoundPanel
+            targetRound={activeTab === 'review' ? (reviewRound ?? currentRound) : (currentRound ?? latestRound)}
+            modeLabel={activeTab === 'review' ? '복기' : '이번회차'}
+            defaultOpen={false}
+          />
+        }
+        validatedLearningSlot={
           <Stack spacing={1.5}>
-            <ParallelRoundPanel
-              targetRound={activeTab === 'review' ? (reviewRound ?? currentRound) : (currentRound ?? latestRound)}
-              modeLabel={activeTab === 'review' ? '복기' : '이번회차'}
-              defaultOpen={false}
-            />
             <FeatureLearningPanel />
             <PatternMiningPanel />
             <RoundLearningPanel />
+            <OverlapLearningServerPanel />
             <OverlapPatternLearnPanel
               accumulated={accumulated}
               modeLabel={activeTab === 'review' ? '복기' : '이번회차'}

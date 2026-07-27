@@ -5469,7 +5469,7 @@ export default function SemiAutoComparePanel({
       {engineTab === 'learn' && (
       <>
       <EngineTabBanner
-        title="학습 레이어 — 1:1역산 · 전이 · 평행 · 검증 · 서버신호"
+        title="학습 레이어 — ①1:1 · ②전이 · ③복기진단 · ④평행 · ⑤검증 · ⑥서버신호"
         chips={
           <>
             <EngineStatusChip
@@ -5481,12 +5481,36 @@ export default function SemiAutoComparePanel({
               label={canRenderLineMatching ? '1:1 축 활성' : '1:1 미적용'}
             />
             <EngineStatusChip
+              variant="outlined"
+              label="① 1:1"
+              onClick={() =>
+                document.getElementById('engine-reverse')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+              sx={{ cursor: 'pointer' }}
+            />
+            <EngineStatusChip
+              variant="outlined"
+              label="② 전이"
+              onClick={() =>
+                document.getElementById('engine-transfer')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+              sx={{ cursor: 'pointer' }}
+            />
+            <EngineStatusChip
+              variant="outlined"
+              label="③ 복기진단"
+              onClick={() =>
+                document.getElementById('engine-review-diag')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+              sx={{ cursor: 'pointer' }}
+            />
+            <EngineStatusChip
               color={
                 learningBridgeStatus.injectRows.find((r) => r.id === '평행')?.status === 'direct'
                   ? 'warning'
                   : 'default'
               }
-              label="엔진② 평행"
+              label="④ 평행"
               onClick={() =>
                 document.getElementById('engine-parallel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }
@@ -5494,7 +5518,7 @@ export default function SemiAutoComparePanel({
             />
             <EngineStatusChip
               color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}
-              label={`엔진③ 주입 ${learningBridgeStatus.validatedCount}`}
+              label={`⑤ 검증 ${learningBridgeStatus.validatedCount}`}
               onClick={() =>
                 document.getElementById('engine-validated')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }
@@ -5502,17 +5526,9 @@ export default function SemiAutoComparePanel({
             />
             <EngineStatusChip
               color={predictionSignals ? 'info' : 'default'}
-              label={predictionSignals ? '④ 서버신호' : '④ 신호 대기'}
+              label={predictionSignals ? '⑥ 서버신호' : '⑥ 신호 대기'}
               onClick={() =>
                 document.getElementById('engine-signals')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-              }
-              sx={{ cursor: 'pointer' }}
-            />
-            <EngineStatusChip
-              variant="outlined"
-              label="전이학습"
-              onClick={() =>
-                document.getElementById('engine-transfer')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }
               sx={{ cursor: 'pointer' }}
             />
@@ -5520,9 +5536,9 @@ export default function SemiAutoComparePanel({
         }
         intent={
           <>
-            <strong>① 1:1 역산</strong>(L1·L4~L8) · <strong>전이학습</strong>(L2·L3) · <strong>② 평행</strong> ·{' '}
-            <strong>③ 검증학습</strong> · <strong>④ 서버신호</strong>(L9). 대상: {intentSectionLabel}{' '}
-            {effectiveRound ?? '?'}회.
+            <strong>① 1:1</strong> · <strong>② 전이(L2)</strong> · <strong>③ 복기진단(L3)</strong> ·{' '}
+            <strong>④ 평행</strong> · <strong>⑤ 검증</strong> · <strong>⑥ 서버신호(L9)</strong>.
+            대상: {intentSectionLabel} {effectiveRound ?? '?'}회.
           </>
         }
       />
@@ -5552,8 +5568,8 @@ export default function SemiAutoComparePanel({
         }
         intent={
           <>
-            이번 회차 용지 <strong>1:1 전수비교</strong> 코어(L1·L4~L7) + <strong>L8 심층 연결</strong>(L1-B·③ 주입).
-            전이학습(L2)·서버신호(L9)·평행·검증학습은 아래 별도 엔진.
+            이번 회차 용지 <strong>1:1 전수비교</strong> 코어(L1·L4~L7) + <strong>L8 심층 연결</strong>.
+            아래 순서: ②전이 · ③복기진단 · ④평행 · ⑤검증 · ⑥서버신호.
           </>
         }
       >
@@ -6381,193 +6397,409 @@ export default function SemiAutoComparePanel({
       </Stack>
       </EngineSection>
 
-      {/* ── 전이 학습 (L2·L3) ── */}
+      {/* ── 엔진② 전이 학습 (L2만 · 순방향 매칭) ── */}
       <EngineSection
         id="engine-transfer"
         tone="secondary"
         collapsible
         defaultOpen
-        title="전이 학습 (L2 프로파일 · L3 출현)"
+        title="엔진② 전이 학습 (L2)"
         chips={
           <>
             <EngineStatusChip
               color={learnedPattern && patternMatched ? 'success' : 'default'}
-              label={learnedPattern && patternMatched ? 'L2 매칭 ON' : 'L2 대기'}
+              label={learnedPattern && patternMatched ? '매칭 ON' : '대기'}
             />
-            <EngineStatusChip
-              color={winningPatternAnalysis ? 'success' : 'default'}
-              label={winningPatternAnalysis ? 'L3 복기진단' : 'L3 —'}
-            />
-            <EngineStatusChip variant="outlined" label="③ 추천 핵심축(L2)" />
+            <EngineStatusChip variant="outlined" label="추천 프로파일축" />
+            <EngineStatusChip variant="outlined" label="역산·적합도 제외" />
           </>
         }
         intent={
           <>
-            <strong>복기 당첨 구조 → 현재 탭 전이</strong>. L2는 ③ 추천의 프로파일 축.
-            L3는 복기 사후 진단(추천 미주입). 엔진① 1:1과 데이터 축이 다릅니다.
+            <strong>순방향만</strong> — 복기에서 만든 당첨 프로파일(centroid·조합구조)을{' '}
+            <strong>현재 탭 번호에 매칭</strong>합니다. 당첨이 몇 위였는지·적합도 자기확인은{' '}
+            <strong>엔진③ 복기 역산</strong>으로 분리했습니다.
           </>
         }
       >
         <Stack spacing={1.25}>
-              {/* L2. 당첨 패턴 학습 → 적합도 */}
-              <EngineSection
-                id="learn-l2"
-                tone="info"
-                collapsible
-                defaultOpen
-                title={`L2. 전이 학습 · ${learnedPattern?.round ?? effectiveRound ?? '?'}회 당첨 프로파일`}
-                chips={
-                  <>
-                    <EngineStatusChip
-                      color={learnedPattern && patternMatched ? 'success' : 'default'}
-                      label={learnedPattern && patternMatched ? (compareWinning ? '적합도 확인' : '프로파일 매칭') : '데이터 없음'}
-                    />
-                    <EngineStatusChip variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`} />
-                    {compareWinning && learnedPattern && patternMatched && (
-                      <EngineStatusChip color="primary" label="밝은 공=당첨 · 회색=비당첨" />
-                    )}
-                  </>
-                }
-                intent={
-                  learnedPattern && patternMatched ? (
-                    <>
-                      복기 당첨 프로파일을 현재 탭 데이터에 전이합니다. 구조 합{learnedPattern.structure.sum}/홀{learnedPattern.structure.odd}/구간{learnedPattern.structure.decades}/연속{learnedPattern.structure.consec}
-                      (자동 {learnedPattern.autoCount}↔반자동 {learnedPattern.semiCount}줄).
-                    </>
-                  ) : (
-                    <>복기 당첨 6개의 1:1 통계 프로파일이 있어야 적합도·매칭을 표시합니다. 복기 용지·당첨이 준비되면 채워집니다.</>
-                  )
-                }
-              >
-              {learnedPattern && patternMatched ? (
-                <>
-                  <Stack direction="row" spacing={0.6} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+          <EngineSection
+            id="learn-l2"
+            tone="info"
+            collapsible
+            defaultOpen
+            title={`L2. 전이 매칭 · ${learnedPattern?.round ?? '복기'}회 → ${effectiveRound ?? '?'}회`}
+            chips={
+              <>
+                <EngineStatusChip
+                  color={patternMatched ? 'success' : 'default'}
+                  label={patternMatched ? '유사도 TOP10' : '데이터 없음'}
+                />
+                <EngineStatusChip variant="outlined" label={intentSectionLabel} />
+              </>
+            }
+            intent={
+              <>
+                현재 탭 1:1 프로파일이 복기 당첨 centroid에 얼마나 가까운지(유사%).
+                {learnedPattern
+                  ? <> 학습 구조 합{learnedPattern.structure.sum}/홀{learnedPattern.structure.odd}/구간{learnedPattern.structure.decades}/연속{learnedPattern.structure.consec}.</>
+                  : null}{' '}
+                ※ 복기 빈도 순위·당첨 몇 위 역산은 L3.
+              </>
+            }
+          >
+            {learnedPattern && patternMatched ? (
+              <Stack spacing={1}>
+                <EngineSubBlock tone="secondary" title="A. 현재 탭 유사도 순위 (전이 결과)">
+                  <Stack direction="row" spacing={0.6} flexWrap="wrap" useFlexGap>
                     {patternMatched.list.map((m, i) => (
                       <Box key={`pm-${m.number}`} sx={{ textAlign: 'center', minWidth: 34 }}>
-                        <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: i < 6 ? 'info.light' : 'text.disabled', fontWeight: 700 }}>
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            display: 'block',
+                            fontSize: 8,
+                            lineHeight: 1,
+                            color: i < 6 ? 'info.light' : 'text.disabled',
+                            fontWeight: 700,
+                          }}
+                        >
                           {i + 1}위
                         </Typography>
-                        <LottoBall number={m.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !m.winning : false} />
+                        <LottoBall number={m.number} size={ENGINE_BALL.list} />
                         <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
                           유사 {m.sim}%{m.deep ? '·3+' : ''}
                         </Typography>
                       </Box>
                     ))}
                   </Stack>
-                  {patternMatched.hit != null ? (
-                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                      적합도 — 매칭 상위 6개 중 당첨 <strong>{patternMatched.hit}개</strong>{' '}
-                      (※ 같은 회차에서 학습·확인한 값이라 낙관적 — 진짜 검증은 다음 회차 이월 적중)
-                    </Typography>
-                  ) : (
-                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                      ※ {learnedPattern.round ?? '복기'}회에서 학습한 프로파일을 {effectiveRound ?? '?'}회 데이터에 전이한 예측 —
-                      복기 탭 적합도와 함께 회차별로 기록해 꾸준한지 확인하세요.
-                    </Typography>
-                  )}
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.25 }}>
-                    학습 근거(<strong>복기 빈도 순위</strong>): {learnedPattern.feats.map((f) => `${f.number}=${f.rank ?? '미등장'}위`).join(' · ')} / 전체 {learnedPattern.totalNums}개
-                    <br />
-                    ※ Top10=현재 유사도 · 이 줄=학습 표본(당첨 6개)의 복기 빈도 순위 — 축이 다름.
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, fontSize: 10 }}>
+                    {compareWinning
+                      ? '복기 탭에서는 당첨 대조(밝은/회색)를 L3에서 봅니다. 여기는 전이 순위만 표시합니다.'
+                      : `${learnedPattern.round ?? '복기'}회 프로파일 → ${effectiveRound ?? '?'}회 전이 예측.`}
                   </Typography>
-                </>
+                </EngineSubBlock>
+              </Stack>
+            ) : (
+              <Alert severity="info" sx={{ py: 0.5 }}>
+                {!learnedPattern
+                  ? '복기 용지·당첨 6개가 있어야 전이 프로파일을 만듭니다.'
+                  : '현재 탭에 자동·반자동 1:1이 있어야 매칭합니다.'}
+              </Alert>
+            )}
+          </EngineSection>
+        </Stack>
+      </EngineSection>
+
+      {/* ── 엔진③ 복기 역산 진단 (L3 · 사후 포착력) ── */}
+      <EngineSection
+        id="engine-review-diag"
+        tone="success"
+        collapsible
+        defaultOpen
+        title="엔진③ 복기 역산 진단 (L3)"
+        chips={
+          <>
+            <EngineStatusChip color="success" label="사후 역산" />
+            <EngineStatusChip
+              color={learnedPattern ? 'success' : 'default'}
+              label={learnedPattern ? 'A 표본순위' : 'A —'}
+            />
+            <EngineStatusChip
+              color={winningPatternAnalysis ? 'success' : 'default'}
+              label={winningPatternAnalysis ? 'B 1:1출현' : 'B —'}
+            />
+            <EngineStatusChip variant="outlined" label="추천 미주입" />
+          </>
+        }
+        intent={
+          <>
+            <strong>역산·진단</strong> — 실제 당첨이 복기 용지·현재 1:1 반복도에서{' '}
+            <strong>몇 위·어느 레벨</strong>이었는지 확인합니다. 전이(엔진②)와 축이 다릅니다.
+          </>
+        }
+      >
+        <Stack spacing={1.25}>
+          <EngineSection
+            id="learn-l3"
+            tone="success"
+            collapsible
+            defaultOpen
+            title={`L3. 복기 역산 · ${learnedPattern?.round ?? effectiveRound ?? '?'}회`}
+            chips={
+              <>
+                <EngineStatusChip color="success" label="복기 역산" />
+                {!compareWinning && (
+                  <EngineStatusChip variant="outlined" label="B·C는 복기탭" />
+                )}
+              </>
+            }
+            intent="A 복기 표본 빈도순위 · B 현재 1:1에서 당첨 출현 · C 전이매칭 자기검증(복기). 모두 사후 진단입니다."
+          >
+            <Stack spacing={1.25}>
+              {learnedPattern && learnedPattern.feats.length > 0 ? (
+                <EngineSubBlock
+                  tone="success"
+                  title="A. 복기 표본 빈도 순위 역산"
+                  chips={
+                    <>
+                      <EngineStatusChip variant="outlined" label={`학습 ${learnedPattern.round ?? '?'}회`} />
+                      <EngineStatusChip variant="outlined" label={`전체 ${learnedPattern.totalNums}`} />
+                    </>
+                  }
+                >
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5, fontSize: 10 }}>
+                    복기 용지 반복도에서 당첨 6개가 몇 위였는지(전이 유사도 TOP과 별개).
+                  </Typography>
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                    {learnedPattern.feats
+                      .slice()
+                      .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
+                      .map((f) => (
+                        <Box key={`feat-${f.number}`} sx={{ textAlign: 'center', minWidth: 40 }}>
+                          <LottoBall number={f.number} size={ENGINE_BALL.list} />
+                          <Typography sx={{ fontSize: 9, color: 'text.disabled', lineHeight: 1.1 }}>
+                            {f.rank != null ? `${f.rank}위` : '미등장'}
+                          </Typography>
+                        </Box>
+                      ))}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: 9 }}>
+                    {learnedPattern.feats.map((f) => `${f.number}=${f.rank ?? '미등장'}위`).join(' · ')}
+                  </Typography>
+                </EngineSubBlock>
               ) : (
                 <Alert severity="info" sx={{ py: 0.5 }}>
-                  당첨 패턴 프로파일이 없습니다. 복기 탭에 당첨·용지가 있으면 L2가 채워집니다.
+                  A. 복기 표본 순위 — 복기 용지·당첨이 있으면 채워집니다.
                 </Alert>
               )}
-              </EngineSection>
 
-              {/* L3. 당첨번호 출현 패턴 (복기 전용) */}
-              <EngineSection
-                id="learn-l3"
-                defaultOpen={false}
-                tone="success"
-                collapsible
-                title={`L3. ${effectiveRound ?? '?'}회 당첨번호 출현 패턴`}
+              <EngineSubBlock
+                tone="info"
+                title="B. 현재 1:1 반복도에서 당첨 출현 역산"
                 chips={
-                  <>
-                    <EngineStatusChip color={winningPatternAnalysis ? 'success' : 'default'} label="복기 전용" />
-                    {!compareWinning && <EngineStatusChip variant="outlined" label="이번회차=미표시" />}
-                    {winningPatternAnalysis && (
-                      <EngineStatusChip
-                        color={winningPatternAnalysis.inTop8 >= 3 ? 'success' : winningPatternAnalysis.inTop8 >= 2 ? 'warning' : 'default'}
-                        label={`상위8 ${winningPatternAnalysis.inTop8} · 상위14 ${winningPatternAnalysis.inTop14}`}
-                      />
-                    )}
-                  </>
-                }
-                intent={
                   winningPatternAnalysis ? (
                     <>
-                      실제 당첨이 전수비교에서 어느 레벨·몇 위였는지 역산(반복도 전체 {winningPatternAnalysis.totalNumbers}개).
-                      순위↑ = 반복도 방식이 당첨을 잘 포착.
+                      <EngineStatusChip
+                        color={winningPatternAnalysis.inTop8 >= 3 ? 'success' : 'warning'}
+                        label={`당첨 ${winningPatternAnalysis.appearedCount}/${winningPatternAnalysis.totalWin} 등장`}
+                      />
+                      <EngineStatusChip
+                        color={winningPatternAnalysis.inTop8 >= 3 ? 'success' : 'warning'}
+                        label={`상위8 ${winningPatternAnalysis.inTop8} · 상위14 ${winningPatternAnalysis.inTop14}`}
+                      />
+                      {winningPatternAnalysis.dominantLevel && (
+                        <EngineStatusChip
+                          variant="outlined"
+                          label={`최다 ${winningPatternAnalysis.dominantLevel[0]}일치×${winningPatternAnalysis.dominantLevel[1]}`}
+                        />
+                      )}
                     </>
                   ) : (
-                    <>복기 탭에서만 실제 당첨으로 역산합니다. 이번회차(미추첨)이거나 당첨 데이터가 없으면 비어 있습니다.</>
+                    <EngineStatusChip variant="outlined" label="복기 탭 전용" />
                   )
                 }
               >
                 {!winningPatternAnalysis ? (
                   <Alert severity="info" sx={{ py: 0.5 }}>
                     {compareWinning
-                      ? '당첨번호 출현 패턴을 계산할 수 없습니다(용지 1:1 또는 당첨 로딩 확인).'
-                      : '이번회차 탭 — L3는 복기 전용입니다. 복기 탭에서 확인하세요.'}
+                      ? '1:1 또는 당첨 로딩을 확인하세요.'
+                      : '이번회차 탭 — B는 복기 전용입니다. 복기 탭에서 확인하세요.'}
                   </Alert>
                 ) : (
                   <>
-                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-                    <EngineStatusChip
-                      color={winningPatternAnalysis.inTop8 >= 3 ? 'success' : winningPatternAnalysis.inTop8 >= 2 ? 'warning' : 'default'}
-                      label={`당첨 ${winningPatternAnalysis.appearedCount}/${winningPatternAnalysis.totalWin} 전수비교 등장`}
-                    />
-                    {winningPatternAnalysis.dominantLevel && (
-                      <EngineStatusChip
-                        variant="outlined"
-                        label={`최다 ${winningPatternAnalysis.dominantLevel[0]}일치×${winningPatternAnalysis.dominantLevel[1]}`}
-                      />
-                    )}
-                  </Stack>
-                  <Stack spacing={0.4}>
-                    {winningPatternAnalysis.perWinning.map((w) => {
-                      const levelStr = [6, 5, 4, 3, 2]
-                        .filter((L) => (w.byLevel[L] ?? 0) > 0)
-                        .map((L) => `${L}일치×${w.byLevel[L]}`)
-                        .join(' · ');
-                      return (
-                        <Stack key={`win-${w.number}`} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
-                          <LottoBall number={w.number} size={ENGINE_BALL.list} />
-                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                            {w.appeared
-                              ? <>반복도 <strong>{w.rank}위</strong> · {w.totalGroups}그룹 ({levelStr}) · 자동 {w.auto}줄·반자동 {w.semi}줄</>
-                              : '전수비교 매치에 미등장'}
-                          </Typography>
-                        </Stack>
-                      );
-                    })}
-                  </Stack>
-                  {(winningPatternAnalysis.winPairs.length > 0 || winningPatternAnalysis.winTriples.length > 0) && (
-                    <Typography variant="caption" color="success.light" sx={{ display: 'block', fontSize: 10, mt: 0.5 }}>
-                      당첨번호끼리 반복 세트:{' '}
-                      {[...winningPatternAnalysis.winPairs, ...winningPatternAnalysis.winTriples]
-                        .slice(0, 6)
-                        .map((s) => `{${s.numbers.join(',')}}×${s.groupCount}`)
-                        .join(' · ')}
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5, fontSize: 10 }}>
+                      실제 당첨이 전수비교 반복도(전체 {winningPatternAnalysis.totalNumbers}개)에서 몇 위·어느
+                      레벨이었는지. 순위↑(숫자↓) = 반복도 방식이 당첨을 잘 포착.
                     </Typography>
-                  )}
+                    <Stack spacing={0.4}>
+                      {winningPatternAnalysis.perWinning.map((w) => {
+                        const levelStr = [6, 5, 4, 3, 2]
+                          .filter((L) => (w.byLevel[L] ?? 0) > 0)
+                          .map((L) => `${L}일치×${w.byLevel[L]}`)
+                          .join(' · ');
+                        return (
+                          <Stack
+                            key={`win-${w.number}`}
+                            direction="row"
+                            alignItems="center"
+                            spacing={0.75}
+                            flexWrap="wrap"
+                            useFlexGap
+                          >
+                            <LottoBall number={w.number} size={ENGINE_BALL.list} />
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                              {w.appeared ? (
+                                <>
+                                  반복도 <strong>{w.rank}위</strong> · {w.totalGroups}그룹 ({levelStr}) · 자동{' '}
+                                  {w.auto}줄·반자동 {w.semi}줄
+                                </>
+                              ) : (
+                                '전수비교 매치에 미등장'
+                              )}
+                            </Typography>
+                          </Stack>
+                        );
+                      })}
+                    </Stack>
+                    {(winningPatternAnalysis.winPairs.length > 0 ||
+                      winningPatternAnalysis.winTriples.length > 0) && (
+                      <Typography
+                        variant="caption"
+                        color="success.light"
+                        sx={{ display: 'block', fontSize: 10, mt: 0.5 }}
+                      >
+                        당첨번호끼리 반복 세트:{' '}
+                        {[...winningPatternAnalysis.winPairs, ...winningPatternAnalysis.winTriples]
+                          .slice(0, 6)
+                          .map((s) => `{${s.numbers.join(',')}}×${s.groupCount}`)
+                          .join(' · ')}
+                      </Typography>
+                    )}
                   </>
                 )}
-              </EngineSection>
+              </EngineSubBlock>
 
-
+              <EngineSubBlock
+                tone="warning"
+                title="C. 전이매칭 자기검증 (복기·낙관적)"
+                chips={
+                  patternMatched?.hit != null ? (
+                    <EngineStatusChip
+                      color={patternMatched.hit >= 3 ? 'success' : patternMatched.hit >= 2 ? 'warning' : 'default'}
+                      label={`매칭상위6 당첨 ${patternMatched.hit}/6`}
+                    />
+                  ) : (
+                    <EngineStatusChip variant="outlined" label="복기·매칭 시 표시" />
+                  )
+                }
+              >
+                {patternMatched?.hit != null ? (
+                  <>
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                      {patternMatched.list.slice(0, 6).map((m) => (
+                        <LottoBall
+                          key={`fit-${m.number}`}
+                          number={m.number}
+                          size={ENGINE_BALL.list}
+                          dimmed={!m.winning}
+                        />
+                      ))}
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                      같은 회차에서 학습·확인한 값이라 <strong>낙관적</strong>입니다. 진짜 검증은 다음 회차
+                      이월 적중. 엔진②의 전이 순위와 목적이 다릅니다(여기는 사후 포착력).
+                    </Typography>
+                  </>
+                ) : (
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                    복기 탭에서 전이 매칭이 있으면, 상위 6개가 당첨을 몇 개 담았는지 여기에 표시합니다.
+                  </Typography>
+                )}
+              </EngineSubBlock>
+            </Stack>
+          </EngineSection>
         </Stack>
       </EngineSection>
 
-      {/* ── 엔진④ 서버 통합신호 (L9) ── */}
+      {/* ── 엔진④ 평행회차 (별도 축 · 패널 자체가 엔진 셸) ── */}
+      <Box id="engine-parallel">
+        <Alert severity="warning" icon={false} sx={{ py: 0.5, mb: 1 }}>
+          <Typography variant="caption">
+            <strong>엔진④ 평행회차</strong> — 용지 1:1·검증학습과 별개 축.
+            L1·추천에 <strong>직접</strong> 주입(validatedLearning 아님).
+            상태:{' '}
+            {learningBridgeStatus.injectRows.find((r) => r.id === '평행')?.status === 'direct'
+              ? `직접 ${learningBridgeStatus.injectRows.find((r) => r.id === '평행')?.count ?? 0}`
+              : '신호 대기'}
+            .
+          </Typography>
+        </Alert>
+        {parallelEngineSlot}
+      </Box>
+
+      {/* ── 엔진⑤ 검증학습 (다회차) ── */}
+      <EngineSection
+        id="engine-validated"
+        tone="success"
+        collapsible
+        defaultOpen
+        title="엔진⑤ 검증학습 (다회차)"
+        chips={
+          <>
+            <EngineStatusChip
+              color={learningBridgeStatus.forwardOnly ? 'secondary' : 'primary'}
+              label={learningBridgeStatus.forwardOnly ? '이번회차 forward ON' : '복기=커버리지만'}
+            />
+            <EngineStatusChip
+              color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}
+              label={`주입 ${learningBridgeStatus.validatedCount}`}
+            />
+            <EngineStatusChip
+              variant="outlined"
+              label={`커버리지 ${learningBridgeStatus.injectRows.find((r) => r.id === '커버리지')?.count ?? 0}`}
+            />
+            <EngineStatusChip
+              color={
+                learningBridgeStatus.injectRows.find((r) => r.id === 'V4-B')?.status === 'on'
+                  ? 'info'
+                  : 'default'
+              }
+              label={
+                learningBridgeStatus.injectRows.find((r) => r.id === 'V4-B')?.status === 'on'
+                  ? 'V4-B fallback'
+                  : learningBridgeStatus.injectRows.find((r) => r.id === 'V4-A')?.status === 'on'
+                    ? 'V4-A 서버'
+                    : 'V4 대기'
+              }
+            />
+          </>
+        }
+        intent={
+          <>
+            V1 Feature · V2 Pattern · V3 다회차 지지 · V4 줄겹침(서버→클라 fallback).
+            평탄·미채택은 미주입. 복기 탭은 forward OFF(커버리지만). →{' '}
+            {learningBridgeStatus.destinations.join(' / ')}.
+          </>
+        }
+      >
+        <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+          {(
+            [
+              ['learn-v1', 'V1 Feature'],
+              ['learn-v2', 'V2 Pattern'],
+              ['learn-v3', 'V3 다회차'],
+              ['learn-v4a', 'V4-A 서버겹침'],
+              ['learn-v4b', 'V4-B 복기겹침'],
+            ] as const
+          ).map(([id, label]) => (
+            <EngineStatusChip
+              key={id}
+              variant="outlined"
+              label={label}
+              onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              sx={{ cursor: 'pointer' }}
+            />
+          ))}
+        </Stack>
+        <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 1 }}>
+          <Typography variant="caption">
+            L5「강한 패턴」= 이번 회차 1:1 · V2 Pattern Mining= 다회차 검증(별개).
+            L7「세트중복」= 현재 매치그룹 · V4 줄겹침= 다회차/복기 당첨일치(별개).
+          </Typography>
+        </Alert>
+        <Stack spacing={1.5}>
+          {validatedLearningSlot}
+          {/* 구버전 단일 슬롯 호환 — 새 슬롯이 없을 때만 */}
+          {!parallelEngineSlot && !validatedLearningSlot ? engineExtraSlot : null}
+        </Stack>
+      </EngineSection>
+
+      {/* ── 엔진⑥ 서버 통합신호 (L9) ── */}
       <Box id="engine-signals">
         <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 1 }}>
           <Typography variant="caption">
-            <strong>엔진④ 서버 통합신호 (L9)</strong> — FE 1:1·검증학습과 별축.
+            <strong>엔진⑥ 서버 통합신호 (L9)</strong> — FE 1:1·검증학습과 별축.
             추첨기·후속·클래식·용지·평행·gap 가중. <strong>③ 추천 점수에는 미주입</strong>(표시·예보 폴백).
           </Typography>
         </Alert>
@@ -6577,7 +6809,7 @@ export default function SemiAutoComparePanel({
         tone="info"
         collapsible
         defaultOpen={false}
-        title={`엔진④ L9. 통합 예측 신호 (규칙 v${predictionSignals?.rules_version ?? '…'})`}
+        title={`엔진⑥ L9. 통합 예측 신호 (규칙 v${predictionSignals?.rules_version ?? '…'})`}
         chips={
           <>
             <EngineStatusChip
@@ -6771,98 +7003,6 @@ export default function SemiAutoComparePanel({
 
       </Box>
 
-      {/* ── 엔진② 평행회차 (별도 축 · 패널 자체가 엔진 셸) ── */}
-      <Box id="engine-parallel">
-        <Alert severity="warning" icon={false} sx={{ py: 0.5, mb: 1 }}>
-          <Typography variant="caption">
-            <strong>엔진② 평행회차</strong> — 용지 1:1·검증학습과 별개 축.
-            L1·③에 <strong>직접</strong> 주입(validatedLearning 아님).
-            상태:{' '}
-            {learningBridgeStatus.injectRows.find((r) => r.id === '평행')?.status === 'direct'
-              ? `직접 ${learningBridgeStatus.injectRows.find((r) => r.id === '평행')?.count ?? 0}`
-              : '신호 대기'}
-            .
-          </Typography>
-        </Alert>
-        {parallelEngineSlot}
-      </Box>
-
-      {/* ── 엔진③ 검증학습 (다회차) ── */}
-      <EngineSection
-        id="engine-validated"
-        tone="success"
-        collapsible
-        defaultOpen
-        title="엔진③ 검증학습 (다회차)"
-        chips={
-          <>
-            <EngineStatusChip
-              color={learningBridgeStatus.forwardOnly ? 'secondary' : 'primary'}
-              label={learningBridgeStatus.forwardOnly ? '이번회차 forward ON' : '복기=커버리지만'}
-            />
-            <EngineStatusChip
-              color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}
-              label={`주입 ${learningBridgeStatus.validatedCount}`}
-            />
-            <EngineStatusChip
-              variant="outlined"
-              label={`커버리지 ${learningBridgeStatus.injectRows.find((r) => r.id === '커버리지')?.count ?? 0}`}
-            />
-            <EngineStatusChip
-              color={
-                learningBridgeStatus.injectRows.find((r) => r.id === 'V4-B')?.status === 'on'
-                  ? 'info'
-                  : 'default'
-              }
-              label={
-                learningBridgeStatus.injectRows.find((r) => r.id === 'V4-B')?.status === 'on'
-                  ? 'V4-B fallback'
-                  : learningBridgeStatus.injectRows.find((r) => r.id === 'V4-A')?.status === 'on'
-                    ? 'V4-A 서버'
-                    : 'V4 대기'
-              }
-            />
-          </>
-        }
-        intent={
-          <>
-            V1 Feature · V2 Pattern · V3 다회차 지지 · V4 줄겹침(서버→클라 fallback).
-            평탄·미채택은 미주입. 복기 탭은 forward OFF(커버리지만). →{' '}
-            {learningBridgeStatus.destinations.join(' / ')}.
-          </>
-        }
-      >
-        <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-          {(
-            [
-              ['learn-v1', 'V1 Feature'],
-              ['learn-v2', 'V2 Pattern'],
-              ['learn-v3', 'V3 다회차'],
-              ['learn-v4a', 'V4-A 서버겹침'],
-              ['learn-v4b', 'V4-B 복기겹침'],
-            ] as const
-          ).map(([id, label]) => (
-            <EngineStatusChip
-              key={id}
-              variant="outlined"
-              label={label}
-              onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              sx={{ cursor: 'pointer' }}
-            />
-          ))}
-        </Stack>
-        <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 1 }}>
-          <Typography variant="caption">
-            L5「강한 패턴」= 이번 회차 1:1 · V2 Pattern Mining= 다회차 검증(별개).
-            L7「세트중복」= 현재 매치그룹 · V4 줄겹침= 다회차/복기 당첨일치(별개).
-          </Typography>
-        </Alert>
-        <Stack spacing={1.5}>
-          {validatedLearningSlot}
-          {/* 구버전 단일 슬롯 호환 — 새 슬롯이 없을 때만 */}
-          {!parallelEngineSlot && !validatedLearningSlot ? engineExtraSlot : null}
-        </Stack>
-      </EngineSection>
       </>
       )}
 

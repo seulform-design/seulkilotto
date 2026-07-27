@@ -1,7 +1,4 @@
-/**
- * 엔진② 평행회차 — 끝2자리 동일 회차군의 당첨 패턴.
- * 용지 역산(L1~L9)·검증학습과 별개 축. L1·③에 직접 주입(validatedLearning 아님).
- */
+/** 엔진② 평행회차 — 끝2자리 동일 회차군의 당첨 패턴. */
 import {
   Alert,
   Box,
@@ -132,19 +129,17 @@ export default function ParallelRoundPanel({
     <EngineSection
       tone="warning"
       id="engine-parallel-panel"
-      title="엔진② 평행회차 분석"
+      title={`엔진② 평행회차 · ${modeLabel} ${data?.target_round ?? targetRound ?? '?'}회`}
       collapsible
       open={open}
       onToggle={() => setOpen((v) => !v)}
       actions={query.isFetching ? <CircularProgress size={16} /> : undefined}
       chips={
         <>
-          <EngineStatusChip variant="outlined" label={modeLabel} />
           {data ? (
             <>
               <EngineStatusChip color="warning" label={data.suffix_label} />
               <EngineStatusChip variant="outlined" label={`${data.parallel_count}회`} />
-              <EngineStatusChip variant="outlined" label={`대상 ${data.target_round}회`} />
             </>
           ) : (
             <EngineStatusChip
@@ -153,11 +148,6 @@ export default function ParallelRoundPanel({
             />
           )}
         </>
-      }
-      intent={
-        data
-          ? `${modeLabel} · ${data.summary} · 고정수 힌트 ${data.semi_auto_fixed_hint.join(', ') || '—'}. 밝은 공=강수 TOP6. 주입: L1 평행가산·③ 5세트에 직접(검증학습 경로 아님).`
-          : `${modeLabel} 끝2자리 동일 회차군. 엔진② 단독 축 · L1·③ 직접 주입.`
       }
     >
       {query.isError && (

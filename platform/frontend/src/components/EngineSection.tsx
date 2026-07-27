@@ -178,20 +178,22 @@ export function EngineTabBanner({
   chips,
 }: {
   title: string;
-  intent: ReactNode;
+  intent?: ReactNode;
   chips?: ReactNode;
 }) {
   return (
     <Alert severity="info" icon={false} sx={{ py: 0.75 }}>
-      <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
+      <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: intent ? 0.25 : 0 }}>
         <Typography variant="caption" fontWeight={800}>
           {title}
         </Typography>
         {chips}
       </Stack>
-      <Typography variant="caption" component="div" color="text.secondary">
-        {intent}
-      </Typography>
+      {intent != null && intent !== false && intent !== '' ? (
+        <Typography variant="caption" component="div" color="text.secondary">
+          {intent}
+        </Typography>
+      ) : null}
     </Alert>
   );
 }

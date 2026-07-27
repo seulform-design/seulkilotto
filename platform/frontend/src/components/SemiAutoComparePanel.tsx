@@ -5469,17 +5469,9 @@ export default function SemiAutoComparePanel({
       {engineTab === 'learn' && (
       <>
       <EngineTabBanner
-        title="학습 레이어 — ①1:1·복기 · ②평행 · ③검증 · ④서버신호"
+        title={`학습 레이어 · ${intentSectionLabel} ${effectiveRound ?? '?'}회`}
         chips={
           <>
-            <EngineStatusChip
-              color={compareWinning ? 'primary' : 'secondary'}
-              label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`}
-            />
-            <EngineStatusChip
-              color={canRenderLineMatching ? 'success' : 'warning'}
-              label={canRenderLineMatching ? '1:1 축 활성' : '1:1 미적용'}
-            />
             <EngineStatusChip
               variant="outlined"
               label="① 1:1·복기"
@@ -5489,11 +5481,7 @@ export default function SemiAutoComparePanel({
               sx={{ cursor: 'pointer' }}
             />
             <EngineStatusChip
-              color={
-                learningBridgeStatus.injectRows.find((r) => r.id === '평행')?.status === 'direct'
-                  ? 'warning'
-                  : 'default'
-              }
+              variant="outlined"
               label="② 평행"
               onClick={() =>
                 document.getElementById('engine-parallel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -5501,28 +5489,21 @@ export default function SemiAutoComparePanel({
               sx={{ cursor: 'pointer' }}
             />
             <EngineStatusChip
-              color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}
-              label={`③ 검증 ${learningBridgeStatus.validatedCount}`}
+              variant="outlined"
+              label="③ 검증"
               onClick={() =>
                 document.getElementById('engine-validated')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }
               sx={{ cursor: 'pointer' }}
             />
             <EngineStatusChip
-              color={predictionSignals ? 'info' : 'default'}
-              label={predictionSignals ? '④ 서버신호' : '④ 신호 대기'}
+              variant="outlined"
+              label="④ 서버신호"
               onClick={() =>
                 document.getElementById('engine-signals')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }
               sx={{ cursor: 'pointer' }}
             />
-          </>
-        }
-        intent={
-          <>
-            <strong>① 1:1·복기</strong>(L1~L8 + L2전이 + L3역산) · <strong>② 평행</strong> ·{' '}
-            <strong>③ 검증학습</strong> · <strong>④ 서버신호(L9)</strong>.
-            대상: {intentSectionLabel} {effectiveRound ?? '?'}회.
           </>
         }
       />
@@ -5554,14 +5535,8 @@ export default function SemiAutoComparePanel({
             />
           </>
         }
-        intent={
-          <>
-            <strong>한 엔진</strong> — 용지 1:1 그래프(L1·L4~L8) + 복기↔1:1 브리지.
-            L2=<strong>순방향 전이</strong>(추천 축) · L3=<strong>사후 역산</strong>(진단·미주입).
-            평행·검증학습·서버신호만 별도 엔진.
-          </>
-        }
       >
+
       <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
         {(
           [
@@ -6388,15 +6363,9 @@ export default function SemiAutoComparePanel({
 
           <Divider textAlign="left" sx={{ my: 0.5 }}>
             <Typography variant="caption" fontWeight={800} color="text.secondary" sx={{ fontSize: 10 }}>
-              복기↔1:1 브리지 · L2 전이(순방향) · L3 역산(사후)
+              L2 전이 · L3 역산
             </Typography>
           </Divider>
-          <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
-            <Typography variant="caption">
-              L2·L3는 <strong>엔진①과 동일 축</strong>(복기 용지·당첨 × 현재 1:1 그래프)입니다.
-              별도 엔진이 아니라 <strong>순방향 전이 / 사후 역산</strong> 두 방향입니다.
-            </Typography>
-          </Alert>
           <EngineSection
             id="learn-l2"
             nested
@@ -6646,42 +6615,25 @@ export default function SemiAutoComparePanel({
       </Stack>
       </EngineSection>
 
-      {/* ── 엔진② 평행회차 (별도 축 · 패널 자체가 엔진 셸) ── */}
-      <Box id="engine-parallel">
-        <Alert severity="warning" icon={false} sx={{ py: 0.5, mb: 1 }}>
-          <Typography variant="caption">
-            <strong>엔진② 평행회차</strong> — 용지 1:1·검증학습과 별개 축.
-            L1·추천에 <strong>직접</strong> 주입(validatedLearning 아님).
-            상태:{' '}
-            {learningBridgeStatus.injectRows.find((r) => r.id === '평행')?.status === 'direct'
-              ? `직접 ${learningBridgeStatus.injectRows.find((r) => r.id === '평행')?.count ?? 0}`
-              : '신호 대기'}
-            .
-          </Typography>
-        </Alert>
-        {parallelEngineSlot}
-      </Box>
+      {/* ── 엔진② 평행회차 ── */}
+      <Box id="engine-parallel">{parallelEngineSlot}</Box>
 
-      {/* ── 엔진③ 검증학습 (다회차) ── */}
+      {/* ── 엔진③ 검증학습 ── */}
       <EngineSection
         id="engine-validated"
         tone="success"
         collapsible
         defaultOpen
-        title="엔진③ 검증학습 (다회차)"
+        title={`엔진③ 검증학습 · ${intentSectionLabel} ${effectiveRound ?? '?'}회`}
         chips={
           <>
             <EngineStatusChip
               color={learningBridgeStatus.forwardOnly ? 'secondary' : 'primary'}
-              label={learningBridgeStatus.forwardOnly ? '이번회차 forward ON' : '복기=커버리지만'}
+              label={learningBridgeStatus.forwardOnly ? 'forward ON' : '복기 커버리지'}
             />
             <EngineStatusChip
               color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}
               label={`주입 ${learningBridgeStatus.validatedCount}`}
-            />
-            <EngineStatusChip
-              variant="outlined"
-              label={`커버리지 ${learningBridgeStatus.injectRows.find((r) => r.id === '커버리지')?.count ?? 0}`}
             />
             <EngineStatusChip
               color={
@@ -6691,19 +6643,12 @@ export default function SemiAutoComparePanel({
               }
               label={
                 learningBridgeStatus.injectRows.find((r) => r.id === 'V4-B')?.status === 'on'
-                  ? 'V4-B fallback'
+                  ? 'V4-B'
                   : learningBridgeStatus.injectRows.find((r) => r.id === 'V4-A')?.status === 'on'
-                    ? 'V4-A 서버'
-                    : 'V4 대기'
+                    ? 'V4-A'
+                    : 'V4 —'
               }
             />
-          </>
-        }
-        intent={
-          <>
-            V1 Feature · V2 Pattern · V3 다회차 지지 · V4 줄겹침(서버→클라 fallback).
-            평탄·미채택은 미주입. 복기 탭은 forward OFF(커버리지만). →{' '}
-            {learningBridgeStatus.destinations.join(' / ')}.
           </>
         }
       >
@@ -6726,43 +6671,24 @@ export default function SemiAutoComparePanel({
             />
           ))}
         </Stack>
-        <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 1 }}>
-          <Typography variant="caption">
-            L5「강한 패턴」= 이번 회차 1:1 · V2 Pattern Mining= 다회차 검증(별개).
-            L7「세트중복」= 현재 매치그룹 · V4 줄겹침= 다회차/복기 당첨일치(별개).
-          </Typography>
-        </Alert>
         <Stack spacing={1.5}>
           {validatedLearningSlot}
-          {/* 구버전 단일 슬롯 호환 — 새 슬롯이 없을 때만 */}
           {!parallelEngineSlot && !validatedLearningSlot ? engineExtraSlot : null}
         </Stack>
       </EngineSection>
 
       {/* ── 엔진④ 서버 통합신호 (L9) ── */}
-      <Box id="engine-signals">
-        <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 1 }}>
-          <Typography variant="caption">
-            <strong>엔진④ 서버 통합신호 (L9)</strong> — FE 1:1·검증학습과 별축.
-            추첨기·후속·클래식·용지·평행·gap 가중. <strong>③ 추천 점수에는 미주입</strong>(표시·예보 폴백).
-          </Typography>
-        </Alert>
-      {/* L9. 통합 예측 신호 (+ 신호원 적중률 = L9 메타, 복기 API 전용) */}
       <EngineSection
-        id="learn-l9"
+        id="engine-signals"
         tone="info"
         collapsible
         defaultOpen={false}
-        title={`엔진④ L9. 통합 예측 신호 (규칙 v${predictionSignals?.rules_version ?? '…'})`}
+        title={`엔진④ 서버 통합신호 · ${intentSectionLabel} ${predictionSignals?.target_round ?? effectiveRound ?? '?'}회`}
         chips={
           <>
             <EngineStatusChip
               color={predictionSignals ? 'success' : 'default'}
-              label={predictionSignals ? '신호 ON' : '로딩/대기'}
-            />
-            <EngineStatusChip
-              color={compareWinning ? 'primary' : 'secondary'}
-              label={`${intentSectionLabel} ${predictionSignals?.target_round ?? effectiveRound ?? '?'}회`}
+              label={predictionSignals ? `L9 v${predictionSignals.rules_version ?? '…'}` : 'L9 대기'}
             />
             <EngineStatusChip
               variant="outlined"
@@ -6776,17 +6702,11 @@ export default function SemiAutoComparePanel({
               <EngineStatusChip color="primary" label="밝은 공=당첨 · 회색=비당첨" />
             )}
             {predictionSignals?.signal_accuracy?.available && (
-              <EngineStatusChip color="warning" label="신호원 적중률 포함" />
+              <EngineStatusChip color="warning" label="신호원 적중률" />
             )}
           </>
         }
         actions={predictionSignalsQuery.isFetching ? <CircularProgress size={16} /> : undefined}
-        intent={
-          <>
-            A 강한후보 · B 등급순위 · C 신호원 적중률(복기 walk-forward, L9 가중 참고).
-            추첨기+후속+클래식+용지+평행+구간gap 가중 합산. 대상 회차·호기=탭과 동일.
-          </>
-        }
       >
         <Stack spacing={1.25}>
         {resolvedStrongCandidates.length > 0 && (
@@ -6944,8 +6864,6 @@ export default function SemiAutoComparePanel({
         )}
         </Stack>
       </EngineSection>
-
-      </Box>
 
       </>
       )}

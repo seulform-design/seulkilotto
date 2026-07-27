@@ -363,14 +363,17 @@ def get_accumulated():
 
 
 @router.get("/round-learning")
-def get_round_learning():
-    """다회차 학습 — 보관된 과거 회차 용지 + 실제 당첨번호로 지지-적중 캘리브레이션.
+def get_round_learning(
+    apply_intent: str = Query("current_round", pattern="^(review|current_round)$"),
+):
+    """다회차 학습 — 보관 회차로 캘리브레이션 후 탭별 용지에 적용.
 
-    보관 용지는 추첨 전 등록분이라 예측 누수가 없다. 학습 결과를 이번회차 용지에 적용.
+    apply_intent=current_round → 이번회차 예상 후보.
+    apply_intent=review → 복기 용지 소급 채점.
     """
     from ..video_analysis.round_learning import build_round_learning
 
-    return to_jsonable(build_round_learning())
+    return to_jsonable(build_round_learning(apply_intent=apply_intent))
 
 
 @router.get("/review-verification")
@@ -385,40 +388,35 @@ def get_review_verification():
 
 
 @router.get("/overlap-learning")
-def get_overlap_learning():
-    """줄겹침(2·3·4번호) 패턴 역산 학습 — 보관 회차 겹침 조합 vs 실제 당첨 대조.
-
-    회차가 쌓이면 호출 시마다 전체 보관 배치를 재집계하므로 자동으로 표본이 늘어난다.
-    """
+def get_overlap_learning(
+    apply_intent: str = Query("current_round", pattern="^(review|current_round)$"),
+):
+    """줄겹침 패턴 역산 학습 — 보관 회차 학습 후 탭별 용지에 적용."""
     from ..video_analysis.overlap_learning import build_overlap_learning
 
-    return to_jsonable(build_overlap_learning())
+    return to_jsonable(build_overlap_learning(apply_intent=apply_intent))
 
 
 @router.get("/feature-learning")
-def get_feature_learning(seed: int = Query(42, ge=0, le=999_999)):
-    """복기 Feature 자동 생성·검증·학습 엔진.
-
-    보관 회차(추첨 전 용지)만으로 Feature Dataset 구축 → Walk-Forward/Bootstrap/
-    Permutation/Monte Carlo/Time-Split 검증 → Random 대비 통과 Feature 만 채택 →
-    앙상블 실험 → 추천 시 Feature 기여도 출력.
-    """
+def get_feature_learning(
+    seed: int = Query(42, ge=0, le=999_999),
+    apply_intent: str = Query("current_round", pattern="^(review|current_round)$"),
+):
+    """Feature 학습 — 보관 회차로 검증 후 탭별 용지에 추천 적용."""
     from ..video_analysis.feature_learning_engine import build_feature_learning
 
-    return to_jsonable(build_feature_learning(seed=seed))
+    return to_jsonable(build_feature_learning(seed=seed, apply_intent=apply_intent))
 
 
 @router.get("/pattern-mining")
-def get_pattern_mining(seed: int = Query(42, ge=0, le=999_999)):
-    """복기 Pattern Mining · Validation · Cluster · 설명가능 추천.
-
-    자동/반자동/매치카드/강한후보/구조(거리·구간·배치)를 전수 학습해 Pattern 을
-    자동 생성하고, Walk-Forward/Rolling/Time-Split/Backtest 로 검증한 뒤
-    통과 Pattern 만 추천·근거에 반영한다. 호출 시마다 전체 재탐색(자동 학습).
-    """
+def get_pattern_mining(
+    seed: int = Query(42, ge=0, le=999_999),
+    apply_intent: str = Query("current_round", pattern="^(review|current_round)$"),
+):
+    """Pattern Mining — 보관 회차 학습 후 탭별 용지에 추천 적용."""
     from ..video_analysis.pattern_mining_engine import build_pattern_mining
 
-    return to_jsonable(build_pattern_mining(seed=seed))
+    return to_jsonable(build_pattern_mining(seed=seed, apply_intent=apply_intent))
 
 
 @router.get("/carryover-learning")

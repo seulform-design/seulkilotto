@@ -819,8 +819,8 @@ def recommend_from_patterns(
 # Public pipeline
 # ---------------------------------------------------------------------------
 
-def build_pattern_mining(seed: int = 42) -> Dict[str, Any]:
-    from .store import _load_current_raw, _manual_saved_lines
+def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") -> Dict[str, Any]:
+    from .store import _load_apply_sheet
     from .draw_template import get_current_round_no
 
     rounds = collect_rounds()
@@ -843,13 +843,12 @@ def build_pattern_mining(seed: int = 42) -> Dict[str, Any]:
     feat_sel = select_features(rounds, adopted, clusters)
     kept = feat_sel.get("kept") or []
 
-    # Current sheet for recommendation
-    current = _load_current_raw()
-    cur_entries = list(current.get("entries") or [])
-    cur_auto = _manual_saved_lines(cur_entries, "자동", include_photo=True)
-    cur_semi = _manual_saved_lines(cur_entries, "반자동", include_photo=True)
-    source = "current_round"
-    if not cur_auto and not cur_semi:
+    # 탭별 적용 용지
+    apply = _load_apply_sheet(apply_intent)
+    cur_auto = list(apply.get("auto_lines") or [])
+    cur_semi = list(apply.get("semi_lines") or [])
+    source = str(apply.get("source") or apply_intent)
+    if apply.get("apply_intent") == "current_round" and not cur_auto and not cur_semi:
         last = rounds[-1]
         cur_auto, cur_semi = last.auto_lines, last.semi_lines
         source = f"archived_demo_{last.round_no}"
@@ -887,7 +886,10 @@ def build_pattern_mining(seed: int = 42) -> Dict[str, Any]:
     return {
         "ok": True,
         "round_count": len(rounds),
-        "current_round_no": int(get_current_round_no()),
+        "current_round_no": int(apply.get("round_no") or get_current_round_no()),
+        "apply_intent": apply.get("apply_intent"),
+        "apply_label": apply.get("label"),
+        "apply_source": apply.get("source"),
         "dataset": {
             "rounds": [
                 {

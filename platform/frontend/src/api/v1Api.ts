@@ -564,30 +564,50 @@ export const v1Api = {
     fetchJson<PhotoAnalysisAccumulated>('/api/v1/photo-analysis/accumulated'),
 
   /** 다회차 학습 — 보관 회차 용지 + 실제 당첨으로 지지-적중 캘리브레이션. */
-  getRoundLearning: () =>
-    fetchJson<RoundLearningResponse>('/api/v1/photo-analysis/round-learning', { timeoutMs: 60_000 }),
+  getRoundLearning: (opts?: { applyIntent?: 'review' | 'current_round' }) => {
+    const q = new URLSearchParams();
+    if (opts?.applyIntent) q.set('apply_intent', opts.applyIntent);
+    const qs = q.toString();
+    return fetchJson<RoundLearningResponse>(
+      `/api/v1/photo-analysis/round-learning${qs ? `?${qs}` : ''}`,
+      { timeoutMs: 60_000 },
+    );
+  },
 
   /** 복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였나 + 커버리지 곡선. */
   getReviewVerification: () =>
     fetchJson<ReviewVerificationResponse>('/api/v1/photo-analysis/review-verification', { timeoutMs: 90_000 }),
 
   /** 줄겹침(2·3·4번호) 패턴 역산 학습 — 보관 회차 겹침 조합 vs 실제 당첨. */
-  getOverlapLearning: () =>
-    fetchJson<OverlapLearningResponse>('/api/v1/photo-analysis/overlap-learning', { timeoutMs: 90_000 }),
+  getOverlapLearning: (opts?: { applyIntent?: 'review' | 'current_round' }) => {
+    const q = new URLSearchParams();
+    if (opts?.applyIntent) q.set('apply_intent', opts.applyIntent);
+    const qs = q.toString();
+    return fetchJson<OverlapLearningResponse>(
+      `/api/v1/photo-analysis/overlap-learning${qs ? `?${qs}` : ''}`,
+      { timeoutMs: 90_000 },
+    );
+  },
 
   /** 복기 Feature 자동 생성·검증·학습 — WF/Bootstrap/Permutation/MC + 기여도 추천. */
-  getFeatureLearning: (seed = 42) =>
-    fetchJson<FeatureLearningResponse>(
-      `/api/v1/photo-analysis/feature-learning?seed=${seed}`,
+  getFeatureLearning: (seed = 42, opts?: { applyIntent?: 'review' | 'current_round' }) => {
+    const q = new URLSearchParams({ seed: String(seed) });
+    if (opts?.applyIntent) q.set('apply_intent', opts.applyIntent);
+    return fetchJson<FeatureLearningResponse>(
+      `/api/v1/photo-analysis/feature-learning?${q.toString()}`,
       { timeoutMs: 180_000 },
-    ),
+    );
+  },
 
   /** 복기 Pattern Mining — 전수 학습·검증·Cluster·설명가능 추천. */
-  getPatternMining: (seed = 42) =>
-    fetchJson<PatternMiningResponse>(
-      `/api/v1/photo-analysis/pattern-mining?seed=${seed}`,
+  getPatternMining: (seed = 42, opts?: { applyIntent?: 'review' | 'current_round' }) => {
+    const q = new URLSearchParams({ seed: String(seed) });
+    if (opts?.applyIntent) q.set('apply_intent', opts.applyIntent);
+    return fetchJson<PatternMiningResponse>(
+      `/api/v1/photo-analysis/pattern-mining?${q.toString()}`,
       { timeoutMs: 180_000 },
-    ),
+    );
+  },
 
   /** 복기 이월(carryover) 역산 — '강수 미당첨 → 다음 회차 당첨' 검증 + 이번회차 이월 후보. */
   getCarryoverLearning: (seed = 42) =>
@@ -1157,6 +1177,9 @@ export interface OverlapLearningResponse {
   by_size?: { size: number; combos: number; mean_overlap: number; expected: number; lift_vs_chance: number; fully_winning: number }[];
   by_lift_bucket?: { size: number; bucket: string; combos: number; mean_overlap: number; expected: number; lift_vs_chance: number }[];
   current_round_no?: number;
+  apply_intent?: 'review' | 'current_round';
+  apply_label?: string;
+  apply_source?: string;
   current_combo_count?: number;
   current_scores?: { number: number; score: number; combo_support: number }[];
   calibration_flat?: boolean;
@@ -1389,6 +1412,9 @@ export interface RoundLearningResponse {
     lift: number;
   }[];
   current_round_no?: number;
+  apply_intent?: 'review' | 'current_round';
+  apply_label?: string;
+  apply_source?: string;
   /** 이번회차가 한쪽(자동만/반자동만)만 등록된 상태인지 — 양쪽 지지가 0이 되는 사유. */
   current_one_sided?: boolean;
   current_auto_lines?: number;

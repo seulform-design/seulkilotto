@@ -1414,14 +1414,14 @@ export default function SemiAutoComparePanel({
   // ✅ 복기 학습 패널(Feature/Round/Overlap/ReviewVerification) → 예상·추천에 반영.
   // 검증 통과·기준선 이상만 validatedLearning 으로 주입한다.
   const featureLearningQuery = useQuery({
-    queryKey: ['v1-photo-feature-learning', 'semi-auto'],
-    queryFn: () => v1Api.getFeatureLearning(42),
+    queryKey: ['v1-photo-feature-learning', 'current_round', 'semi-auto'],
+    queryFn: () => v1Api.getFeatureLearning(42, { applyIntent: 'current_round' }),
     staleTime: 300_000,
     retry: 1,
   });
   const roundLearningQuery = useQuery({
-    queryKey: ['v1-photo-round-learning', 'semi-auto'],
-    queryFn: v1Api.getRoundLearning,
+    queryKey: ['v1-photo-round-learning', 'current_round', 'semi-auto'],
+    queryFn: () => v1Api.getRoundLearning({ applyIntent: 'current_round' }),
     staleTime: 300_000,
     retry: 1,
   });
@@ -1432,15 +1432,15 @@ export default function SemiAutoComparePanel({
     retry: 1,
   });
   const overlapLearningQuery = useQuery({
-    // V4-A 패널과 동일 키 — 캐시 공유
-    queryKey: ['v1-photo-overlap-learning'],
-    queryFn: v1Api.getOverlapLearning,
+    // 주입은 항상 이번회차 적용 — 복기 탭 패널 캐시와 분리
+    queryKey: ['v1-photo-overlap-learning', 'current_round', 'semi-auto'],
+    queryFn: () => v1Api.getOverlapLearning({ applyIntent: 'current_round' }),
     staleTime: 300_000,
     retry: 1,
   });
   const patternMiningQuery = useQuery({
-    queryKey: ['v1-photo-pattern-mining', 'semi-auto'],
-    queryFn: () => v1Api.getPatternMining(42),
+    queryKey: ['v1-photo-pattern-mining', 'current_round', 'semi-auto'],
+    queryFn: () => v1Api.getPatternMining(42, { applyIntent: 'current_round' }),
     staleTime: 300_000,
     retry: 1,
   });

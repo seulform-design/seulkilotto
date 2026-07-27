@@ -1809,12 +1809,13 @@ export default function PhotoAnalysisPage() {
         }
         validatedLearningSlot={
           <Stack spacing={1.5}>
-            <FeatureLearningPanel />
-            <PatternMiningPanel />
-            <RoundLearningPanel />
-            <OverlapLearningServerPanel />
+            <FeatureLearningPanel sheetIntent={activeTab} />
+            <PatternMiningPanel sheetIntent={activeTab} />
+            <RoundLearningPanel sheetIntent={activeTab} />
+            <OverlapLearningServerPanel sheetIntent={activeTab} />
             <OverlapPatternLearnPanel
               accumulated={accumulated}
+              sheetIntent={activeTab}
               modeLabel={activeTab === 'review' ? '복기' : '이번회차'}
             />
           </Stack>

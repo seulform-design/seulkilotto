@@ -23,14 +23,19 @@ import { v1Api, type PatternMiningResponse } from '../api/v1Api';
  * 복기 Pattern Mining 엔진 UI.
  * 검증 통과 Pattern · Cluster · Feature · 설명가능 추천을 표시한다.
  */
-export default function PatternMiningPanel() {
+export default function PatternMiningPanel({
+  sheetIntent = 'current_round',
+}: {
+  sheetIntent?: 'review' | 'current_round';
+}) {
+
   const [open, setOpen] = useState(false);
   const [showRejected, setShowRejected] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const q = useQuery({
-    queryKey: ['v1-photo-pattern-mining'],
-    queryFn: () => v1Api.getPatternMining(42),
+    queryKey: ['v1-photo-pattern-mining', sheetIntent],
+    queryFn: () => v1Api.getPatternMining(42, { applyIntent: sheetIntent }),
     staleTime: 300_000,
     retry: 1,
   });
@@ -255,11 +260,19 @@ export default function PatternMiningPanel() {
 
       {/* Recommendation */}
       <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
-        설명가능 추천{rec?.source && rec.source !== 'current_round' ? ` (${rec.source})` : ''}
+        설명가능 추천 · {sheetIntent === 'review' ? '복기 소급' : '이번회차 예상'}
+        {rec?.source && rec.source !== 'current_round' && rec.source !== 'review_saved' && rec.source !== 'archived'
+          ? ` (${rec.source})`
+          : ''}
       </Typography>
       {!rec?.ok ? (
         <Alert severity="info" sx={{ py: 0.5 }}>
-          <Typography variant="caption">{rec?.reason ?? '추천 없음'}</Typography>
+          <Typography variant="caption">
+            {rec?.reason ??
+              (sheetIntent === 'review'
+                ? '복기 용지가 없어 소급 추천을 만들 수 없습니다.'
+                : '이번회차 용지가 없어 예상 추천을 만들 수 없습니다.')}
+          </Typography>
         </Alert>
       ) : (
         <>

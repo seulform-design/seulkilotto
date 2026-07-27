@@ -249,9 +249,9 @@ def _compare_signals_across_rounds(
 _SIG_CMP_LABELS = {"support": "양쪽 지지(반복 빈도)", "combo_strength": "조합 강도(반복줄×lift)"}
 
 
-def build_overlap_learning() -> Dict[str, Any]:
+def build_overlap_learning(apply_intent: str = "current_round") -> Dict[str, Any]:
     """보관된 모든 회차의 겹침 조합을 실제 당첨과 대조해 누적 학습."""
-    from .store import _load_historical_raw, _load_current_raw, _manual_saved_lines
+    from .store import _load_historical_raw, _load_apply_sheet, _manual_saved_lines
     from ..database import load_history
     from .draw_template import get_current_round_no
 
@@ -333,10 +333,9 @@ def build_overlap_learning() -> Dict[str, Any]:
         (b["size"], b["bucket"]): b["lift_vs_chance"] for b in learned["by_lift_bucket"]
     }
 
-    # ── 이번회차 적용 — 학습된 (크기, lift구간) 가중치로 겹침 조합을 채점 ──
-    current = _load_current_raw()
-    cur_entries = list(current.get("entries") or [])
-    cur_auto = _manual_saved_lines(cur_entries, "자동", include_photo=True)
+    # ── 탭별 적용 — 학습된 (크기, lift구간) 가중치로 겹침 조합을 채점 ──
+    apply = _load_apply_sheet(apply_intent)
+    cur_auto = list(apply.get("auto_lines") or [])
     cur_combos = _combos_for_lines(cur_auto, "cur")
     number_score: Dict[int, float] = {}
     number_support: Dict[int, int] = {}
@@ -382,7 +381,10 @@ def build_overlap_learning() -> Dict[str, Any]:
         "by_size": learned["by_size"],
         "by_lift_bucket": learned["by_lift_bucket"],
         "total_combos": len(all_records),
-        "current_round_no": int(get_current_round_no()),
+        "current_round_no": int(apply.get("round_no") or get_current_round_no()),
+        "apply_intent": apply.get("apply_intent"),
+        "apply_label": apply.get("label"),
+        "apply_source": apply.get("source"),
         "current_combo_count": len(cur_combos),
         "current_scores": current_scores,
         "calibration_flat": flat,

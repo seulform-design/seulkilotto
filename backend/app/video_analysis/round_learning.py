@@ -78,9 +78,9 @@ def _number_support(auto_lines: List[List[int]], semi_lines: List[List[int]]) ->
     return out
 
 
-def build_round_learning() -> Dict[str, Any]:
-    """보관된 모든 과거 회차로 지지-적중 캘리브레이션을 만들고 이번회차에 적용."""
-    from .store import _load_historical_raw, _load_current_raw, _manual_saved_lines
+def build_round_learning(apply_intent: str = "current_round") -> Dict[str, Any]:
+    """보관된 모든 과거 회차로 지지-적중 캘리브레이션을 만들고 탭별 용지에 적용."""
+    from .store import _load_historical_raw, _load_apply_sheet, _manual_saved_lines
     from .draw_template import get_current_round_no
 
     historical = _load_historical_raw()
@@ -169,15 +169,14 @@ def build_round_learning() -> Dict[str, Any]:
             }
         )
 
-    # 이번회차 적용 — 현재 샌드박스 용지의 지지 구간에 학습 lift 를 곱해 점수화.
-    current = _load_current_raw()
-    cur_entries = list(current.get("entries") or [])
-    cur_auto = _manual_saved_lines(cur_entries, "자동", include_photo=True)
-    cur_semi = _manual_saved_lines(cur_entries, "반자동", include_photo=True)
+    # 탭별 적용 — 복기=소급, 이번회차=예상.
+    apply = _load_apply_sheet(apply_intent)
+    cur_auto = list(apply.get("auto_lines") or [])
+    cur_semi = list(apply.get("semi_lines") or [])
     lift_of = {c["bucket"]: c["lift"] for c in calibration}
     current_scores: List[Dict[str, Any]] = []
     # 한쪽(자동만/반자동만)만 등록하면 support=min(auto,semi)=0 이라 전 번호가 걸러져
-    # '이번회차 용지 없음' 이라는 **거짓 안내**가 떴다. 등장 자체가 있으면 포함한다.
+    # '용지 없음' 이라는 **거짓 안내**가 떴다. 등장 자체가 있으면 포함한다.
     one_sided = bool(cur_auto) != bool(cur_semi)
     if cur_auto or cur_semi:
         cur_sup = _number_support(cur_auto, cur_semi)
@@ -213,9 +212,12 @@ def build_round_learning() -> Dict[str, Any]:
         "round_count": len(rounds_out),
         "rounds": sorted(rounds_out, key=lambda r: -r["round_no"]),
         "calibration": calibration,
-        "current_round_no": int(get_current_round_no()),
+        "current_round_no": int(apply.get("round_no") or get_current_round_no()),
+        "apply_intent": apply.get("apply_intent"),
+        "apply_label": apply.get("label"),
+        "apply_source": apply.get("source"),
         "current_scores": current_scores,
-        # 이번회차가 한쪽(자동만/반자동만)만 등록된 상태인지 — 양쪽 지지 지표가
+        # 적용 탭이 한쪽(자동만/반자동만)만 등록된 상태인지 — 양쪽 지지 지표가
         # 0 이 되므로 UI 가 '데이터 없음' 대신 정확한 사유를 안내해야 한다.
         "current_one_sided": one_sided,
         "current_auto_lines": len(cur_auto),

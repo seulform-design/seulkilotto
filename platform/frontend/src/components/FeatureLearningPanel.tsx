@@ -23,14 +23,19 @@ import { v1Api, type FeatureLearningFeatureReport } from '../api/v1Api';
  * 복기 Feature 자동 생성·검증·학습 패널.
  * 검증 통과 Feature 만 추천에 쓰고, Random 대비 지표·기여도를 함께 표시한다.
  */
-export default function FeatureLearningPanel() {
+export default function FeatureLearningPanel({
+  sheetIntent = 'current_round',
+}: {
+  sheetIntent?: 'review' | 'current_round';
+}) {
+
   const [open, setOpen] = useState(false);
   const [showRejected, setShowRejected] = useState(false);
   const [expandedNumber, setExpandedNumber] = useState<number | null>(null);
 
   const q = useQuery({
-    queryKey: ['v1-photo-feature-learning'],
-    queryFn: () => v1Api.getFeatureLearning(42),
+    queryKey: ['v1-photo-feature-learning', sheetIntent],
+    queryFn: () => v1Api.getFeatureLearning(42, { applyIntent: sheetIntent }),
     staleTime: 300_000,
     retry: 1,
   });
@@ -246,11 +251,19 @@ export default function FeatureLearningPanel() {
       {/* 추천 + 기여도 */}
       <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
         검증 Feature 기반 번호 점수 · 기여도
-        {rec?.source && rec.source !== 'current_round' ? ` (${rec.source})` : ''}
+        {` · ${sheetIntent === 'review' ? '복기 소급' : '이번회차 예상'}`}
+        {rec?.source && rec.source !== 'current_round' && rec.source !== 'review_saved' && rec.source !== 'archived'
+          ? ` (${rec.source})`
+          : ''}
       </Typography>
       {!rec?.ok ? (
         <Alert severity="info" sx={{ py: 0.5 }}>
-          <Typography variant="caption">{rec?.reason ?? '추천 없음'}</Typography>
+          <Typography variant="caption">
+            {rec?.reason ??
+              (sheetIntent === 'review'
+                ? '복기 용지가 없어 소급 추천을 만들 수 없습니다.'
+                : '이번회차 용지가 없어 예상 추천을 만들 수 없습니다.')}
+          </Typography>
         </Alert>
       ) : (
         <>

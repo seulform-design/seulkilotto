@@ -31,10 +31,12 @@ const DIR_ARROW: Record<Discriminator['dir'], string> = { higher: '▲ 높음', 
 
 export default function OverlapPatternLearnPanel({
   accumulated,
+  sheetIntent = 'current_round',
   modeLabel = '학습',
   injectHint,
 }: {
   accumulated: PhotoAnalysisAccumulated | null;
+  sheetIntent?: 'review' | 'current_round';
   /** 복기/이번회차 탭 라벨 — 표시용 */
   modeLabel?: string;
   /** 상위(SemiAuto)에서 계산한 주입 상태 한 줄 */
@@ -43,10 +45,12 @@ export default function OverlapPatternLearnPanel({
   const [open, setOpen] = useState(false);
   const review = accumulated?.by_intent?.review ?? null;
   const current = accumulated?.by_intent?.current_round ?? null;
+  const applySlice = sheetIntent === 'review' ? review : current;
 
   const winningNumbers = review?.draw_template?.winning_numbers ?? null;
   const reviewRound = review?.draw_template?.ticket_round ?? review?.ticket_round ?? null;
-  const currentRound = current?.ticket_round ?? null;
+  const applyRound =
+    applySlice?.draw_template?.ticket_round ?? applySlice?.ticket_round ?? null;
 
   const profile = useMemo(
     () => learnOverlapProfile(review?.accumulated_combo_patterns ?? null, winningNumbers),
@@ -54,8 +58,8 @@ export default function OverlapPatternLearnPanel({
   );
 
   const ranked = useMemo(
-    () => rankCurrentByProfile(current?.accumulated_combo_patterns ?? null, profile),
-    [current?.accumulated_combo_patterns, profile]
+    () => rankCurrentByProfile(applySlice?.accumulated_combo_patterns ?? null, profile),
+    [applySlice?.accumulated_combo_patterns, profile]
   );
 
   const hasSample = Boolean(review && profile.totalCombos > 0 && winningNumbers?.length);
@@ -87,16 +91,16 @@ export default function OverlapPatternLearnPanel({
           {reviewRound != null && (
             <EngineStatusChip variant="outlined" label={`학습 ${reviewRound}회`} />
           )}
-          {currentRound != null && (
-            <EngineStatusChip variant="outlined" label={`적용 ${currentRound}회`} />
+          {applyRound != null && (
+            <EngineStatusChip variant="outlined" label={`적용 ${applyRound}회`} />
           )}
         </>
       }
       intent={
         <>
-          복기 줄겹침(2·3·4)의 <strong>완전·부분 당첨일치</strong> 구조를 역산해 이번회차를 채점합니다.
-          V4-A 서버가 살아 있으면 그쪽이 우선이고, <strong>평탄/부재일 때만</strong> 이 프로파일이
-          약한 fallback 주입을 합니다. 엔진① L7(현재 1:1 세트)과 축이 다릅니다.
+          복기 줄겹침(2·3·4)의 <strong>완전·부분 당첨일치</strong> 구조를 학습합니다.
+          적용은 탭별 — 복기=<strong>소급</strong>, 이번회차=<strong>예상</strong>.
+          V4-A가 살아 있으면 우선, <strong>평탄/부재일 때만</strong> fallback.
           {injectHint ? <> · {injectHint}</> : null}
         </>
       }
@@ -156,7 +160,7 @@ export default function OverlapPatternLearnPanel({
 
           <EngineSubBlock
             tone="warning"
-            title="C. 이번회차 적용 후보"
+            title={sheetIntent === 'review' ? 'C. 복기 소급 적용' : 'C. 이번회차 예상 후보'}
             chips={
               <EngineStatusChip
                 variant="outlined"
@@ -192,7 +196,9 @@ export default function OverlapPatternLearnPanel({
             ) : (
               <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
                 {profile.win
-                  ? '이번회차 겹침 조합이 없습니다. 이번회차 자동 용지(2줄+)를 등록하면 채점됩니다.'
+                  ? sheetIntent === 'review'
+                    ? '복기 겹침 조합이 없습니다. 복기 자동 용지(2줄+)를 등록하면 소급 채점됩니다.'
+                    : '이번회차 겹침 조합이 없습니다. 이번회차 자동 용지(2줄+)를 등록하면 채점됩니다.'
                   : '양성 표본이 없어 프로파일을 못 만들었습니다. 회차·줄이 쌓이면 채점됩니다.'}
               </Typography>
             )}

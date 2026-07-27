@@ -16,11 +16,16 @@ import { v1Api } from '../api/v1Api';
  * ⚠️ 로또는 균등 무작위 → 기대상 구간별 적중률은 평탄(≈13.3%)하다. 이 패널의 값어치는
  * 신호가 있다고 우기는 게 아니라 내 용지 구조의 예측력을 정직하게 측정하는 데 있다.
  */
-export default function RoundLearningPanel() {
+export default function RoundLearningPanel({
+  sheetIntent = 'current_round',
+}: {
+  sheetIntent?: 'review' | 'current_round';
+}) {
+
   const [open, setOpen] = useState(false);
   const q = useQuery({
-    queryKey: ['v1-photo-round-learning'],
-    queryFn: v1Api.getRoundLearning,
+    queryKey: ['v1-photo-round-learning', sheetIntent],
+    queryFn: () => v1Api.getRoundLearning({ applyIntent: sheetIntent }),
     staleTime: 300_000,
     retry: 1,
   });
@@ -95,8 +100,8 @@ export default function RoundLearningPanel() {
       }
       intent={
         <>
-          추첨 <strong>전</strong> 등록 보관 용지만 사용(누수 없음). 양쪽 지지(자동∩반자동) 구간별 적중을
-          측정해 이번회차에 적용합니다. <strong>평탄·lift&lt;1.05는 점수 미주입</strong>.
+          추첨 <strong>전</strong> 등록 보관 용지만 학습(누수 없음). 적용은 탭별 —
+          복기=<strong>소급</strong>, 이번회차=<strong>예상</strong>. <strong>평탄·lift&lt;1.05는 점수 미주입</strong>.
         </>
       }
     >
@@ -185,12 +190,15 @@ export default function RoundLearningPanel() {
 
         <EngineSubBlock
           tone="warning"
-          title={`C. ${d.current_round_no ?? '?'}회 이번회차 적용`}
+          title={`C. ${d.current_round_no ?? '?'}회 ${d.apply_label ?? (sheetIntent === 'review' ? '복기' : '이번회차')} ${sheetIntent === 'review' ? '소급' : '예상'} 적용`}
           chips={
-            <EngineStatusChip
-              variant="outlined"
-              label={scores.length > 0 ? `${scores.length}개 · 주입게이트 lift≥1.05` : '적용 없음'}
-            />
+            <>
+              <EngineStatusChip variant="outlined" label={sheetIntent === 'review' ? '복기 탭' : '이번회차 탭'} />
+              <EngineStatusChip
+                variant="outlined"
+                label={scores.length > 0 ? `${scores.length}개 · 주입게이트 lift≥1.05` : '적용 없음'}
+              />
+            </>
           }
         >
           {scores.length > 0 ? (
@@ -224,14 +232,16 @@ export default function RoundLearningPanel() {
             <Alert severity="info" sx={{ py: 0.25 }}>
               {(d.current_auto_lines ?? 0) + (d.current_semi_lines ?? 0) > 0 ? (
                 <>
-                  이번회차 용지는 등록돼 있으나(자동 {d.current_auto_lines ?? 0}줄 · 반자동{' '}
+                  {sheetIntent === 'review' ? '복기' : '이번회차'} 용지는 등록돼 있으나(자동 {d.current_auto_lines ?? 0}줄 · 반자동{' '}
                   {d.current_semi_lines ?? 0}줄) 학습 점수를 낼 수 없습니다.
                   {d.current_one_sided
                     ? ' 한쪽만 등록돼 양쪽 지지가 0입니다 — 나머지 한쪽도 등록하세요.'
                     : ''}
                 </>
               ) : (
-                '이번회차 용지가 없어 적용 대상이 없습니다.'
+                sheetIntent === 'review'
+                  ? '복기 용지가 없어 소급 적용 대상이 없습니다. 복기 탭에 자동·반자동 용지를 등록하세요.'
+                  : '이번회차 용지가 없어 예상 적용 대상이 없습니다. 이번회차 탭에 용지를 등록하세요.'
               )}
             </Alert>
           )}

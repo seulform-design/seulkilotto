@@ -9,11 +9,16 @@ import LottoBall from './LottoBall';
 import { ENGINE_BALL, EngineSection, EngineStatusChip, EngineSubBlock } from './EngineSection';
 import { v1Api } from '../api/v1Api';
 
-export default function OverlapLearningServerPanel() {
+export default function OverlapLearningServerPanel({
+  sheetIntent = 'current_round',
+}: {
+  sheetIntent?: 'review' | 'current_round';
+}) {
+
   const [open, setOpen] = useState(false);
   const q = useQuery({
-    queryKey: ['v1-photo-overlap-learning'],
-    queryFn: v1Api.getOverlapLearning,
+    queryKey: ['v1-photo-overlap-learning', sheetIntent],
+    queryFn: () => v1Api.getOverlapLearning({ applyIntent: sheetIntent }),
     staleTime: 300_000,
     retry: 1,
   });
@@ -126,9 +131,12 @@ export default function OverlapLearningServerPanel() {
 
         <EngineSubBlock
           tone="warning"
-          title={`C. ${d.current_round_no ?? '?'}회 적용`}
+          title={`C. ${d.current_round_no ?? '?'}회 ${d.apply_label ?? (sheetIntent === 'review' ? '복기' : '이번회차')} ${sheetIntent === 'review' ? '소급' : '예상'} 적용`}
           chips={
-            <EngineStatusChip variant="outlined" label={flat ? '평탄 게이트' : `${scores.length}개`} />
+            <>
+              <EngineStatusChip variant="outlined" label={sheetIntent === 'review' ? '복기 탭' : '이번회차 탭'} />
+              <EngineStatusChip variant="outlined" label={flat ? '평탄 게이트' : `${scores.length}개`} />
+            </>
           }
         >
           {scores.length > 0 ? (
@@ -145,7 +153,9 @@ export default function OverlapLearningServerPanel() {
             </Stack>
           ) : (
             <Alert severity="info" sx={{ py: 0.25 }}>
-              이번회차 겹침 조합이 없어 적용 대상이 없습니다(자동 용지 2줄 이상 필요).
+              {sheetIntent === 'review'
+                ? '복기 겹침 조합이 없어 소급 적용 대상이 없습니다(자동 용지 2줄 이상 필요).'
+                : '이번회차 겹침 조합이 없어 예상 적용 대상이 없습니다(자동 용지 2줄 이상 필요).'}
             </Alert>
           )}
         </EngineSubBlock>

@@ -449,6 +449,58 @@ def _load_current_raw() -> Dict[str, Any]:
     return data
 
 
+def _load_apply_sheet(apply_intent: str = "current_round") -> Dict[str, Any]:
+    """탭별 **적용** 대상 용지(자동/반자동 줄). 학습 표본(archived)과 별개.
+
+    - current_round: 이번회차 샌드박스 → 예상 후보
+    - review: 복기 회차 용지(보관 정본 우선, 없으면 review_saved) → 소급 채점
+    """
+    from .draw_template import get_current_round_no, get_review_round_no
+
+    intent = "review" if str(apply_intent) == "review" else "current_round"
+    if intent == "review":
+        rnd = int(get_review_round_no())
+        archived_raw, review_saved = _review_entries_for_round(rnd)
+        if archived_raw:
+            group = _dedupe_entries_by_content(
+                [{**_deep_copy(e), "video_intent": "review"} for e in archived_raw]
+            )
+            source = "archived"
+        elif review_saved:
+            group = _dedupe_entries_by_content(list(review_saved))
+            source = "review_saved"
+        else:
+            historical = _load_historical_raw()
+            group = [
+                e
+                for e in (historical.get("entries") or [])
+                if e.get("video_intent") == "review"
+            ]
+            source = "legacy_all" if group else "empty"
+        round_no = rnd
+        label = "복기"
+    else:
+        current = _load_current_raw()
+        group = list(current.get("entries") or [])
+        source = "current_round"
+        round_no = int(get_current_round_no())
+        label = "이번회차"
+
+    auto = _manual_saved_lines(group, "자동", include_photo=True)
+    semi = _manual_saved_lines(group, "반자동", include_photo=True)
+    return {
+        "apply_intent": intent,
+        "label": label,
+        "round_no": round_no,
+        "source": source,
+        "entries": group,
+        "auto_lines": auto,
+        "semi_lines": semi,
+        "auto_count": len(auto),
+        "semi_count": len(semi),
+    }
+
+
 def _save_current_raw(data: Dict[str, Any]) -> None:
     _slim_store_entries_inplace(data)  # store 점진 축소
     payload = _deep_copy(data)

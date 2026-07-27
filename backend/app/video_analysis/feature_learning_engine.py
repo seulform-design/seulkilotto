@@ -737,9 +737,9 @@ def recommend_with_contributions(
 # Public API
 # ---------------------------------------------------------------------------
 
-def build_feature_learning(seed: int = 42) -> Dict[str, Any]:
-    """전체 파이프라인: 수집 → Feature → 검증 → 앙상블 → 이번회차 추천."""
-    from .store import _load_current_raw, _manual_saved_lines
+def build_feature_learning(seed: int = 42, apply_intent: str = "current_round") -> Dict[str, Any]:
+    """전체 파이프라인: 수집 → Feature → 검증 → 앙상블 → 탭별 추천."""
+    from .store import _load_apply_sheet
     from .draw_template import get_current_round_no
 
     samples = collect_round_samples()
@@ -760,14 +760,13 @@ def build_feature_learning(seed: int = 42) -> Dict[str, Any]:
     adopted_keys = [r["key"] for r in feature_reports if r.get("adopted")]
     ensemble = _try_sklearn_models(samples, adopted_keys or ["support", "inv_rank", "combo_strength"], seed=seed)
 
-    # 이번회차 용지
-    current = _load_current_raw()
-    cur_entries = list(current.get("entries") or [])
-    cur_auto = _manual_saved_lines(cur_entries, "자동", include_photo=True)
-    cur_semi = _manual_saved_lines(cur_entries, "반자동", include_photo=True)
-    # 이번회차 없으면 최신 보관 회차로 시연(표시용, 추천 라벨에 명시)
-    rec_source = "current_round"
-    if not cur_auto and not cur_semi and samples:
+    # 탭별 적용 용지 (복기=소급 / 이번회차=예상)
+    apply = _load_apply_sheet(apply_intent)
+    cur_auto = list(apply.get("auto_lines") or [])
+    cur_semi = list(apply.get("semi_lines") or [])
+    rec_source = str(apply.get("source") or apply_intent)
+    # 이번회차 탭에서만 용지 없을 때 최신 보관 회차로 시연(표시용)
+    if apply.get("apply_intent") == "current_round" and not cur_auto and not cur_semi and samples:
         last = samples[-1]
         cur_auto, cur_semi = last.auto_lines, last.semi_lines
         rec_source = f"archived_demo_{last.round_no}"
@@ -794,7 +793,10 @@ def build_feature_learning(seed: int = 42) -> Dict[str, Any]:
     return {
         "ok": True,
         "round_count": len(samples),
-        "current_round_no": int(get_current_round_no()),
+        "current_round_no": int(apply.get("round_no") or get_current_round_no()),
+        "apply_intent": apply.get("apply_intent"),
+        "apply_label": apply.get("label"),
+        "apply_source": apply.get("source"),
         "dataset": dataset_summary,
         "features": feature_reports,
         "adopted_count": adopted_n,

@@ -1600,7 +1600,7 @@ export default function SemiAutoComparePanel({
         label: '평행회차(엔진②)',
         status: parallelStrong.length > 0 || parallelExpected.length > 0 ? 'direct' : 'off',
         count: parallelStrong.length + parallelExpected.length,
-        note: '엔진② · validatedLearning 아님 → L1·③ 직접',
+        note: '엔진② · validatedLearning 아님 → L1·추천 직접',
       },
       {
         id: 'V1',
@@ -5469,7 +5469,7 @@ export default function SemiAutoComparePanel({
       {engineTab === 'learn' && (
       <>
       <EngineTabBanner
-        title="학습 레이어 — ①1:1 · ②전이 · ③복기진단 · ④평행 · ⑤검증 · ⑥서버신호"
+        title="학습 레이어 — ①1:1·복기 · ②평행 · ③검증 · ④서버신호"
         chips={
           <>
             <EngineStatusChip
@@ -5482,25 +5482,9 @@ export default function SemiAutoComparePanel({
             />
             <EngineStatusChip
               variant="outlined"
-              label="① 1:1"
+              label="① 1:1·복기"
               onClick={() =>
                 document.getElementById('engine-reverse')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-              }
-              sx={{ cursor: 'pointer' }}
-            />
-            <EngineStatusChip
-              variant="outlined"
-              label="② 전이"
-              onClick={() =>
-                document.getElementById('engine-transfer')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-              }
-              sx={{ cursor: 'pointer' }}
-            />
-            <EngineStatusChip
-              variant="outlined"
-              label="③ 복기진단"
-              onClick={() =>
-                document.getElementById('engine-review-diag')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }
               sx={{ cursor: 'pointer' }}
             />
@@ -5510,7 +5494,7 @@ export default function SemiAutoComparePanel({
                   ? 'warning'
                   : 'default'
               }
-              label="④ 평행"
+              label="② 평행"
               onClick={() =>
                 document.getElementById('engine-parallel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }
@@ -5518,7 +5502,7 @@ export default function SemiAutoComparePanel({
             />
             <EngineStatusChip
               color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}
-              label={`⑤ 검증 ${learningBridgeStatus.validatedCount}`}
+              label={`③ 검증 ${learningBridgeStatus.validatedCount}`}
               onClick={() =>
                 document.getElementById('engine-validated')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }
@@ -5526,7 +5510,7 @@ export default function SemiAutoComparePanel({
             />
             <EngineStatusChip
               color={predictionSignals ? 'info' : 'default'}
-              label={predictionSignals ? '⑥ 서버신호' : '⑥ 신호 대기'}
+              label={predictionSignals ? '④ 서버신호' : '④ 신호 대기'}
               onClick={() =>
                 document.getElementById('engine-signals')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }
@@ -5536,20 +5520,20 @@ export default function SemiAutoComparePanel({
         }
         intent={
           <>
-            <strong>① 1:1</strong> · <strong>② 전이(L2)</strong> · <strong>③ 복기진단(L3)</strong> ·{' '}
-            <strong>④ 평행</strong> · <strong>⑤ 검증</strong> · <strong>⑥ 서버신호(L9)</strong>.
+            <strong>① 1:1·복기</strong>(L1~L8 + L2전이 + L3역산) · <strong>② 평행</strong> ·{' '}
+            <strong>③ 검증학습</strong> · <strong>④ 서버신호(L9)</strong>.
             대상: {intentSectionLabel} {effectiveRound ?? '?'}회.
           </>
         }
       />
 
-      {/* ── 엔진① 1:1 역산 (L1-A · L4~L8) ── */}
+      {/* ── 엔진① 1:1·복기 브리지 (L1~L8 + L2 전이 + L3 역산) ── */}
       <EngineSection
         id="engine-reverse"
         tone="info"
         collapsible
         defaultOpen
-        title={`엔진① 1:1 역산 · ${intentSectionLabel} ${effectiveRound ?? '?'}회`}
+        title={`엔진① 1:1·복기 브리지 · ${intentSectionLabel} ${effectiveRound ?? '?'}회`}
         chips={
           <>
             <EngineStatusChip
@@ -5557,19 +5541,24 @@ export default function SemiAutoComparePanel({
               label={canRenderLineMatching ? '1:1 ON' : '1:1 OFF'}
             />
             <EngineStatusChip
-              color={predictedNumbers.length > 0 ? 'success' : 'default'}
-              label={predictedNumbers.length > 0 ? `예상 ${Math.min(10, predictedNumbers.length)}위` : '예상 없음'}
+              color={patternMatched ? 'success' : 'default'}
+              label={patternMatched ? 'L2 전이' : 'L2 —'}
+            />
+            <EngineStatusChip
+              color={winningPatternAnalysis || learnedPattern ? 'success' : 'default'}
+              label={winningPatternAnalysis || learnedPattern ? 'L3 역산' : 'L3 —'}
             />
             <EngineStatusChip
               color={deepInjectSignals.length > 0 ? 'success' : 'default'}
-              label={deepInjectSignals.length > 0 ? `L8→점수 ${deepInjectSignals.length}` : 'L8 미연결'}
+              label={deepInjectSignals.length > 0 ? `L8→점수 ${deepInjectSignals.length}` : 'L8 —'}
             />
           </>
         }
         intent={
           <>
-            이번 회차 용지 <strong>1:1 전수비교</strong> 코어(L1·L4~L7) + <strong>L8 심층 연결</strong>.
-            아래 순서: ②전이 · ③복기진단 · ④평행 · ⑤검증 · ⑥서버신호.
+            <strong>한 엔진</strong> — 용지 1:1 그래프(L1·L4~L8) + 복기↔1:1 브리지.
+            L2=<strong>순방향 전이</strong>(추천 축) · L3=<strong>사후 역산</strong>(진단·미주입).
+            평행·검증학습·서버신호만 별도 엔진.
           </>
         }
       >
@@ -5577,6 +5566,8 @@ export default function SemiAutoComparePanel({
         {(
           [
             ['learn-l1', 'L1 1:1'],
+            ['learn-l2', 'L2 전이'],
+            ['learn-l3', 'L3 역산'],
             ['learn-l4', 'L4 정밀'],
             ['learn-l5', 'L5 강패턴'],
             ['learn-l6', 'L6 레벨'],
@@ -6394,37 +6385,21 @@ export default function SemiAutoComparePanel({
 
 
 
-      </Stack>
-      </EngineSection>
 
-      {/* ── 엔진② 전이 학습 (L2만 · 순방향 매칭) ── */}
-      <EngineSection
-        id="engine-transfer"
-        tone="secondary"
-        collapsible
-        defaultOpen
-        title="엔진② 전이 학습 (L2)"
-        chips={
-          <>
-            <EngineStatusChip
-              color={learnedPattern && patternMatched ? 'success' : 'default'}
-              label={learnedPattern && patternMatched ? '매칭 ON' : '대기'}
-            />
-            <EngineStatusChip variant="outlined" label="추천 프로파일축" />
-            <EngineStatusChip variant="outlined" label="역산·적합도 제외" />
-          </>
-        }
-        intent={
-          <>
-            <strong>순방향만</strong> — 복기에서 만든 당첨 프로파일(centroid·조합구조)을{' '}
-            <strong>현재 탭 번호에 매칭</strong>합니다. 당첨이 몇 위였는지·적합도 자기확인은{' '}
-            <strong>엔진③ 복기 역산</strong>으로 분리했습니다.
-          </>
-        }
-      >
-        <Stack spacing={1.25}>
+          <Divider textAlign="left" sx={{ my: 0.5 }}>
+            <Typography variant="caption" fontWeight={800} color="text.secondary" sx={{ fontSize: 10 }}>
+              복기↔1:1 브리지 · L2 전이(순방향) · L3 역산(사후)
+            </Typography>
+          </Divider>
+          <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
+            <Typography variant="caption">
+              L2·L3는 <strong>엔진①과 동일 축</strong>(복기 용지·당첨 × 현재 1:1 그래프)입니다.
+              별도 엔진이 아니라 <strong>순방향 전이 / 사후 역산</strong> 두 방향입니다.
+            </Typography>
+          </Alert>
           <EngineSection
             id="learn-l2"
+            nested
             tone="info"
             collapsible
             defaultOpen
@@ -6444,7 +6419,7 @@ export default function SemiAutoComparePanel({
                 {learnedPattern
                   ? <> 학습 구조 합{learnedPattern.structure.sum}/홀{learnedPattern.structure.odd}/구간{learnedPattern.structure.decades}/연속{learnedPattern.structure.consec}.</>
                   : null}{' '}
-                ※ 복기 빈도 순위·당첨 몇 위 역산은 L3.
+                ※ 같은 엔진① 안 L3가 복기 역산(사후)을 담당.
               </>
             }
           >
@@ -6475,7 +6450,7 @@ export default function SemiAutoComparePanel({
                   </Stack>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, fontSize: 10 }}>
                     {compareWinning
-                      ? '복기 탭에서는 당첨 대조(밝은/회색)를 L3에서 봅니다. 여기는 전이 순위만 표시합니다.'
+                      ? '복기 탭의 당첨 몇 위·적합도는 아래 L3 역산. 여기는 1:1 프로파일 전이 순위만.'
                       : `${learnedPattern.round ?? '복기'}회 프로파일 → ${effectiveRound ?? '?'}회 전이 예측.`}
                   </Typography>
                 </EngineSubBlock>
@@ -6488,40 +6463,9 @@ export default function SemiAutoComparePanel({
               </Alert>
             )}
           </EngineSection>
-        </Stack>
-      </EngineSection>
-
-      {/* ── 엔진③ 복기 역산 진단 (L3 · 사후 포착력) ── */}
-      <EngineSection
-        id="engine-review-diag"
-        tone="success"
-        collapsible
-        defaultOpen
-        title="엔진③ 복기 역산 진단 (L3)"
-        chips={
-          <>
-            <EngineStatusChip color="success" label="사후 역산" />
-            <EngineStatusChip
-              color={learnedPattern ? 'success' : 'default'}
-              label={learnedPattern ? 'A 표본순위' : 'A —'}
-            />
-            <EngineStatusChip
-              color={winningPatternAnalysis ? 'success' : 'default'}
-              label={winningPatternAnalysis ? 'B 1:1출현' : 'B —'}
-            />
-            <EngineStatusChip variant="outlined" label="추천 미주입" />
-          </>
-        }
-        intent={
-          <>
-            <strong>역산·진단</strong> — 실제 당첨이 복기 용지·현재 1:1 반복도에서{' '}
-            <strong>몇 위·어느 레벨</strong>이었는지 확인합니다. 전이(엔진②)와 축이 다릅니다.
-          </>
-        }
-      >
-        <Stack spacing={1.25}>
           <EngineSection
             id="learn-l3"
+            nested
             tone="success"
             collapsible
             defaultOpen
@@ -6688,7 +6632,7 @@ export default function SemiAutoComparePanel({
                     </Stack>
                     <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
                       같은 회차에서 학습·확인한 값이라 <strong>낙관적</strong>입니다. 진짜 검증은 다음 회차
-                      이월 적중. 엔진②의 전이 순위와 목적이 다릅니다(여기는 사후 포착력).
+                      이월 적중. 위 L2 전이 순위와 목적이 다릅니다(여기는 사후 포착력).
                     </Typography>
                   </>
                 ) : (
@@ -6699,14 +6643,14 @@ export default function SemiAutoComparePanel({
               </EngineSubBlock>
             </Stack>
           </EngineSection>
-        </Stack>
+      </Stack>
       </EngineSection>
 
-      {/* ── 엔진④ 평행회차 (별도 축 · 패널 자체가 엔진 셸) ── */}
+      {/* ── 엔진② 평행회차 (별도 축 · 패널 자체가 엔진 셸) ── */}
       <Box id="engine-parallel">
         <Alert severity="warning" icon={false} sx={{ py: 0.5, mb: 1 }}>
           <Typography variant="caption">
-            <strong>엔진④ 평행회차</strong> — 용지 1:1·검증학습과 별개 축.
+            <strong>엔진② 평행회차</strong> — 용지 1:1·검증학습과 별개 축.
             L1·추천에 <strong>직접</strong> 주입(validatedLearning 아님).
             상태:{' '}
             {learningBridgeStatus.injectRows.find((r) => r.id === '평행')?.status === 'direct'
@@ -6718,13 +6662,13 @@ export default function SemiAutoComparePanel({
         {parallelEngineSlot}
       </Box>
 
-      {/* ── 엔진⑤ 검증학습 (다회차) ── */}
+      {/* ── 엔진③ 검증학습 (다회차) ── */}
       <EngineSection
         id="engine-validated"
         tone="success"
         collapsible
         defaultOpen
-        title="엔진⑤ 검증학습 (다회차)"
+        title="엔진③ 검증학습 (다회차)"
         chips={
           <>
             <EngineStatusChip
@@ -6795,11 +6739,11 @@ export default function SemiAutoComparePanel({
         </Stack>
       </EngineSection>
 
-      {/* ── 엔진⑥ 서버 통합신호 (L9) ── */}
+      {/* ── 엔진④ 서버 통합신호 (L9) ── */}
       <Box id="engine-signals">
         <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 1 }}>
           <Typography variant="caption">
-            <strong>엔진⑥ 서버 통합신호 (L9)</strong> — FE 1:1·검증학습과 별축.
+            <strong>엔진④ 서버 통합신호 (L9)</strong> — FE 1:1·검증학습과 별축.
             추첨기·후속·클래식·용지·평행·gap 가중. <strong>③ 추천 점수에는 미주입</strong>(표시·예보 폴백).
           </Typography>
         </Alert>
@@ -6809,7 +6753,7 @@ export default function SemiAutoComparePanel({
         tone="info"
         collapsible
         defaultOpen={false}
-        title={`엔진⑥ L9. 통합 예측 신호 (규칙 v${predictionSignals?.rules_version ?? '…'})`}
+        title={`엔진④ L9. 통합 예측 신호 (규칙 v${predictionSignals?.rules_version ?? '…'})`}
         chips={
           <>
             <EngineStatusChip

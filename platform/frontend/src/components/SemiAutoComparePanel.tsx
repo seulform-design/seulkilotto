@@ -5508,7 +5508,7 @@ export default function SemiAutoComparePanel({
         }
       />
 
-      {/* ── 엔진① 1:1·복기 브리지 (L1~L3 + 1:1 상세 L4~L7 + L8) ── */}
+      {/* ── 엔진① 1:1·복기 브리지 (L1~L8) ── */}
       <EngineSection
         id="engine-reverse"
         tone="info"
@@ -5543,7 +5543,10 @@ export default function SemiAutoComparePanel({
             ['learn-l1', 'L1 1:1'],
             ['learn-l2', 'L2 패턴'],
             ['learn-l3', 'L3 출현'],
-            ['learn-l1-detail', '1:1 상세'],
+            ['learn-l4', 'L4 정밀'],
+            ['learn-l5', 'L5 강패턴'],
+            ['learn-l6', 'L6 레벨'],
+            ['learn-l7', 'L7 세트'],
             ['learn-l8', 'L8 심층'],
           ] as const
         ).map(([id, label]) => (
@@ -6043,26 +6046,12 @@ export default function SemiAutoComparePanel({
                 )}
               </EngineSection>
 
-              <EngineSection
-                id="learn-l1-detail"
-                nested
-                tone="neutral"
-                collapsible
-                defaultOpen={false}
-                title="1:1 상세 (L4~L7)"
-                chips={
-                  <>
-                    <EngineStatusChip variant="outlined" label="정밀·강패턴·레벨·세트" />
-                    {predictedNumbers.length > 0 ? (
-                      <EngineStatusChip color="success" label={`후보 ${predictedNumbers.length}`} />
-                    ) : (
-                      <EngineStatusChip variant="outlined" label="후보 없음" />
-                    )}
-                  </>
-                }
-                intent="현재 회차 1:1 그래프의 정밀 역산. L1 요약의 상세 펼침."
-              >
-                <Stack spacing={1.25}>
+              <Divider textAlign="left" sx={{ my: 0.25 }}>
+                <Typography variant="caption" fontWeight={800} color="text.secondary" sx={{ fontSize: 10 }}>
+                  L4~L7
+                </Typography>
+              </Divider>
+
               {/* L4. 번호별 반복 출현 정밀 역산 */}
               {predictedNumbers.length > 0 && (
                 <EngineSection
@@ -6301,9 +6290,6 @@ export default function SemiAutoComparePanel({
                   )}
                 </EngineSection>
               )}
-
-                </Stack>
-              </EngineSection>
 
           <Divider textAlign="left" sx={{ my: 0.25 }}>
             <Typography variant="caption" fontWeight={800} color="text.secondary" sx={{ fontSize: 10 }}>

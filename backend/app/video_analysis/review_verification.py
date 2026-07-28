@@ -62,9 +62,17 @@ def _coverage_significance(total_hits: float, rounds: int, k: int) -> Dict[str, 
     }
 
 
-def _rank_signal(values: Dict[int, float]) -> List[int]:
-    """값 내림차순(동률은 번호 오름차순)으로 45개 번호를 정렬한 랭킹."""
-    return sorted(range(1, 46), key=lambda n: (-values.get(n, 0.0), n))
+def _rank_signal(values: Dict[int, float], tiebreak: Dict[int, float] | None = None) -> List[int]:
+    """값 내림차순으로 45개 번호를 정렬. 동률은 tiebreak(총 등장 등, 높을수록 우선) →
+    그다음 번호 오름차순.
+
+    ⚠️ tiebreak 없이 번호 순서로만 동률을 깨면 인덱스 편향(낮은 번호가 임의로 상위)이
+    생긴다. feature/round 엔진은 총 등장(auto+semi_sup)으로 동률을 깬다 — 같은 'support'
+    신호가 엔진마다 다르게 정렬되던 불일치를 없애기 위해 여기서도 total_freq 를 넘겨 맞춘다.
+    """
+    if tiebreak is None:
+        return sorted(range(1, 46), key=lambda n: (-values.get(n, 0.0), n))
+    return sorted(range(1, 46), key=lambda n: (-values.get(n, 0.0), -tiebreak.get(n, 0.0), n))
 
 
 # 구간(10단위) — 균형 커버리지의 기준. balanced 신호와 동일 관례(min(4,(n-1)//10)):
@@ -137,7 +145,7 @@ def _decade_catch(samples=None) -> Dict[str, Any]:
     rounds = 0
     for s in samples:
         sigs = _signals(s.auto_lines, s.semi_lines)
-        pos = {n: i + 1 for i, n in enumerate(_rank_signal(sigs["support"]))}
+        pos = {n: i + 1 for i, n in enumerate(_rank_signal(sigs["support"], sigs["total_freq"]))}
         for w in s.winning:
             d = _decade(w)
             per_decade[d]["winning"] += 1
@@ -180,7 +188,7 @@ def _signals(auto: List[List[int]], semi: List[List[int]]) -> Dict[str, Dict[int
     support = {n: float(min(float(ac.get(n, 0)), sc_sup[n])) for n in range(1, 46)}
     total = {n: float(ac.get(n, 0) + sc_sup[n]) for n in range(1, 46)}
     # 균형: 지지 점수에 구간(10단위) 상한을 둬 한 구간 쏠림을 억제한 커버리지 지향 신호.
-    balanced_order = _rank_signal(support)
+    balanced_order = _rank_signal(support, total)
     balanced_val: Dict[int, float] = {}
     dc: Counter = Counter()
     score = 45.0
@@ -220,7 +228,7 @@ def _analyze(auto: List[List[int]], semi: List[List[int]], winning: List[int]) -
     out_signals: List[Dict[str, Any]] = []
     best = None
     for key, vals in sigs.items():
-        ranked = _rank_signal(vals)
+        ranked = _rank_signal(vals, sigs["total_freq"])
         pos = {n: ranked.index(n) + 1 for n in range(1, 46)}
         winner_ranks = sorted(
             ({"number": n, "rank": pos[n]} for n in winning),
@@ -335,7 +343,7 @@ def _signal_leaderboard(samples=None) -> Dict[str, Any]:
         sigs = _signals(s.auto_lines, s.semi_lines)
         per_sig: Dict[str, Dict[int, int]] = {}
         for sk in keys:
-            ranked = _rank_signal(sigs[sk])
+            ranked = _rank_signal(sigs[sk], sigs["total_freq"])
             rank_of = {num: idx + 1 for idx, num in enumerate(ranked)}
             per_sig[sk] = {num: rank_of[num] for num in s.winning}
         pos_by_round.append(per_sig)
@@ -359,6 +367,8 @@ def _signal_leaderboard(samples=None) -> Dict[str, Any]:
                     tiers[sk]["out"] += 1
     rounds = len(samples)
     n = max(1, rounds)
+    random_top6 = round(6 * 6 / 45, 3)   # ≈ 0.8
+    random_top18 = round(18 * 6 / 45, 3)  # ≈ 2.4
     leaderboard = sorted(
         (
             {
@@ -369,25 +379,52 @@ def _signal_leaderboard(samples=None) -> Dict[str, Any]:
                 "tiers": tiers[sk],
                 # 이 신호의 상위18 커버리지가 우연을 유의하게 초과하나(소표본 보수).
                 "significance": _coverage_significance(agg[sk][18], rounds, 18),
+                # 무작위 이하 = 단독 커버리지 신호로 쓰지 말 것(역산 진단용).
+                "underperforming": round(agg[sk][18] / n, 3) <= random_top18,
+                "beats_random18": round(agg[sk][18] / n, 3) > random_top18,
             }
             for sk in keys
         ),
         key=lambda x: (-x["mean_top18"], -x["mean_top6"], x["key"]),
     )
+    # 단독 best 는 무작위 초과 신호만. 전부 이하면 성적 1위 폴백(빈 신호 금지).
+    # auto_freq 는 구조적으로 최악인 경우가 많아, 초과해도 다른 초과 신호가 있으면 후순위.
+    eligible = [e for e in leaderboard if e["beats_random18"] and e["key"] != "auto_freq"]
+    if not eligible:
+        eligible = [e for e in leaderboard if e["beats_random18"]]
+    if not eligible:
+        eligible = list(leaderboard)
     # Leave-one-out 교차검증 — 각 회차를 빼고 나머지로 최고 신호를 고른 뒤, 뺀 회차에서의
     # 상위18 적중. '신호 선택'이 과적합이 아니라 실제로 일반화되는지 정직하게 본다(누수 없음:
     # 뺀 회차는 선택에 미참여). 소표본이면 표본이 더 흔들려 참고용.
+    # 단독 선택과 동일 정책: 무작위 초과 우선, auto_freq 후순위.
     loo: List[Dict[str, Any]] = []
     if rounds >= 3:
         for i in range(rounds):
             best_sk, best_score = None, -1
             for sk in keys:
+                if sk == "auto_freq":
+                    continue
                 tot = sum(
                     sum(1 for r in pos_by_round[j][sk].values() if r <= 18)
                     for j in range(rounds) if j != i
                 )
+                held_n = rounds - 1
+                mean18 = tot / held_n if held_n else 0
+                # 무작위 이하 신호는 LOO 선택에서도 제외(전부 이하면 아래에서 폴백).
+                if mean18 <= random_top18:
+                    continue
                 if tot > best_score:
                     best_score, best_sk = tot, sk
+            if best_sk is None:
+                # 폴백 — auto_freq 제외 전 신호, 그래도 없으면 전체.
+                for sk in [k for k in keys if k != "auto_freq"] or keys:
+                    tot = sum(
+                        sum(1 for r in pos_by_round[j][sk].values() if r <= 18)
+                        for j in range(rounds) if j != i
+                    )
+                    if tot > best_score:
+                        best_score, best_sk = tot, sk
             held_hit = sum(1 for r in pos_by_round[i][best_sk].values() if r <= 18)
             loo.append({
                 "held_round": samples[i].round_no,
@@ -396,12 +433,14 @@ def _signal_leaderboard(samples=None) -> Dict[str, Any]:
                 "top18_hit": held_hit,
             })
     loo_mean = round(sum(x["top18_hit"] for x in loo) / len(loo), 3) if loo else None
-    random_top18 = round(18 * 6 / 45, 3)  # ≈ 2.4
+    best_entry = eligible[0] if (eligible and samples) else None
     return {
         "rounds": rounds,
         "small_sample": rounds < SMALL_SAMPLE_ROUNDS,
         "leaderboard": leaderboard,
-        "best_signal_multi": leaderboard[0]["key"] if (leaderboard and samples) else None,
+        "best_signal_multi": best_entry["key"] if best_entry else None,
+        "random_baseline": {"top6": random_top6, "top18": random_top18},
+        "underperforming_keys": [e["key"] for e in leaderboard if e.get("underperforming")],
         "loo": {
             "folds": loo,
             "mean_top18_hit": loo_mean,
@@ -418,7 +457,7 @@ def _coverage_set_from_signals(
     selected_by: str,
 ) -> Dict[str, Any]:
     """단일 신호 랭킹으로 core6 + 구간균형 expand18 커버리지 세트를 만든다."""
-    ranked = _rank_signal(sigs.get(signal_key, sigs["support"]))
+    ranked = _rank_signal(sigs.get(signal_key, sigs["support"]), sigs.get("total_freq"))
     present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
     raw_expand = ranked[:18]
     bal_expand = _balance_expand(ranked, ranked[:6], present, 18)
@@ -445,18 +484,29 @@ def _consensus_coverage(
     """
     lb = leaderboard.get("leaderboard", []) or []
     random_top18 = 18 * 6 / 45  # ≈ 2.4
+    banned = set(leaderboard.get("underperforming_keys") or [])
+    # good = 다회차 상위18이 무작위 초과 AND underperforming 아님. auto_freq 는 단독 제외.
     good = [
         e["key"] for e in lb
-        if float(e.get("mean_top18", 0)) > random_top18 and e["key"] in cur_signals
+        if float(e.get("mean_top18", 0)) > random_top18
+        and e["key"] not in banned
+        and e["key"] != "auto_freq"
+        and e["key"] in cur_signals
     ]
-    if len(good) < 2:  # 무작위 초과 신호가 부족하면 성적 상위 3개로 폴백
+    if len(good) < 2:  # 무작위 초과 신호가 부족하면 성적 상위(auto_freq·저성과 제외) 폴백
+        good = [
+            e["key"] for e in lb
+            if e["key"] in cur_signals and e["key"] != "auto_freq" and e["key"] not in banned
+        ][:3]
+    if len(good) < 2:
         good = [e["key"] for e in lb[:3] if e["key"] in cur_signals]
     if not good:
         return {}
     agree = {n: 0 for n in range(1, 46)}
     best_rank = {n: 99 for n in range(1, 46)}
+    total_tb = cur_signals.get("total_freq")
     for key in good:
-        ranked = _rank_signal(cur_signals[key])
+        ranked = _rank_signal(cur_signals[key], total_tb)
         for i, n in enumerate(ranked):
             if i < 18:
                 agree[n] += 1
@@ -500,7 +550,10 @@ def _missed_winner_analysis(samples=None) -> Dict[str, Any]:
     agg = {"total": 0, "top6_any": 0, "top18_any": 0, "top30_any": 0, "uncatchable": 0, "missing_ticket": 0}
     for s in samples:
         sigs = _signals(s.auto_lines, s.semi_lines)
-        rank_pos = {k: {n: i + 1 for i, n in enumerate(_rank_signal(sigs[k]))} for k in keys}
+        rank_pos = {
+            k: {n: i + 1 for i, n in enumerate(_rank_signal(sigs[k], sigs["total_freq"]))}
+            for k in keys
+        }
         appeared = {int(n) for ln in (s.auto_lines + s.semi_lines) for n in ln if 1 <= int(n) <= 45}
         missed: List[Dict[str, Any]] = []
         caught: List[int] = []
@@ -532,6 +585,160 @@ def _missed_winner_analysis(samples=None) -> Dict[str, Any]:
             "missed": missed,
         })
     return {"rounds": len(samples), "aggregate": agg, "per_round": per_round}
+
+
+def _inverse_diagnosis(
+    *,
+    leaderboard: Dict[str, Any],
+    multi_round: Dict[str, Any],
+    missed: Dict[str, Any],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    """시니어/디렉터 관점 역산 진단 — 왜 엔진 당첨률(특히 top-6)이 낮았는지 문제→정책.
+
+    확률을 올리지 않는다. 백테스트가 보여 준 구조적 실패(집중·저성과 신호·천장)를
+    주입/추천 정책으로 바꿔 '넓은 그물'이 실제로 쓰이게 한다.
+    """
+    random6 = 6 * 6 / 45.0    # ≈ 0.8
+    random18 = 18 * 6 / 45.0  # ≈ 2.4
+    lb_rows = leaderboard.get("leaderboard") or []
+    best = next(
+        (e for e in lb_rows if e.get("key") == leaderboard.get("best_signal_multi")),
+        lb_rows[0] if lb_rows else None,
+    )
+    mean6 = float(best["mean_top6"]) if best else float(summary.get("best_top6") or 0)
+    mean18 = float(best["mean_top18"]) if best else float(summary.get("best_top18") or 0)
+    under = list(leaderboard.get("underperforming_keys") or [])
+    m18 = (multi_round.get("aggregate") or {}).get("18") or {}
+    m6 = (multi_round.get("aggregate") or {}).get("6") or {}
+    miss_agg = missed.get("aggregate") or {}
+    total_w = max(1, int(miss_agg.get("total") or 0))
+    ticket_miss_pct = round(100.0 * int(miss_agg.get("missing_ticket") or 0) / total_w, 1)
+    top6_any_pct = round(100.0 * int(miss_agg.get("top6_any") or 0) / total_w, 1)
+    top18_any_pct = round(100.0 * int(miss_agg.get("top18_any") or 0) / total_w, 1)
+    loo = leaderboard.get("loo") or {}
+    small = bool(leaderboard.get("small_sample") or multi_round.get("small_sample"))
+
+    problems: List[Dict[str, Any]] = []
+    # P1 — top-6 집중 실패 (구조)
+    if mean6 <= random6 * 1.25 or float(m6.get("mean_hit") or 0) <= random6 * 1.25:
+        problems.append({
+            "id": "top6_concentration_fail",
+            "severity": "high",
+            "title": "top-6 집중 픽 구조적 실패",
+            "detail": (
+                f"다회차 최선 신호 상위6 평균 {mean6:.2f}/6 (무작위≈{random6:.1f}). "
+                "당첨은 중간 지지대에 흩어져 집중 픽이 구조적으로 놓친다."
+            ),
+        })
+    # P2 — 저성과 신호를 단독으로 쓰면 안 됨
+    if under:
+        labels = [
+            next((e["label"] for e in lb_rows if e["key"] == k), k) for k in under
+        ]
+        problems.append({
+            "id": "underperforming_signals",
+            "severity": "high",
+            "title": "저성과 신호 단독 사용 위험",
+            "detail": (
+                f"상위18이 무작위({random18:.1f}) 이하인 신호: {', '.join(labels)}. "
+                "특히 '자동 빈도'는 많이 산 번호에 편향되어 당첨과 무관하다."
+            ),
+        })
+    # P3 — 커버리지 vs 집중 격차
+    if mean18 - mean6 >= 1.0:
+        problems.append({
+            "id": "coverage_gap",
+            "severity": "medium",
+            "title": "넓은 그물(top-18)만 유효",
+            "detail": (
+                f"상위18 평균 {mean18:.2f} vs 상위6 {mean6:.2f} — 격차 {mean18 - mean6:.2f}. "
+                "핵심6에 높은 가중을 주면 검증학습이 실패 패턴을 강화한다."
+            ),
+        })
+    # P4 — 예측 천장(티켓 미등장)
+    if ticket_miss_pct >= 10:
+        problems.append({
+            "id": "ticket_ceiling",
+            "severity": "medium",
+            "title": "티켓 미등장 = 구조적 천장",
+            "detail": (
+                f"당첨의 {ticket_miss_pct}%가 자동·반자동 줄에 아예 없음 — 티켓 기반 엔진으로는 "
+                f"원천 미포착. 전신호 상위6 안 {top6_any_pct}% · 상위18 안 {top18_any_pct}%."
+            ),
+        })
+    # P5 — 소표본 / LOO 일반화 약함
+    if small or not loo.get("generalizes", True):
+        problems.append({
+            "id": "small_sample_or_weak_loo",
+            "severity": "low",
+            "title": "소표본·일반화 근거 약함",
+            "detail": (
+                f"보관 {leaderboard.get('rounds', 0)}회차"
+                + (
+                    f" · LOO 상위18 평균 {loo.get('mean_top18_hit')} (무작위 {loo.get('random_baseline')})"
+                    if loo.get("mean_top18_hit") is not None
+                    else ""
+                )
+                + ". 순위·lift 는 참고용 — 유의성 게이트를 유지한다."
+            ),
+        })
+
+    # 주입/추천 정책 — 프론트·히어로가 그대로 따른다.
+    expand_first = any(p["id"] in ("top6_concentration_fail", "coverage_gap") for p in problems)
+    # core6 가중 하향 / expand18 상향 (기존 0.85/0.45 → 역전)
+    core_scale = 0.35 if expand_first else 0.55
+    expand_scale = 1.0 if expand_first else 0.7
+    # 신뢰도는 다회차 최선 신호의 mean_top18 기준(단일회차 summary 보다 안정).
+    multi_conf = max(0.0, min(1.0, (mean18 - random18) / (6.0 - random18))) if mean18 else 0.0
+    prefer_consensus = len([
+        e for e in lb_rows
+        if e.get("beats_random18") and e.get("key") != "auto_freq"
+    ]) >= 2
+
+    actions = [
+        "저성과·자동빈도 신호를 단독 커버리지/합의에서 제외",
+        "다회차 성적 1위(무작위 초과)만 커버리지 신호로 채택",
+        "주입 가중: expand18 > core6 (집중 실패 시)" if expand_first else "주입 가중: 균형",
+        "다중신호 합의(consensus)를 히어로 1순위로 유지" if prefer_consensus else "단일 best 커버리지 유지",
+        "티켓 미등장 당첨은 분석 천장으로 고지(확률 불변)",
+    ]
+
+    return {
+        "problems": problems,
+        "actions": actions,
+        "verdict": (
+            "집중 예측은 구조적으로 실패하고 넓은 커버리지(합의·expand18)만 유효하다. "
+            "저성과 신호를 끊고 expand18 우선 주입으로 검증학습이 실패 패턴을 강화하지 않게 한다."
+            if expand_first
+            else "신호 성적이 무작위와 비슷하다 — 과신 없이 커버리지·합의만 유지한다."
+        ),
+        "metrics": {
+            "best_signal": best.get("key") if best else None,
+            "best_label": best.get("label") if best else None,
+            "mean_top6": round(mean6, 3),
+            "mean_top18": round(mean18, 3),
+            "random_top6": round(random6, 3),
+            "random_top18": round(random18, 3),
+            "support_top6_mean": m6.get("mean_hit"),
+            "support_top18_mean": m18.get("mean_hit"),
+            "ticket_miss_pct": ticket_miss_pct,
+            "top6_any_pct": top6_any_pct,
+            "top18_any_pct": top18_any_pct,
+            "underperforming": under,
+            "small_sample": small,
+            "loo_generalizes": loo.get("generalizes"),
+        },
+        "policy": {
+            "coverage_mode": "expand18_first" if expand_first else "balanced",
+            "core6_weight_scale": core_scale,
+            "expand18_weight_scale": expand_scale,
+            "multi_round_confidence": round(multi_conf, 3),
+            "prefer_consensus": prefer_consensus,
+            "banned_signals": under + (["auto_freq"] if "auto_freq" not in under else []),
+            "preferred_signal": leaderboard.get("best_signal_multi"),
+        },
+    }
 
 
 def build_review_verification() -> Dict[str, Any]:
@@ -605,6 +812,20 @@ def build_review_verification() -> Dict[str, Any]:
 
     from .feature_learning_engine import _detect_fixed_semi
 
+    multi_round_backtest = _multi_round_backtest(_samples)
+    missed_winner_analysis = _missed_winner_analysis(_samples)
+    summary = {
+        "best_top6": t6,
+        "best_top18": t18,
+        "best_label": best_entry["label"] if best_entry else None,
+    }
+    inverse_diagnosis = _inverse_diagnosis(
+        leaderboard=leaderboard,
+        multi_round=multi_round_backtest,
+        missed=missed_winner_analysis,
+        summary=summary,
+    )
+
     return {
         "ok": True,
         "round_no": review_round,
@@ -620,15 +841,12 @@ def build_review_verification() -> Dict[str, Any]:
         "review_consensus_coverage": review_consensus_coverage,
         "current_coverage_set": current_coverage_set,
         "consensus_coverage": consensus_coverage,
-        "multi_round_backtest": _multi_round_backtest(_samples),
+        "multi_round_backtest": multi_round_backtest,
         "signal_leaderboard": leaderboard,
-        "missed_winner_analysis": _missed_winner_analysis(_samples),
+        "missed_winner_analysis": missed_winner_analysis,
         "decade_catch": _decade_catch(_samples),
-        "summary": {
-            "best_top6": t6,
-            "best_top18": t18,
-            "best_label": best_entry["label"] if best_entry else None,
-        },
+        "inverse_diagnosis": inverse_diagnosis,
+        "summary": summary,
         "honesty": (
             f"{review_round}회 당첨 6개 중 어떤 신호도 top-6 로는 최대 {t6}개만 잡았고, "
             f"top-18 로 넓히면 {t18}개까지 잡혔습니다. 즉 '집중 예측' 은 구조적으로 실패하고 "

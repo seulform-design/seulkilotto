@@ -1164,6 +1164,8 @@ export interface ReviewVerificationResponse {
     rounds: number;
     small_sample?: boolean;
     best_signal_multi?: string | null;
+    random_baseline?: { top6: number; top18: number };
+    underperforming_keys?: string[];
     leaderboard?: {
       key: string;
       label: string;
@@ -1171,6 +1173,8 @@ export interface ReviewVerificationResponse {
       mean_top18: number;
       tiers: { t6: number; t18: number; t30: number; out: number };
       significance?: CoverageSignificance;
+      underperforming?: boolean;
+      beats_random18?: boolean;
     }[];
     /** Leave-One-Out 교차검증 — 신호 선택이 일반화되나(과적합 아닌지). */
     loo?: {
@@ -1178,6 +1182,37 @@ export interface ReviewVerificationResponse {
       mean_top18_hit: number | null;
       random_baseline: number;
       generalizes: boolean;
+    };
+  };
+  /** 시니어/디렉터 역산 진단 — 낮은 당첨률 원인 → 주입·추천 정책. */
+  inverse_diagnosis?: {
+    problems: { id: string; severity: 'high' | 'medium' | 'low'; title: string; detail: string }[];
+    actions: string[];
+    verdict: string;
+    metrics?: {
+      best_signal?: string | null;
+      best_label?: string | null;
+      mean_top6?: number;
+      mean_top18?: number;
+      random_top6?: number;
+      random_top18?: number;
+      support_top6_mean?: number;
+      support_top18_mean?: number;
+      ticket_miss_pct?: number;
+      top6_any_pct?: number;
+      top18_any_pct?: number;
+      underperforming?: string[];
+      small_sample?: boolean;
+      loo_generalizes?: boolean;
+    };
+    policy?: {
+      coverage_mode: 'expand18_first' | 'balanced';
+      core6_weight_scale: number;
+      expand18_weight_scale: number;
+      multi_round_confidence: number;
+      prefer_consensus: boolean;
+      banned_signals: string[];
+      preferred_signal?: string | null;
     };
   };
   /** 다회차 백테스트 — 보관 전 회차의 지지(고정수 제외) 상위 K 커버리지 + 이월. */

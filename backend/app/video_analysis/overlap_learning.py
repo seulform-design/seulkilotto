@@ -329,6 +329,34 @@ def build_overlap_learning(apply_intent: str = "current_round") -> Dict[str, Any
     signal_comparison = _compare_signals_across_rounds(batches, win_by_round)
 
     learned = _summarize(all_records)
+
+    # 회차 단위 유의성(부호검정) — ⚠️ 한 회차 안의 겹침 조합들은 같은 용지에서 나와 강하게
+    # 상관된다. 조합 개수(수백~수천)를 독립 시행으로 검정하면 false precision(거짓 정밀)이다.
+    # 독립 단위는 '회차'뿐 → 각 size k 에서 '그 회차 평균 겹침 > 기대' 인 회차가 R 중 몇인지
+    # 부호검정(p0=0.5)한다. R 이 작으면(소표본) 유의로 단정하지 않는다.
+    from .stats import binomial_significance, SMALL_SAMPLE_N
+
+    n_rounds = len(rounds_out)
+    above_by_size: Dict[int, int] = {}
+    for ro in rounds_out:
+        for bs in ro.get("by_size", []):
+            if bs["mean_overlap"] > bs["expected"]:
+                above_by_size[bs["size"]] = above_by_size.get(bs["size"], 0) + 1
+    for bs in learned["by_size"]:
+        above = above_by_size.get(bs["size"], 0)
+        sig = binomial_significance(above, n_rounds, 0.5)  # 부호검정: 과반 회차가 기대 초과?
+        if n_rounds < SMALL_SAMPLE_N:
+            sig["small_sample"] = True
+            sig["significant"] = False
+        bs["round_significance"] = {
+            "rounds_above_chance": above,
+            "rounds_total": n_rounds,
+            "test": "sign_test(p0=0.5)",
+            "p_value": sig["p_value"],
+            "significant": sig["significant"],
+            "small_sample": sig["small_sample"],
+        }
+
     lift_of: Dict[tuple[int, str], float] = {
         (b["size"], b["bucket"]): b["lift_vs_chance"] for b in learned["by_lift_bucket"]
     }

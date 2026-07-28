@@ -131,6 +131,50 @@ export default function ReviewVerificationPanel() {
         {' '}지지 신호는 <strong>반자동 고정수를 제외</strong>해 산출합니다(고정수는 거의 모든 반자동 줄에 반복돼 왜곡).
       </Alert>
 
+      {/* 🧭 시니어 역산 진단 — 낮은 당첨률 원인 → 적용 정책 */}
+      {d.inverse_diagnosis && (d.inverse_diagnosis.problems?.length ?? 0) > 0 && (
+        <Box sx={{ mb: 1.5, p: 1.25, borderRadius: 1, border: '1px solid', borderColor: 'error.light', bgcolor: 'rgba(211,47,47,0.04)' }}>
+          <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
+            🧭 시니어 역산 진단 — 엔진 당첨률이 낮았던 이유
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.75 }}>
+            {d.inverse_diagnosis.verdict}
+          </Typography>
+          <Stack spacing={0.4} sx={{ mb: 0.75 }}>
+            {d.inverse_diagnosis.problems.map((p) => (
+              <Box key={p.id} sx={{ pl: 0.5 }}>
+                <Typography variant="caption" sx={{ fontSize: 10.5, fontWeight: 800, color: p.severity === 'high' ? 'error.main' : p.severity === 'medium' ? 'warning.main' : 'text.secondary' }}>
+                  [{p.severity === 'high' ? '치명' : p.severity === 'medium' ? '주의' : '참고'}] {p.title}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5 }}>
+                  {p.detail}
+                </Typography>
+              </Box>
+            ))}
+          </Stack>
+          {d.inverse_diagnosis.metrics && (
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+              <Chip size="small" color="warning" label={`다회차 상위6 ${d.inverse_diagnosis.metrics.mean_top6 ?? '—'} (무작위 ${d.inverse_diagnosis.metrics.random_top6 ?? 0.8})`} sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+              <Chip size="small" color="success" label={`다회차 상위18 ${d.inverse_diagnosis.metrics.mean_top18 ?? '—'} (무작위 ${d.inverse_diagnosis.metrics.random_top18 ?? 2.4})`} sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+              {d.inverse_diagnosis.policy && (
+                <Chip size="small" color={d.inverse_diagnosis.policy.coverage_mode === 'expand18_first' ? 'primary' : 'default'}
+                  label={`정책 ${d.inverse_diagnosis.policy.coverage_mode} · core×${d.inverse_diagnosis.policy.core6_weight_scale} · expand×${d.inverse_diagnosis.policy.expand18_weight_scale}`}
+                  sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+              )}
+            </Stack>
+          )}
+          <Typography variant="caption" fontWeight={700} sx={{ display: 'block', fontSize: 10, mb: 0.25 }}>적용 보완</Typography>
+          <Stack component="ul" sx={{ m: 0, pl: 2 }}>
+            {(d.inverse_diagnosis.actions ?? []).map((a) => (
+              <Typography key={a} component="li" variant="caption" sx={{ fontSize: 9.5, color: 'text.secondary' }}>{a}</Typography>
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontSize: 9, mt: 0.5, fontStyle: 'italic' }}>
+            ⚠️ 이 진단은 1등 확률을 올리지 않습니다. 실패 패턴(집중·저성과 신호)을 주입에서 끊어 커버리지 전략만 남깁니다.
+          </Typography>
+        </Box>
+      )}
+
       {/* 🧪 다회차 백테스트 — 보관 전 회차의 지지(고정수 제외) 상위 K 커버리지 + 이월 */}
       {d.multi_round_backtest && d.multi_round_backtest.rounds > 1 && (
         <Box sx={{ mb: 1.5, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
@@ -200,8 +244,8 @@ export default function ReviewVerificationPanel() {
                 <Typography variant="caption" sx={{ fontSize: 10.5, fontWeight: s.key === d.signal_leaderboard!.best_signal_multi ? 800 : 600, minWidth: 130 }}>
                   {s.label}{s.key === d.signal_leaderboard!.best_signal_multi ? ' ⭐' : ''}
                 </Typography>
-                <Chip size="small" color={s.mean_top18 >= 3 ? 'success' : 'default'}
-                  label={`상위6 ${s.mean_top6} · 상위18 ${s.mean_top18}`} sx={{ height: 17, fontSize: 9.5, fontWeight: 700 }} />
+                <Chip size="small" color={s.mean_top18 >= 3 ? 'success' : s.underperforming ? 'error' : 'default'}
+                  label={`상위6 ${s.mean_top6} · 상위18 ${s.mean_top18}${s.underperforming ? ' ·저성과' : ''}`} sx={{ height: 17, fontSize: 9.5, fontWeight: 700 }} />
                 {s.significance && (
                   <Typography variant="caption" sx={{ fontSize: 9, fontWeight: 700, color: s.significance.significant ? 'success.main' : 'text.disabled' }}>
                     p={s.significance.p_value}{s.significance.significant ? ' ✓유의' : ''}

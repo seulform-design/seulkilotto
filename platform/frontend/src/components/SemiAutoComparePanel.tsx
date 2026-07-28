@@ -1521,19 +1521,35 @@ export default function SemiAutoComparePanel({
 
     const rv = reviewVerificationQuery.data;
     // 탭별 커버리지: 복기=복기 용지 세트 / 이번회차=다음 회차 세트.
+    // 역산 정책: 합의 expand 우선, core6 가중 하향(집중 실패 시), 신뢰도는 다회차 mean.
     const cov = forwardLearning ? rv?.current_coverage_set : rv?.review_coverage_set;
-    if (rv?.ok && cov) {
-      // 커버리지 신뢰도 = 복기 회차에서 '넓은 그물(top-18)'이 무작위 기대(≈2.4)를 얼마나
-      // 초과해 당첨을 담았나. best_signal 은 1개 회차로 고른 값이므로, 그 신호가 무작위
-      // 수준이면 covConf≈0 → 커버리지 가산도 0. (근거 없는 단일회차 신호가 고정 최고가중
-      // 0.85 를 갖던 것을 '실제로 넓은 그물이 통한 정도'에 비례하도록 교정. 확률 불변.)
-      const bestTop18 = rv.summary?.best_top18 ?? 0;
+    const consensus = forwardLearning ? rv?.consensus_coverage : rv?.review_consensus_coverage;
+    if (rv?.ok && (cov || consensus)) {
+      const policy = rv.inverse_diagnosis?.policy;
+      const preferConsensus = policy?.prefer_consensus !== false && (consensus?.expand18?.length ?? 0) >= 6;
+      const core = preferConsensus ? (consensus?.core6 ?? cov?.core6 ?? []) : (cov?.core6 ?? []);
+      const expand = preferConsensus ? (consensus?.expand18 ?? cov?.expand18 ?? []) : (cov?.expand18 ?? []);
+      // 다회차 최선 신호 mean_top18 기반 신뢰도(단일회차 summary 보다 안정). 정책값 우선.
+      const multiConf = policy?.multi_round_confidence;
+      const bestTop18 =
+        multiConf != null
+          ? null
+          : (rv.signal_leaderboard?.leaderboard?.find((e) => e.key === rv.signal_leaderboard?.best_signal_multi)?.mean_top18
+            ?? rv.summary?.best_top18
+            ?? 0);
       const randomExp18 = (18 * 6) / 45; // ≈ 2.4
-      const covConf = Math.max(0, Math.min(1, (bestTop18 - randomExp18) / (6 - randomExp18)));
+      const covConf =
+        multiConf != null
+          ? Math.max(0, Math.min(1, multiConf))
+          : Math.max(0, Math.min(1, ((bestTop18 ?? 0) - randomExp18) / (6 - randomExp18)));
+      const coreScale = policy?.core6_weight_scale ?? 0.55;
+      const expandScale = policy?.expand18_weight_scale ?? 0.7;
       if (covConf > 0) {
-        for (const n of cov.core6 ?? []) push(n, 0.85 * covConf, 'coverage', '커버리지core');
-        for (const n of cov.expand18 ?? []) {
-          if (!(cov.core6 ?? []).includes(n)) push(n, 0.45 * covConf, 'coverage', '커버리지18');
+        // expand18_first: 넓은 그물에 더 높은 가중 — 집중 실패를 주입에서 강화하지 않음.
+        for (const n of expand) push(n, 0.7 * expandScale * covConf, 'coverage', '커버리지18');
+        for (const n of core) {
+          // core 는 expand 에 이미 들어간 경우가 많아 가산만(중복 push 허용 — weight 합산).
+          push(n, 0.35 * coreScale * covConf, 'coverage', '커버리지core');
         }
       }
     }
@@ -1571,13 +1587,31 @@ export default function SemiAutoComparePanel({
 
   const learningBridgeStatus = useMemo(() => {
     const rv = reviewVerificationQuery.data;
-    const bestTop18 = rv?.ok ? (rv.summary?.best_top18 ?? 0) : 0;
+    const policy = rv?.ok ? rv.inverse_diagnosis?.policy : undefined;
+    const multiConf = policy?.multi_round_confidence;
+    const bestTop18 = rv?.ok
+      ? (rv.signal_leaderboard?.leaderboard?.find((e) => e.key === rv.signal_leaderboard?.best_signal_multi)?.mean_top18
+        ?? rv.summary?.best_top18
+        ?? 0)
+      : 0;
     const randomExp18 = (18 * 6) / 45;
     const covWired = Boolean(
-      compareWinning ? rv?.review_coverage_set : rv?.current_coverage_set
+      compareWinning
+        ? (rv?.review_consensus_coverage?.expand18?.length || rv?.review_coverage_set)
+        : (rv?.consensus_coverage?.expand18?.length || rv?.current_coverage_set)
     );
     const coverageConf = covWired
-      ? Math.round(Math.max(0, Math.min(1, (bestTop18 - randomExp18) / (6 - randomExp18))) * 100)
+      ? Math.round(
+          Math.max(
+            0,
+            Math.min(
+              1,
+              multiConf != null
+                ? multiConf
+                : (bestTop18 - randomExp18) / (6 - randomExp18)
+            )
+          ) * 100
+        )
       : 0;
     const countSrc = (src: ValidatedLearningSignal['source']) =>
       validatedLearning.filter((v) => v.source === src).length;
@@ -3432,6 +3466,7 @@ export default function SemiAutoComparePanel({
       agreement: source === 'consensus' ? agreement : {},
       // 복기 탭만 당첨 대조(같은 회차 추천 vs 실제 당첨).
       showWinning: compareWinning,
+      coverageMode: rv?.ok ? rv.inverse_diagnosis?.policy?.coverage_mode ?? null : null,
     };
   }, [
     compareWinning,
@@ -5014,6 +5049,9 @@ export default function SemiAutoComparePanel({
                   ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다(공에 '몇 신호').`
                   : ''}{' '}
                 <strong>top-6 집중보다 넓은 그물이 유효</strong>.
+                {heroRecommendation.coverageMode === 'expand18_first'
+                  ? ' 역산 정책: expand18 우선 주입(집중 실패 보정).'
+                  : ''}
                 {heroRecommendation.showWinning && winningSet && winningSet.size > 0
                   ? ` 핵심6 당첨 ${heroRecommendation.core6.filter((n) => winningSet.has(n)).length}/6 · 확장18 당첨 ${heroRecommendation.expand18.filter((n) => winningSet.has(n)).length}/6.`
                   : ''}

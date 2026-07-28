@@ -290,6 +290,40 @@ export default function ReviewVerificationPanel() {
         </Box>
       )}
 
+      {/* 🎼 앙상블 커버리지 천장 백테스트 — 전 엔진을 합쳐도 무작위를 이기나(정직한 천장) */}
+      {d.ensemble_backtest?.ok && (d.ensemble_backtest.rounds ?? 0) > 1 && (() => {
+        const e = d.ensemble_backtest!;
+        const sig18 = e.ensemble_significance?.['18'];
+        return (
+          <Box sx={{ mb: 1.5, p: 1, borderRadius: 1, border: '2px solid', borderColor: e.beats_random ? 'success.main' : 'warning.dark' }}>
+            <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
+              🎼 앙상블 커버리지 천장 백테스트 ({e.rounds}개 회차 · 전 엔진 신호 합산)
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+              전 신호({(e.signals_combined ?? []).length}개)를 <strong>등가중 평균순위(Borda·과적합 없음)</strong>로 합친 앙상블이
+              당첨을 상위18에 몇 개 담나 — <strong>무작위·최고 단일신호와 정면 비교</strong>.
+            </Typography>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+              <Chip size="small" variant="outlined" label={`무작위 ${e.random_baseline?.top18 ?? 2.4}`} sx={{ height: 20, fontSize: 10 }} />
+              {e.best_single_signal && (
+                <Chip size="small" variant="outlined" color="info" label={`최고 단일: ${e.best_single_signal.label} ${e.best_single_signal.mean_top18}`} sx={{ height: 20, fontSize: 10, fontWeight: 700 }} />
+              )}
+              <Chip size="small" color={sig18?.significant ? 'success' : 'warning'}
+                label={`앙상블 ${e.ensemble_mean?.['18'] ?? '—'}${sig18 ? ` · p=${sig18.p_value}${sig18.significant ? ' ✓유의' : sig18.small_sample ? ' ·소표본' : ''}` : ''}`}
+                sx={{ height: 20, fontSize: 10, fontWeight: 800 }} />
+            </Stack>
+            <Typography variant="caption" sx={{ display: 'block', fontSize: 10, fontWeight: 700, color: e.beats_random ? 'success.main' : 'text.secondary' }}>
+              판정: {e.verdict}
+              {e.beats_best_single ? ' · 최고 단일도 상회' : ' · 최고 단일 대비 이점 없음'}
+            </Typography>
+            <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontSize: 9, mt: 0.3, fontStyle: 'italic' }}>
+              ⚠️ 확률(1/8,145,060)·부분일치 기대값은 어떤 앙상블로도 불변입니다. 이 백테스트는 '천장'을 정직하게 볼 뿐 —
+              유일한 실질 레버는 당첨 시 기대수령액(공동당첨 회피)입니다.
+            </Typography>
+          </Box>
+        );
+      })()}
+
       {/* 🚫 놓친 당첨 분석 — 어떤 신호로도 못 잡은 당첨(예측 천장) */}
       {d.missed_winner_analysis && d.missed_winner_analysis.rounds > 0 && d.missed_winner_analysis.aggregate.total > 0 && (() => {
         const a = d.missed_winner_analysis.aggregate;

@@ -1141,6 +1141,24 @@ export interface ReviewVerificationResponse {
     per_decade: { decade: string; winning: number; caught_top18: number; catch_rate: number | null }[];
     weak_decades: string[];
   };
+  /** 앙상블 커버리지 천장 백테스트 — 전 엔진 신호를 합쳐도 무작위를 이기나(정직한 천장). */
+  ensemble_backtest?: {
+    ok: boolean;
+    reason?: string;
+    rounds: number;
+    small_sample?: boolean;
+    ensemble_method?: string;
+    signals_combined?: string[];
+    per_round?: { round_no: number; winning: number[]; ens_top6: number; ens_top18: number }[];
+    ensemble_mean?: Record<string, number>;
+    ensemble_significance?: Record<string, CoverageSignificance>;
+    best_single_signal?: { label: string; mean_top18: number } | null;
+    random_baseline?: { top6: number; top18: number };
+    beats_random?: boolean;
+    beats_best_single?: boolean;
+    verdict?: string;
+    honesty?: string;
+  };
   /** 놓친 당첨 분석 — 어떤 신호로도 못 잡은 당첨(예측 천장). */
   missed_winner_analysis?: {
     rounds: number;

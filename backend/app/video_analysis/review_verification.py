@@ -814,6 +814,9 @@ def build_review_verification() -> Dict[str, Any]:
 
     multi_round_backtest = _multi_round_backtest(_samples)
     missed_winner_analysis = _missed_winner_analysis(_samples)
+    from .ensemble_backtest import build_ensemble_backtest
+
+    ensemble_backtest = build_ensemble_backtest(_samples)
     summary = {
         "best_top6": t6,
         "best_top18": t18,
@@ -845,6 +848,7 @@ def build_review_verification() -> Dict[str, Any]:
         "signal_leaderboard": leaderboard,
         "missed_winner_analysis": missed_winner_analysis,
         "decade_catch": _decade_catch(_samples),
+        "ensemble_backtest": ensemble_backtest,
         "inverse_diagnosis": inverse_diagnosis,
         "summary": summary,
         "honesty": (

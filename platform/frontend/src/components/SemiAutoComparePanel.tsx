@@ -4159,7 +4159,22 @@ export default function SemiAutoComparePanel({
         {showAnalysisSection && (
         <>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.25 }}>
-        빈도 → 1:1 요약/상세 → 누적·회차별 데이터 순으로 봅니다. 추천·검증은 ③·④로 이어집니다.
+        빈도 → 1:1 요약/상세 → 누적·회차별 데이터 순으로 봅니다. 학습 엔진(L1~L8·V1~V4)은{' '}
+        <Button
+          size="small"
+          variant="text"
+          sx={{ minWidth: 0, p: 0, verticalAlign: 'baseline', fontSize: 11, fontWeight: 700 }}
+          onClick={() => {
+            setShowPredictionDetail(true);
+            setEngineTab('learn');
+            requestAnimationFrame(() =>
+              document.getElementById('engine-reverse')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            );
+          }}
+        >
+          ④ 패턴 분석 엔진
+        </Button>
+        에서 확인하세요.
       </Typography>
       {analysisPrelude}
       {/* 반자동 누적 기반 빈도 — 자동 분석과 분리, 반자동 누적만 카운트 */}
@@ -5569,8 +5584,36 @@ export default function SemiAutoComparePanel({
         ))}
       </Stack>
       <Stack spacing={1.25}>
-      {activeComparison && (
-        <>
+          {!activeComparison && (
+            <Alert
+              severity={suspendHeavyComparison ? 'warning' : 'info'}
+              sx={{ py: 0.5 }}
+              action={
+                suspendHeavyComparison ? (
+                  <Button color="warning" size="small" variant="outlined" onClick={() => setForceDetailedComparison(true)}>
+                    전체 전수비교 실행
+                  </Button>
+                ) : undefined
+              }
+            >
+              <Typography variant="caption">
+                {suspendHeavyComparison ? (
+                  <>
+                    대량 용지로 <strong>1:1 전수비교가 보류</strong>되어 L1·L4~L8 본문이 비어 있습니다.
+                    <strong> [전체 전수비교 실행]</strong>으로 엔진 역산을 채우세요. L2 패턴학습은 복기 용지만으로도 표시됩니다.
+                  </>
+                ) : hasLineMatchingInputs ? (
+                  <>
+                    1:1 비교 결과가 아직 없습니다. 자동·반자동 줄을 확인하세요. L2는 복기 용지 기준으로 학습합니다.
+                  </>
+                ) : (
+                  <>
+                    자동·반자동 용지를 등록하면 L1·L4~L8 1:1 역산이 채워집니다. L2 당첨 패턴 학습은 복기 용지·당첨만으로도 동작합니다.
+                  </>
+                )}
+              </Typography>
+            </Alert>
+          )}
           <Divider textAlign="left" sx={{ my: 0.25 }}>
             <Typography variant="caption" fontWeight={800} color="text.secondary" sx={{ fontSize: 10 }}>
               1:1 코어 · L1
@@ -6613,14 +6656,6 @@ export default function SemiAutoComparePanel({
               </Stack>
             </EngineSection>
           )}
-
-
-
-        </>
-      )}
-
-
-
 
       </Stack>
       </EngineSection>

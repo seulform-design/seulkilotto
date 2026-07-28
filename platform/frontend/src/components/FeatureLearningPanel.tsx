@@ -224,7 +224,7 @@ export default function FeatureLearningPanel({
                 {(ensemble.models ?? []).map((m) => (
                   <TableRow key={m.name} selected={m.name === ensemble.selected}>
                     <TableCell sx={{ fontWeight: m.name === ensemble.selected ? 800 : 500 }}>{m.name}</TableCell>
-                    <TableCell align="right">{m.walk_forward_mean_hits.toFixed(2)}</TableCell>
+                    <TableCell align="right">{(m.walk_forward_mean_hits ?? 0).toFixed(2)}</TableCell>
                     <TableCell align="right">{m.lift_vs_uniform.toFixed(2)}</TableCell>
                     <TableCell align="right">{m.folds}</TableCell>
                     <TableCell>
@@ -378,7 +378,7 @@ function FeatureTable({
             <TableRow key={f.key}>
               <TableCell sx={{ fontSize: 11, fontWeight: 600 }}>{f.label}</TableCell>
               <TableCell align="right" sx={{ fontSize: 11 }}>
-                {f.walk_forward_mean_hits.toFixed(2)}
+                {(f.walk_forward_mean_hits ?? 0).toFixed(2)}
               </TableCell>
               <TableCell align="right" sx={{ fontSize: 11 }}>
                 {f.lift_vs_uniform.toFixed(2)}
@@ -387,7 +387,7 @@ function FeatureTable({
                 {f.permutation_p.toFixed(3)}
               </TableCell>
               <TableCell align="right" sx={{ fontSize: 10 }}>
-                {f.bootstrap_ci95[0].toFixed(2)}–{f.bootstrap_ci95[1].toFixed(2)}
+                {(f.bootstrap_ci95?.[0] ?? 0).toFixed(2)}–{(f.bootstrap_ci95?.[1] ?? 0).toFixed(2)}
               </TableCell>
               <TableCell>
                 <Chip

@@ -201,7 +201,7 @@ export default function PatternMiningPanel({
                     {p.appear_rounds}
                   </TableCell>
                   <TableCell align="right" sx={{ fontSize: 11 }}>
-                    {p.wf_mean_hits.toFixed(2)}
+                    {(p.wf_mean_hits ?? 0).toFixed(2)}
                   </TableCell>
                   <TableCell align="right" sx={{ fontSize: 11 }}>
                     {p.lift_vs_baseline.toFixed(2)}

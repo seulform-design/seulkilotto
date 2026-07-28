@@ -3459,17 +3459,20 @@ export default function SemiAutoComparePanel({
     const best = lb?.leaderboard?.[0];
     const clean = (arr: number[] | undefined) =>
       Array.from(new Set((arr ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= 45)));
-    // 우선순위: ①다중신호 합의 → ②다회차 best 신호 커버리지 → ③로컬 폴백.
-    let core6 = clean(consensus?.core6);
-    let expand18 = clean(consensus?.expand18);
-    let source: 'consensus' | 'coverage' | 'forecast' | 'repeat' = 'consensus';
-    if (core6.length < 6 || expand18.length < 6) {
-      core6 = clean(cov?.core6);
-      expand18 = clean(cov?.expand18);
-      source = 'coverage';
+    // 핵심6: 다회차 best 단일신호(cov=review/current_coverage_set) 우선. 다중신호 '합의'는
+    // 약한 신호가 최고 신호를 희석해 커버리지가 오히려 낮다 — 앙상블 백테스트로 실증(합산
+    // top18 2.75 < 최고단일 4.0), 실측 1234 도 합의가 당첨 43 을 비당첨 39 로 바꿔 2/6→1/6
+    // 이 됐다. 확장18(넓은 그물)은 합의 우선(더 넓고 구간균형) → '집중 실패'를 그물로 보정.
+    let core6 = clean(cov?.core6);
+    let source: 'consensus' | 'coverage' | 'forecast' | 'repeat' = 'coverage';
+    if (core6.length < 6) {
+      core6 = clean(consensus?.core6);
+      source = 'consensus';
     }
+    let expand18 = clean(consensus?.expand18);
+    if (expand18.length < 6) expand18 = clean(cov?.expand18);
     if (core6.length < 6 || expand18.length < 6) {
-      // 폴백 — 서버 커버리지가 없으면 해당 탭 로컬 신호로 채운다.
+      // 폴백 — 서버 커버리지가 없으면 해당 탭 로컬 신호로 부족한 쪽만 채운다.
       const rep = !compareWinning ? (currentRoundForecast?.representative ?? []) : [];
       const predTop = predictedNumbers.map((p) => p.number);
       // 통합 예측 신호(탭별 target_round)도 폴백에 반영.
@@ -3477,9 +3480,11 @@ export default function SemiAutoComparePanel({
         (n) => Number.isInteger(n) && n >= 1 && n <= 45
       );
       const pool = predTop.length >= 6 ? predTop : signalTop.length >= 6 ? signalTop : predTop;
-      core6 = clean(rep.length >= 6 ? rep : pool.slice(0, 6));
-      expand18 = clean(pool.slice(0, 18));
-      source = rep.length >= 6 ? 'forecast' : 'repeat';
+      if (core6.length < 6) {
+        core6 = clean(rep.length >= 6 ? rep : pool.slice(0, 6));
+        source = rep.length >= 6 ? 'forecast' : 'repeat';
+      }
+      if (expand18.length < 6) expand18 = clean(pool.slice(0, 18));
     }
     const ready = core6.length >= 6 && expand18.length >= 6;
     const shareResult = ready ? optimizeForSharing(expand18, Math.min(18, expand18.length)) : null;
@@ -5080,7 +5085,7 @@ export default function SemiAutoComparePanel({
                 {' '}→ {recommendHeroHint}
                 {heroRecommendation.goodSignalCount > 0
                   ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다(공에 '몇 신호').`
-                  : ''}{' '}
+                  : ` 아래 핵심 6은 다회차 1위 신호(${heroRecommendation.signalLabel}) 상위6입니다 — 여러 신호를 '합의'로 섞으면 약한 신호가 최고 신호를 희석해 오히려 덜 잡습니다(앙상블 백테스트로 실증).`}{' '}
                 <strong>top-6 집중보다 넓은 그물이 유효</strong>.
                 {heroRecommendation.coverageMode === 'expand18_first'
                   ? ' 역산 정책: expand18 우선 주입(집중 실패 보정).'

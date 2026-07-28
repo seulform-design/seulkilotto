@@ -5258,6 +5258,15 @@ export default function SemiAutoComparePanel({
                         sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
                       />
                     )}
+                    {carryoverQuery.data?.ok && carryoverQuery.data.backtest?.by_k?.['12']?.significance && (
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        color={carryoverQuery.data.backtest.by_k['12'].significance!.significant ? 'success' : 'default'}
+                        label={`이월 p=${carryoverQuery.data.backtest.by_k['12'].significance!.p_value}${carryoverQuery.data.backtest.by_k['12'].significance!.significant ? ' ✓유의' : carryoverQuery.data.backtest.by_k['12'].significance!.small_sample ? ' ·소표본' : ''}`}
+                        sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                      />
+                    )}
                   </Stack>
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
                     <Chip size="small" variant="outlined" label="🔁 반복(1:1)" sx={{ height: 18, fontSize: 9 }} />

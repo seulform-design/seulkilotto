@@ -67,12 +67,26 @@ def build_carryover_learning(seed: int = 42) -> Dict[str, Any]:
             agg[k]["cnt"] += 1
         per_pair.append(row)
 
+    from .stats import binomial_significance, SMALL_SAMPLE_N
+
     backtest_by_k: Dict[str, Any] = {}
     best_lift = 0.0
     for k in CARRYOVER_KS:
         hit, exp = agg[k]["hit"], agg[k]["exp"]
         lift = round(hit / exp, 3) if exp > 0 else 0.0
-        backtest_by_k[str(k)] = {"hit": hit, "exp": round(exp, 3), "lift": lift, "pairs": int(agg[k]["cnt"])}
+        # trials = 이월 후보 총 개수(= exp/BASELINE_HIT), p0 = 무작위 다음당첨 확률.
+        trials = int(round(exp / BASELINE_HIT)) if BASELINE_HIT > 0 else 0
+        transitions = int(agg[k]["cnt"])
+        sig = binomial_significance(hit, trials, BASELINE_HIT)
+        # ⚠️ 실효 독립표본은 후보 개수가 아니라 '전이(회차쌍) 수' — 한 전이의 후보들은
+        # 같은 회차 강수라 상관된다. 전이가 적으면 후보가 많아도 유의로 단정하지 않는다.
+        if transitions < SMALL_SAMPLE_N:
+            sig["small_sample"] = True
+            sig["significant"] = False
+        backtest_by_k[str(k)] = {
+            "hit": hit, "exp": round(exp, 3), "lift": lift, "pairs": transitions,
+            "significance": sig,
+        }
         best_lift = max(best_lift, lift)
     pairs = len(per_pair)
     # 신호(비평탄) 인정: 표본(전이) 하한 이상 **AND** 재현되는 초과(lift≥1.15).

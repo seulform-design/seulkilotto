@@ -152,12 +152,22 @@ def build_round_learning(apply_intent: str = "current_round") -> Dict[str, Any]:
             "round_count": 0,
         }
 
+    from .stats import binomial_significance, SMALL_SAMPLE_N
+
+    round_count = len(rounds_out)
     calibration: List[Dict[str, Any]] = []
     for label, _, _ in RANK_BUCKETS:
         st = bucket_stats[label]
         played = st["played"]
         won = st["won"]
         rate = (won / played) if played else 0.0
+        # 구간 적중률이 무작위(6/45)를 우연 이상으로 초과하나 — 슬롯 단위 이항근사.
+        sig = binomial_significance(won, played, BASELINE_HIT_RATE)
+        # ⚠️ 소표본 판단은 슬롯 수가 아니라 '회차 수' 기준 — 회차가 적으면 구간 배정
+        # 자체가 우연이라, 슬롯이 많아도 유의로 단정하면 안 된다(정직).
+        if round_count < SMALL_SAMPLE_N:
+            sig["small_sample"] = True
+            sig["significant"] = False
         calibration.append(
             {
                 "bucket": label,
@@ -166,6 +176,7 @@ def build_round_learning(apply_intent: str = "current_round") -> Dict[str, Any]:
                 "hit_rate": round(rate, 4),
                 "baseline": round(BASELINE_HIT_RATE, 4),
                 "lift": round(rate / BASELINE_HIT_RATE, 2) if played and BASELINE_HIT_RATE else 0.0,
+                "significance": sig,
             }
         )
 
@@ -205,6 +216,11 @@ def build_round_learning(apply_intent: str = "current_round") -> Dict[str, Any]:
 
     total_top6_hits = sum(r["top6_hits"] for r in rounds_out)
     expected_top6 = round(len(rounds_out) * 6 * BASELINE_HIT_RATE, 2)
+    # 지지 상위6 픽이 무작위를 우연 이상으로 잡나 — trials = 회차×6 픽, p0 = 6/45.
+    top6_sig = binomial_significance(total_top6_hits, round_count * 6, BASELINE_HIT_RATE)
+    if round_count < SMALL_SAMPLE_N:
+        top6_sig["small_sample"] = True
+        top6_sig["significant"] = False
     flat = all(abs(c["lift"] - 1.0) < 0.35 for c in calibration if c["played"] >= 20)
 
     return {
@@ -227,6 +243,7 @@ def build_round_learning(apply_intent: str = "current_round") -> Dict[str, Any]:
             "expected_top6_hits": expected_top6,
             "rounds": len(rounds_out),
             "calibration_flat": flat,
+            "top6_significance": top6_sig,
         },
         "honesty": (
             "보관 회차 용지는 추첨 전 등록분이라 누수가 없습니다. "

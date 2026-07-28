@@ -1039,6 +1039,21 @@ export interface ArchivedCurrentRoundSnapshot {
 }
 
 /** 복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였나 + 커버리지 곡선. */
+/** 이항 정규근사 유의성 — 관측 hits/trials 가 무작위 기준확률을 우연 이상으로 초과하나. */
+export interface BinomialSignificance {
+  hits: number;
+  trials: number;
+  expected: number;
+  rate: number;
+  ci95: [number, number];
+  z: number;
+  p_value: number;
+  lift: number;
+  /** 소표본(회차/전이 적음)이면 유의해 보여도 우연 가능 → significant 를 보수적으로 억제. */
+  significant: boolean;
+  small_sample: boolean;
+}
+
 /** 커버리지가 균등무작위를 유의하게 초과하나 — 회차별 초기하 합의 정규근사 검정. */
 export interface CoverageSignificance {
   total_hits: number;
@@ -1225,7 +1240,7 @@ export interface CarryoverLearningResponse {
   from_round?: number;
   backtest?: {
     pairs: number;
-    by_k?: Record<string, { hit: number; exp: number; lift: number; pairs: number }>;
+    by_k?: Record<string, { hit: number; exp: number; lift: number; pairs: number; significance?: BinomialSignificance }>;
     per_pair?: {
       from_round: number;
       to_round: number;
@@ -1349,6 +1364,15 @@ export interface PatternMiningResponse {
   pattern_count?: number;
   adopted_count?: number;
   rejected_count?: number;
+  /** 다중검정 맥락 — N개 패턴을 α로 검정하면 우연으로도 평균 N×α개가 채택돼 보인다. */
+  multiple_testing?: {
+    n_tested: number;
+    alpha: number;
+    expected_false_positives: number;
+    bonferroni_alpha: number;
+    adopted_count: number;
+    exceeds_chance: boolean;
+  };
   dataset?: {
     rounds: {
       round_no: number;
@@ -1434,6 +1458,7 @@ export interface RoundLearningResponse {
     hit_rate: number;
     baseline: number;
     lift: number;
+    significance?: BinomialSignificance;
   }[];
   current_round_no?: number;
   apply_intent?: 'review' | 'current_round';
@@ -1458,6 +1483,7 @@ export interface RoundLearningResponse {
     expected_top6_hits: number;
     rounds: number;
     calibration_flat: boolean;
+    top6_significance?: BinomialSignificance;
   };
   honesty?: string;
 }

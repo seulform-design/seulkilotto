@@ -112,6 +112,20 @@ export default function PatternMiningPanel({
         </Alert>
       )}
 
+      {d.multiple_testing && d.multiple_testing.n_tested > 0 && (
+        <Alert severity={d.multiple_testing.exceeds_chance ? 'success' : 'info'} sx={{ mb: 1.5, py: 0.5 }}>
+          <Typography variant="caption">
+            🎲 <strong>다중검정 맥락</strong>: {d.multiple_testing.n_tested}개 패턴을 검정하면 순수 우연으로도 평균{' '}
+            <strong>{d.multiple_testing.expected_false_positives}개</strong>가 '채택'돼 보입니다(오탐).
+            현재 채택 <strong>{d.multiple_testing.adopted_count}개</strong> —{' '}
+            {d.multiple_testing.exceeds_chance
+              ? '기대 오탐을 넘어 신호 가능성(그래도 소표본 주의).'
+              : '기대 오탐 이하 → 우연 채택과 구분되지 않습니다(과신 금물).'}
+            {' '}엄격 기준(Bonferroni) p&lt;{d.multiple_testing.bonferroni_alpha}. 확률 불변.
+          </Typography>
+        </Alert>
+      )}
+
       {d.pipeline && (
         <Stack direction="row" flexWrap="wrap" gap={0.5} sx={{ mb: 1.5 }}>
           {d.pipeline.map((step) => (

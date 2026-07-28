@@ -839,6 +839,8 @@ def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") ->
     scores = [validate_pattern(p, rounds, rng) for p in patterns]
     scores.sort(key=lambda s: (-int(s.adopted), -s.lift_vs_baseline, s.permutation_p))
     adopted = [s for s in scores if s.adopted]
+    from .stats import expected_false_positives
+    _mt = expected_false_positives(len(scores), P_ADOPT)
     clusters = cluster_patterns(scores)
     feat_sel = select_features(rounds, adopted, clusters)
     kept = feat_sel.get("kept") or []
@@ -908,6 +910,14 @@ def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") ->
         "pattern_count": len(scores),
         "adopted_count": len(adopted),
         "rejected_count": len(scores) - len(adopted),
+        # 다중검정 맥락 — N 개 패턴을 채택임계 α(P_ADOPT)로 검정하면 순수 우연으로도 평균
+        # N×α 개가 '채택'돼 보인다. 채택 수가 이 기대 오탐을 넘지 못하면 신호로 보기 어렵다
+        # (개별 패턴이 유의해도 다중검정 보정 전엔 과신 금물). 확률 불변.
+        "multiple_testing": {
+            **_mt,
+            "adopted_count": len(adopted),
+            "exceeds_chance": bool(len(adopted) > _mt["expected_false_positives"]),
+        },
         "patterns": [_score_dict(s) for s in scores[:80]],
         "adopted_patterns": [_score_dict(s) for s in adopted[:40]],
         "clusters": clusters[:30],

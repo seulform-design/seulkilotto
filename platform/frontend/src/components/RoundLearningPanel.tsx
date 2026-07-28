@@ -178,9 +178,22 @@ export default function RoundLearningPanel({
                 <Typography sx={{ width: 132, fontSize: 10, color: 'text.secondary', textAlign: 'right' }}>
                   {(c.hit_rate * 100).toFixed(1)}% · lift {c.lift} · {c.won}/{c.played}
                 </Typography>
+                {c.significance && (
+                  <Typography sx={{ width: 74, fontSize: 9, textAlign: 'right', fontWeight: 700, color: c.significance.significant ? 'success.main' : 'text.disabled' }}>
+                    p={c.significance.p_value}{c.significance.significant ? '✓' : c.significance.small_sample ? '·소표본' : ''}
+                  </Typography>
+                )}
               </Stack>
             ))}
           </Stack>
+          {d.summary?.top6_significance && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.5 }}>
+              지지 상위6 종합: 적중 {d.summary.top6_significance.hits}/{d.summary.top6_significance.trials} ·
+              기대 {d.summary.top6_significance.expected} · lift {d.summary.top6_significance.lift} ·
+              p={d.summary.top6_significance.p_value}{' '}
+              {d.summary.top6_significance.significant ? '(✓ 유의)' : d.summary.top6_significance.small_sample ? '(소표본 — 우연 가능)' : '(미유의)'}
+            </Typography>
+          )}
           {flat && (
             <Alert severity="info" sx={{ mt: 1, py: 0.25 }}>
               구간별 적중률이 <strong>거의 평탄</strong>합니다 — ③ 추천 점수에는 넣지 않습니다.

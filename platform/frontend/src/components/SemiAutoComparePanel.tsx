@@ -458,12 +458,14 @@ function getIntentExcludedCandidates(
   accumulated: PhotoAnalysisAccumulated | null,
   intent: SheetIntent
 ): number[] {
-  const sliceExcluded = accumulated?.by_intent?.[intent]?.final_predictions?.excluded_candidates;
-  if (sliceExcluded?.length) return sliceExcluded;
-  if (intent === 'review') {
-    return accumulated?.final_predictions?.excluded_candidates ?? [];
-  }
-  return [];
+  // intent 슬라이스만 사용 — top-level final_predictions 는 복기+이번회차 합산이라
+  // 복기 탭에 현재회차 배제가 섞이는 오염을 막는다.
+  return accumulated?.by_intent?.[intent]?.final_predictions?.excluded_candidates ?? [];
+}
+
+/** 이번회차 용지 없을 때 서버가 넣는 보관회차 시연 추천 — 점수 주입 금지. */
+function isArchivedDemoSource(source?: string | null): boolean {
+  return typeof source === 'string' && source.startsWith('archived_demo_');
 }
 
 function getCurrentRoundStrongCandidates(
@@ -1286,8 +1288,17 @@ export default function SemiAutoComparePanel({
     ? effectiveCompareRound ?? latest.data?.round ?? latestRound
     : currentRound;
 
-  const winningNumbers = compareWinning ? (comparisonRoundData?.numbers ?? []) : [];
-  const winningBonus = compareWinning ? (comparisonRoundData?.bonus ?? null) : null;
+  // 복기 당첨: API 회차 우선, 없으면 저장소 draw_template(용지에 이미 있는 당첨)로 시드.
+  // getRound 실패·로딩 중에도 당첨 대조·dimming 이 비지 않게 한다(PhotoAnalysisPage 와 동일).
+  const reviewTemplate = accumulated?.by_intent?.review?.draw_template;
+  const winningNumbers = compareWinning
+    ? (comparisonRoundData?.numbers?.length
+        ? comparisonRoundData.numbers
+        : (reviewTemplate?.winning_numbers ?? []))
+    : [];
+  const winningBonus = compareWinning
+    ? (comparisonRoundData?.bonus ?? reviewTemplate?.bonus ?? null)
+    : null;
 
   // 하이드레이션·로컬 입력 후 회차 stamp 가 비어 있으면 effectiveRound 로 보정.
   useEffect(() => {
@@ -1426,9 +1437,10 @@ export default function SemiAutoComparePanel({
     retry: 1,
   });
   const reviewVerificationQuery = useQuery({
-    queryKey: ['v1-photo-review-verification', 'semi-auto'],
+    // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
+    queryKey: ['v1-photo-review-verification'],
     queryFn: v1Api.getReviewVerification,
-    staleTime: 300_000,
+    staleTime: 60_000,
     retry: 1,
   });
   const overlapLearningQuery = useQuery({
@@ -1452,21 +1464,30 @@ export default function SemiAutoComparePanel({
   });
 
   const validatedLearning = useMemo((): ValidatedLearningSignal[] => {
-    const out: ValidatedLearningSignal[] = [];
-    const seen = new Set<string>();
+    const byKey = new Map<string, ValidatedLearningSignal>();
     const push = (n: number, weight: number, source: ValidatedLearningSignal['source'], label: string) => {
       if (!Number.isInteger(n) || n < 1 || n > 45 || weight <= 0) return;
       const key = `${source}:${n}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push({ number: n, weight: Math.max(0, Math.min(1, weight)), source, label });
+      const prev = byKey.get(key);
+      if (prev) {
+        // 같은 source·번호는 가중 합산(커버리지 expand+core 가산 등). cap 1.
+        prev.weight = Math.max(0, Math.min(1, prev.weight + weight));
+        return;
+      }
+      byKey.set(key, { number: n, weight: Math.max(0, Math.min(1, weight)), source, label });
     };
 
     // 이번회차 전용 학습(다음 회차 적용) — 복기 탭에 넣으면 양 탭 추천이 같아진다.
     const forwardLearning = sheetIntent === 'current_round';
 
     const feat = featureLearningQuery.data;
-    if (forwardLearning && feat?.ok && feat.recommendation?.ok) {
+    // archived_demo_* = 이번회차 용지 없을 때 보관회차 시연 — 점수 주입 금지(오염).
+    if (
+      forwardLearning &&
+      feat?.ok &&
+      feat.recommendation?.ok &&
+      !isArchivedDemoSource(feat.recommendation.source)
+    ) {
       const nums = feat.recommendation.numbers ?? [];
       const maxAbs = Math.max(0.01, ...nums.map((x) => Math.abs(x.score)));
       for (const row of nums.slice(0, 18)) {
@@ -1555,7 +1576,12 @@ export default function SemiAutoComparePanel({
     }
 
     const pm = patternMiningQuery.data;
-    if (forwardLearning && pm?.ok && pm.recommendation?.ok) {
+    if (
+      forwardLearning &&
+      pm?.ok &&
+      pm.recommendation?.ok &&
+      !isArchivedDemoSource(pm.recommendation.source)
+    ) {
       const nums = pm.recommendation.numbers ?? [];
       const maxScore = Math.max(0.01, ...nums.map((x) => Math.abs(x.score)));
       for (const row of nums.slice(0, 15)) {
@@ -1573,7 +1599,7 @@ export default function SemiAutoComparePanel({
       }
     }
 
-    return out.sort((a, b) => b.weight - a.weight);
+    return Array.from(byKey.values()).sort((a, b) => b.weight - a.weight);
   }, [
     sheetIntent,
     accumulated,
@@ -1763,6 +1789,12 @@ export default function SemiAutoComparePanel({
         qc.invalidateQueries({ queryKey: ['v1-latest-for-semi-auto'] }),
         qc.invalidateQueries({ queryKey: ['v1-meta-for-semi-auto'] }),
         qc.invalidateQueries({ queryKey: ['v1-round-for-semi-auto'] }),
+        qc.invalidateQueries({ queryKey: ['v1-photo-review-verification'] }),
+        qc.invalidateQueries({ queryKey: ['v1-photo-feature-learning'] }),
+        qc.invalidateQueries({ queryKey: ['v1-photo-round-learning'] }),
+        qc.invalidateQueries({ queryKey: ['v1-photo-overlap-learning'] }),
+        qc.invalidateQueries({ queryKey: ['v1-photo-pattern-mining'] }),
+        qc.invalidateQueries({ queryKey: ['v1-photo-carryover-learning'] }),
         qc.refetchQueries({ queryKey: ['v1-latest-for-semi-auto'] }),
         qc.refetchQueries({ queryKey: ['v1-meta-for-semi-auto'] }),
         compareRound != null
@@ -1774,8 +1806,9 @@ export default function SemiAutoComparePanel({
       }
       await qc.invalidateQueries({ queryKey: ['v1-prediction-signals', sheetIntent] });
       await qc.refetchQueries({ queryKey: ['v1-prediction-signals', sheetIntent] });
+      await qc.refetchQueries({ queryKey: ['v1-photo-review-verification'] });
       setRecommendations([]);
-      setReanalyzeNotice('✅ 재분석 완료 — 당첨번호·서버 누적·통계를 갱신했습니다.');
+      setReanalyzeNotice('✅ 재분석 완료 — 당첨번호·서버 누적·통계·학습 신호를 갱신했습니다.');
     } catch (e) {
       setReanalyzeNotice(
         `❌ 재분석 실패: ${e instanceof Error ? e.message : '서버 오류'}`
@@ -5216,8 +5249,8 @@ export default function SemiAutoComparePanel({
           />
         </Stack>
       </Divider>
-      {/* 강수·기대수 · 최종합의 — ③ 추천 상세 (항상 표시) */}
-      {activeComparison && (
+      {/* 강수·기대수 · 최종합의 — ③ 추천 상세 (1:1 반복도 기반, activeComparison 불필요) */}
+      {(decadePattern || finalStrongExpected) && (
         <>
               {/* ★ 1:1 강수 & 기대수 (구간별) — 평행회차와 동일 레이아웃, 1:1 반복도 기반 */}
               {decadePattern && (
@@ -6917,11 +6950,11 @@ export default function SemiAutoComparePanel({
                         <Stack key={src} direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
                           <EngineStatusChip label={SRC_LABEL[src] ?? src} variant="outlined" sx={{ minWidth: 76 }} />
                           <Typography variant="caption">
-                            평균 {v.avg_hits.toFixed(2)}개 · 3개+ {v.rounds_3plus}/{v.rounds_tested}회
+                            평균 {(v.avg_hits ?? 0).toFixed(2)}개 · 3개+ {v.rounds_3plus}/{v.rounds_tested}회
                           </Typography>
                           <EngineStatusChip
-                            color={v.lift_vs_random > 0 ? 'success' : v.lift_vs_random < 0 ? 'error' : 'default'}
-                            label={`무작위 대비 ${v.lift_vs_random >= 0 ? '+' : ''}${v.lift_vs_random.toFixed(2)}`}
+                            color={(v.lift_vs_random ?? 0) > 0 ? 'success' : (v.lift_vs_random ?? 0) < 0 ? 'error' : 'default'}
+                            label={`무작위 대비 ${(v.lift_vs_random ?? 0) >= 0 ? '+' : ''}${(v.lift_vs_random ?? 0).toFixed(2)}`}
                           />
                           {weak && <EngineStatusChip color="error" label="약한 신호 ↓보정" />}
                           {strong && <EngineStatusChip color="success" label="강한 신호" />}

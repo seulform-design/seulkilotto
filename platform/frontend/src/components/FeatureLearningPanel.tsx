@@ -225,7 +225,7 @@ export default function FeatureLearningPanel({
                   <TableRow key={m.name} selected={m.name === ensemble.selected}>
                     <TableCell sx={{ fontWeight: m.name === ensemble.selected ? 800 : 500 }}>{m.name}</TableCell>
                     <TableCell align="right">{(m.walk_forward_mean_hits ?? 0).toFixed(2)}</TableCell>
-                    <TableCell align="right">{m.lift_vs_uniform.toFixed(2)}</TableCell>
+                    <TableCell align="right">{(m.lift_vs_uniform ?? 0).toFixed(2)}</TableCell>
                     <TableCell align="right">{m.folds}</TableCell>
                     <TableCell>
                       <Chip
@@ -381,10 +381,10 @@ function FeatureTable({
                 {(f.walk_forward_mean_hits ?? 0).toFixed(2)}
               </TableCell>
               <TableCell align="right" sx={{ fontSize: 11 }}>
-                {f.lift_vs_uniform.toFixed(2)}
+                {(f.lift_vs_uniform ?? 0).toFixed(2)}
               </TableCell>
               <TableCell align="right" sx={{ fontSize: 11 }}>
-                {f.permutation_p.toFixed(3)}
+                {(f.permutation_p ?? 1).toFixed(3)}
               </TableCell>
               <TableCell align="right" sx={{ fontSize: 10 }}>
                 {(f.bootstrap_ci95?.[0] ?? 0).toFixed(2)}–{(f.bootstrap_ci95?.[1] ?? 0).toFixed(2)}

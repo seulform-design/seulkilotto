@@ -108,21 +108,9 @@ export default function ComposedAnalysisPage() {
   const isLoading = queries.some((q) => q.isLoading);
   const isError = queries.every((q) => q.isError);
 
-  // 용지 축: strong_candidates 가 null 이어도 저장 줄이 있으면 이번회차로 본다.
-  const photoIntentUsed: 'review' | 'current_round' = useMemo(() => {
-    const sliceScore = (intent: 'current_round' | 'review') => {
-      const s = photoQuery.data?.by_intent?.[intent];
-      const strong = Array.isArray(s?.final_predictions?.strong_candidates)
-        ? s!.final_predictions!.strong_candidates.length
-        : 0;
-      const lines =
-        (s?.saved_auto_lines?.length ?? 0) + (s?.saved_semi_lines?.length ?? 0);
-      return strong + (lines > 0 ? lines : 0);
-    };
-    const cr = sliceScore('current_round');
-    const rv = sliceScore('review');
-    return cr === 0 && rv > 0 ? 'review' : 'current_round';
-  }, [photoQuery.data]);
+  // 용지 축: 다음 회차 추첨기에는 이번회차 용지만 사용.
+  // 복기 폴백은 과거 회차를 미래 축에 조용히 섞는 오염이므로 금지.
+  const photoIntentUsed = 'current_round' as const;
 
   const composite = useMemo(
     () =>
@@ -301,7 +289,7 @@ export default function ComposedAnalysisPage() {
               photoQuery.isLoading
                 ? '용지 1:1 전수비교 (로딩)'
                 : composite.sourcesAvailable.oneToOne
-                  ? `용지 1:1 전수비교 (${photoIntentUsed === 'review' ? '복기 대체' : '이번회차'})`
+                  ? '용지 1:1 전수비교 (이번회차)'
                   : '용지 1:1 (없음 — 이번회차 등록 시 합쳐짐)'
             }
           />

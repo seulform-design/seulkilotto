@@ -204,13 +204,13 @@ export default function PatternMiningPanel({
                     {(p.wf_mean_hits ?? 0).toFixed(2)}
                   </TableCell>
                   <TableCell align="right" sx={{ fontSize: 11 }}>
-                    {p.lift_vs_baseline.toFixed(2)}
+                    {(p.lift_vs_baseline ?? 0).toFixed(2)}
                   </TableCell>
                   <TableCell align="right" sx={{ fontSize: 11 }}>
-                    {p.stability.toFixed(2)}
+                    {(p.stability ?? 0).toFixed(2)}
                   </TableCell>
                   <TableCell align="right" sx={{ fontSize: 11 }}>
-                    {p.permutation_p.toFixed(3)}
+                    {(p.permutation_p ?? 1).toFixed(3)}
                   </TableCell>
                 </TableRow>
               ))}
@@ -317,7 +317,7 @@ export default function PatternMiningPanel({
                   >
                     <LottoBall number={row.number} size={ENGINE_BALL.list} />
                     <Typography sx={{ fontWeight: 700, fontSize: 12, minWidth: 64 }}>
-                      점수 {row.score.toFixed(2)}
+                      점수 {(row.score ?? 0).toFixed(2)}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }} noWrap>
                       {(row.reasons ?? [])
@@ -346,13 +346,13 @@ export default function PatternMiningPanel({
                             <TableCell sx={{ fontSize: 11 }}>{r.pattern_label}</TableCell>
                             <TableCell sx={{ fontSize: 11 }}>{r.cluster_id ?? '—'}</TableCell>
                             <TableCell align="right" sx={{ fontSize: 11 }}>
-                              {r.lift.toFixed(2)}
+                              {(r.lift ?? 0).toFixed(2)}
                             </TableCell>
                             <TableCell align="right" sx={{ fontSize: 11 }}>
-                              {r.stability.toFixed(2)}
+                              {(r.stability ?? 0).toFixed(2)}
                             </TableCell>
                             <TableCell align="right" sx={{ fontSize: 11, fontWeight: 700 }}>
-                              {r.contribution.toFixed(3)}
+                              {(r.contribution ?? 0).toFixed(3)}
                             </TableCell>
                           </TableRow>
                         ))}

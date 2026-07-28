@@ -145,12 +145,13 @@ export default function ReviewVerificationPanel() {
             {['6', '12', '18'].map((k) => {
               const a = d.multi_round_backtest!.aggregate?.[k];
               if (!a) return null;
+              const sig = a.significance;
               return (
                 <Chip
                   key={k}
                   size="small"
-                  color={a.lift >= 1.15 ? 'success' : 'default'}
-                  label={`top-${k} 평균 ${a.mean_hit}/6 (무작위 ${a.mean_exp} · ×${a.lift})`}
+                  color={sig?.significant ? 'success' : a.lift >= 1.15 ? 'warning' : 'default'}
+                  label={`top-${k} 평균 ${a.mean_hit}/6 (무작위 ${a.mean_exp} · ×${a.lift}${sig ? ` · p=${sig.p_value}${sig.significant ? ' ✓유의' : sig.small_sample ? ' ·소표본' : ''}` : ''})`}
                   sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
                 />
               );
@@ -201,6 +202,11 @@ export default function ReviewVerificationPanel() {
                 </Typography>
                 <Chip size="small" color={s.mean_top18 >= 3 ? 'success' : 'default'}
                   label={`상위6 ${s.mean_top6} · 상위18 ${s.mean_top18}`} sx={{ height: 17, fontSize: 9.5, fontWeight: 700 }} />
+                {s.significance && (
+                  <Typography variant="caption" sx={{ fontSize: 9, fontWeight: 700, color: s.significance.significant ? 'success.main' : 'text.disabled' }}>
+                    p={s.significance.p_value}{s.significance.significant ? ' ✓유의' : ''}
+                  </Typography>
+                )}
                 <Typography variant="caption" sx={{ fontSize: 9, color: 'text.disabled' }}>
                   tier 6:{s.tiers.t6}·18:{s.tiers.t18}·30:{s.tiers.t30}·밖:{s.tiers.out}
                 </Typography>
@@ -209,6 +215,33 @@ export default function ReviewVerificationPanel() {
           </Stack>
           <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontSize: 9, mt: 0.5, fontStyle: 'italic' }}>
             ⚠️ {d.signal_leaderboard.rounds}회차는 표본이 작아 순위는 흔들릴 수 있습니다 — 회차가 쌓일수록 안정됩니다. 확률 불변.
+          </Typography>
+        </Box>
+      )}
+
+      {/* 🔁 Leave-One-Out 교차검증 — 신호 선택이 과적합이 아니라 일반화되나(누수 없음) */}
+      {d.signal_leaderboard?.loo && (d.signal_leaderboard.loo.folds?.length ?? 0) > 0 && (
+        <Box sx={{ mb: 1.5, p: 1, borderRadius: 1, border: '1px dashed', borderColor: 'divider' }}>
+          <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
+            🔁 Leave-One-Out 교차검증 — 신호 선택이 일반화되나
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
+            각 회차를 빼고 <strong>나머지로 최고 신호를 고른 뒤</strong>, 뺀 회차에서의 상위18 적중 — 신호 선택이 과적합이
+            아닌지 정직하게 봅니다(뺀 회차는 선택에 미참여 = 누수 없음).
+          </Typography>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.3 }}>
+            {d.signal_leaderboard.loo.folds.map((f) => (
+              <Chip key={f.held_round} size="small" variant="outlined"
+                label={`${f.held_round}회 → ${f.chosen_label} ${f.top18_hit}/6`}
+                sx={{ height: 18, fontSize: 9.5 }} />
+            ))}
+          </Stack>
+          <Typography variant="caption" sx={{ display: 'block', fontSize: 10, fontWeight: 700, color: d.signal_leaderboard.loo.generalizes ? 'success.main' : 'text.secondary' }}>
+            LOO 평균 상위18 적중 {d.signal_leaderboard.loo.mean_top18_hit ?? '—'} vs 무작위 {d.signal_leaderboard.loo.random_baseline}
+            {d.signal_leaderboard.loo.generalizes ? ' — 무작위 초과(일반화 조짐)' : ' — 무작위와 비슷(일반화 근거 약함)'}
+          </Typography>
+          <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontSize: 9, mt: 0.3, fontStyle: 'italic' }}>
+            ⚠️ 소표본에선 LOO 도 흔들립니다 — 참고용. 회차가 쌓일수록 신뢰도가 오릅니다. 확률 불변.
           </Typography>
         </Box>
       )}

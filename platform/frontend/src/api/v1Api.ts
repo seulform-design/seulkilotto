@@ -1039,6 +1039,20 @@ export interface ArchivedCurrentRoundSnapshot {
 }
 
 /** 복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였나 + 커버리지 곡선. */
+/** 커버리지가 균등무작위를 유의하게 초과하나 — 회차별 초기하 합의 정규근사 검정. */
+export interface CoverageSignificance {
+  total_hits: number;
+  expected: number;
+  mean_hit: number;
+  ci95: [number, number];
+  z: number;
+  p_value: number;
+  lift: number;
+  /** 소표본이면 유의해 보여도 우연 가능 → significant 를 보수적으로 False 억제. */
+  significant: boolean;
+  small_sample: boolean;
+}
+
 /** 넓은 그물(expand18)의 구간(10단위) 균형 진단. */
 export interface DecadeBalance {
   /** 보정 세트의 구간별 개수. */
@@ -1133,6 +1147,7 @@ export interface ReviewVerificationResponse {
   /** 다회차 신호 순위표 — 어느 신호가 당첨을 가장 잘 잡았나(고정수 제외). */
   signal_leaderboard?: {
     rounds: number;
+    small_sample?: boolean;
     best_signal_multi?: string | null;
     leaderboard?: {
       key: string;
@@ -1140,12 +1155,21 @@ export interface ReviewVerificationResponse {
       mean_top6: number;
       mean_top18: number;
       tiers: { t6: number; t18: number; t30: number; out: number };
+      significance?: CoverageSignificance;
     }[];
+    /** Leave-One-Out 교차검증 — 신호 선택이 일반화되나(과적합 아닌지). */
+    loo?: {
+      folds: { held_round: number; chosen_signal: string; chosen_label: string; top18_hit: number }[];
+      mean_top18_hit: number | null;
+      random_baseline: number;
+      generalizes: boolean;
+    };
   };
   /** 다회차 백테스트 — 보관 전 회차의 지지(고정수 제외) 상위 K 커버리지 + 이월. */
   multi_round_backtest?: {
     rounds: number;
-    aggregate?: Record<string, { mean_hit: number; mean_exp: number; lift: number }>;
+    small_sample?: boolean;
+    aggregate?: Record<string, { mean_hit: number; mean_exp: number; lift: number; significance?: CoverageSignificance }>;
     per_round?: {
       round_no: number;
       winning: number[];

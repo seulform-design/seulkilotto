@@ -12,10 +12,54 @@ top-6 집중 픽은 대부분 놓친다. 왜인지를 데이터로 보여준다.
 """
 from __future__ import annotations
 
+import math
 from collections import Counter
 from typing import Any, Dict, List
 
 COVERAGE_KS = [6, 10, 15, 18, 24, 30]
+
+# 통계적 유의성 — 소표본에서 lift 를 과신하지 않도록 p값·신뢰구간을 병기한다.
+SMALL_SAMPLE_ROUNDS = 5  # 이 미만이면 소표본 경고(우연 가능성 높음)
+
+
+def _normal_sf(z: float) -> float:
+    """표준정규 상측 꼬리 P(Z >= z) — scipy 없이 erfc 로."""
+    return 0.5 * math.erfc(z / math.sqrt(2.0))
+
+
+def _coverage_significance(total_hits: float, rounds: int, k: int) -> Dict[str, Any]:
+    """상위 K 커버리지가 균등무작위를 유의하게 초과하나 — 회차별 초기하 합의 정규근사.
+
+    귀무가설(H0): 상위 K 는 무작위 K-부분집합. 한 회차 적중수 ~ Hypergeometric(N=45,
+    당첨=6, 추출=K), 평균 K·6/45, 분산 K·(6/45)(39/45)((45-K)/44). 회차 독립 합산 후
+    (관측-기대)/표준편차 로 z, 상측 p값. 로또 i.i.d. 이므로 확률을 올리는 게 아니라 '이
+    커버리지가 우연 이상인지'만 정직하게 검정한다. 소표본은 significant 라도 우연 가능."""
+    if rounds <= 0 or k <= 0 or k >= 45:
+        return {"total_hits": int(total_hits), "expected": 0.0, "z": 0.0, "p_value": 1.0,
+                "lift": 0.0, "significant": False, "small_sample": True}
+    p = 6.0 / 45.0
+    exp_per = k * p
+    var_per = k * p * (1.0 - p) * ((45.0 - k) / 44.0)
+    expected = rounds * exp_per
+    variance = rounds * var_per
+    sd = math.sqrt(variance) if variance > 0 else 0.0
+    z = (total_hits - expected) / sd if sd > 0 else 0.0
+    p_value = _normal_sf(z)
+    mean_hit = total_hits / rounds
+    ci_half = 1.96 * math.sqrt(var_per / rounds) if (rounds > 0 and var_per > 0) else 0.0
+    small = rounds < SMALL_SAMPLE_ROUNDS
+    return {
+        "total_hits": int(round(total_hits)),
+        "expected": round(expected, 3),
+        "mean_hit": round(mean_hit, 3),
+        "ci95": [round(max(0.0, mean_hit - ci_half), 3), round(mean_hit + ci_half, 3)],
+        "z": round(z, 3),
+        "p_value": round(p_value, 4),
+        "lift": round(total_hits / expected, 3) if expected > 0 else 0.0,
+        # 소표본에선 유의해도 우연일 수 있어 significant 를 보수적으로: 소표본이면 False 로 억제.
+        "significant": bool(p_value < 0.05 and total_hits > expected and not small),
+        "small_sample": small,
+    }
 
 
 def _rank_signal(values: Dict[int, float]) -> List[int]:
@@ -257,10 +301,17 @@ def _multi_round_backtest(samples=None) -> Dict[str, Any]:
             "mean_hit": round(agg[k]["hit"] / n, 3),
             "mean_exp": round(agg[k]["exp"] / n, 3),
             "lift": round(agg[k]["hit"] / agg[k]["exp"], 3) if agg[k]["exp"] > 0 else 0.0,
+            # 유의성 — 이 커버리지가 우연(균등무작위)을 통계적으로 초과하나(소표본 보수).
+            "significance": _coverage_significance(agg[k]["hit"], len(samples), k),
         }
         for k in ks
     }
-    return {"rounds": len(samples), "per_round": per_round, "aggregate": aggregate}
+    return {
+        "rounds": len(samples),
+        "small_sample": len(samples) < SMALL_SAMPLE_ROUNDS,
+        "per_round": per_round,
+        "aggregate": aggregate,
+    }
 
 
 def _signal_leaderboard(samples=None) -> Dict[str, Any]:
@@ -277,27 +328,37 @@ def _signal_leaderboard(samples=None) -> Dict[str, Any]:
     if samples is None:
         samples = collect_round_samples()
     keys = list(_SIGNAL_LABELS.keys())
-    agg = {sk: {6: 0, 18: 0} for sk in keys}
-    tiers = {sk: {"t6": 0, "t18": 0, "t30": 0, "out": 0} for sk in keys}
+    # (회차, 신호) → 당첨번호별 순위 — 회차당 _signals 1회만(combo_strength 재계산이 무겁다)
+    # 계산해 agg·유의성·LOO 에서 재사용.
+    pos_by_round: List[Dict[str, Dict[int, int]]] = []
     for s in samples:
         sigs = _signals(s.auto_lines, s.semi_lines)
-        win = list(s.winning)
+        per_sig: Dict[str, Dict[int, int]] = {}
         for sk in keys:
             ranked = _rank_signal(sigs[sk])
-            pos = {n: ranked.index(n) + 1 for n in win}
-            agg[sk][6] += sum(1 for n in win if pos[n] <= 6)
-            agg[sk][18] += sum(1 for n in win if pos[n] <= 18)
-            for n in win:
-                r = pos[n]
+            rank_of = {num: idx + 1 for idx, num in enumerate(ranked)}
+            per_sig[sk] = {num: rank_of[num] for num in s.winning}
+        pos_by_round.append(per_sig)
+
+    agg = {sk: {6: 0, 18: 0} for sk in keys}
+    tiers = {sk: {"t6": 0, "t18": 0, "t30": 0, "out": 0} for sk in keys}
+    for i, s in enumerate(samples):
+        for sk in keys:
+            for num in s.winning:
+                r = pos_by_round[i][sk][num]
                 if r <= 6:
+                    agg[sk][6] += 1
+                    agg[sk][18] += 1
                     tiers[sk]["t6"] += 1
                 elif r <= 18:
+                    agg[sk][18] += 1
                     tiers[sk]["t18"] += 1
                 elif r <= 30:
                     tiers[sk]["t30"] += 1
                 else:
                     tiers[sk]["out"] += 1
-    n = max(1, len(samples))
+    rounds = len(samples)
+    n = max(1, rounds)
     leaderboard = sorted(
         (
             {
@@ -306,15 +367,47 @@ def _signal_leaderboard(samples=None) -> Dict[str, Any]:
                 "mean_top6": round(agg[sk][6] / n, 3),
                 "mean_top18": round(agg[sk][18] / n, 3),
                 "tiers": tiers[sk],
+                # 이 신호의 상위18 커버리지가 우연을 유의하게 초과하나(소표본 보수).
+                "significance": _coverage_significance(agg[sk][18], rounds, 18),
             }
             for sk in keys
         ),
         key=lambda x: (-x["mean_top18"], -x["mean_top6"], x["key"]),
     )
+    # Leave-one-out 교차검증 — 각 회차를 빼고 나머지로 최고 신호를 고른 뒤, 뺀 회차에서의
+    # 상위18 적중. '신호 선택'이 과적합이 아니라 실제로 일반화되는지 정직하게 본다(누수 없음:
+    # 뺀 회차는 선택에 미참여). 소표본이면 표본이 더 흔들려 참고용.
+    loo: List[Dict[str, Any]] = []
+    if rounds >= 3:
+        for i in range(rounds):
+            best_sk, best_score = None, -1
+            for sk in keys:
+                tot = sum(
+                    sum(1 for r in pos_by_round[j][sk].values() if r <= 18)
+                    for j in range(rounds) if j != i
+                )
+                if tot > best_score:
+                    best_score, best_sk = tot, sk
+            held_hit = sum(1 for r in pos_by_round[i][best_sk].values() if r <= 18)
+            loo.append({
+                "held_round": samples[i].round_no,
+                "chosen_signal": best_sk,
+                "chosen_label": _SIGNAL_LABELS.get(best_sk, best_sk),
+                "top18_hit": held_hit,
+            })
+    loo_mean = round(sum(x["top18_hit"] for x in loo) / len(loo), 3) if loo else None
+    random_top18 = round(18 * 6 / 45, 3)  # ≈ 2.4
     return {
-        "rounds": len(samples),
+        "rounds": rounds,
+        "small_sample": rounds < SMALL_SAMPLE_ROUNDS,
         "leaderboard": leaderboard,
         "best_signal_multi": leaderboard[0]["key"] if (leaderboard and samples) else None,
+        "loo": {
+            "folds": loo,
+            "mean_top18_hit": loo_mean,
+            "random_baseline": random_top18,
+            "generalizes": bool(loo_mean is not None and loo_mean > random_top18),
+        },
     }
 
 

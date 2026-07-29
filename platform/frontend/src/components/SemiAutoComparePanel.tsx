@@ -3469,8 +3469,10 @@ export default function SemiAutoComparePanel({
       core6 = clean(consensus?.core6);
       source = 'consensus';
     }
-    let expand18 = clean(consensus?.expand18);
-    if (expand18.length < 6) expand18 = clean(cov?.expand18);
+    // 확장18(넓은 그물) = 전 엔진 '최선순위' 커버리지(cov.expand18) 우선 — 어느 엔진이든
+    // 상위로 꼽은 catchable 당첨을 담는다(합의는 특정 엔진만 잡은 번호를 놓침). 합의는 폴백.
+    let expand18 = clean(cov?.expand18);
+    if (expand18.length < 6) expand18 = clean(consensus?.expand18);
     if (core6.length < 6 || expand18.length < 6) {
       // 폴백 — 서버 커버리지가 없으면 해당 탭 로컬 신호로 부족한 쪽만 채운다.
       const rep = !compareWinning ? (currentRoundForecast?.representative ?? []) : [];

@@ -36,6 +36,7 @@ def build_ensemble_backtest(samples: Any = None) -> Dict[str, Any]:
     from .review_verification import (
         SMALL_SAMPLE_ROUNDS,
         _SIGNAL_LABELS,
+        _best_of_engines_order,
         _coverage_significance,
         _signal_leaderboard,
         _signals,
@@ -53,6 +54,7 @@ def build_ensemble_backtest(samples: Any = None) -> Dict[str, Any]:
 
     keys = list(_SIGNAL_LABELS.keys())
     ens_hits = {k: 0 for k in ENSEMBLE_KS}
+    boe_hits = {k: 0 for k in ENSEMBLE_KS}  # best-of-engines(최선순위) 넓은 그물
     per_round: List[Dict[str, Any]] = []
     ens_pos_by_round: List[Dict[int, int]] = []
     for s in samples:
@@ -60,15 +62,21 @@ def build_ensemble_backtest(samples: Any = None) -> Dict[str, Any]:
         order = _ensemble_order(sigs, keys)
         pos = {n: i + 1 for i, n in enumerate(order)}
         ens_pos_by_round.append(pos)
+        boe_pos = {n: i + 1 for i, n in enumerate(_best_of_engines_order(sigs))}
         row: Dict[str, Any] = {"round_no": s.round_no, "winning": list(s.winning)}
         for k in ENSEMBLE_KS:
             h = sum(1 for n in s.winning if pos[n] <= k)
             ens_hits[k] += h
             row[f"ens_top{k}"] = h
+            bh = sum(1 for n in s.winning if boe_pos[n] <= k)
+            boe_hits[k] += bh
+            row[f"boe_top{k}"] = bh
         per_round.append(row)
 
     ensemble_sig = {str(k): _coverage_significance(ens_hits[k], rounds, k) for k in ENSEMBLE_KS}
     ensemble_mean = {str(k): round(ens_hits[k] / rounds, 3) for k in ENSEMBLE_KS}
+    boe_sig = {str(k): _coverage_significance(boe_hits[k], rounds, k) for k in ENSEMBLE_KS}
+    boe_mean = {str(k): round(boe_hits[k] / rounds, 3) for k in ENSEMBLE_KS}
 
     # 최고 단일 신호(다회차 상위18) 와 비교 — 앙상블이 그보다 나은가?
     lb = _signal_leaderboard(samples)
@@ -91,6 +99,15 @@ def build_ensemble_backtest(samples: Any = None) -> Dict[str, Any]:
         "per_round": per_round,
         "ensemble_mean": ensemble_mean,
         "ensemble_significance": ensemble_sig,
+        # 전 엔진 '최선순위'(min-rank) 넓은 그물 — 어느 엔진이든 잡은 catchable 당첨을 담는다.
+        # 평균/합의가 특정 엔진만 잡은 당첨을 놓치던 것을 보완(recall↑). 확률은 여전히 불변.
+        "best_of_engines_method": "최선순위(min-rank) — 어느 엔진이든 상위로 꼽으면 넓은 그물에 포함",
+        "best_of_engines_mean": boe_mean,
+        "best_of_engines_significance": boe_sig,
+        "boe_beats_ensemble_top18": bool(boe_mean["18"] > ensemble_mean["18"]),
+        "boe_beats_best_single_top18": bool(
+            best_single is not None and boe_mean["18"] > float(best_single.get("mean_top18", 0.0))
+        ),
         "best_single_signal": (
             {"label": best_single.get("label"), "mean_top18": best_single.get("mean_top18")}
             if best_single

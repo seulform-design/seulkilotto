@@ -450,25 +450,47 @@ def _signal_leaderboard(samples=None) -> Dict[str, Any]:
     }
 
 
+def _best_of_engines_order(sigs: Dict[str, Dict[int, float]]) -> List[int]:
+    """전 신호의 '최선(최소) 순위'로 번호를 정렬 — 어느 엔진이든 상위로 꼽은 번호를 앞에
+    둔다. 넓은 그물(expand18)의 본령: 합의·평균은 약신호가 최고신호를 희석하고 특정 엔진만
+    잡은 catchable 당첨을 놓치지만(예: 조합강도만 잡은 번호), 최선순위는 '어느 엔진이든
+    잡았으면 포함'이라 상위K 로 담을 수 있는 당첨을 최대한 담는다. 동률은 총 등장으로 정렬.
+    ⚠️ 확률 불변 — 넓은 그물의 recall 을 높일 뿐, 잭팟·부분일치 기대값은 안 변한다."""
+    keys = list(_SIGNAL_LABELS.keys())
+    tb = sigs.get("total_freq", {})
+    pos = {sk: {n: i for i, n in enumerate(_rank_signal(sigs[sk], tb))} for sk in keys}
+    min_rank = {n: min(pos[sk][n] for sk in keys) for n in range(1, 46)}
+    return sorted(range(1, 46), key=lambda n: (min_rank[n], -tb.get(n, 0.0), n))
+
+
 def _coverage_set_from_signals(
     sigs: Dict[str, Dict[int, float]],
     *,
     signal_key: str,
     selected_by: str,
 ) -> Dict[str, Any]:
-    """단일 신호 랭킹으로 core6 + 구간균형 expand18 커버리지 세트를 만든다."""
+    """단일 신호 랭킹으로 core6 + 구간균형 expand18 커버리지 세트를 만든다.
+
+    - core6: 최고 단일신호(집중 픽) — 합의/평균은 약신호가 희석하므로 단일 우선.
+    - expand18: 전 엔진 '최선순위'(min-rank) 넓은 그물 — 어느 엔진이든 잡은 catchable
+      당첨을 최대한 담는다(단일 신호가 놓친 번호도 포함). core6 ⊂ expand18 유지.
+    """
     ranked = _rank_signal(sigs.get(signal_key, sigs["support"]), sigs.get("total_freq"))
     present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
     raw_expand = ranked[:18]
-    bal_expand = _balance_expand(ranked, ranked[:6], present, 18)
+    single_expand = _balance_expand(ranked, ranked[:6], present, 18)
+    boe_order = _best_of_engines_order(sigs)
+    boe_expand = _balance_expand(boe_order, ranked[:6], present, 18)
     return {
         "signal": signal_key,
         "signal_label": _SIGNAL_LABELS.get(signal_key, signal_key),
         "selected_by": selected_by,
         "core6": ranked[:6],
-        "expand18": bal_expand,
+        # 넓은 그물 = 전 엔진 최선순위(recall↑). 단일신호 그물은 참고로 병기.
+        "expand18": boe_expand,
+        "expand18_single": single_expand,
         "expand18_raw": raw_expand,
-        "decade_balance": _decade_balance_info(bal_expand, raw_expand, present),
+        "decade_balance": _decade_balance_info(boe_expand, raw_expand, present),
     }
 
 

@@ -1631,10 +1631,10 @@ export default function SemiAutoComparePanel({
         ?? 0)
       : 0;
     const randomExp18 = (18 * 6) / 45;
+    const forwardOnly = sheetIntent === 'current_round';
+    // 점수 주입과 동일: 이번회차 커버리지만 wired. 복기는 히어로 표시만.
     const covWired = Boolean(
-      compareWinning
-        ? (rv?.review_consensus_coverage?.expand18?.length || rv?.review_coverage_set)
-        : (rv?.consensus_coverage?.expand18?.length || rv?.current_coverage_set)
+      forwardOnly && (rv?.consensus_coverage?.expand18?.length || rv?.current_coverage_set)
     );
     const coverageConf = covWired
       ? Math.round(
@@ -1651,7 +1651,6 @@ export default function SemiAutoComparePanel({
       : 0;
     const countSrc = (src: ValidatedLearningSignal['source']) =>
       validatedLearning.filter((v) => v.source === src).length;
-    const forwardOnly = sheetIntent === 'current_round';
     const ovFlat = Boolean(overlapLearningQuery.data?.ok && overlapLearningQuery.data.calibration_flat);
     const coFlat = carryoverQuery.data?.ok ? (carryoverQuery.data.calibration_flat ?? true) : true;
     /** L10 ↔ 점수 경로 상태(내부). UI 전용 섹션은 두지 않음. */
@@ -1717,9 +1716,9 @@ export default function SemiAutoComparePanel({
       {
         id: '커버리지',
         label: '커버리지',
-        status: countSrc('coverage') > 0 ? 'on' : 'off',
+        status: forwardOnly && countSrc('coverage') > 0 ? 'on' : 'off',
         count: countSrc('coverage'),
-        note: compareWinning ? '복기 용지 세트' : '이번회차 용지 세트',
+        note: forwardOnly ? '이번회차 용지 세트' : '복기=히어로 표시만(점수 미주입)',
       },
       {
         id: '이월',
@@ -1750,7 +1749,6 @@ export default function SemiAutoComparePanel({
       notInjected: ['L1-A 상위순위(순수 1:1)', 'L9 통합신호(서버 독립)', '히어로 핵심6(커버리지 서버)'] as const,
     };
   }, [
-    compareWinning,
     sheetIntent,
     validatedLearning,
     featureLearningQuery.data,
@@ -2467,12 +2465,28 @@ export default function SemiAutoComparePanel({
   const hasLineMatchingInputs = groupLineMatching.autoLineCount > 0 || groupLineMatching.semiLineCount > 0;
   const canRenderLineMatching = groupLineMatching.autoLineCount > 0 && groupLineMatching.semiLineCount > 0;
 
+  // 🔒 반자동 고정수 감지 — crossSet/deep/predicted 공통. 줄≥10 · 등장≥50%.
+  const fixedSemiNumbers = useMemo(() => {
+    const lines = groupLineMatching.allSemiNumbers;
+    const n = lines.length;
+    if (n < 10) return { set: new Set<number>(), list: [] as { number: number; frac: number }[], lineCount: n };
+    const freq: Record<number, number> = {};
+    for (const line of lines) for (const v of new Set(line)) if (v >= 1 && v <= 45) freq[v] = (freq[v] ?? 0) + 1;
+    const list = Object.entries(freq)
+      .map(([v, c]) => ({ number: Number(v), frac: c / n }))
+      .filter((x) => x.frac >= 0.5)
+      .sort((a, b) => b.frac - a.frac || a.number - b.number);
+    return { set: new Set(list.map((x) => x.number)), list, lineCount: n };
+  }, [groupLineMatching.allSemiNumbers]);
+
   // 🔁 세트 중복 역산 — 모든 일치 그룹(6·5·4·3·2)의 matchedNumbers 를 서로 교차해,
   // 2·3개짜리 하위 세트가 '몇 개의 그룹에 걸쳐' 반복 등장하는지(groupCount)와 그
   // 지지(support=Σ(자동수+반자동수))를 집계한다. 예: {13,38} 이 2일치·3일치·5일치
   // 그룹 여러 곳에 나타나면 강한 반복 패턴. 자동·반자동이 반복해 함께 가리킨 세트를
   // 찾는 2차 전수비교다. 당첨번호는 정렬에 쓰지 않고(누수 방지) 표시만 대조한다.
+  // 🔒 고정수 포함 세트는 제외(오염 방지).
   const crossSetPatterns = useMemo(() => {
+    const fixedSet = fixedSemiNumbers.set;
     const allGroups = [
       ...groupLineMatching.groups6,
       ...groupLineMatching.groups5,
@@ -2484,6 +2498,7 @@ export default function SemiAutoComparePanel({
     const pairMap = new Map<string, Acc>();
     const tripleMap = new Map<string, Acc>();
     const addCombo = (map: Map<string, Acc>, combo: number[], support: number, level: number) => {
+      if (combo.some((n) => fixedSet.has(n))) return;
       const key = combo.join('-');
       const e = map.get(key);
       if (e) {
@@ -2495,7 +2510,7 @@ export default function SemiAutoComparePanel({
       }
     };
     for (const g of allGroups) {
-      const nums = g.matchedNumbers;
+      const nums = g.matchedNumbers.filter((n) => !fixedSet.has(n));
       const support = g.autoList.length + g.semiList.length;
       for (let i = 0; i < nums.length; i += 1) {
         for (let j = i + 1; j < nums.length; j += 1) {
@@ -2525,25 +2540,8 @@ export default function SemiAutoComparePanel({
     groupLineMatching.groups3,
     groupLineMatching.groups2,
     winningSet,
+    fixedSemiNumbers,
   ]);
-
-  // 🔒 반자동 고정수 감지 — 반자동은 '고정수(사용자 지정) + 자동fill' 구조라, 고정수는
-  // 거의 모든 반자동 줄에 반복 등장해(자동fill 은 번호당 ~13%/줄) 빈도·지지·1:1 통계를
-  // 왜곡한다(support=min 이라 고정수는 반자동 쪽이 최대치가 돼 자동값 그대로 강수화).
-  // 반자동 줄의 50%+ 에 등장하는 번호를 고정수로 보고 '발견 신호'에서 분리한다.
-  // 표본이 적으면(<10줄) 자동fill 우연이 50%를 넘을 수 있어 감지하지 않는다(오탐 방지).
-  const fixedSemiNumbers = useMemo(() => {
-    const lines = groupLineMatching.allSemiNumbers;
-    const n = lines.length;
-    if (n < 10) return { set: new Set<number>(), list: [] as { number: number; frac: number }[], lineCount: n };
-    const freq: Record<number, number> = {};
-    for (const line of lines) for (const v of new Set(line)) if (v >= 1 && v <= 45) freq[v] = (freq[v] ?? 0) + 1;
-    const list = Object.entries(freq)
-      .map(([v, c]) => ({ number: Number(v), frac: c / n }))
-      .filter((x) => x.frac >= 0.5)
-      .sort((a, b) => b.frac - a.frac || a.number - b.number);
-    return { set: new Set(list.map((x) => x.number)), list, lineCount: n };
-  }, [groupLineMatching.allSemiNumbers]);
 
   // 🎯 당첨 예상번호 & 번호별 반복 출현 정밀 프로파일 (단일 소스).
   // 핵심 신호 = 자동↔반자동 1:1 전수비교에서 '서로 다른 자동 줄 수 × 서로 다른
@@ -2989,11 +2987,12 @@ export default function SemiAutoComparePanel({
     for (const g of groups) {
       const gw = (LW[g.matchCount] ?? 1) * (1 + Math.log2(Math.min(g.autoList.length, g.semiList.length) + 1));
       for (const n of g.matchedNumbers) {
+        if (fixedSet.has(n)) continue;
         wscore[n] = (wscore[n] ?? 0) + gw;
         maxMatch[n] = Math.max(maxMatch[n] ?? 0, g.matchCount);
         grpCnt[n] = (grpCnt[n] ?? 0) + 1;
       }
-      const ns = g.matchedNumbers;
+      const ns = g.matchedNumbers.filter((n) => !fixedSet.has(n));
       for (let i = 0; i < ns.length; i += 1)
         for (let j = i + 1; j < ns.length; j += 1) {
           const a = ns[i];
@@ -3053,7 +3052,10 @@ export default function SemiAutoComparePanel({
     // '고루 상위'인 번호(견고한 합의)를 최상위로 올린다. 1:1 이 가장 중요 → 양쪽빈도·가중치 최우선.
     const setSupport: Record<number, number> = {};
     for (const s of [...crossSetPatterns.pairs, ...crossSetPatterns.triples])
-      for (const n of s.numbers) setSupport[n] = (setSupport[n] ?? 0) + s.support;
+      for (const n of s.numbers) {
+        if (fixedSet.has(n)) continue;
+        setSupport[n] = (setSupport[n] ?? 0) + s.support;
+      }
     const consensus: Record<number, number> = {};
     for (const n of freqTable.map((f) => f.number)) consensus[n] = Math.log2((af[n] ?? 0) + 1) * Math.log2((sf[n] ?? 0) + 1);
     const ensembleNums = Array.from(new Set([
@@ -6778,7 +6780,7 @@ export default function SemiAutoComparePanel({
           <>
             <EngineStatusChip
               color={learningBridgeStatus.forwardOnly ? 'secondary' : 'primary'}
-              label={learningBridgeStatus.forwardOnly ? 'forward ON' : '복기 커버리지'}
+              label={learningBridgeStatus.forwardOnly ? 'forward ON' : '복기 표시만'}
             />
             <EngineStatusChip
               color={learningBridgeStatus.validatedCount > 0 ? 'success' : 'default'}

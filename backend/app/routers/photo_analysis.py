@@ -430,6 +430,19 @@ def get_carryover_learning(seed: int = Query(42, ge=0, le=999_999)):
     return to_jsonable(build_carryover_learning(seed=seed))
 
 
+@router.get("/full-history-backtest")
+def get_full_history_backtest(warmup: int = Query(50, ge=10, le=500)):
+    """전체 당첨 이력 워크포워드 백테스트 — 흔한 전략(핫·콜드·미출·최근·페어·회피)이
+    무작위를 이기는지 수백~1200+ 회차로 검정한다. 각 회차는 이전 회차만으로 예측하고 그
+    회차로 채점(누수 없음). 다중검정 보정(Bonferroni)으로 위양성(예: 콜드 top18)을 걸러낸다.
+    ⚠️ 로또 i.i.d. — 확률(1/8,145,060)은 어떤 전략으로도 불변. 큰 표본으로도 우위 없음을
+    정직하게 확정하는 도구다(용지·회차 무관 전역 분석이라 캐시 가능).
+    """
+    from ..video_analysis.full_history_backtest import build_full_history_backtest
+
+    return to_jsonable(build_full_history_backtest(warmup=warmup))
+
+
 class ReattributeRequest(BaseModel):
     from_round: int = Field(..., ge=1, description="현재 잘못 기록된 회차")
     to_round: int = Field(..., ge=1, description="교정할 실제 회차")

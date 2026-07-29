@@ -616,6 +616,13 @@ export const v1Api = {
       { timeoutMs: 120_000 },
     ),
 
+  /** 전체 당첨 이력 워크포워드 백테스트 — 흔한 전략이 무작위를 이기나(다중검정 보정). */
+  getFullHistoryBacktest: () =>
+    fetchJson<FullHistoryBacktestResponse>(
+      '/api/v1/photo-analysis/full-history-backtest',
+      { timeoutMs: 60_000 },
+    ),
+
   /** 복기 엔트리 회차 재귀속(관리자) — 라벨만 교정, 보관 정본 불변, 원본 회차 보존. */
   reattributeEntries: (fromRound: number, toRound: number, entryIds?: string[]) =>
     fetchJson<{
@@ -1282,6 +1289,40 @@ export interface OverlapLearningResponse {
     random_baseline?: { top6: number; top10: number; top18: number };
     verdict?: string;
   };
+  honesty?: string;
+}
+
+/** 전체 당첨 이력 워크포워드 백테스트 — 흔한 전략이 무작위를 이기나(다중검정 보정). */
+export interface FullHistoryBacktestResponse {
+  ok: boolean;
+  reason?: string;
+  total_rounds: number;
+  tested_rounds?: number;
+  warmup?: number;
+  random_baseline?: Record<string, number>;
+  strategies?: {
+    strategy: string;
+    label: string;
+    by_k: Record<string, {
+      hits: number;
+      mean_per_round: number;
+      expected_per_round: number;
+      lift: number;
+      p_value: number;
+      significant_raw: boolean;
+      significant: boolean;
+    }>;
+  }[];
+  multiple_testing?: {
+    n_tested: number;
+    alpha: number;
+    expected_false_positives: number;
+    bonferroni_alpha: number;
+    raw_significant_count: number;
+    note?: string;
+  };
+  any_beats_random?: boolean;
+  verdict?: string;
   honesty?: string;
 }
 

@@ -29,6 +29,7 @@ import OverlapPatternLearnPanel from '../components/OverlapPatternLearnPanel';
 import OverlapLearningServerPanel from '../components/OverlapLearningServerPanel';
 import RoundDataBreakdownPanel from '../components/RoundDataBreakdownPanel';
 import RoundLearningPanel from '../components/RoundLearningPanel';
+import FullHistoryBacktestPanel from '../components/FullHistoryBacktestPanel';
 import ReviewVerificationPanel from '../components/ReviewVerificationPanel';
 import FeatureLearningPanel from '../components/FeatureLearningPanel';
 import PatternMiningPanel from '../components/PatternMiningPanel';
@@ -1809,6 +1810,7 @@ export default function PhotoAnalysisPage() {
         }
         validatedLearningSlot={
           <Stack spacing={1.5}>
+            <FullHistoryBacktestPanel />
             <FeatureLearningPanel sheetIntent={activeTab} />
             <PatternMiningPanel sheetIntent={activeTab} />
             <RoundLearningPanel sheetIntent={activeTab} />

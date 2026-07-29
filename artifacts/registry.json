@@ -6,7 +6,7 @@
   "completeness": {
     "sheet_engine_runtime": 0.96,
     "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. 용지분석 런타임 버그·정책·백테스트 게이트는 검수 완료.",
-    "last_audit": "2026-07-30: Explain UI + experimental ball/sim specs; fixed_semi set/hub; review covWired"
+    "last_audit": "2026-07-30: 05_statistics snapshot schema 0.1.0; 08_ai validation gate + ModelEntry"
   },
   "safety": {
     "no_win_guarantee": true,
@@ -194,9 +194,11 @@
       "generate": false,
       "mapped_paths": [
         "backend/app/video_analysis/stats.py",
-        "backend/app/epo"
+        "backend/app/epo",
+        "artifacts/05_statistics/INDEX.md",
+        "artifacts/05_statistics/SCHEMA.md"
       ],
-      "gap": "통합 Statistics Artifact 스키마·버전드 스냅샷 미통일"
+      "gap": "스키마 0.1.0 확정 — HistoricalProfile→JSON serializer·API는 후속"
     },
     {
       "id": "06_pattern",
@@ -228,13 +230,14 @@
       "title": "AI / Model Registry Artifact",
       "status": "partial",
       "priority": "medium",
-      "generate": true,
+      "generate": false,
       "mapped_paths": [
         "backend/app/video_analysis/feature_learning_engine.py",
         "backend/app/video_analysis/vision_llm.py",
-        "artifacts/08_ai/model_registry.md"
+        "artifacts/08_ai/model_registry.md",
+        "artifacts/08_ai/validation_gate.md"
       ],
-      "gap": "Model Rollback·토너먼트 UI·SHAP/Drift 미구축"
+      "gap": "Validation gate 설계 완료 — 공통 GateResult API·Rollback/토너먼트 UI·SHAP/Drift 미구축"
     },
     {
       "id": "09_validation",
@@ -383,14 +386,19 @@
   ],
   "generation_queue": [
     {
-      "id": "05_statistics",
-      "reason": "통합 Statistics 스냅샷 스키마 미통일",
-      "action": "define versioned stats snapshot aligned with EPO/decade"
+      "id": "05_statistics_impl",
+      "reason": "StatisticsSnapshot serializer·선택 API",
+      "action": "HistoricalProfile → SCHEMA 0.1.0 JSON + unit test; scoring 미연결"
     },
     {
-      "id": "08_ai",
-      "reason": "Model registry rollback·토너먼트 UI",
-      "action": "extend artifacts/08_ai after Validation gate design"
+      "id": "10_explain",
+      "reason": "V1–V4 응답 explain 필드 통일",
+      "action": "optional ExplainPayload on feature/pattern/round/overlap APIs"
+    },
+    {
+      "id": "08_ai_gate_impl",
+      "reason": "공통 GateResult 헬퍼",
+      "action": "evaluate_gate from feature/pattern adopt; Registry last_gate 연동"
     }
   ]
 }

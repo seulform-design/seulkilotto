@@ -90,10 +90,11 @@ Ball / 대규모 MC / DL·GNN 등은 데이터·실험 영역이라 Experimental
 |----|------|-----------|
 | `01_knowledge` | partial | 도메인 지식 INDEX (추첨·확률·정직성 시드) |
 | `04_ball` | missing | 볼 단위 스펙 — 데이터 없으면 Experimental 설계만 |
+| `05_statistics` | partial | 스냅샷 스키마 0.1.0 · serializer 후속 |
 | `07_simulation` | partial | 대규모 MC는 Experimental 스펙 후 검증 |
-| `08_ai` | partial | Model Registry 스텁 · 토너먼트 |
-| `10_explain` | partial | 통일 ExplainPayload |
-| `100_experimental` | missing | 가설·무속 격리 공간 |
+| `08_ai` | partial | Validation gate 설계 · Rollback/토너먼트 UI 후속 |
+| `10_explain` | partial | 복기 UI 연결됨 · V1–V4 ExplainPayload 통일 후속 |
+| `100_experimental` | partial | 볼·대규모 MC 가설 격리 |
 | Enterprise 32 graph, 39 markov, 40 bayesian, 42–44 DL, 66 shap, 67 drift, 80 event, 87 registry… | missing | 필요 시 템플릿으로 추가, **점수 연결은 Validation 통과 후** |
 
 ---

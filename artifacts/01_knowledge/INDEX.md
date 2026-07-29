@@ -3,7 +3,7 @@
 > 상태: `partial`  
 > 영역: Knowledge  
 > 용지분석 연결: 전 엔진 공통 원칙 (점수 계산 아님)  
-> 출처: [`SOURCES.md`](./SOURCES.md) · export: [`export.json`](./export.json) `0.1.0`
+> 출처: [`SOURCES.md`](./SOURCES.md) · export: [`export.json`](./export.json) `0.1.1`
 
 ## 1. 목적
 
@@ -41,4 +41,4 @@
 
 - [x] registry `01_knowledge` partial
 - [x] 공식 출처 URL (`SOURCES.md`)
-- [x] 버전드 JSON export (`export.json` 0.1.0)
+- [x] 버전드 JSON export (`export.json` 0.1.1 · draw-machine DM-* 교차)

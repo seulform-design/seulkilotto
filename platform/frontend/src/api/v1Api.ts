@@ -1488,6 +1488,12 @@ export interface FeatureLearningResponse {
     auto_mutate_scoring?: boolean;
     honesty?: string;
   };
+  model_registry?: {
+    disabled_ids?: string[];
+    event_count?: number;
+    auto_mutate_scoring?: boolean;
+    honesty?: string;
+  };
 }
 
 /** 복기 Pattern Mining 엔진 응답. */

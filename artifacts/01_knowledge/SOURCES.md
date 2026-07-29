@@ -1,7 +1,8 @@
 # Knowledge — 공식·검증 출처
 
-> 버전: `0.1.0` · 점수 계산에 쓰지 않음  
-> export: [`export.json`](./export.json)
+> 버전: `0.1.1` · 점수 계산에 쓰지 않음  
+> export: [`export.json`](./export.json)  
+> 교차: [`../03_draw_machine/SOURCES.md`](../03_draw_machine/SOURCES.md) (DM-*)
 
 ## 공식·1차 출처
 

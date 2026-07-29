@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from app.config import settings
@@ -27,6 +27,13 @@ from app.video_analysis.vision_config import clear_vision_api_key, save_vision_a
 router = APIRouter(prefix="/api/v1/photo-analysis", tags=["photo-analysis"])
 
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
+
+
+def _verify_upgrade_key(x_upgrade_key: str | None = Header(default=None, alias="X-Upgrade-Key")) -> None:
+    """상태 변경 보호 — UPGRADE_API_KEY 설정 시 헤더 필요 (data.upgrade 와 동일)."""
+    key = settings.UPGRADE_API_KEY.strip()
+    if key and x_upgrade_key != key:
+        raise HTTPException(status_code=403, detail="Upgrade API key required")
 
 
 def _save_uploads(files: List[UploadFile], tmp: Path) -> List[Path]:
@@ -406,6 +413,56 @@ def get_feature_learning(
     from ..video_analysis.feature_learning_engine import build_feature_learning
 
     return to_jsonable(build_feature_learning(seed=seed, apply_intent=apply_intent))
+
+
+class ModelRegistryActionBody(BaseModel):
+    model_id: str = Field(..., min_length=1, max_length=200)
+    reason: str = Field(default="human_disable", max_length=500)
+    confirm: bool = Field(default=False, description="true 필수 — 자동 적용 금지")
+    by: str = Field(default="operator", max_length=120)
+
+
+@router.get("/model-registry")
+def get_model_registry():
+    """사람 승인 비활성 목록·이벤트 (읽기 전용)."""
+    from ..video_analysis.model_registry_store import get_registry_state
+
+    return to_jsonable(get_registry_state())
+
+
+@router.post("/model-registry/disable")
+def post_model_registry_disable(
+    body: ModelRegistryActionBody,
+    _: None = Depends(_verify_upgrade_key),
+):
+    """사람 승인 후 scoring 경로 비활성. confirm=true + (설정 시) X-Upgrade-Key."""
+    from ..video_analysis.model_registry_store import apply_disable
+
+    return to_jsonable(
+        apply_disable(
+            body.model_id,
+            reason=body.reason,
+            confirmed=bool(body.confirm),
+            by=body.by,
+        )
+    )
+
+
+@router.post("/model-registry/enable")
+def post_model_registry_enable(
+    body: ModelRegistryActionBody,
+    _: None = Depends(_verify_upgrade_key),
+):
+    """비활성 해제. 이벤트 로그는 유지(삭제 금지)."""
+    from ..video_analysis.model_registry_store import apply_enable
+
+    return to_jsonable(
+        apply_enable(
+            body.model_id,
+            confirmed=bool(body.confirm),
+            by=body.by,
+        )
+    )
 
 
 @router.get("/pattern-mining")

@@ -6,7 +6,7 @@
   "completeness": {
     "sheet_engine_runtime": 0.96,
     "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. 용지분석 런타임 버그·정책·백테스트 게이트는 검수 완료.",
-    "last_audit": "2026-07-30: draw-machine sources; shap/drift experimental; orchestrator propose-only"
+    "last_audit": "2026-07-30: knowledge DM cross-link; human model-registry disable API"
   },
   "safety": {
     "no_win_guarantee": true,
@@ -149,7 +149,7 @@
         "docs/LOTTO_KNOWLEDGE_ARTIFACT_SYSTEM.md",
         "docs/DATA_ISOLATION.md"
       ],
-      "gap": "출처·export 0.1.0 완료 — 추첨기/볼 공식 스펙 인용은 03/04 후속"
+      "gap": "출처·export 0.1.1(DM 교차) 완료 — 추첨기 제조사 PDF는 03 후속"
     },
     {
       "id": "02_historical",
@@ -259,10 +259,11 @@
         "backend/app/video_analysis/ensemble_backtest.py",
         "backend/app/video_analysis/full_history_backtest.py",
         "backend/app/video_analysis/strategy_orchestrator.py",
+        "backend/app/video_analysis/model_registry_store.py",
         "artifacts/09_validation/orchestration.md",
         "backend/tests"
       ],
-      "gap": "propose_retirements 읽기전용 완료 — 사람 승인 disable API·Nested CV 후속"
+      "gap": "propose + human disable API 완료 — Nested CV 후속"
     },
     {
       "id": "10_explain",
@@ -400,19 +401,20 @@
   ],
   "generation_queue": [
     {
-      "id": "09_validation_disable_api",
-      "reason": "사람 승인 후 scoring_allowed 내리기 API",
-      "action": "authenticated POST propose→apply; never auto; keep archive"
-    },
-    {
       "id": "03_draw_machine_spec_pdf",
       "reason": "Editec Venus 제조사 스펙 확보 시 SOURCES 승격",
-      "action": "when primary PDF available; physics stays Experimental until Validation"
+      "action": "blocked until primary PDF; physics stays Experimental",
+      "blocked": true
     },
     {
-      "id": "01_knowledge_machine_link",
-      "reason": "Knowledge export에 draw-machine 출처 교차링크",
-      "action": "add DM-* ids to export.json sources"
+      "id": "09_validation_nested_cv",
+      "reason": "Nested CV 설계",
+      "action": "document nested walk-forward; no scoring change"
+    },
+    {
+      "id": "10_explain_experimental_banner",
+      "reason": "Experimental 결과 UI 배너",
+      "action": "decision-agnostic banner when artifact experimental"
     }
   ]
 }

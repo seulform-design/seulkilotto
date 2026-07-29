@@ -757,6 +757,9 @@ def build_feature_learning(seed: int = 42, apply_intent: str = "current_round") 
         }
 
     feature_reports = validate_features(samples, seed=seed)
+    from .model_registry_store import apply_human_disables_to_feature_reports, get_registry_state
+
+    feature_reports = apply_human_disables_to_feature_reports(feature_reports)
     adopted_keys = [r["key"] for r in feature_reports if r.get("adopted")]
     ensemble = _try_sklearn_models(samples, adopted_keys or ["support", "inv_rank", "combo_strength"], seed=seed)
 
@@ -869,6 +872,7 @@ def build_feature_learning(seed: int = 42, apply_intent: str = "current_round") 
         "recommendation": {**recommendation, "source": rec_source},
         "validation_gates": gate_summary,
         "orchestrator": orchestrator,
+        "model_registry": get_registry_state(),
         "explain": explain,
         "baselines": {
             "uniform_top6_hits": round(BASELINE_TOP6_HITS, 4),

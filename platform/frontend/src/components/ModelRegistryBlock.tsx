@@ -26,19 +26,23 @@ export function ModelRegistryBlock({
   tournament,
   selected,
   orchestrator,
+  modelRegistry,
   title = 'Model Registry (표시전용)',
 }: {
   gates?: ValidationGatesSummary | null;
   tournament?: TournamentModelRow[] | null;
   selected?: string | null;
   orchestrator?: { candidates?: OrchestratorCandidate[]; auto_mutate_scoring?: boolean } | null;
+  modelRegistry?: { disabled_ids?: string[]; honesty?: string } | null;
   title?: string;
 }) {
   const hasGates = Boolean(gates && gates.count > 0);
   const hasTour = Boolean(tournament && tournament.length > 0);
   const proposals = (orchestrator?.candidates ?? []).filter((c) => c.action === 'propose_disable').slice(0, 8);
   const hasOrch = proposals.length > 0;
-  if (!hasGates && !hasTour && !hasOrch) return null;
+  const disabledIds = modelRegistry?.disabled_ids ?? [];
+  const hasDisabled = disabledIds.length > 0;
+  if (!hasGates && !hasTour && !hasOrch && !hasDisabled) return null;
 
   const allowed = gates?.scoring_allowed_ids ?? [];
   const rejected = gates?.rejected ?? [];
@@ -88,6 +92,21 @@ export function ModelRegistryBlock({
             </Typography>
           )}
         </Stack>
+      )}
+
+      {hasDisabled && (
+        <Box sx={{ mb: hasTour || hasOrch ? 1 : 0 }}>
+          <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.3 }}>
+            사람 승인 비활성 ({disabledIds.length})
+          </Typography>
+          <Typography variant="caption" color="warning.main" sx={{ fontSize: 9 }}>
+            {disabledIds.slice(0, 10).join(', ')}
+            {disabledIds.length > 10 ? '…' : ''}
+          </Typography>
+          <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontSize: 8.5, mt: 0.2 }}>
+            POST /model-registry/disable|enable + confirm + X-Upgrade-Key (자동 적용 없음)
+          </Typography>
+        </Box>
       )}
 
       {hasTour && (

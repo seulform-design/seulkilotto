@@ -1,6 +1,6 @@
 {
   "artifact_id": "01_knowledge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "exported_at": "2026-07-30",
   "honesty": "지식·출처 export. 당첨 보장·확률 왜곡 없음. 추천 점수 미연결.",
   "facts": [
@@ -14,7 +14,7 @@
       "id": "K-IID-001",
       "statement": "회차 간 추첨은 독립에 가깝게 설계됨(i.i.d. 가정)",
       "grade": "operational_assumption",
-      "sources": ["SRC-DHL-GUIDE"]
+      "sources": ["SRC-DHL-GUIDE", "DM-DHL-GUIDE"]
     },
     {
       "id": "K-TICKET-001",
@@ -51,6 +51,12 @@
       "statement": "archived_demo_* 는 표시용 — 점수 주입 금지",
       "grade": "engine",
       "sources": ["SRC-FIXED"]
+    },
+    {
+      "id": "K-MACHINE-001",
+      "statement": "추첨기·호기 신호는 경험 집계·체험용이며 확률을 바꾸지 않는다",
+      "grade": "draw_machine",
+      "sources": ["DM-DHL-INTRO", "DM-HIST", "DM-ANALYTICS", "DM-VENUS-001"]
     }
   ],
   "sources": [
@@ -93,8 +99,41 @@
       "id": "SRC-FIXED",
       "title": "fixed_semi exclusion",
       "path": "backend/app/video_analysis/feature_learning_engine.py"
+    },
+    {
+      "id": "DM-DHL-INTRO",
+      "title": "Draw Machine — 동행복권 소개 (교차)",
+      "url": "https://www.dhlottery.co.kr/lt645/intro",
+      "maps_to": "artifacts/03_draw_machine/SOURCES.md"
+    },
+    {
+      "id": "DM-DHL-GUIDE",
+      "title": "Draw Machine — 추첨방송 안내 (교차)",
+      "url": "https://www.dhlottery.co.kr/guide/wnrGuide",
+      "maps_to": "artifacts/03_draw_machine/SOURCES.md"
+    },
+    {
+      "id": "DM-HIST",
+      "title": "machine_history.csv",
+      "path": "backend/data/machine_history.csv",
+      "maps_to": "artifacts/03_draw_machine/SOURCES.md"
+    },
+    {
+      "id": "DM-ANALYTICS",
+      "title": "machine_analytics.py",
+      "path": "backend/app/machine_analytics.py",
+      "maps_to": "artifacts/03_draw_machine/SOURCES.md"
+    },
+    {
+      "id": "DM-VENUS-001",
+      "title": "Editec Venus 계열 보도·UI 라벨",
+      "path": "artifacts/03_draw_machine/SOURCES.md",
+      "grade": "secondary"
     }
   ],
+  "cross_artifacts": {
+    "03_draw_machine": "artifacts/03_draw_machine/SOURCES.md"
+  },
   "recommendation_policy": {
     "core6_mode": "best_single",
     "expand18_mode": "best_of_engines",

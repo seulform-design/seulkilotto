@@ -135,6 +135,7 @@ export default function FeatureLearningPanel({
         tournament={ensemble?.models}
         selected={ensemble?.selected}
         orchestrator={d.orchestrator}
+        modelRegistry={d.model_registry}
         title="Model Registry — Feature / Ensemble"
       />
 

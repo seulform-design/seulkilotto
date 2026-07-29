@@ -70,5 +70,5 @@ Backtest/Gates → Orchestrator(propose only) → Registry UI 표시
 - [x] 설계 문서 (자동 변이 금지 명시)
 - [x] `propose_retirements` 읽기 전용 헬퍼
 - [x] Feature 응답 `orchestrator` + Registry UI 후보 표시
-- [ ] 사람 승인 disable API
-- [ ] 자동 scoring mutate 회귀 테스트 (없어야 함)
+- [x] 사람 승인 disable/enable API (`confirm` + X-Upgrade-Key)
+- [x] 자동 scoring mutate 회귀 테스트 (auto_applied=false)

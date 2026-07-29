@@ -44,10 +44,14 @@
 
 ## 미구축
 
-- [ ] 공통 GateResult API
 - [ ] Rollback·토너먼트 UI
 - [ ] SHAP / Feature Drift
 - [ ] 자동 가중·자동 비활성 오케스트레이션
+
+## 구현됨 (코드)
+
+- `validation_gate.py` — `evaluate_gate` · feature/pattern 어댑터
+- Feature/Pattern 응답: `last_gate`, `validation_gates`
 
 ## 규칙
 

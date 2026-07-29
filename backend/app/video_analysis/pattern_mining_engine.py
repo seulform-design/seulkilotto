@@ -894,6 +894,67 @@ def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") ->
             "per_round": s.per_round,
         }
 
+    honesty = (
+        f"보관 {len(rounds)}개 회차로 Pattern {len(scores)}개를 탐색·검증했습니다. "
+        "목표는 패턴을 사실로 단정하는 것이 아니라, 재현되는 후보만 골라 설명 가능하게 쓰는 것입니다. "
+        "1등 확률(1/8,145,060)은 변하지 않습니다."
+    )
+    demo_blocked = str(source).startswith("archived_demo_")
+    from .explain import build_explain_payload
+    from .validation_gate import evaluate_gate_from_pattern_score, summarize_gates
+
+    pattern_rows = []
+    for s in scores[:80]:
+        row = _score_dict(s)
+        row["last_gate"] = evaluate_gate_from_pattern_score(row, demo_source=demo_blocked)
+        pattern_rows.append(row)
+    adopted_rows = [r for r in pattern_rows if r.get("adopted")][:40]
+    gates = [r["last_gate"] for r in pattern_rows]
+    gate_summary = summarize_gates(gates, demo_blocked=demo_blocked)
+    scoring_ok = bool(rec.get("ok")) and len(adopted) > 0 and not demo_blocked
+    conf = min(100, int(round(100 * len(adopted) / max(1, len(scores))))) if adopted else 0
+    explain = build_explain_payload(
+        subject_type="signal",
+        subject_value="pattern_mining",
+        decision="recommend" if scoring_ok else "neutral",
+        honesty=honesty,
+        intent=str(apply.get("apply_intent") or apply_intent),
+        rounds=[r.round_no for r in rounds],
+        algorithms=["pattern_mine", "walk_forward", "cluster", "feature_selection"],
+        evidence=[
+            {
+                "kind": "pattern",
+                "detail": f"adopted={len(adopted)}/{len(scores)} demo_blocked={demo_blocked}",
+                "weight": 1.0,
+            },
+            {
+                "kind": "backtest",
+                "detail": f"multiple_testing expected_fp≈{_mt.get('expected_false_positives')}",
+                "weight": 0.7,
+            },
+        ],
+        confidence={
+            "overall": conf,
+            "statistics": conf // 3,
+            "pattern": conf,
+            "model": 0,
+            "simulation": conf // 2,
+            "backtest": conf,
+        },
+        backtest={
+            "metric": "adopted_pattern_count",
+            "value": len(adopted),
+            "baseline": BASELINE_TOP6,
+            "small_sample": len(rounds) < 5,
+        },
+        limits=(
+            ["archived_demo 는 표시용 — forward 점수 주입 금지"]
+            if demo_blocked
+            else (["채택 Pattern 없음"] if not adopted else [])
+        ),
+        improvements=["회차 누적 후 재탐색", "Validation gate scoring_allowed 확인"],
+        artifact_versions=["06_pattern", "08_ai@pattern", "10_explain@0.1.0"],
+    )
     return {
         "ok": True,
         "round_count": len(rounds),
@@ -927,11 +988,13 @@ def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") ->
             "adopted_count": len(adopted),
             "exceeds_chance": bool(len(adopted) > _mt["expected_false_positives"]),
         },
-        "patterns": [_score_dict(s) for s in scores[:80]],
-        "adopted_patterns": [_score_dict(s) for s in adopted[:40]],
+        "patterns": pattern_rows,
+        "adopted_patterns": adopted_rows,
         "clusters": clusters[:30],
         "feature_selection": feat_sel,
         "recommendation": rec,
+        "validation_gates": gate_summary,
+        "explain": explain,
         "pipeline": [
             "전수 학습(자동·반자동·매치·강한후보·구조)",
             "Pattern Mining(조합·배치·거리·관계)",
@@ -943,9 +1006,5 @@ def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") ->
             "새 복기 추가 시 전체 재탐색(호출 시 재계산)",
         ],
         "baselines": {"uniform_top6_hits": round(BASELINE_TOP6, 4)},
-        "honesty": (
-            f"보관 {len(rounds)}개 회차로 Pattern {len(scores)}개를 탐색·검증했습니다. "
-            "목표는 패턴을 사실로 단정하는 것이 아니라, 재현되는 후보만 골라 설명 가능하게 쓰는 것입니다. "
-            "1등 확률(1/8,145,060)은 변하지 않습니다."
-        ),
+        "honesty": honesty,
     }

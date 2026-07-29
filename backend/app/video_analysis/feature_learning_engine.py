@@ -790,6 +790,64 @@ def build_feature_learning(seed: int = 42, apply_intent: str = "current_round") 
     }
 
     adopted_n = sum(1 for r in feature_reports if r["adopted"])
+    honesty = (
+        f"보관 {len(samples)}개 회차만 사용(추첨 전 용지, 누수 없음). "
+        "로또는 균등 독립시행이므로 대부분 Feature 는 Random 과 구분되지 않습니다. "
+        "채택된 Feature 가 없거나 표본이 작으면 추천을 내리지 않습니다. "
+        "당첨 확률 향상은 단정하지 않으며 검증 지표만 표시합니다."
+    )
+    demo_blocked = str(rec_source).startswith("archived_demo_")
+    from .explain import build_explain_payload
+    from .validation_gate import evaluate_gate_from_feature_report, summarize_gates
+
+    for r in feature_reports:
+        r["last_gate"] = evaluate_gate_from_feature_report(r, demo_source=demo_blocked)
+    gates = [r["last_gate"] for r in feature_reports]
+    gate_summary = summarize_gates(gates, demo_blocked=demo_blocked)
+    scoring_ok = bool(recommendation.get("ok")) and adopted_n > 0 and not demo_blocked
+    conf = min(100, int(round(100 * adopted_n / max(1, len(feature_reports))))) if adopted_n else 0
+    explain = build_explain_payload(
+        subject_type="signal",
+        subject_value="feature_learning",
+        decision="recommend" if scoring_ok else "neutral",
+        honesty=honesty,
+        intent=str(apply.get("apply_intent") or apply_intent),
+        rounds=[s.round_no for s in samples],
+        algorithms=["walk_forward", "bootstrap", "permutation", "monte_carlo", "time_split"],
+        evidence=[
+            {
+                "kind": "model",
+                "detail": f"adopted={adopted_n}/{len(feature_reports)} demo_blocked={demo_blocked}",
+                "weight": 1.0,
+            },
+            {
+                "kind": "backtest",
+                "detail": f"uniform_top6_hits≈{BASELINE_TOP6_HITS:.3f}",
+                "weight": 0.6,
+            },
+        ],
+        confidence={
+            "overall": conf,
+            "statistics": conf // 2,
+            "pattern": 0,
+            "model": conf,
+            "simulation": conf // 2,
+            "backtest": conf,
+        },
+        backtest={
+            "metric": "adopted_feature_count",
+            "value": adopted_n,
+            "baseline": BASELINE_TOP6_HITS,
+            "small_sample": len(samples) < MIN_ROUNDS_FOR_ADOPT,
+        },
+        limits=(
+            ["archived_demo 는 표시용 — forward 점수 주입 금지"]
+            if demo_blocked
+            else (["채택 Feature 없음"] if adopted_n == 0 else [])
+        ),
+        improvements=["회차 누적 후 재검증", "Validation gate scoring_allowed 확인"],
+        artifact_versions=["08_ai@feature", "10_explain@0.1.0", "05_statistics@0.1.0"],
+    )
     return {
         "ok": True,
         "round_count": len(samples),
@@ -803,6 +861,8 @@ def build_feature_learning(seed: int = 42, apply_intent: str = "current_round") 
         "rejected_count": len(feature_reports) - adopted_n,
         "ensemble": ensemble,
         "recommendation": {**recommendation, "source": rec_source},
+        "validation_gates": gate_summary,
+        "explain": explain,
         "baselines": {
             "uniform_top6_hits": round(BASELINE_TOP6_HITS, 4),
             "uniform_hit_rate": round(BASELINE_HIT, 4),
@@ -816,10 +876,5 @@ def build_feature_learning(seed: int = 42, apply_intent: str = "current_round") 
             "앙상블 실험",
             "검증 통과 Feature 만 추천·기여도 출력",
         ],
-        "honesty": (
-            f"보관 {len(samples)}개 회차만 사용(추첨 전 용지, 누수 없음). "
-            "로또는 균등 독립시행이므로 대부분 Feature 는 Random 과 구분되지 않습니다. "
-            "채택된 Feature 가 없거나 표본이 작으면 추천을 내리지 않습니다. "
-            "당첨 확률 향상은 단정하지 않으며 검증 지표만 표시합니다."
-        ),
+        "honesty": honesty,
     }

@@ -87,14 +87,14 @@
 
 ## 7. 구현 스케치 (후속)
 
-1. `HistoricalProfile` → `StatisticsSnapshot` serializer (JSON export)
-2. API: 선택 `GET .../statistics/snapshot?version=0.1.0`
-3. Explain `confidence.statistics` / `used_data.artifact_versions` 에 `05_statistics@semver` 기입
+1. ~~`HistoricalProfile` → `StatisticsSnapshot` serializer (JSON export)~~
+2. ~~API: 선택 `GET /api/v1/stats/snapshot`~~
+3. Explain `used_data.artifact_versions` 에 `05_statistics@0.1.0` 기입 (V1 등)
 4. **추천 점수 직접 연결 금지** — EPO 필터·Explain 기준선만
 
 ## 8. Acceptance
 
 - [x] 스키마 문서 (`SCHEMA.md`)
-- [ ] serializer + 단위 테스트
-- [ ] registry `mapped_paths` 갱신
-- [ ] 기존 EPO/용지 UI 동작 불변
+- [x] serializer + 단위 테스트
+- [x] registry `mapped_paths` 갱신
+- [x] 기존 EPO/용지 UI 동작 불변

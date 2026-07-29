@@ -67,6 +67,7 @@ Gate 실패 시 Ensemble/추천 주입 스킵, Explain에 reject 근거만.
 ## 6. Acceptance
 
 - [x] 게이트 체크리스트·GateResult 스키마
-- [ ] 공통 `evaluate_gate()` 헬퍼 (Feature/Pattern 채택 결과 재사용)
-- [ ] Model Registry 항목에 `last_gate` 필드 연동
-- [ ] 점수 경로에 Experimental 유입 테스트
+- [x] 공통 `evaluate_gate()` / feature·pattern 어댑터
+- [x] Feature/Pattern 응답 `last_gate` · `validation_gates` 요약
+- [ ] Model Registry UI `last_gate` 표시
+- [ ] 점수 경로에 Experimental 유입 테스트 (CI e2e)

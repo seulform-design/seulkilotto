@@ -427,6 +427,49 @@ def build_overlap_learning(apply_intent: str = "current_round") -> Dict[str, Any
     #  기울어 우연을 신호로 오도했다. round_learning 의 all([])==True 와 방향 일치.)
     flat = (not _sized) or all(abs(s["lift_vs_chance"] - 1.0) <= 0.25 for s in _sized)
 
+    honesty = (
+        "보관 회차 용지는 추첨 전 등록분이라 누수가 없습니다. "
+        "무작위 게임에서는 모든 구간의 lift_vs_chance 가 1.0 근처(평탄)로 나오는 것이 정상이며, "
+        f"현재 {len(rounds_out)}개 회차 표본은 통계적으로 매우 작아 편차는 우연일 수 있습니다. "
+        "회차가 쌓일수록 자동으로 표본이 늘어납니다. "
+        "1등 확률(1/8,145,060)은 어떤 학습으로도 변하지 않습니다."
+    )
+    from .explain import build_explain_payload
+
+    demo_blocked = str(apply.get("source") or "").startswith("archived_demo_")
+    decision = "neutral" if flat or demo_blocked else "recommend"
+    conf = 0 if flat else min(40, len(rounds_out) * 5)
+    explain = build_explain_payload(
+        subject_type="signal",
+        subject_value="overlap_learning",
+        decision=decision,
+        honesty=honesty,
+        intent=str(apply.get("apply_intent") or "current_round"),
+        rounds=[r["round_no"] for r in rounds_out],
+        algorithms=["combo_overlap", "lift_vs_chance", "size_bucket"],
+        evidence=[
+            {"kind": "pattern", "detail": f"calibration_flat={flat} combos={len(all_records)}", "weight": 0.8},
+            {"kind": "statistic", "detail": f"current_scores={len(current_scores)}", "weight": 0.5},
+        ],
+        confidence={
+            "overall": conf,
+            "statistics": conf // 2,
+            "pattern": conf,
+            "model": 0,
+            "simulation": 0,
+            "backtest": conf,
+        },
+        backtest={
+            "metric": "sized_buckets_nonflat",
+            "value": 0 if flat else 1,
+            "baseline": 0,
+            "small_sample": len(rounds_out) < 5,
+        },
+        limits=["소표본 — 평탄이 정상"] if len(rounds_out) < 5 else [],
+        improvements=["회차 누적 후 by_size 재집계"],
+        artifact_versions=["engine3_V4", "10_explain@0.1.0"],
+    )
+
     return {
         "ok": True,
         "round_count": len(rounds_out),
@@ -442,11 +485,6 @@ def build_overlap_learning(apply_intent: str = "current_round") -> Dict[str, Any
         "current_scores": current_scores,
         "calibration_flat": flat,
         "signal_comparison": signal_comparison,
-        "honesty": (
-            "보관 회차 용지는 추첨 전 등록분이라 누수가 없습니다. "
-            "무작위 게임에서는 모든 구간의 lift_vs_chance 가 1.0 근처(평탄)로 나오는 것이 정상이며, "
-            f"현재 {len(rounds_out)}개 회차 표본은 통계적으로 매우 작아 편차는 우연일 수 있습니다. "
-            "회차가 쌓일수록 자동으로 표본이 늘어납니다. "
-            "1등 확률(1/8,145,060)은 어떤 학습으로도 변하지 않습니다."
-        ),
+        "explain": explain,
+        "honesty": honesty,
     }

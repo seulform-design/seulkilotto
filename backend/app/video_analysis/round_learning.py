@@ -223,6 +223,48 @@ def build_round_learning(apply_intent: str = "current_round") -> Dict[str, Any]:
         top6_sig["significant"] = False
     flat = all(abs(c["lift"] - 1.0) < 0.35 for c in calibration if c["played"] >= 20)
 
+    honesty = (
+        "보관 회차 용지는 추첨 전 등록분이라 누수가 없습니다. "
+        "다만 로또는 균등 무작위이므로 구간별 적중률은 기대상 평탄(≈13.3%)합니다. "
+        f"현재 {len(rounds_out)}개 회차 표본은 통계적으로 매우 작아 lift 는 우연일 수 있습니다. "
+        "1등 확률(1/8,145,060)은 어떤 학습으로도 변하지 않습니다."
+    )
+    from .explain import build_explain_payload
+
+    demo_blocked = str(apply.get("source") or "").startswith("archived_demo_")
+    decision = "neutral" if flat or demo_blocked else "recommend"
+    conf = 0 if flat or round_count < SMALL_SAMPLE_N else min(40, round_count * 5)
+    explain = build_explain_payload(
+        subject_type="signal",
+        subject_value="round_learning",
+        decision=decision,
+        honesty=honesty,
+        intent=str(apply.get("apply_intent") or "current_round"),
+        rounds=[r["round_no"] for r in rounds_out],
+        algorithms=["support_bucket_calibration", "binomial_significance"],
+        evidence=[
+            {"kind": "statistic", "detail": f"calibration_flat={flat} top6_hits={total_top6_hits}", "weight": 0.8},
+            {"kind": "backtest", "detail": f"expected_top6≈{expected_top6}", "weight": 0.6},
+        ],
+        confidence={
+            "overall": conf,
+            "statistics": conf,
+            "pattern": 0,
+            "model": 0,
+            "simulation": 0,
+            "backtest": conf,
+        },
+        backtest={
+            "metric": "total_top6_hits",
+            "value": total_top6_hits,
+            "baseline": expected_top6,
+            "small_sample": round_count < SMALL_SAMPLE_N,
+        },
+        limits=["소표본 — lift 과신 금지"] if round_count < SMALL_SAMPLE_N else [],
+        improvements=["회차 누적 후 재캘리브"],
+        artifact_versions=["engine3_V3", "10_explain@0.1.0"],
+    )
+
     return {
         "ok": True,
         "round_count": len(rounds_out),
@@ -245,10 +287,6 @@ def build_round_learning(apply_intent: str = "current_round") -> Dict[str, Any]:
             "calibration_flat": flat,
             "top6_significance": top6_sig,
         },
-        "honesty": (
-            "보관 회차 용지는 추첨 전 등록분이라 누수가 없습니다. "
-            "다만 로또는 균등 무작위이므로 구간별 적중률은 기대상 평탄(≈13.3%)합니다. "
-            f"현재 {len(rounds_out)}개 회차 표본은 통계적으로 매우 작아 lift 는 우연일 수 있습니다. "
-            "1등 확률(1/8,145,060)은 어떤 학습으로도 변하지 않습니다."
-        ),
+        "explain": explain,
+        "honesty": honesty,
     }

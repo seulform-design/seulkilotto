@@ -16,6 +16,11 @@
 from .backtest import BacktestResult, evaluate_filters, loose_fallback_predicates
 from .engine import ENGINE_VERSION, DISCLAIMER, EpoConfig, EpoResult, run
 from .historical_stats import HistoricalProfile, compute_profile
+from .statistics_snapshot import (
+    SNAPSHOT_VERSION,
+    build_snapshot_from_history,
+    profile_to_snapshot,
+)
 
 __all__ = [
     "BacktestResult",
@@ -24,8 +29,11 @@ __all__ = [
     "EpoConfig",
     "EpoResult",
     "HistoricalProfile",
+    "SNAPSHOT_VERSION",
+    "build_snapshot_from_history",
     "compute_profile",
     "evaluate_filters",
     "loose_fallback_predicates",
+    "profile_to_snapshot",
     "run",
 ]

@@ -170,3 +170,33 @@ def get_walk_forward(
         ],
         "disclaimer": summary.disclaimer,
     }
+
+
+@router.get("/snapshot")
+def get_statistics_snapshot(
+    recent_n: int | None = Query(
+        default=None,
+        ge=1,
+        description="최근 N회차만 스냅샷. 생략 시 전체 이력.",
+    ),
+    include_carry: bool = Query(
+        default=False,
+        description="last_round carry 필드 포함(기본 제외 — 누수·의도 혼동 방지).",
+    ),
+):
+    """Statistics Artifact 0.1.0 — EPO HistoricalProfile 버전드 스냅샷.
+
+    추천 점수에 연결하지 않는다. Explain·필터 기준선·재현용.
+    """
+    from ..epo.statistics_snapshot import SNAPSHOT_VERSION, build_snapshot_from_history
+
+    df = load_history()
+    if df.empty:
+        snap = build_snapshot_from_history(None, include_carry=include_carry)
+        snap["note"] = "당첨 데이터 없음 — FALLBACK 보수값"
+        return snap
+    snap = build_snapshot_from_history(
+        df, include_carry=include_carry, recent_n=recent_n
+    )
+    snap["api_version"] = SNAPSHOT_VERSION
+    return snap

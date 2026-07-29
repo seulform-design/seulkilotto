@@ -917,42 +917,54 @@ def build_review_verification() -> Dict[str, Any]:
         "(1/8,145,060)은 어떤 신호로도 변하지 않습니다."
     )
     policy = inverse_diagnosis.get("policy") or {}
-    explain = {
-        "version": "0.1.0",
-        "subject": {"type": "signal", "value": bkey},
-        "decision": "coverage",
-        "confidence": {
-            "overall": int(round(float(policy.get("multi_round_confidence") or 0) * 100)),
-            "statistics": int(round(float(policy.get("multi_round_confidence") or 0) * 100)),
+    from .explain import build_explain_payload
+
+    conf_pct = int(round(float(policy.get("multi_round_confidence") or 0) * 100))
+    explain = build_explain_payload(
+        subject_type="signal",
+        subject_value=bkey,
+        decision="coverage",
+        honesty=honesty,
+        intent="review",
+        rounds=[s.round_no for s in _samples],
+        algorithms=["best_single", "best_of_engines_min_rank", "decade_balance"],
+        evidence=[
+            {
+                "kind": "policy",
+                "detail": f"core6={policy.get('core6_mode')} expand18={policy.get('expand18_mode')}",
+                "weight": 1.0,
+            },
+            {
+                "kind": "backtest",
+                "detail": f"다회차 best={bkey} top18={summary.get('best_top18')}",
+                "weight": 0.8,
+            },
+        ],
+        confidence={
+            "overall": conf_pct,
+            "statistics": conf_pct,
             "pattern": 0,
             "model": 0,
             "simulation": 0,
-            "backtest": int(round(float(policy.get("multi_round_confidence") or 0) * 100)),
+            "backtest": conf_pct,
         },
-        "evidence": [
-            {"kind": "policy", "detail": f"core6={policy.get('core6_mode')} expand18={policy.get('expand18_mode')}", "weight": 1.0},
-            {"kind": "backtest", "detail": f"다회차 best={bkey} top18={summary.get('best_top18')}", "weight": 0.8},
-        ],
-        "used_data": {
-            "intent": "review",
-            "rounds": [s.round_no for s in _samples],
-            "artifact_versions": ["review_verification", "inverse_diagnosis"],
-        },
-        "algorithms": ["best_single", "best_of_engines_min_rank", "decade_balance"],
-        "backtest": {
+        backtest={
             "metric": "mean_top18",
             "value": next(
-                (e.get("mean_top18") for e in (leaderboard.get("leaderboard") or [])
-                 if e.get("key") == leaderboard.get("best_signal_multi")),
+                (
+                    e.get("mean_top18")
+                    for e in (leaderboard.get("leaderboard") or [])
+                    if e.get("key") == leaderboard.get("best_signal_multi")
+                ),
                 None,
             ),
             "baseline": 18 * 6 / 45,
             "small_sample": bool(leaderboard.get("small_sample")),
         },
-        "limits": [p.get("title") for p in (inverse_diagnosis.get("problems") or [])],
-        "improvements": list(inverse_diagnosis.get("actions") or []),
-        "honesty": honesty,
-    }
+        limits=[p.get("title") for p in (inverse_diagnosis.get("problems") or [])],
+        improvements=list(inverse_diagnosis.get("actions") or []),
+        artifact_versions=["review_verification", "inverse_diagnosis", "10_explain@0.1.0"],
+    )
 
     return {
         "ok": True,

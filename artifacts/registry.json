@@ -6,7 +6,7 @@
   "completeness": {
     "sheet_engine_runtime": 0.96,
     "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. 용지분석 런타임 버그·정책·백테스트 게이트는 검수 완료.",
-    "last_audit": "2026-07-30: 05_statistics snapshot schema 0.1.0; 08_ai validation gate + ModelEntry"
+    "last_audit": "2026-07-30: stats snapshot API+serializer; V1–V4 explain; evaluate_gate"
   },
   "safety": {
     "no_win_guarantee": true,
@@ -195,10 +195,12 @@
       "mapped_paths": [
         "backend/app/video_analysis/stats.py",
         "backend/app/epo",
+        "backend/app/epo/statistics_snapshot.py",
+        "backend/app/routers/stats.py",
         "artifacts/05_statistics/INDEX.md",
         "artifacts/05_statistics/SCHEMA.md"
       ],
-      "gap": "스키마 0.1.0 확정 — HistoricalProfile→JSON serializer·API는 후속"
+      "gap": "serializer·GET /stats/snapshot 완료 — decade hit_rate·스냅샷 히스토리 스토어 후속"
     },
     {
       "id": "06_pattern",
@@ -234,10 +236,11 @@
       "mapped_paths": [
         "backend/app/video_analysis/feature_learning_engine.py",
         "backend/app/video_analysis/vision_llm.py",
+        "backend/app/video_analysis/validation_gate.py",
         "artifacts/08_ai/model_registry.md",
         "artifacts/08_ai/validation_gate.md"
       ],
-      "gap": "Validation gate 설계 완료 — 공통 GateResult API·Rollback/토너먼트 UI·SHAP/Drift 미구축"
+      "gap": "evaluate_gate·last_gate 응답 연동 완료 — Rollback/토너먼트 UI·SHAP/Drift 미구축"
     },
     {
       "id": "09_validation",
@@ -264,9 +267,10 @@
         "platform/frontend/src/components/FeatureLearningPanel.tsx",
         "platform/frontend/src/components/ReviewVerificationPanel.tsx",
         "artifacts/10_explain/SCHEMA.md",
-        "backend/app/video_analysis/review_verification.py"
+        "backend/app/video_analysis/review_verification.py",
+        "backend/app/video_analysis/explain.py"
       ],
-      "gap": "복기 Explain UI 연결됨 — V1–V4 응답 explain 필드 통일은 후속"
+      "gap": "V1–V4·복기 explain 필드 통일 — Feature/Pattern 패널 UI Explain 블록은 후속"
     },
     {
       "id": "100_experimental",
@@ -386,19 +390,19 @@
   ],
   "generation_queue": [
     {
-      "id": "05_statistics_impl",
-      "reason": "StatisticsSnapshot serializer·선택 API",
-      "action": "HistoricalProfile → SCHEMA 0.1.0 JSON + unit test; scoring 미연결"
+      "id": "10_explain_ui",
+      "reason": "Feature/Pattern 패널 Explain 블록",
+      "action": "optional ExplainPayload section like ReviewVerificationPanel"
     },
     {
-      "id": "10_explain",
-      "reason": "V1–V4 응답 explain 필드 통일",
-      "action": "optional ExplainPayload on feature/pattern/round/overlap APIs"
+      "id": "05_statistics_decade",
+      "reason": "decade hit_rate_per_band 자동 산출",
+      "action": "fill SCHEMA decade_bands from history; keep scoring disconnected"
     },
     {
-      "id": "08_ai_gate_impl",
-      "reason": "공통 GateResult 헬퍼",
-      "action": "evaluate_gate from feature/pattern adopt; Registry last_gate 연동"
+      "id": "08_ai_registry_ui",
+      "reason": "Model Registry last_gate 표시·Rollback UI",
+      "action": "surface validation_gates in Feature/Pattern panels; no auto scoring"
     }
   ]
 }

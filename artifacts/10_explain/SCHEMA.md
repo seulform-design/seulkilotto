@@ -46,5 +46,6 @@
 
 1. ~~공통 TypeScript 타입을 `v1Api.ts` 에 추가~~  
 2. ~~복기 검증 응답 `explain` + ReviewVerificationPanel UI~~  
-3. 신규 엔진 응답에 `explain?: ExplainPayload` 선택 필드 (V1–V4)  
-4. Experimental 결과는 `decision` 과 무관하게 UI 배너만
+3. ~~신규 엔진 응답에 `explain?: ExplainPayload` (V1–V4 + review)~~  
+4. Experimental 결과는 `decision` 과 무관하게 UI 배너만  
+5. 프론트 Feature/Pattern 패널에 Explain 블록 표시(선택)

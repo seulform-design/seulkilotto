@@ -1235,7 +1235,12 @@ export interface ReviewVerificationResponse {
       core6_weight_scale: number;
       expand18_weight_scale: number;
       multi_round_confidence: number;
+      /** @deprecated 합의 희석 실증 후 항상 false. core6_mode/expand18_mode 사용. */
       prefer_consensus: boolean;
+      /** 핵심6: best_single(다회차 1위) | consensus(폴백만) */
+      core6_mode?: 'best_single' | 'consensus';
+      /** 확장18: best_of_engines(min-rank) | consensus */
+      expand18_mode?: 'best_of_engines' | 'consensus';
       banned_signals: string[];
       preferred_signal?: string | null;
     };

@@ -38,9 +38,29 @@ def _line_freq(lines: List[List[int]]) -> Counter:
     return c
 
 
-def _rank_signal(values: Dict[int, float]) -> List[int]:
-    """값 내림차순(동률은 번호 오름차순) 랭킹."""
-    return sorted(range(1, 46), key=lambda n: (-values.get(n, 0.0), n))
+def _rank_signal(
+    values: Dict[int, float],
+    tiebreak: Dict[int, float] | None = None,
+    tiebreak2: Dict[int, float] | None = None,
+) -> List[int]:
+    """값 내림차순 랭킹. 동률은 tiebreak(총등장) → tiebreak2(자동빈도) → 번호.
+    review_verification / feature 와 동일 4단계 — 번호순만으로 깨면 인덱스 편향."""
+    if tiebreak is None:
+        return sorted(range(1, 46), key=lambda n: (-values.get(n, 0.0), n))
+    if tiebreak2 is None:
+        return sorted(
+            range(1, 46),
+            key=lambda n: (-values.get(n, 0.0), -tiebreak.get(n, 0.0), n),
+        )
+    return sorted(
+        range(1, 46),
+        key=lambda n: (
+            -values.get(n, 0.0),
+            -tiebreak.get(n, 0.0),
+            -tiebreak2.get(n, 0.0),
+            n,
+        ),
+    )
 
 
 def _bucket_of_lift(lift: float) -> str:
@@ -206,10 +226,15 @@ def _compare_signals_across_rounds(
             n: float(min(ac.get(n, 0), 0 if n in fixed else sc.get(n, 0)))
             for n in range(1, 46)
         }
+        total = {
+            n: float(ac.get(n, 0) + (0 if n in fixed else sc.get(n, 0)))
+            for n in range(1, 46)
+        }
+        auto_freq = {n: float(ac.get(n, 0)) for n in range(1, 46)}
         combo = combo_strength_by_number(auto, f"cmp{rnd}")
         rounds_used += 1
         for key, vals in (("support", support), ("combo_strength", combo)):
-            ranked = _rank_signal(vals)
+            ranked = _rank_signal(vals, total, auto_freq)
             pos = {n: ranked.index(n) + 1 for n in range(1, 46)}
             for k in KS:
                 acc[key][k] += sum(1 for n in winning if pos[n] <= k)

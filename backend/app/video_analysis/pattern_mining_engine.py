@@ -245,10 +245,19 @@ def mine_patterns(rounds: List[RoundSheet]) -> List[Pattern]:
         core = tuple(sorted(sheet.strong18[:6]))
         if len(core) == 6:
             strong_core_cnt[core] += 1
-        # auto∩semi 상위 코어
+        # auto∩semi 상위 코어 — 반자동 고정수 제외(다른 엔진과 동일, 오염 방지)
+        from .feature_learning_engine import _detect_fixed_semi
+
+        fixed = _detect_fixed_semi(sheet.semi_lines)
         ac, sc = _line_freq(sheet.auto_lines), _line_freq(sheet.semi_lines)
-        both = [n for n in range(1, 46) if ac.get(n, 0) > 0 and sc.get(n, 0) > 0]
-        both.sort(key=lambda n: (-min(ac[n], sc[n]), -ac[n] - sc[n], n))
+
+        def _semi_sup(n: int) -> int:
+            return 0 if n in fixed else int(sc.get(n, 0))
+
+        both = [n for n in range(1, 46) if ac.get(n, 0) > 0 and _semi_sup(n) > 0]
+        both.sort(
+            key=lambda n: (-min(ac[n], _semi_sup(n)), -(ac[n] + _semi_sup(n)), -ac[n], n)
+        )
         if len(both) >= 4:
             nums = tuple(both[:4])
             pid = _pid("asc", nums)

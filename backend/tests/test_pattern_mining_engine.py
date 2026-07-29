@@ -46,5 +46,26 @@ def test_mine_and_validate():
     print("ok")
 
 
+def test_auto_semi_core_excludes_fixed_semi():
+    """반자동 고정수가 auto∩semi 코어 패턴에 재유입되면 안 된다(다른 엔진과 동일)."""
+    from app.video_analysis.pattern_mining_engine import mine_patterns, _strong18, _match_groups
+
+    # 고정수 후보: 45가 반자동 줄 ≥50% 에 반복(12줄 중 12)
+    auto = [[1, 2, 3, 4, 5, 6]] * 12
+    semi = [[1, 2, 3, 4, 5, 45]] * 12
+    rounds = [
+        RoundSheet(i, auto, semi, [1, 2, 3, 4, 5, 6], strong18=[], match_groups={})
+        for i in range(1, 4)
+    ]
+    for r in rounds:
+        r.match_groups = _match_groups(r.auto_lines, r.semi_lines)
+        r.strong18 = _strong18(r.auto_lines, r.semi_lines)
+
+    patterns = mine_patterns(rounds)
+    cores = [p for p in patterns if p.kind == "auto_semi_core"]
+    for p in cores:
+        assert 45 not in p.numbers, f"고정수 45 가 코어에 포함됨: {p.numbers}"
+
+
 if __name__ == "__main__":
     test_mine_and_validate()

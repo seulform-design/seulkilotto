@@ -62,17 +62,39 @@ def _coverage_significance(total_hits: float, rounds: int, k: int) -> Dict[str, 
     }
 
 
-def _rank_signal(values: Dict[int, float], tiebreak: Dict[int, float] | None = None) -> List[int]:
-    """값 내림차순으로 45개 번호를 정렬. 동률은 tiebreak(총 등장 등, 높을수록 우선) →
-    그다음 번호 오름차순.
+def _rank_signal(
+    values: Dict[int, float],
+    tiebreak: Dict[int, float] | None = None,
+    tiebreak2: Dict[int, float] | None = None,
+) -> List[int]:
+    """값 내림차순으로 45개 번호를 정렬.
+
+    동률 깨기(feature/round/pattern 과 동일 4단계):
+      1) values 내림차순
+      2) tiebreak(총 등장 total_freq) 내림차순
+      3) tiebreak2(자동 빈도 auto_freq) 내림차순
+      4) 번호 오름차순
 
     ⚠️ tiebreak 없이 번호 순서로만 동률을 깨면 인덱스 편향(낮은 번호가 임의로 상위)이
-    생긴다. feature/round 엔진은 총 등장(auto+semi_sup)으로 동률을 깬다 — 같은 'support'
-    신호가 엔진마다 다르게 정렬되던 불일치를 없애기 위해 여기서도 total_freq 를 넘겨 맞춘다.
+    생긴다. feature 엔진은 (-support, -total, -auto, n) — 같은 support 신호가 엔진마다
+    다르게 정렬되던 불일치를 없애기 위해 여기서도 total·auto 를 넘겨 맞춘다.
     """
     if tiebreak is None:
         return sorted(range(1, 46), key=lambda n: (-values.get(n, 0.0), n))
-    return sorted(range(1, 46), key=lambda n: (-values.get(n, 0.0), -tiebreak.get(n, 0.0), n))
+    if tiebreak2 is None:
+        return sorted(
+            range(1, 46),
+            key=lambda n: (-values.get(n, 0.0), -tiebreak.get(n, 0.0), n),
+        )
+    return sorted(
+        range(1, 46),
+        key=lambda n: (
+            -values.get(n, 0.0),
+            -tiebreak.get(n, 0.0),
+            -tiebreak2.get(n, 0.0),
+            n,
+        ),
+    )
 
 
 # 구간(10단위) — 균형 커버리지의 기준. balanced 신호와 동일 관례(min(4,(n-1)//10)):
@@ -145,7 +167,9 @@ def _decade_catch(samples=None) -> Dict[str, Any]:
     rounds = 0
     for s in samples:
         sigs = _signals(s.auto_lines, s.semi_lines)
-        pos = {n: i + 1 for i, n in enumerate(_rank_signal(sigs["support"], sigs["total_freq"]))}
+        pos = {n: i + 1 for i, n in enumerate(
+            _rank_signal(sigs["support"], sigs["total_freq"], sigs.get("auto_freq"))
+        )}
         for w in s.winning:
             d = _decade(w)
             per_decade[d]["winning"] += 1
@@ -188,7 +212,7 @@ def _signals(auto: List[List[int]], semi: List[List[int]]) -> Dict[str, Dict[int
     support = {n: float(min(float(ac.get(n, 0)), sc_sup[n])) for n in range(1, 46)}
     total = {n: float(ac.get(n, 0) + sc_sup[n]) for n in range(1, 46)}
     # 균형: 지지 점수에 구간(10단위) 상한을 둬 한 구간 쏠림을 억제한 커버리지 지향 신호.
-    balanced_order = _rank_signal(support, total)
+    balanced_order = _rank_signal(support, total, {n: float(ac.get(n, 0)) for n in range(1, 46)})
     balanced_val: Dict[int, float] = {}
     dc: Counter = Counter()
     score = 45.0
@@ -228,7 +252,7 @@ def _analyze(auto: List[List[int]], semi: List[List[int]], winning: List[int]) -
     out_signals: List[Dict[str, Any]] = []
     best = None
     for key, vals in sigs.items():
-        ranked = _rank_signal(vals, sigs["total_freq"])
+        ranked = _rank_signal(vals, sigs["total_freq"], sigs.get("auto_freq"))
         pos = {n: ranked.index(n) + 1 for n in range(1, 46)}
         winner_ranks = sorted(
             ({"number": n, "rank": pos[n]} for n in winning),
@@ -343,7 +367,7 @@ def _signal_leaderboard(samples=None) -> Dict[str, Any]:
         sigs = _signals(s.auto_lines, s.semi_lines)
         per_sig: Dict[str, Dict[int, int]] = {}
         for sk in keys:
-            ranked = _rank_signal(sigs[sk], sigs["total_freq"])
+            ranked = _rank_signal(sigs[sk], sigs["total_freq"], sigs.get("auto_freq"))
             rank_of = {num: idx + 1 for idx, num in enumerate(ranked)}
             per_sig[sk] = {num: rank_of[num] for num in s.winning}
         pos_by_round.append(per_sig)
@@ -458,9 +482,10 @@ def _best_of_engines_order(sigs: Dict[str, Dict[int, float]]) -> List[int]:
     ⚠️ 확률 불변 — 넓은 그물의 recall 을 높일 뿐, 잭팟·부분일치 기대값은 안 변한다."""
     keys = list(_SIGNAL_LABELS.keys())
     tb = sigs.get("total_freq", {})
-    pos = {sk: {n: i for i, n in enumerate(_rank_signal(sigs[sk], tb))} for sk in keys}
+    af = sigs.get("auto_freq", {})
+    pos = {sk: {n: i for i, n in enumerate(_rank_signal(sigs[sk], tb, af))} for sk in keys}
     min_rank = {n: min(pos[sk][n] for sk in keys) for n in range(1, 46)}
-    return sorted(range(1, 46), key=lambda n: (min_rank[n], -tb.get(n, 0.0), n))
+    return sorted(range(1, 46), key=lambda n: (min_rank[n], -tb.get(n, 0.0), -af.get(n, 0.0), n))
 
 
 def _coverage_set_from_signals(
@@ -475,7 +500,11 @@ def _coverage_set_from_signals(
     - expand18: 전 엔진 '최선순위'(min-rank) 넓은 그물 — 어느 엔진이든 잡은 catchable
       당첨을 최대한 담는다(단일 신호가 놓친 번호도 포함). core6 ⊂ expand18 유지.
     """
-    ranked = _rank_signal(sigs.get(signal_key, sigs["support"]), sigs.get("total_freq"))
+    ranked = _rank_signal(
+        sigs.get(signal_key, sigs["support"]),
+        sigs.get("total_freq"),
+        sigs.get("auto_freq"),
+    )
     present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
     raw_expand = ranked[:18]
     single_expand = _balance_expand(ranked, ranked[:6], present, 18)
@@ -528,7 +557,7 @@ def _consensus_coverage(
     best_rank = {n: 99 for n in range(1, 46)}
     total_tb = cur_signals.get("total_freq")
     for key in good:
-        ranked = _rank_signal(cur_signals[key], total_tb)
+        ranked = _rank_signal(cur_signals[key], total_tb, cur_signals.get("auto_freq"))
         for i, n in enumerate(ranked):
             if i < 18:
                 agree[n] += 1
@@ -573,7 +602,12 @@ def _missed_winner_analysis(samples=None) -> Dict[str, Any]:
     for s in samples:
         sigs = _signals(s.auto_lines, s.semi_lines)
         rank_pos = {
-            k: {n: i + 1 for i, n in enumerate(_rank_signal(sigs[k], sigs["total_freq"]))}
+            k: {
+                n: i + 1
+                for i, n in enumerate(
+                    _rank_signal(sigs[k], sigs["total_freq"], sigs.get("auto_freq"))
+                )
+            }
             for k in keys
         }
         appeared = {int(n) for ln in (s.auto_lines + s.semi_lines) for n in ln if 1 <= int(n) <= 45}
@@ -707,22 +741,25 @@ def _inverse_diagnosis(
         })
 
     # 주입/추천 정책 — 프론트·히어로가 그대로 따른다.
+    # 앙상블 백테스트 실증: 다중신호 '합의'는 약신호가 최고신호를 희석(합산 top18 < 최고단일).
+    # 정립 원칙 — core6=다회차 best 단일신호(정밀) / expand18=전 엔진 min-rank(recall).
+    # prefer_consensus 는 항상 False(하위호환 필드 유지). 합의 세트는 폴백·참고용만.
     expand_first = any(p["id"] in ("top6_concentration_fail", "coverage_gap") for p in problems)
     # core6 가중 하향 / expand18 상향 (기존 0.85/0.45 → 역전)
     core_scale = 0.35 if expand_first else 0.55
     expand_scale = 1.0 if expand_first else 0.7
     # 신뢰도는 다회차 최선 신호의 mean_top18 기준(단일회차 summary 보다 안정).
     multi_conf = max(0.0, min(1.0, (mean18 - random18) / (6.0 - random18))) if mean18 else 0.0
-    prefer_consensus = len([
+    n_good = len([
         e for e in lb_rows
         if e.get("beats_random18") and e.get("key") != "auto_freq"
-    ]) >= 2
+    ])
 
     actions = [
-        "저성과·자동빈도 신호를 단독 커버리지/합의에서 제외",
-        "다회차 성적 1위(무작위 초과)만 커버리지 신호로 채택",
+        "저성과·자동빈도 신호를 단독 커버리지에서 제외",
+        "핵심6: 다회차 성적 1위 단일신호(합의 희석 금지)",
+        "확장18: 전 엔진 최선순위(min-rank) 넓은 그물",
         "주입 가중: expand18 > core6 (집중 실패 시)" if expand_first else "주입 가중: 균형",
-        "다중신호 합의(consensus)를 히어로 1순위로 유지" if prefer_consensus else "단일 best 커버리지 유지",
         "티켓 미등장 당첨은 분석 천장으로 고지(확률 불변)",
     ]
 
@@ -730,10 +767,10 @@ def _inverse_diagnosis(
         "problems": problems,
         "actions": actions,
         "verdict": (
-            "집중 예측은 구조적으로 실패하고 넓은 커버리지(합의·expand18)만 유효하다. "
-            "저성과 신호를 끊고 expand18 우선 주입으로 검증학습이 실패 패턴을 강화하지 않게 한다."
+            "집중 예측은 구조적으로 실패한다. 핵심6은 최고 단일신호로 정밀하게, "
+            "확장18은 전 엔진 min-rank 로 recall 을 확보한다. 합의·평균은 희석이므로 쓰지 않는다."
             if expand_first
-            else "신호 성적이 무작위와 비슷하다 — 과신 없이 커버리지·합의만 유지한다."
+            else "신호 성적이 무작위와 비슷하다 — 과신 없이 best 단일·min-rank 그물만 유지한다."
         ),
         "metrics": {
             "best_signal": best.get("key") if best else None,
@@ -750,13 +787,17 @@ def _inverse_diagnosis(
             "underperforming": under,
             "small_sample": small,
             "loo_generalizes": loo.get("generalizes"),
+            "good_signal_count": n_good,
         },
         "policy": {
             "coverage_mode": "expand18_first" if expand_first else "balanced",
             "core6_weight_scale": core_scale,
             "expand18_weight_scale": expand_scale,
             "multi_round_confidence": round(multi_conf, 3),
-            "prefer_consensus": prefer_consensus,
+            # 하위호환: 합의 희석이 실증됐으므로 항상 False. 프론트는 core6_mode/expand18_mode 우선.
+            "prefer_consensus": False,
+            "core6_mode": "best_single",
+            "expand18_mode": "best_of_engines",
             "banned_signals": under + (["auto_freq"] if "auto_freq" not in under else []),
             "preferred_signal": leaderboard.get("best_signal_multi"),
         },

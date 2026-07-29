@@ -1542,14 +1542,23 @@ export default function SemiAutoComparePanel({
 
     const rv = reviewVerificationQuery.data;
     // 탭별 커버리지: 복기=복기 용지 세트 / 이번회차=다음 회차 세트.
-    // 역산 정책: 합의 expand 우선, core6 가중 하향(집중 실패 시), 신뢰도는 다회차 mean.
+    // 역산 정책(앙상블 실증): core6=best 단일신호, expand18=min-rank(합의 희석 금지).
     const cov = forwardLearning ? rv?.current_coverage_set : rv?.review_coverage_set;
     const consensus = forwardLearning ? rv?.consensus_coverage : rv?.review_consensus_coverage;
     if (rv?.ok && (cov || consensus)) {
       const policy = rv.inverse_diagnosis?.policy;
-      const preferConsensus = policy?.prefer_consensus !== false && (consensus?.expand18?.length ?? 0) >= 6;
-      const core = preferConsensus ? (consensus?.core6 ?? cov?.core6 ?? []) : (cov?.core6 ?? []);
-      const expand = preferConsensus ? (consensus?.expand18 ?? cov?.expand18 ?? []) : (cov?.expand18 ?? []);
+      // prefer_consensus 는 항상 false(하위호환). core6/expand18 모드는 정책 명시값 우선.
+      const coreMode = policy?.core6_mode ?? (policy?.prefer_consensus ? 'consensus' : 'best_single');
+      const expandMode = policy?.expand18_mode ?? 'best_of_engines';
+      const core =
+        coreMode === 'consensus'
+          ? (consensus?.core6 ?? cov?.core6 ?? [])
+          : (cov?.core6 ?? consensus?.core6 ?? []);
+      // best_of_engines / coverage expand 는 서버 cov.expand18(min-rank). 합의는 폴백만.
+      const expand =
+        expandMode === 'consensus'
+          ? (consensus?.expand18 ?? cov?.expand18 ?? [])
+          : (cov?.expand18 ?? consensus?.expand18 ?? []);
       // 다회차 최선 신호 mean_top18 기반 신뢰도(단일회차 summary 보다 안정). 정책값 우선.
       const multiConf = policy?.multi_round_confidence;
       const bestTop18 =

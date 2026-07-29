@@ -83,6 +83,9 @@ def test_inverse_diagnosis_expand18_first_when_top6_fails():
     assert diag["policy"]["coverage_mode"] == "expand18_first"
     assert diag["policy"]["expand18_weight_scale"] > diag["policy"]["core6_weight_scale"]
     assert "auto_freq" in diag["policy"]["banned_signals"]
+    assert diag["policy"]["prefer_consensus"] is False
+    assert diag["policy"]["core6_mode"] == "best_single"
+    assert diag["policy"]["expand18_mode"] == "best_of_engines"
     assert any(p["id"] == "top6_concentration_fail" for p in diag["problems"])
     assert any(p["id"] == "coverage_gap" for p in diag["problems"])
     assert diag["policy"]["multi_round_confidence"] > 0

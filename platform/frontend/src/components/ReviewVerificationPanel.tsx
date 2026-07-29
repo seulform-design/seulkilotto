@@ -158,7 +158,7 @@ export default function ReviewVerificationPanel() {
               <Chip size="small" color="success" label={`다회차 상위18 ${d.inverse_diagnosis.metrics.mean_top18 ?? '—'} (무작위 ${d.inverse_diagnosis.metrics.random_top18 ?? 2.4})`} sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
               {d.inverse_diagnosis.policy && (
                 <Chip size="small" color={d.inverse_diagnosis.policy.coverage_mode === 'expand18_first' ? 'primary' : 'default'}
-                  label={`정책 ${d.inverse_diagnosis.policy.coverage_mode} · core×${d.inverse_diagnosis.policy.core6_weight_scale} · expand×${d.inverse_diagnosis.policy.expand18_weight_scale}`}
+                  label={`정책 ${d.inverse_diagnosis.policy.coverage_mode} · core=${d.inverse_diagnosis.policy.core6_mode ?? 'best_single'} · expand=${d.inverse_diagnosis.policy.expand18_mode ?? 'best_of_engines'}`}
                   sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
               )}
             </Stack>

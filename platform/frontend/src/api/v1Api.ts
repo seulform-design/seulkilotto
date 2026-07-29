@@ -1475,6 +1475,19 @@ export interface FeatureLearningResponse {
   honesty?: string;
   explain?: ExplainPayload;
   validation_gates?: ValidationGatesSummary;
+  orchestrator?: {
+    version?: string;
+    candidates?: {
+      model_id: string;
+      action: string;
+      reason: string;
+      requires_human?: boolean;
+      auto_applied?: boolean;
+    }[];
+    unchanged?: string[];
+    auto_mutate_scoring?: boolean;
+    honesty?: string;
+  };
 }
 
 /** 복기 Pattern Mining 엔진 응답. */

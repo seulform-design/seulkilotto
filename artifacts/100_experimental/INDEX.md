@@ -40,3 +40,9 @@
 ```
 
 지금은 디렉터리만 필요 시 생성한다.
+
+## 현재 문서
+
+- `ball_hypothesis.md` — 볼 물리 가설
+- `simulation_scale.md` — 대규모 MC
+- `shap_drift.md` — SHAP/Drift 설계 (점수 미연결)

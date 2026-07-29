@@ -9,6 +9,14 @@ export type TournamentModelRow = {
   stable?: boolean;
 };
 
+export type OrchestratorCandidate = {
+  model_id: string;
+  action: string;
+  reason: string;
+  requires_human?: boolean;
+  auto_applied?: boolean;
+};
+
 /**
  * Model Registry 표시 — Rollback/토너먼트는 **표시·감사**만.
  * 자동 가중·자동 비활성·점수 주입은 하지 않는다 (Validation gate 설계).
@@ -17,16 +25,20 @@ export function ModelRegistryBlock({
   gates,
   tournament,
   selected,
+  orchestrator,
   title = 'Model Registry (표시전용)',
 }: {
   gates?: ValidationGatesSummary | null;
   tournament?: TournamentModelRow[] | null;
   selected?: string | null;
+  orchestrator?: { candidates?: OrchestratorCandidate[]; auto_mutate_scoring?: boolean } | null;
   title?: string;
 }) {
   const hasGates = Boolean(gates && gates.count > 0);
   const hasTour = Boolean(tournament && tournament.length > 0);
-  if (!hasGates && !hasTour) return null;
+  const proposals = (orchestrator?.candidates ?? []).filter((c) => c.action === 'propose_disable').slice(0, 8);
+  const hasOrch = proposals.length > 0;
+  if (!hasGates && !hasTour && !hasOrch) return null;
 
   const allowed = gates?.scoring_allowed_ids ?? [];
   const rejected = gates?.rejected ?? [];
@@ -123,6 +135,26 @@ export function ModelRegistryBlock({
             </TableBody>
           </Table>
         </>
+      )}
+
+      {hasOrch && (
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.3 }}>
+            폐기 제안 (사람 확인 전 · auto_applied=false)
+          </Typography>
+          <Stack spacing={0.2}>
+            {proposals.map((c) => (
+              <Typography key={c.model_id} variant="caption" color="text.secondary" sx={{ fontSize: 9 }}>
+                · {c.model_id}: {c.reason}
+              </Typography>
+            ))}
+          </Stack>
+          {orchestrator?.auto_mutate_scoring === false && (
+            <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 0.3, fontSize: 8.5 }}>
+              자동 scoring 변경 없음
+            </Typography>
+          )}
+        </Box>
       )}
     </Box>
   );

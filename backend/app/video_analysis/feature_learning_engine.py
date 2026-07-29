@@ -804,6 +804,12 @@ def build_feature_learning(seed: int = 42, apply_intent: str = "current_round") 
         r["last_gate"] = evaluate_gate_from_feature_report(r, demo_source=demo_blocked)
     gates = [r["last_gate"] for r in feature_reports]
     gate_summary = summarize_gates(gates, demo_blocked=demo_blocked)
+    from .strategy_orchestrator import propose_retirements
+
+    orchestrator = propose_retirements(
+        gate_summary=gate_summary,
+        ensemble_models=list((ensemble or {}).get("models") or []),
+    )
     scoring_ok = bool(recommendation.get("ok")) and adopted_n > 0 and not demo_blocked
     conf = min(100, int(round(100 * adopted_n / max(1, len(feature_reports))))) if adopted_n else 0
     explain = build_explain_payload(
@@ -862,6 +868,7 @@ def build_feature_learning(seed: int = 42, apply_intent: str = "current_round") 
         "ensemble": ensemble,
         "recommendation": {**recommendation, "source": rec_source},
         "validation_gates": gate_summary,
+        "orchestrator": orchestrator,
         "explain": explain,
         "baselines": {
             "uniform_top6_hits": round(BASELINE_TOP6_HITS, 4),

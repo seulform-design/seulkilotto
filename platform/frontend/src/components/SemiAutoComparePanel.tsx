@@ -81,6 +81,7 @@ import {
 import { GRADE_COLORS, GRADE_LABELS } from '../utils/compositeAnalysis';
 import { learnOverlapProfile, rankCurrentByProfile } from '../utils/overlapPatternLearning';
 import { scrollToPhotoRecommend, takePhotoFocus } from '../utils/photoFocus';
+import MachineOverviewPanel from './MachineOverviewPanel';
 
 const ComposedAnalysisPage = lazy(() => import('../pages/ComposedAnalysisPage'));
 const RoundRecommendPage = lazy(() => import('../pages/RoundRecommendPage'));
@@ -5136,10 +5137,23 @@ export default function SemiAutoComparePanel({
         <Chip
           size="small"
           variant="outlined"
-          label="추첨기"
+          label="호기신호"
           onClick={() => {
             setShowMachineEmbed(true);
             window.setTimeout(() => scrollToPhotoRecommend({ embed: 'machine' }), 60);
+          }}
+          sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+        />
+        <Chip
+          size="small"
+          variant="outlined"
+          label="호기현황 → ④"
+          onClick={() => {
+            setShowPredictionDetail(true);
+            setEngineTab('aux');
+            window.setTimeout(() => {
+              document.getElementById('engine-machine-overview')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 80);
           }}
           sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
         />
@@ -5160,7 +5174,7 @@ export default function SemiAutoComparePanel({
       </Stack>
       {!showRecommendSection && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          핵심 · 5세트 · 합의/Venus · 호기 추천 — 접힘. 백테스트는 ④ 검증 탭.
+          핵심 · 용지 5세트 · 합의/Venus · 호기 신호 — 접힘. 호기 현황·백테스트는 ④.
         </Typography>
       )}
       {showRecommendSection && (
@@ -5297,13 +5311,24 @@ export default function SemiAutoComparePanel({
               추천 5세트 생성
             </Button>
           </Stack>
+          {compareWinning && (
+            <Alert severity="info" sx={{ mb: 1, py: 0.5 }} icon={false}>
+              <Typography variant="caption">
+                <strong>당첨 적중이 자료 로드 후 낮아 보이는 이유:</strong> 1등 확률(1/8,145,060)은
+                변하지 않습니다. 복기 당첨번호를 불러오기 <em>전</em>에는 대조가 없어 공이 모두 밝게
+                보이고, 불러온 <em>뒤</em>에는 실제 당첨과 맞춰 회색·당첨 N/6이 표시됩니다(착시 해소).
+                또한 복기 탭은 forward 학습 주입 OFF(validatedLearning{' '}
+                {learningBridgeStatus.validatedCount}개)라 이번회차보다 보수적으로 조합이 잡힙니다.
+              </Typography>
+            </Alert>
+          )}
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
             <strong>주입 경로:</strong> 1:1 전수비교 · 평행(엔진② 직접) · 프로파일 매칭(L2) ·
             validatedLearning <strong>{learningBridgeStatus.validatedCount}개</strong>
             (엔진③ Feature/Pattern/다회차/겹침/커버리지/이월).
             미검증·평탄 제외. 강한후보·호기 추정 미사용.
             {compareWinning
-              ? ' 복기: forward 학습 OFF·커버리지·평행만. 당첨 일치는 표시만.'
+              ? ' 복기: forward 학습 OFF·커버리지·평행만. 당첨 일치는 표시만(점수 미주입).'
               : ' 이번회차: forward 학습 ON.'}
             {/* ⚠️ combinedTickets 만 보면 '반자동만 있는' 상태에서도 '분석 대상 N줄'
                 이라고 표시돼, 1:1 축과 학습 프로파일 축이 죽은 사실이 감춰진다.
@@ -5630,17 +5655,17 @@ export default function SemiAutoComparePanel({
       </>
       )}
 
-      {/* ── 종합 분석 · 호기 추천 (③ 접힘과 무관 — Venus 추첨기는 종합분석에만 1대) ── */}
+      {/* ── 종합 합의·Venus(intent별) · 호기 신호(5게임/호기현황 제외) ── */}
       <Divider sx={{ my: 1.5 }} />
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: 10 }}>
-        합의 번호·Venus 물리 추첨기(1대) · 호기 패턴 추천. Walk-Forward 백테스트는{' '}
-        <strong>④ 검증·백테스트</strong>로 분리했습니다.
+        Venus는 탭별로 분리됩니다(복기=확정 호기 · 이번회차=예상 호기). 용지 <strong>5세트</strong>만
+        조합 추천으로 쓰고, 호기 현황·Walk-Forward는 <strong>④</strong>로 보냅니다.
       </Typography>
       <Stack spacing={1}>
         <Paper id="photo-embed-composite" variant="outlined" sx={{ p: 1.25 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
             <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13 }}>
-              종합 합의 · Venus 추첨기
+              종합 합의 · Venus ({intentSectionLabel})
             </Typography>
             <Button size="small" variant="outlined" onClick={() => setShowCompositeEmbed((v) => !v)}>
               {showCompositeEmbed ? '접기 ▲' : '펼치기 ▼'}
@@ -5656,7 +5681,7 @@ export default function SemiAutoComparePanel({
                   </Stack>
                 }
               >
-                <ComposedAnalysisPage embedded />
+                <ComposedAnalysisPage embedded sheetIntent={sheetIntent} />
               </Suspense>
             </Box>
           )}
@@ -5664,7 +5689,7 @@ export default function SemiAutoComparePanel({
         <Paper id="photo-embed-machine" variant="outlined" sx={{ p: 1.25 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
             <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13 }}>
-              호기 추천 5게임 (물리 추첨기 없음)
+              호기 패턴 신호 (5게임·호기현황 없음)
             </Typography>
             <Button size="small" variant="outlined" onClick={() => setShowMachineEmbed((v) => !v)}>
               {showMachineEmbed ? '접기 ▲' : '펼치기 ▼'}
@@ -5676,11 +5701,11 @@ export default function SemiAutoComparePanel({
                 fallback={
                   <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1.5 }}>
                     <CircularProgress size={18} />
-                    <Typography variant="caption" color="text.secondary">추첨기 추천 로딩…</Typography>
+                    <Typography variant="caption" color="text.secondary">호기 신호 로딩…</Typography>
                   </Stack>
                 }
               >
-                <RoundRecommendPage embedded />
+                <RoundRecommendPage embedded sheetIntent={sheetIntent} />
               </Suspense>
             </Box>
           )}
@@ -5735,12 +5760,15 @@ export default function SemiAutoComparePanel({
           </Stack>
           <Stack spacing={1.5}>
           {engineTab === 'aux' && (
-            <EngineAuxSignalsPanel
-              intentLabel={intentSectionLabel}
-              roundNo={effectiveRound}
-              postOccurrence={predictionSignals?.sources?.post_occurrence ?? null}
-              decadeGap={predictionSignals?.sources?.decade_gap ?? null}
-            />
+            <>
+              <MachineOverviewPanel defaultOpen />
+              <EngineAuxSignalsPanel
+                intentLabel={intentSectionLabel}
+                roundNo={effectiveRound}
+                postOccurrence={predictionSignals?.sources?.post_occurrence ?? null}
+                decadeGap={predictionSignals?.sources?.decade_gap ?? null}
+              />
+            </>
           )}
 
       {engineTab === 'learn' && (

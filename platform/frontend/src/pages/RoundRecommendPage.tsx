@@ -27,7 +27,13 @@ const MACHINE_COLORS: Record<number, string> = { 1: '#E8570D', 2: '#0D8A3E', 3: 
 
 type MachineChoice = 'auto' | 1 | 2 | 3;
 
-export default function RoundRecommendPage({ embedded = false }: { embedded?: boolean } = {}) {
+export default function RoundRecommendPage({
+  embedded = false,
+  sheetIntent = 'current_round',
+}: {
+  embedded?: boolean;
+  sheetIntent?: 'review' | 'current_round';
+} = {}) {
   const [machine, setMachine] = useState<MachineChoice>('auto');
 
   const meta = useQuery({ queryKey: ['v1-meta'], queryFn: v1Api.getMeta });
@@ -61,14 +67,19 @@ export default function RoundRecommendPage({ embedded = false }: { embedded?: bo
       )}
       {embedded && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontWeight: 700 }}>
-          {meta.data?.current_round ?? '—'}회 · 호기 패턴 5게임
+          {sheetIntent === 'review' ? '복기 탭 · ' : '이번회차 탭 · '}
+          호기 패턴 신호(다음 회차) · 용지 5세트와 별개
           {meta.data ? ` · 데이터 ${meta.data.row_count}건` : ''}
         </Typography>
       )}
       <Alert severity="success" sx={{ mb: embedded ? 1.25 : 2, py: 0.5 }}>
         {embedded ? (
           <Typography variant="caption">
-            호기 실측(lottotapa) 기반 패턴 추천 · Venus 물리 추첨기는 위 <strong>종합 합의</strong>에만 있습니다.
+            호기 실측 신호만 표시합니다. <strong>추천 5게임·호기 현황</strong>은 ③에서 제거했습니다
+            (용지 통계 5세트와 중복 · 호기 현황은 ④ 후속·gap). Venus는 위 종합 합의에만 있습니다.
+            {sheetIntent === 'review'
+              ? ' 복기 탭에서는 당첨 대조용 용지 추천(위)을 우선하세요 — 호기 패턴은 다음 회차 예측용입니다.'
+              : ''}
           </Typography>
         ) : (
           <>
@@ -82,7 +93,7 @@ export default function RoundRecommendPage({ embedded = false }: { embedded?: bo
       {/* ③ 임베드: Venus는 종합분석에 1대만 — 여기서 물리 추첨기 중복 금지 */}
       {!embedded && <MachineDrawSimulator />}
 
-      {ov && (
+      {!embedded && ov && (
         <Paper sx={paperSx}>
           <Typography variant="subtitle1" fontWeight={700} gutterBottom>
             🎰 추첨기(호기) 현황
@@ -140,7 +151,7 @@ export default function RoundRecommendPage({ embedded = false }: { embedded?: bo
         </Paper>
       )}
 
-      {data && (
+      {!embedded && data && (
         <Paper sx={{ ...paperSx, bgcolor: '#69C8F2', color: '#10202A' }}>
           <Typography variant="caption" fontWeight={600}>
             추천 대상
@@ -350,9 +361,18 @@ export default function RoundRecommendPage({ embedded = false }: { embedded?: bo
         </Paper>
       )}
 
+      {embedded && data && (
+        <Alert severity="info" sx={{ mb: 1.25, py: 0.5 }} icon={false}>
+          <Typography variant="caption">
+            다음 {data.next_round}회 · {data.machine_id}호기 패턴. 조합 5게임은 용지 통계{' '}
+            <strong>추천 5세트</strong>만 사용하세요(중복 제거).
+          </Typography>
+        </Alert>
+      )}
+
       {data?.top_scored && data.top_scored.length > 0 && (
         <Paper sx={paperSx}>
-          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+          <Typography variant={embedded ? 'subtitle2' : 'subtitle1'} fontWeight={700} gutterBottom>
             🎯 상위 신호 번호 (근거)
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
@@ -375,7 +395,7 @@ export default function RoundRecommendPage({ embedded = false }: { embedded?: bo
         </Paper>
       )}
 
-      {data && data.combinations.length > 0 && (
+      {!embedded && data && data.combinations.length > 0 && (
         <Box>
           <Typography variant="subtitle1" fontWeight={700}>
             추천 5게임

@@ -61,12 +61,23 @@ const HONESTY_FOOTER =
 
 const GRADE_ORDER: ConsensusGrade[] = ['S', 'A', 'B', 'C', 'X'];
 
-export default function ComposedAnalysisPage({ embedded = false }: { embedded?: boolean } = {}) {
+export default function ComposedAnalysisPage({
+  embedded = false,
+  sheetIntent = 'current_round',
+}: {
+  embedded?: boolean;
+  sheetIntent?: 'review' | 'current_round';
+} = {}) {
   const queries = useQueries({
     queries: [
       {
-        queryKey: ['composite', 'machine'],
+        queryKey: ['composite', 'machine', sheetIntent],
         queryFn: () => v1Api.getRoundRecommend(),
+        staleTime: 60_000,
+      },
+      {
+        queryKey: ['composite', 'machine-overview'],
+        queryFn: () => v1Api.getMachineOverview(),
         staleTime: 60_000,
       },
       {
@@ -92,10 +103,10 @@ export default function ComposedAnalysisPage({ embedded = false }: { embedded?: 
       },
       {
         // 상세분석 종합예측과 같은 통합신호 — 브리지 스냅샷 없을 때 재합성용
-        queryKey: ['composite', 'prediction-signals'],
+        queryKey: ['composite', 'prediction-signals', sheetIntent],
         queryFn: async () => {
           try {
-            return await v1Api.getPredictionSignals('current_round');
+            return await v1Api.getPredictionSignals(sheetIntent);
           } catch {
             return null;
           }
@@ -105,14 +116,14 @@ export default function ComposedAnalysisPage({ embedded = false }: { embedded?: 
     ],
   });
 
-  const [machineQuery, parallelQuery, temperatureQuery, photoQuery, signalsQuery] = queries;
+  const [machineQuery, overviewQuery, parallelQuery, temperatureQuery, photoQuery, signalsQuery] = queries;
 
   const isLoading = queries.some((q) => q.isLoading);
   const isError = queries.every((q) => q.isError);
 
-  // 용지 축: 다음 회차 추첨기에는 이번회차 용지만 사용.
-  // 복기 폴백은 과거 회차를 미래 축에 조용히 섞는 오염이므로 금지.
-  const photoIntentUsed = 'current_round' as const;
+  // 이번회차 Venus/합의 → current_round 용지만.
+  // 복기 탭 → review 용지(해당 회차 대조용). 서로 섞지 않음.
+  const photoIntentUsed = sheetIntent;
 
   const composite = useMemo(
     () =>
@@ -144,20 +155,22 @@ export default function ComposedAnalysisPage({ embedded = false }: { embedded?: 
   }, []);
 
   // ① 용지분석 [상세 분석] 스냅샷(동일 브라우저) → ② 줄빈도+통합신호+평행 재합성
-  const detailBridgeRaw = useMemo(() => loadDetailForecast('current_round'), [
+  const detailBridgeRaw = useMemo(() => loadDetailForecast(sheetIntent), [
     photoQuery.dataUpdatedAt,
     signalsQuery.dataUpdatedAt,
     bridgeTick,
+    sheetIntent,
   ]);
-  // 지난 회차 스냅샷이 남아 있으면 폐기(롤오버 직후·미정리 대비)
+  // 이번회차: 지난 회차 스냅샷이 남아 있으면 폐기. 복기: 해당 intent 스냅샷 유지.
   const detailBridge = useMemo(() => {
     if (!detailBridgeRaw) return null;
+    if (sheetIntent === 'review') return detailBridgeRaw;
     const next = machineQuery.data?.next_round;
     if (next != null && detailBridgeRaw.round != null && detailBridgeRaw.round !== next) {
       return null;
     }
     return detailBridgeRaw;
-  }, [detailBridgeRaw, machineQuery.data?.next_round]);
+  }, [detailBridgeRaw, machineQuery.data?.next_round, sheetIntent]);
 
   const photoExpected = useMemo((): (PhotoExpectedNumber & { detailSource?: string })[] => {
     // ① 상세분석 스냅샷 — expand18(커버리지) 우선
@@ -224,8 +237,19 @@ export default function ComposedAnalysisPage({ embedded = false }: { embedded?: 
 
   const photoExpectedNums = useMemo(() => photoExpected.map((p) => p.number), [photoExpected]);
   const detailSourceKey = photoExpected[0]?.detailSource ?? 'lines';
-  const targetRound = machineQuery.data?.next_round ?? detailBridge?.round ?? null;
-  const machineId = machineQuery.data?.machine_id ?? 1;
+  const ov = overviewQuery.data;
+  const targetRound =
+    sheetIntent === 'review'
+      ? (detailBridge?.round ?? ov?.latest_round ?? null)
+      : (machineQuery.data?.next_round ?? detailBridge?.round ?? null);
+  const machineId = (() => {
+    if (sheetIntent === 'review' && targetRound != null && ov?.recent_history) {
+      const hit = ov.recent_history.find((h) => h.round === targetRound);
+      if (hit?.machine) return hit.machine;
+      return ov.latest_machine ?? machineQuery.data?.machine_id ?? 1;
+    }
+    return machineQuery.data?.machine_id ?? 1;
+  })();
 
   const effectiveDrawMode: DrawMachineMode =
     photoExpectedNums.length === 0 && drawMode !== 'consensus' ? 'consensus' : drawMode;
@@ -266,7 +290,7 @@ export default function ComposedAnalysisPage({ embedded = false }: { embedded?: 
         )}
         {embedded && (
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-            3축 합의 · Venus · Walk-Forward
+            {sheetIntent === 'review' ? '복기' : '이번회차'} · 3축 합의 · Venus
           </Typography>
         )}
         <Button
@@ -480,7 +504,9 @@ export default function ComposedAnalysisPage({ embedded = false }: { embedded?: 
           />
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant={embedded ? 'subtitle2' : 'subtitle1'} fontWeight={700}>
-              🎡 물리 추첨기 — {targetRound ?? drawMachine.nextRound ?? '?'}회 예상 {machineId}호기
+              🎡 물리 추첨기 — {sheetIntent === 'review' ? '복기' : '이번회차'}{' '}
+              {targetRound ?? drawMachine.nextRound ?? '?'}회 · {machineId}호기
+              {sheetIntent === 'review' ? ' (확정)' : ' (예상)'}
             </Typography>
             <Tooltip title={photoExpectedNums.length < 6 ? '상세예상번호 6개 이상 필요' : '상세분석 예상번호를 물리적으로 더 잘 뜨게 함'}>
               <span>

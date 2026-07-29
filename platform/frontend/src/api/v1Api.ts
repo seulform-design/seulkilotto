@@ -612,6 +612,63 @@ export const v1Api = {
       { timeoutMs: 180_000 },
     ),
 
+  /** Statistics Artifact 스냅샷 — 점수 미연결. */
+  getStatisticsSnapshot: (opts?: { recentN?: number; persist?: boolean; includeCarry?: boolean }) => {
+    const q = new URLSearchParams();
+    if (opts?.recentN != null) q.set('recent_n', String(opts.recentN));
+    if (opts?.persist) q.set('persist', 'true');
+    if (opts?.includeCarry) q.set('include_carry', 'true');
+    const qs = q.toString();
+    return fetchJson<StatisticsSnapshot>(
+      `/api/v1/stats/snapshot${qs ? `?${qs}` : ''}`,
+      { timeoutMs: 60_000 },
+    );
+  },
+
+  getStatisticsSnapshotHistory: (limit = 30) =>
+    fetchJson<StatisticsSnapshotHistory>(
+      `/api/v1/stats/snapshot/history?limit=${limit}`,
+      { timeoutMs: 30_000 },
+    ),
+
+  getStatisticsSnapshotFile: (filename: string) =>
+    fetchJson<StatisticsSnapshot>(
+      `/api/v1/stats/snapshot/history/${encodeURIComponent(filename)}`,
+      { timeoutMs: 30_000 },
+    ),
+
+  /** Model Registry — 사람 승인 비활성 목록. */
+  getModelRegistry: () =>
+    fetchJson<ModelRegistryState>('/api/v1/photo-analysis/model-registry'),
+
+  postModelRegistryDisable: (
+    body: { model_id: string; reason?: string; confirm: boolean; by?: string },
+    upgradeKey?: string,
+  ) =>
+    fetchJson<ModelRegistryActionResult>('/api/v1/photo-analysis/model-registry/disable', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(upgradeKey ? { 'X-Upgrade-Key': upgradeKey } : {}),
+      },
+      body: JSON.stringify(body),
+      timeoutMs: 30_000,
+    }),
+
+  postModelRegistryEnable: (
+    body: { model_id: string; reason?: string; confirm: boolean; by?: string },
+    upgradeKey?: string,
+  ) =>
+    fetchJson<ModelRegistryActionResult>('/api/v1/photo-analysis/model-registry/enable', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(upgradeKey ? { 'X-Upgrade-Key': upgradeKey } : {}),
+      },
+      body: JSON.stringify(body),
+      timeoutMs: 30_000,
+    }),
+
   /** 복기 Pattern Mining — 전수 학습·검증·Cluster·설명가능 추천. */
   getPatternMining: (seed = 42, opts?: { applyIntent?: 'review' | 'current_round' }) => {
     const q = new URLSearchParams({ seed: String(seed) });
@@ -1433,6 +1490,74 @@ export interface FeatureLearningFeatureReport {
   use_reason: string[];
   exclude_reason: string[];
   last_gate?: GateResult;
+  /** 사람 승인 Model Registry disable 로 scoring 강제 차단. */
+  human_disabled?: boolean;
+}
+
+export interface StatisticsSnapshot {
+  version?: string;
+  artifact_id?: string;
+  created_at?: string;
+  honesty?: string;
+  note?: string;
+  persist?: { ok?: boolean; filename?: string; persisted_at?: string };
+  source?: {
+    dataset?: string;
+    rounds?: { from?: number; to?: number; count?: number };
+  };
+  empirical?: {
+    sum?: { p01?: number; p10?: number; p50?: number; p90?: number; p99?: number; mean?: number };
+    odd_count_modes?: number[];
+    high_count_modes?: number[];
+    ac?: { mean?: number; p10?: number };
+  };
+  decade_bands?: {
+    labels?: string[];
+    hit_rate_per_band?: number[];
+    expected_per_band?: number[];
+    note?: string;
+  };
+  baselines?: {
+    uniform_hit_prob?: number;
+    uniform_top6_hits?: number;
+    jackpot_odds?: string;
+  };
+  [key: string]: unknown;
+}
+
+export interface StatisticsSnapshotHistoryItem {
+  filename: string;
+  size_bytes?: number;
+  mtime?: string;
+  version?: string;
+  rounds_count?: number;
+  created_at?: string;
+  parse_error?: boolean;
+}
+
+export interface StatisticsSnapshotHistory {
+  ok: boolean;
+  count?: number;
+  total_files?: number;
+  items?: StatisticsSnapshotHistoryItem[];
+  honesty?: string;
+}
+
+export interface ModelRegistryState {
+  disabled_ids?: string[];
+  event_count?: number;
+  auto_mutate_scoring?: boolean;
+  honesty?: string;
+  disabled?: Record<string, { reason?: string; at?: string; by?: string }>;
+  events?: { action?: string; model_id?: string; at?: string; reason?: string }[];
+}
+
+export interface ModelRegistryActionResult {
+  ok: boolean;
+  error?: string;
+  model_id?: string;
+  auto_applied?: boolean;
+  disabled_ids?: string[];
 }
 
 export interface FeatureLearningResponse {
@@ -1685,6 +1810,20 @@ export interface PatternMiningResponse {
   honesty?: string;
   explain?: ExplainPayload;
   validation_gates?: ValidationGatesSummary;
+  orchestrator?: {
+    version?: string;
+    candidates?: {
+      model_id: string;
+      action: string;
+      reason: string;
+      requires_human?: boolean;
+      auto_applied?: boolean;
+    }[];
+    unchanged?: string[];
+    auto_mutate_scoring?: boolean;
+    honesty?: string;
+  };
+  model_registry?: ModelRegistryState;
 }
 
 /** 다회차 학습 — 보관 회차 용지 + 실제 당첨 대조 캘리브레이션. */

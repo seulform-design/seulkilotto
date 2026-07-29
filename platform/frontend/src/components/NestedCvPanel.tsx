@@ -15,6 +15,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import LottoBall from './LottoBall';
 import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
+import { ValidationGatesBlock } from './ExplainArtifactBlock';
 import { v1Api } from '../api/v1Api';
 
 /**
@@ -28,6 +29,15 @@ export default function NestedCvPanel() {
     queryFn: () => v1Api.getNestedCv(42),
     staleTime: 300_000,
     retry: 1,
+  });
+
+  /** Gate 교차 링크 — Feature 학습 요약(읽기 전용). Nested 자체는 Gate 미승격. */
+  const featureQ = useQuery({
+    queryKey: ['v1-photo-feature-learning', 'current_round'],
+    queryFn: () => v1Api.getFeatureLearning(42, { applyIntent: 'current_round' }),
+    staleTime: 300_000,
+    retry: 1,
+    enabled: open,
   });
 
   if (q.isLoading) {
@@ -75,11 +85,13 @@ export default function NestedCvPanel() {
   const mean = d.mean_top6;
   const baseline = d.baseline_top6 ?? 0.8;
   const models = d.picked_models ?? [];
+  const outer = d.outer_folds ?? 0;
+  const stable = outer >= 5 && !d.small_sample;
 
   return (
     <EngineSection
       tone="info"
-      title={`Validation · Nested CV (outer ${d.outer_folds ?? 0})`}
+      title={`Validation · Nested CV (outer ${outer})`}
       id="learn-nested-cv"
       collapsible
       open={open}
@@ -93,6 +105,10 @@ export default function NestedCvPanel() {
             label={d.scoring_allowed ? 'scoring?' : '점수 미연결'}
           />
           <EngineStatusChip
+            color={stable ? 'success' : 'warning'}
+            label={stable ? 'outer≥5 안정' : '소표본/불안정'}
+          />
+          <EngineStatusChip
             variant="outlined"
             label={
               mean != null
@@ -100,19 +116,31 @@ export default function NestedCvPanel() {
                 : `base ${baseline}`
             }
           />
-          {d.small_sample && <EngineStatusChip color="warning" label="소표본" />}
         </>
       }
       intent={
         <>
           Outer fold에서 채택 Feature로 top6 hits를 집계합니다. Gate·사람 승인 전{' '}
-          <strong>scoring에 쓰지 않습니다</strong>.
+          <strong>scoring에 쓰지 않습니다</strong>. Feature Gate 요약은 아래 교차 링크입니다.
         </>
       }
     >
       {d.honesty && (
         <Alert severity="warning" sx={{ mb: 1.5, py: 0.5 }}>
           <Typography variant="caption">{d.honesty}</Typography>
+        </Alert>
+      )}
+      {stable ? (
+        <Alert severity="success" sx={{ mb: 1, py: 0.5 }} icon={false}>
+          <Typography variant="caption">
+            outer folds ≥ 5 — 안정성 기준 충족(표시용). Gate 승격·scoring 허용은 별도 사람 승인.
+          </Typography>
+        </Alert>
+      ) : (
+        <Alert severity="info" sx={{ mb: 1, py: 0.5 }} icon={false}>
+          <Typography variant="caption">
+            outer &lt; 5 또는 small_sample — Nested 결과를 Gate/점수에 올리지 마세요.
+          </Typography>
         </Alert>
       )}
       {d.note && (
@@ -138,6 +166,9 @@ export default function NestedCvPanel() {
           sx={{ height: 20, fontSize: 10 }}
         />
       </Stack>
+
+      <ValidationGatesBlock gates={featureQ.data?.validation_gates} />
+
       {models.length === 0 ? (
         <Alert severity="info" sx={{ py: 0.5 }}>
           <Typography variant="caption">outer fold 결과가 없습니다.</Typography>

@@ -4,9 +4,9 @@
   "aligned_with_sheet_analysis": true,
   "updated": "2026-07-30",
   "completeness": {
-    "sheet_engine_runtime": 0.96,
-    "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. 용지분석 런타임 버그·정책·백테스트 게이트는 검수 완료. IA: 종합분석·추첨기추천 → 용지분석 ③ 번호추천.",
-    "last_audit": "2026-07-30: ③에서 WF백테스트·중복Venus 제거 → ④검증; Nested CV/SHAP; size unify"
+    "sheet_engine_runtime": 0.97,
+    "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. Stats snapshot UI·Model Registry disable UI·Nested/Pattern 레지스트리 패리티 반영.",
+    "last_audit": "2026-07-30: StatisticsSnapshotPanel + Registry disable/enable + Nested polish + Pattern orchestrator"
   },
   "safety": {
     "no_win_guarantee": true,
@@ -409,5 +409,12 @@
       "action": "blocked until primary PDF; physics stays Experimental",
       "blocked": true
     }
+  ],
+  "recently_shipped": [
+    "05_statistics_snapshot_ui",
+    "08_ai_model_registry_disable_ui",
+    "08_ai_human_disabled_badge",
+    "09_validation_nested_stability_ui",
+    "08_ai_pattern_registry_parity"
   ]
 }

@@ -6953,6 +6953,7 @@ export default function SemiAutoComparePanel({
         <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
           {(
             [
+              ['learn-stats-snapshot', 'Stats'],
               ['learn-v1', 'V1 Feature'],
               ['learn-nested-cv', 'Nested CV'],
               ['learn-shap-drift', 'SHAP/Drift'],

@@ -13,7 +13,7 @@ import {
   TableRow,
   Typography,
 } from '@mui/material';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
 import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
@@ -34,6 +34,7 @@ export default function FeatureLearningPanel({
   const [open, setOpen] = useState(false);
   const [showRejected, setShowRejected] = useState(false);
   const [expandedNumber, setExpandedNumber] = useState<number | null>(null);
+  const qc = useQueryClient();
 
   const q = useQuery({
     queryKey: ['v1-photo-feature-learning', sheetIntent],
@@ -43,11 +44,15 @@ export default function FeatureLearningPanel({
   });
 
   const adopted = useMemo(
-    () => (q.data?.features ?? []).filter((f) => f.adopted),
+    () => (q.data?.features ?? []).filter((f) => f.adopted && !f.human_disabled),
     [q.data?.features],
   );
   const rejected = useMemo(
-    () => (q.data?.features ?? []).filter((f) => !f.adopted),
+    () => (q.data?.features ?? []).filter((f) => !f.adopted || f.human_disabled),
+    [q.data?.features],
+  );
+  const humanDisabledCount = useMemo(
+    () => (q.data?.features ?? []).filter((f) => f.human_disabled).length,
     [q.data?.features],
   );
 
@@ -103,6 +108,9 @@ export default function FeatureLearningPanel({
             color={adopted.length > 0 ? 'success' : 'default'}
             label={`채택 ${d.adopted_count ?? adopted.length} · 제외 ${d.rejected_count ?? rejected.length}`}
           />
+          {humanDisabledCount > 0 && (
+            <EngineStatusChip color="warning" label={`사람비활성 ${humanDisabledCount}`} />
+          )}
           {d.baselines && (
             <EngineStatusChip
               variant="outlined"
@@ -137,6 +145,10 @@ export default function FeatureLearningPanel({
         orchestrator={d.orchestrator}
         modelRegistry={d.model_registry}
         title="Model Registry — Feature / Ensemble"
+        onChanged={() => {
+          void qc.invalidateQueries({ queryKey: ['v1-photo-feature-learning'] });
+          void qc.invalidateQueries({ queryKey: ['v1-photo-pattern-mining'] });
+        }}
       />
 
       {/* 파이프라인 */}
@@ -417,8 +429,14 @@ function FeatureTable({
                 <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
                   <Chip
                     size="small"
-                    color={f.adopted ? 'success' : 'default'}
-                    label={f.adopted ? '채택' : (f.exclude_reason?.[0] ?? '제외').slice(0, 28)}
+                    color={f.human_disabled ? 'warning' : f.adopted ? 'success' : 'default'}
+                    label={
+                      f.human_disabled
+                        ? '사람 비활성'
+                        : f.adopted
+                          ? '채택'
+                          : (f.exclude_reason?.[0] ?? '제외').slice(0, 28)
+                    }
                     sx={{ height: 18, fontSize: 9, maxWidth: 180 }}
                   />
                   {f.last_gate && (

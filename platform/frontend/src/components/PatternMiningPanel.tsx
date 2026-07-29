@@ -13,7 +13,7 @@ import {
   TableRow,
   Typography,
 } from '@mui/material';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
 import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
@@ -34,6 +34,7 @@ export default function PatternMiningPanel({
   const [open, setOpen] = useState(false);
   const [showRejected, setShowRejected] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const qc = useQueryClient();
 
   const q = useQuery({
     queryKey: ['v1-photo-pattern-mining', sheetIntent],
@@ -121,7 +122,13 @@ export default function PatternMiningPanel({
       <ValidationGatesBlock gates={d.validation_gates} />
       <ModelRegistryBlock
         gates={d.validation_gates}
-        title="Model Registry — Pattern (표시전용)"
+        orchestrator={d.orchestrator}
+        modelRegistry={d.model_registry}
+        title="Model Registry — Pattern"
+        onChanged={() => {
+          void qc.invalidateQueries({ queryKey: ['v1-photo-pattern-mining'] });
+          void qc.invalidateQueries({ queryKey: ['v1-photo-feature-learning'] });
+        }}
       />
 
       {d.multiple_testing && d.multiple_testing.n_tested > 0 && (

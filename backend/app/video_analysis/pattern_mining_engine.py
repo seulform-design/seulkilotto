@@ -911,6 +911,10 @@ def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") ->
     adopted_rows = [r for r in pattern_rows if r.get("adopted")][:40]
     gates = [r["last_gate"] for r in pattern_rows]
     gate_summary = summarize_gates(gates, demo_blocked=demo_blocked)
+    from .model_registry_store import get_registry_state
+    from .strategy_orchestrator import propose_retirements
+
+    orchestrator = propose_retirements(gate_summary=gate_summary)
     scoring_ok = bool(rec.get("ok")) and len(adopted) > 0 and not demo_blocked
     conf = min(100, int(round(100 * len(adopted) / max(1, len(scores))))) if adopted else 0
     explain = build_explain_payload(
@@ -994,6 +998,8 @@ def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") ->
         "feature_selection": feat_sel,
         "recommendation": rec,
         "validation_gates": gate_summary,
+        "orchestrator": orchestrator,
+        "model_registry": get_registry_state(),
         "explain": explain,
         "pipeline": [
             "전수 학습(자동·반자동·매치·강한후보·구조)",

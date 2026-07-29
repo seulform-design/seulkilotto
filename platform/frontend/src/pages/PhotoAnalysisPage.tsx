@@ -30,6 +30,7 @@ import OverlapLearningServerPanel from '../components/OverlapLearningServerPanel
 import RoundDataBreakdownPanel from '../components/RoundDataBreakdownPanel';
 import NestedCvPanel from '../components/NestedCvPanel';
 import ShapDriftPanel from '../components/ShapDriftPanel';
+import StatisticsSnapshotPanel from '../components/StatisticsSnapshotPanel';
 import WalkForwardPanel from '../components/WalkForwardPanel';
 import RoundLearningPanel from '../components/RoundLearningPanel';
 import FullHistoryBacktestPanel from '../components/FullHistoryBacktestPanel';
@@ -1818,6 +1819,7 @@ export default function PhotoAnalysisPage() {
         validatedLearningSlot={
           <Stack spacing={1.5}>
             <FullHistoryBacktestPanel />
+            <StatisticsSnapshotPanel />
             <FeatureLearningPanel sheetIntent={activeTab} />
             <NestedCvPanel />
             <ShapDriftPanel />

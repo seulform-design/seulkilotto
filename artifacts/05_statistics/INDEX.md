@@ -14,13 +14,19 @@
 
 ## 갭
 
-- 스냅샷 버전 히스토리 스토어(누적 파일)는 후속
+- (없음 — 히스토리 스토어 API 추가됨. 장기 보존 정책만 운영 선택)
 
 ## 구현
 
 - Serializer: `backend/app/epo/statistics_snapshot.py` (decade hit_rate 포함)
-- API: `GET /api/v1/stats/snapshot` (점수 미연결)
+- Store: `backend/app/epo/snapshot_store.py` → `data/statistics_snapshots/`
+- API:
+  - `GET /api/v1/stats/snapshot` (`persist=true` 시 누적 저장)
+  - `GET /api/v1/stats/snapshot/history`
+  - `GET /api/v1/stats/snapshot/history/{filename}`
+- **점수 미연결**
 
 ## 규칙
 
-스냅샷은 재현·Explain용. Experimental·Ball 가설과 합치지 않는다.
+스냅샷은 재현·Explain용. Experimental·Ball 가설과 합치지 않는다.  
+저장된 파일은 삭제하지 않고 누적한다.

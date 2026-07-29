@@ -183,20 +183,49 @@ def get_statistics_snapshot(
         default=False,
         description="last_round carry 필드 포함(기본 제외 — 누수·의도 혼동 방지).",
     ),
+    persist: bool = Query(
+        default=False,
+        description="True 이면 data/statistics_snapshots/ 에 누적 저장(삭제 없음).",
+    ),
 ):
     """Statistics Artifact 0.1.0 — EPO HistoricalProfile 버전드 스냅샷.
 
     추천 점수에 연결하지 않는다. Explain·필터 기준선·재현용.
     """
+    from ..epo.snapshot_store import persist_snapshot
     from ..epo.statistics_snapshot import SNAPSHOT_VERSION, build_snapshot_from_history
 
     df = load_history()
     if df.empty:
         snap = build_snapshot_from_history(None, include_carry=include_carry)
         snap["note"] = "당첨 데이터 없음 — FALLBACK 보수값"
-        return snap
-    snap = build_snapshot_from_history(
-        df, include_carry=include_carry, recent_n=recent_n
-    )
+    else:
+        snap = build_snapshot_from_history(
+            df, include_carry=include_carry, recent_n=recent_n
+        )
     snap["api_version"] = SNAPSHOT_VERSION
+    if persist:
+        meta = persist_snapshot(snap, tag="api")
+        snap["persist"] = meta
+    return snap
+
+
+@router.get("/snapshot/history")
+def get_statistics_snapshot_history(
+    limit: int = Query(default=30, ge=1, le=200),
+):
+    """누적 저장된 StatisticsSnapshot 목록(메타만). 점수 미연결."""
+    from ..epo.snapshot_store import list_snapshots
+
+    return list_snapshots(limit=limit)
+
+
+@router.get("/snapshot/history/{filename}")
+def get_statistics_snapshot_file(filename: str):
+    """저장된 스냅샷 본문. 경로 탈출 방지."""
+    from ..epo.snapshot_store import load_snapshot
+
+    snap = load_snapshot(filename)
+    if snap is None:
+        raise HTTPException(status_code=404, detail="스냅샷 파일을 찾을 수 없습니다.")
     return snap

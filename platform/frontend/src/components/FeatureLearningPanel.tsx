@@ -18,6 +18,7 @@ import { useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
 import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
 import { ExplainArtifactBlock, ValidationGatesBlock } from './ExplainArtifactBlock';
+import { ModelRegistryBlock } from './ModelRegistryBlock';
 import { v1Api, type FeatureLearningFeatureReport } from '../api/v1Api';
 
 /**
@@ -129,6 +130,12 @@ export default function FeatureLearningPanel({
         title={`Explain — Feature (${d.explain?.decision ?? 'neutral'})`}
       />
       <ValidationGatesBlock gates={d.validation_gates} />
+      <ModelRegistryBlock
+        gates={d.validation_gates}
+        tournament={ensemble?.models}
+        selected={ensemble?.selected}
+        title="Model Registry — Feature / Ensemble"
+      />
 
       {/* 파이프라인 */}
       {d.pipeline && (

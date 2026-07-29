@@ -6,7 +6,7 @@
   "completeness": {
     "sheet_engine_runtime": 0.96,
     "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. 용지분석 런타임 버그·정책·백테스트 게이트는 검수 완료.",
-    "last_audit": "2026-07-30: Explain/Gate UI V1–V4; decade hit_rate in snapshot"
+    "last_audit": "2026-07-30: snapshot store; ModelRegistry UI; knowledge SOURCES+export"
   },
   "safety": {
     "no_win_guarantee": true,
@@ -139,15 +139,17 @@
       "title": "Knowledge Artifact",
       "status": "partial",
       "priority": "high",
-      "generate": true,
+      "generate": false,
       "covers": ["추첨방식", "확률이론", "조합론", "랜덤성", "통계", "ML개념", "정직성원칙"],
       "mapped_paths": [
         "artifacts/README.md",
         "artifacts/01_knowledge/INDEX.md",
+        "artifacts/01_knowledge/SOURCES.md",
+        "artifacts/01_knowledge/export.json",
         "docs/LOTTO_KNOWLEDGE_ARTIFACT_SYSTEM.md",
         "docs/DATA_ISOLATION.md"
       ],
-      "gap": "공식 출처 URL·버전드 JSON export 추가 여지"
+      "gap": "출처·export 0.1.0 완료 — 추첨기/볼 공식 스펙 인용은 03/04 후속"
     },
     {
       "id": "02_historical",
@@ -196,11 +198,12 @@
         "backend/app/video_analysis/stats.py",
         "backend/app/epo",
         "backend/app/epo/statistics_snapshot.py",
+        "backend/app/epo/snapshot_store.py",
         "backend/app/routers/stats.py",
         "artifacts/05_statistics/INDEX.md",
         "artifacts/05_statistics/SCHEMA.md"
       ],
-      "gap": "serializer·snapshot·decade hit_rate 완료 — 스냅샷 히스토리 스토어 후속"
+      "gap": "serializer·snapshot·decade·히스토리 스토어 완료 — 장기 보존 정책만 운영 선택"
     },
     {
       "id": "06_pattern",
@@ -238,9 +241,10 @@
         "backend/app/video_analysis/vision_llm.py",
         "backend/app/video_analysis/validation_gate.py",
         "artifacts/08_ai/model_registry.md",
-        "artifacts/08_ai/validation_gate.md"
+        "artifacts/08_ai/validation_gate.md",
+        "platform/frontend/src/components/ModelRegistryBlock.tsx"
       ],
-      "gap": "evaluate_gate·last_gate·패널 Gate UI 완료 — Rollback/토너먼트 UI·SHAP/Drift 미구축"
+      "gap": "Gate·Registry 표시 UI 완료 — 자동 Rollback API·SHAP/Drift 미구축"
     },
     {
       "id": "09_validation",
@@ -391,19 +395,19 @@
   ],
   "generation_queue": [
     {
-      "id": "05_statistics_store",
-      "reason": "스냅샷 버전 히스토리 누적 스토어",
-      "action": "optional file/db archive of StatisticsSnapshot by date; no scoring"
+      "id": "03_draw_machine_sources",
+      "reason": "추첨기·볼 공식 스펙 인용",
+      "action": "extend 03_draw_machine INDEX with Editec/Venus citations; physics stays Experimental"
     },
     {
-      "id": "08_ai_rollback_ui",
-      "reason": "Model Rollback·토너먼트 UI",
-      "action": "planned only until Validation backlog; surface archived model_ids"
+      "id": "08_ai_shap_drift",
+      "reason": "SHAP/Feature Drift 설계",
+      "action": "Experimental stub only until Validation backlog"
     },
     {
-      "id": "01_knowledge_sources",
-      "reason": "공식 출처 URL·버전드 Knowledge export",
-      "action": "extend 01_knowledge INDEX with citations"
+      "id": "09_validation_orchestrate",
+      "reason": "자동 전략 폐기 오케스트레이션",
+      "action": "design only — never auto-mutate scoring without gate"
     }
   ]
 }

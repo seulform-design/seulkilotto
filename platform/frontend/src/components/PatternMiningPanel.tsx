@@ -18,6 +18,7 @@ import { useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
 import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
 import { ExplainArtifactBlock, ValidationGatesBlock } from './ExplainArtifactBlock';
+import { ModelRegistryBlock } from './ModelRegistryBlock';
 import { v1Api, type PatternMiningResponse } from '../api/v1Api';
 
 /**
@@ -118,6 +119,10 @@ export default function PatternMiningPanel({
         title={`Explain — Pattern (${d.explain?.decision ?? 'neutral'})`}
       />
       <ValidationGatesBlock gates={d.validation_gates} />
+      <ModelRegistryBlock
+        gates={d.validation_gates}
+        title="Model Registry — Pattern (표시전용)"
+      />
 
       {d.multiple_testing && d.multiple_testing.n_tested > 0 && (
         <Alert severity={d.multiple_testing.exceeds_chance ? 'success' : 'info'} sx={{ mb: 1.5, py: 0.5 }}>

@@ -21,6 +21,7 @@ from .statistics_snapshot import (
     build_snapshot_from_history,
     profile_to_snapshot,
 )
+from .snapshot_store import list_snapshots, load_snapshot, persist_snapshot
 
 __all__ = [
     "BacktestResult",
@@ -33,7 +34,10 @@ __all__ = [
     "build_snapshot_from_history",
     "compute_profile",
     "evaluate_filters",
+    "list_snapshots",
+    "load_snapshot",
     "loose_fallback_predicates",
+    "persist_snapshot",
     "profile_to_snapshot",
     "run",
 ]

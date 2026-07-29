@@ -44,7 +44,7 @@
 
 ## 미구축
 
-- [ ] Rollback·토너먼트 UI
+- [ ] 자동 Rollback API (사용자 확인 없이 점수 전환 금지)
 - [ ] SHAP / Feature Drift
 - [ ] 자동 가중·자동 비활성 오케스트레이션
 
@@ -52,6 +52,7 @@
 
 - `validation_gate.py` — `evaluate_gate` · feature/pattern 어댑터
 - Feature/Pattern 응답: `last_gate`, `validation_gates`
+- UI: `ModelRegistryBlock` — 활성/거절·토너먼트 **표시전용** (자동 점수 변경 없음)
 
 ## 규칙
 

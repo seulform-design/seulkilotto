@@ -2,7 +2,8 @@
 
 > 상태: `partial`  
 > 영역: Knowledge  
-> 용지분석 연결: 전 엔진 공통 원칙 (점수 계산 아님)
+> 용지분석 연결: 전 엔진 공통 원칙 (점수 계산 아님)  
+> 출처: [`SOURCES.md`](./SOURCES.md) · export: [`export.json`](./export.json) `0.1.0`
 
 ## 1. 목적
 
@@ -34,11 +35,10 @@
 ## 4. 확장 큐
 
 - 추첨기·볼 규격 공식 스펙 인용 정리 (`03_draw_machine` / `04_ball`)
-- 동행복권 정책·법령 링크 목록
 - Monte Carlo / Bayesian / Markov 개념 요약 (교육용, Experimental과 분리)
 
 ## 5. Acceptance
 
 - [x] registry `01_knowledge` partial
-- [ ] 공식 출처 URL 붙이기
-- [ ] 버전드 JSON export
+- [x] 공식 출처 URL (`SOURCES.md`)
+- [x] 버전드 JSON export (`export.json` 0.1.0)

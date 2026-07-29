@@ -1,0 +1,103 @@
+{
+  "artifact_id": "01_knowledge",
+  "version": "0.1.0",
+  "exported_at": "2026-07-30",
+  "honesty": "지식·출처 export. 당첨 보장·확률 왜곡 없음. 추천 점수 미연결.",
+  "facts": [
+    {
+      "id": "K-PROB-001",
+      "statement": "한국 로또 6/45 1등 확률은 1/8,145,060",
+      "grade": "official_math",
+      "sources": ["SRC-DHL-INTRO", "SRC-COMB-001"]
+    },
+    {
+      "id": "K-IID-001",
+      "statement": "회차 간 추첨은 독립에 가깝게 설계됨(i.i.d. 가정)",
+      "grade": "operational_assumption",
+      "sources": ["SRC-DHL-GUIDE"]
+    },
+    {
+      "id": "K-TICKET-001",
+      "statement": "티켓에 없는 번호는 티켓 기반 엔진으로 포착 불가(천장)",
+      "grade": "engine",
+      "sources": ["SRC-ARTIFACT"]
+    },
+    {
+      "id": "K-FIXED-001",
+      "statement": "반자동 고정수는 지지·패턴 신호에서 제외해야 오염 방지",
+      "grade": "engine",
+      "sources": ["SRC-FIXED"]
+    },
+    {
+      "id": "K-CORE-001",
+      "statement": "핵심6은 다회차 best 단일신호; 합의는 희석",
+      "grade": "policy",
+      "sources": ["SRC-POLICY-CORE"]
+    },
+    {
+      "id": "K-EXP-001",
+      "statement": "확장18은 전 엔진 min-rank(best_of_engines)",
+      "grade": "policy",
+      "sources": ["SRC-POLICY-EXP"]
+    },
+    {
+      "id": "K-INTENT-001",
+      "statement": "review=소급 대조, current_round=예상·forward 주입",
+      "grade": "engine",
+      "sources": ["SRC-DATA-ISO"]
+    },
+    {
+      "id": "K-DEMO-001",
+      "statement": "archived_demo_* 는 표시용 — 점수 주입 금지",
+      "grade": "engine",
+      "sources": ["SRC-FIXED"]
+    }
+  ],
+  "sources": [
+    {
+      "id": "SRC-DHL-INTRO",
+      "title": "동행복권 로또6/45 소개",
+      "url": "https://www.dhlottery.co.kr/lt645/intro"
+    },
+    {
+      "id": "SRC-DHL-GUIDE",
+      "title": "당첨자 가이드·추첨방송",
+      "url": "https://www.dhlottery.co.kr/guide/wnrGuide"
+    },
+    {
+      "id": "SRC-COMB-001",
+      "title": "C(45,6)=8145060",
+      "url": null
+    },
+    {
+      "id": "SRC-POLICY-CORE",
+      "title": "core6 best_single policy",
+      "path": "backend/app/video_analysis/review_verification.py"
+    },
+    {
+      "id": "SRC-POLICY-EXP",
+      "title": "expand18 min-rank policy",
+      "path": "backend/app/video_analysis/review_verification.py"
+    },
+    {
+      "id": "SRC-DATA-ISO",
+      "title": "DATA_ISOLATION",
+      "path": "docs/DATA_ISOLATION.md"
+    },
+    {
+      "id": "SRC-ARTIFACT",
+      "title": "Lotto Knowledge Artifact System",
+      "path": "docs/LOTTO_KNOWLEDGE_ARTIFACT_SYSTEM.md"
+    },
+    {
+      "id": "SRC-FIXED",
+      "title": "fixed_semi exclusion",
+      "path": "backend/app/video_analysis/feature_learning_engine.py"
+    }
+  ],
+  "recommendation_policy": {
+    "core6_mode": "best_single",
+    "expand18_mode": "best_of_engines",
+    "prefer_consensus": false
+  }
+}

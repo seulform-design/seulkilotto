@@ -1287,6 +1287,8 @@ export interface ExplainPayload {
   limits: string[];
   improvements: string[];
   honesty: string;
+  /** true 이면 Experimental 배너 — decision과 무관, 점수 미연결. */
+  experimental?: boolean;
 }
 
 /** Validation Gate 응답 요약 (artifacts/08_ai/validation_gate.md). */

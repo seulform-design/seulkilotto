@@ -1,5 +1,27 @@
-import { Box, Chip, Stack, Typography } from '@mui/material';
+import { Alert, Box, Chip, Stack, Typography } from '@mui/material';
 import type { ExplainPayload, ValidationGatesSummary } from '../api/v1Api';
+
+const EXPERIMENTAL_DEFAULT =
+  'Experimental — 점수·히어로·validatedLearning에 연결되지 않습니다. 당첨 확률(1/8,145,060)은 변하지 않습니다.';
+
+/** decision과 무관 — Experimental Artifact 결과 배너. */
+export function ExperimentalBanner({
+  show,
+  label,
+}: {
+  show?: boolean;
+  label?: string;
+}) {
+  if (!show) return null;
+  return (
+    <Alert severity="warning" sx={{ mb: 1.5, py: 0.5 }} icon={false}>
+      <Typography variant="caption" fontWeight={700} sx={{ display: 'block' }}>
+        Experimental
+      </Typography>
+      <Typography variant="caption">{label ?? EXPERIMENTAL_DEFAULT}</Typography>
+    </Alert>
+  );
+}
 
 /** Explain Artifact 표준 블록 — Review/Feature/Pattern/Round/Overlap 공용. */
 export function ExplainArtifactBlock({
@@ -10,13 +32,29 @@ export function ExplainArtifactBlock({
   title?: string;
 }) {
   if (!explain) return null;
+  const isExp =
+    Boolean(explain.experimental) ||
+    (explain.used_data?.artifact_versions ?? []).some((v) => /experimental/i.test(v));
   const heading = title ?? `Explain — ${explain.decision}`;
   return (
-    <Box sx={{ mb: 1.5, p: 1.25, borderRadius: 1, border: '1px dashed', borderColor: 'info.main' }}>
+    <Box
+      sx={{
+        mb: 1.5,
+        p: 1.25,
+        borderRadius: 1,
+        border: '1px dashed',
+        borderColor: isExp ? 'warning.main' : 'info.main',
+      }}
+    >
+      <ExperimentalBanner show={isExp} />
       <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
         {heading}
+        {isExp ? ' · 실험' : ''}
       </Typography>
       <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+        {isExp && (
+          <Chip size="small" color="warning" label="점수 미연결" sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+        )}
         <Chip
           size="small"
           color={explain.confidence.overall >= 40 ? 'success' : 'default'}

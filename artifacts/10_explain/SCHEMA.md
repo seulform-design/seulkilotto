@@ -31,9 +31,12 @@
   "backtest": { "metric": "", "value": null, "baseline": null, "small_sample": true },
   "limits": [],
   "improvements": [],
-  "honesty": "확률 불변. 당첨 보장 없음."
+  "honesty": "확률 불변. 당첨 보장 없음.",
+  "experimental": false
 }
 ```
+
+`experimental: true` 이거나 `artifact_versions` 에 `experimental`/`100_experimental` 이 있으면 UI는 **decision과 무관하게** Experimental 배너를 표시하고 점수 미연결을 고지한다.
 
 ## 현재 분산 구현
 
@@ -48,4 +51,5 @@
 2. ~~복기 검증 응답 `explain` + ReviewVerificationPanel UI~~  
 3. ~~신규 엔진 응답에 `explain?: ExplainPayload` (V1–V4 + review)~~  
 4. ~~Feature/Pattern/Round/Overlap 패널 Explain 공용 블록~~  
-5. Experimental 결과는 `decision` 과 무관하게 UI 배너만
+5. ~~Experimental 배너 (`experimental` / `100_experimental`)~~  
+6. SHAP 등 Experimental 결과를 Explain에 붙일 때 `experimental: true` 고정

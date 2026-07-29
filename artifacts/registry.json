@@ -6,7 +6,7 @@
   "completeness": {
     "sheet_engine_runtime": 0.96,
     "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. 용지분석 런타임 버그·정책·백테스트 게이트는 검수 완료.",
-    "last_audit": "2026-07-30: knowledge DM cross-link; human model-registry disable API"
+    "last_audit": "2026-07-30: nested CV stub; Experimental banner (decision-agnostic)"
   },
   "safety": {
     "no_win_guarantee": true,
@@ -260,10 +260,12 @@
         "backend/app/video_analysis/full_history_backtest.py",
         "backend/app/video_analysis/strategy_orchestrator.py",
         "backend/app/video_analysis/model_registry_store.py",
+        "backend/app/video_analysis/nested_cv.py",
         "artifacts/09_validation/orchestration.md",
+        "artifacts/09_validation/nested_cv.md",
         "backend/tests"
       ],
-      "gap": "propose + human disable API 완료 — Nested CV 후속"
+      "gap": "propose·disable·nested stub 완료 — outer hit 집계·Nested CV 승격 후속"
     },
     {
       "id": "10_explain",
@@ -280,7 +282,7 @@
         "backend/app/video_analysis/review_verification.py",
         "backend/app/video_analysis/explain.py"
       ],
-      "gap": "V1–V4·복기 Explain UI 공용 블록 완료 — Experimental 배너만 후속"
+      "gap": "V1–V4·복기 Explain + Experimental 배너 완료 — SHAP Explain 연동은 Experimental"
     },
     {
       "id": "100_experimental",
@@ -407,14 +409,14 @@
       "blocked": true
     },
     {
-      "id": "09_validation_nested_cv",
-      "reason": "Nested CV 설계",
-      "action": "document nested walk-forward; no scoring change"
+      "id": "09_validation_nested_hits",
+      "reason": "Nested CV outer hit 집계",
+      "action": "compute mean_top6 on outer folds; keep scoring_allowed=false until gate"
     },
     {
-      "id": "10_explain_experimental_banner",
-      "reason": "Experimental 결과 UI 배너",
-      "action": "decision-agnostic banner when artifact experimental"
+      "id": "08_ai_shap_stub_api",
+      "reason": "SHAP/Drift 읽기 API 스텁",
+      "action": "GET experimental shap report; scoring_allowed=false always"
     }
   ]
 }

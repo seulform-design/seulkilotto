@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useVenusMachineHeight } from '../hooks/useVenusMachineHeight';
 import ComboActions from '../components/ComboActions';
 import SharingBadge from '../components/SharingBadge';
+import { ExperimentalBanner } from '../components/ExplainArtifactBlock';
 import { optimizeForSharing } from '../utils/jackpotSharing';
 import LottoBall from '../components/LottoBall';
 import MetricChips from '../components/MetricChips';
@@ -459,6 +460,10 @@ export default function ComposedAnalysisPage() {
       {/* 🎡 물리 추첨기 — 1234회 예상 1호기 + 상세예상 favor */}
       {drawMachine && (
         <Paper sx={{ p: 2, mb: 2 }}>
+          <ExperimentalBanner
+            show
+            label="물리 추첨기·상세예상 가중은 Experimental/체험용입니다. 히어로·용지 점수에 주입하지 않으며 당첨 확률은 변하지 않습니다."
+          />
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant="subtitle1" fontWeight={700}>
               🎡 물리 추첨기 — {targetRound ?? drawMachine.nextRound ?? '?'}회 예상 {machineId}호기

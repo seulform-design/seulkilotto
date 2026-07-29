@@ -415,6 +415,16 @@ def get_feature_learning(
     return to_jsonable(build_feature_learning(seed=seed, apply_intent=apply_intent))
 
 
+@router.get("/nested-cv")
+def get_nested_cv(seed: int = Query(42, ge=0, le=999_999)):
+    """Nested walk-forward CV 스텁 리포트 — scoring_allowed 항상 false."""
+    from ..video_analysis.feature_learning_engine import collect_round_samples
+    from ..video_analysis.nested_cv import run_nested_feature_cv
+
+    samples = collect_round_samples()
+    return to_jsonable(run_nested_feature_cv(samples, seed=seed))
+
+
 class ModelRegistryActionBody(BaseModel):
     model_id: str = Field(..., min_length=1, max_length=200)
     reason: str = Field(default="human_disable", max_length=500)

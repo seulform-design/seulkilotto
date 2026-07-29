@@ -44,22 +44,28 @@ def build_explain_payload(
     limits: list[str] | None = None,
     improvements: list[str] | None = None,
     artifact_versions: list[str] | None = None,
+    experimental: bool = False,
 ) -> dict[str, Any]:
     """Explain Artifact 표준 JSON."""
     conf = confidence or _confidence()
     # 누락 키 채움
     base = _confidence()
     base.update({k: int(v) for k, v in conf.items() if k in base})
+    versions = list(artifact_versions or [])
+    exp = bool(experimental) or any("experimental" in str(v).lower() for v in versions)
+    if exp and "100_experimental" not in versions:
+        versions.append("100_experimental")
     return {
         "version": EXPLAIN_VERSION,
         "subject": {"type": subject_type, "value": subject_value},
         "decision": decision,
+        "experimental": exp,
         "confidence": base,
         "evidence": list(evidence or []),
         "used_data": {
             "intent": intent,
             "rounds": list(rounds or []),
-            "artifact_versions": list(artifact_versions or []),
+            "artifact_versions": versions,
         },
         "algorithms": list(algorithms or []),
         "backtest": backtest

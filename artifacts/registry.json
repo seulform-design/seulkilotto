@@ -6,7 +6,7 @@
   "completeness": {
     "sheet_engine_runtime": 0.96,
     "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. 용지분석 런타임 버그·정책·백테스트 게이트는 검수 완료.",
-    "last_audit": "2026-07-30: stats snapshot API+serializer; V1–V4 explain; evaluate_gate"
+    "last_audit": "2026-07-30: Explain/Gate UI V1–V4; decade hit_rate in snapshot"
   },
   "safety": {
     "no_win_guarantee": true,
@@ -200,7 +200,7 @@
         "artifacts/05_statistics/INDEX.md",
         "artifacts/05_statistics/SCHEMA.md"
       ],
-      "gap": "serializer·GET /stats/snapshot 완료 — decade hit_rate·스냅샷 히스토리 스토어 후속"
+      "gap": "serializer·snapshot·decade hit_rate 완료 — 스냅샷 히스토리 스토어 후속"
     },
     {
       "id": "06_pattern",
@@ -240,7 +240,7 @@
         "artifacts/08_ai/model_registry.md",
         "artifacts/08_ai/validation_gate.md"
       ],
-      "gap": "evaluate_gate·last_gate 응답 연동 완료 — Rollback/토너먼트 UI·SHAP/Drift 미구축"
+      "gap": "evaluate_gate·last_gate·패널 Gate UI 완료 — Rollback/토너먼트 UI·SHAP/Drift 미구축"
     },
     {
       "id": "09_validation",
@@ -266,11 +266,12 @@
         "platform/frontend/src/components/SemiAutoComparePanel.tsx",
         "platform/frontend/src/components/FeatureLearningPanel.tsx",
         "platform/frontend/src/components/ReviewVerificationPanel.tsx",
+        "platform/frontend/src/components/ExplainArtifactBlock.tsx",
         "artifacts/10_explain/SCHEMA.md",
         "backend/app/video_analysis/review_verification.py",
         "backend/app/video_analysis/explain.py"
       ],
-      "gap": "V1–V4·복기 explain 필드 통일 — Feature/Pattern 패널 UI Explain 블록은 후속"
+      "gap": "V1–V4·복기 Explain UI 공용 블록 완료 — Experimental 배너만 후속"
     },
     {
       "id": "100_experimental",
@@ -390,19 +391,19 @@
   ],
   "generation_queue": [
     {
-      "id": "10_explain_ui",
-      "reason": "Feature/Pattern 패널 Explain 블록",
-      "action": "optional ExplainPayload section like ReviewVerificationPanel"
+      "id": "05_statistics_store",
+      "reason": "스냅샷 버전 히스토리 누적 스토어",
+      "action": "optional file/db archive of StatisticsSnapshot by date; no scoring"
     },
     {
-      "id": "05_statistics_decade",
-      "reason": "decade hit_rate_per_band 자동 산출",
-      "action": "fill SCHEMA decade_bands from history; keep scoring disconnected"
+      "id": "08_ai_rollback_ui",
+      "reason": "Model Rollback·토너먼트 UI",
+      "action": "planned only until Validation backlog; surface archived model_ids"
     },
     {
-      "id": "08_ai_registry_ui",
-      "reason": "Model Registry last_gate 표시·Rollback UI",
-      "action": "surface validation_gates in Feature/Pattern panels; no auto scoring"
+      "id": "01_knowledge_sources",
+      "reason": "공식 출처 URL·버전드 Knowledge export",
+      "action": "extend 01_knowledge INDEX with citations"
     }
   ]
 }

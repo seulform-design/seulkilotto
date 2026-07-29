@@ -21,6 +21,35 @@ JACKPOT_ODDS = "1/8145060"
 HONESTY = "경험적 분포일 뿐이며 i.i.d.·당첨 확률을 바꾸지 않는다."
 
 DECADE_LABELS = ["1-10", "11-20", "21-30", "31-40", "41-45"]
+# 균등 추첨 시 밴드별 기대 비율 (밴드 크기 / 45)
+DECADE_EXPECTED = [10 / 45, 10 / 45, 10 / 45, 10 / 45, 5 / 45]
+
+
+def decade_of(n: int) -> int:
+    """번호 → 5밴드 인덱스 (용지 L3 decade UI와 동일)."""
+    return min(4, max(0, (int(n) - 1) // 10))
+
+
+def _decade_hit_rates(df: pd.DataFrame) -> tuple[list[float | None], list[float]]:
+    """당첨 번호 슬롯 중 각 decade 밴드 비율 + 기대 대비 lift.
+
+    hit_rate = (해당 밴드 당첨 번호 개수) / (전체 당첨 슬롯).
+    점수 주입용이 아니라 관측·Explain 기준선용.
+    """
+    if df is None or df.empty:
+        return [None, None, None, None, None], list(DECADE_EXPECTED)
+    flat = df[database.NUMBER_COLUMNS].to_numpy().ravel()
+    counts = [0, 0, 0, 0, 0]
+    total = 0
+    for v in flat:
+        iv = int(v)
+        if 1 <= iv <= 45:
+            counts[decade_of(iv)] += 1
+            total += 1
+    if total <= 0:
+        return [None, None, None, None, None], list(DECADE_EXPECTED)
+    rates = [round(c / total, 6) for c in counts]
+    return rates, list(DECADE_EXPECTED)
 
 
 def profile_to_snapshot(
@@ -35,10 +64,14 @@ def profile_to_snapshot(
     number_counts: dict[int, int] | None = None,
     frequency_window: str = "all",
     frequency_window_n: int | None = None,
+    decade_hit_rates: list[float | None] | None = None,
+    decade_expected: list[float] | None = None,
     created_at: str | None = None,
 ) -> dict[str, Any]:
     """HistoricalProfile → StatisticsSnapshot dict (SCHEMA 0.1.0)."""
     count = int(profile.rounds_analyzed)
+    rates = decade_hit_rates if decade_hit_rates is not None else [None, None, None, None, None]
+    expected = decade_expected if decade_expected is not None else list(DECADE_EXPECTED)
     snap: dict[str, Any] = {
         "version": SNAPSHOT_VERSION,
         "artifact_id": ARTIFACT_ID,
@@ -71,8 +104,9 @@ def profile_to_snapshot(
         },
         "decade_bands": {
             "labels": list(DECADE_LABELS),
-            "hit_rate_per_band": [None, None, None, None, None],
-            "note": "용지 L3/decade UI와 동일 5밴드; null이면 미산출",
+            "hit_rate_per_band": rates,
+            "expected_per_band": expected,
+            "note": "용지 L3/decade UI와 동일 5밴드; 관측 비율(점수 미연결)",
         },
         "frequency": {
             "number_counts": {str(k): int(v) for k, v in sorted((number_counts or {}).items())},
@@ -133,12 +167,15 @@ def build_snapshot_from_history(
         profile = _FALLBACK
         round_from = round_to = None
         counts: dict[int, int] = {}
+        decade_rates: list[float | None] = [None, None, None, None, None]
+        decade_exp = list(DECADE_EXPECTED)
     else:
         profile = compute_profile(work)
         rounds = work["round"].astype(int)
         round_from = int(rounds.min())
         round_to = int(rounds.max())
         counts = _number_counts_from_df(work)
+        decade_rates, decade_exp = _decade_hit_rates(work)
 
     return profile_to_snapshot(
         profile,
@@ -150,4 +187,6 @@ def build_snapshot_from_history(
         number_counts=counts,
         frequency_window=window,
         frequency_window_n=window_n,
+        decade_hit_rates=decade_rates,
+        decade_expected=decade_exp,
     )

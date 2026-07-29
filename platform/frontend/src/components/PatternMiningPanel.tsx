@@ -17,6 +17,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
 import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
+import { ExplainArtifactBlock, ValidationGatesBlock } from './ExplainArtifactBlock';
 import { v1Api, type PatternMiningResponse } from '../api/v1Api';
 
 /**
@@ -111,6 +112,12 @@ export default function PatternMiningPanel({
           <Typography variant="caption">{d.honesty}</Typography>
         </Alert>
       )}
+
+      <ExplainArtifactBlock
+        explain={d.explain}
+        title={`Explain — Pattern (${d.explain?.decision ?? 'neutral'})`}
+      />
+      <ValidationGatesBlock gates={d.validation_gates} />
 
       {d.multiple_testing && d.multiple_testing.n_tested > 0 && (
         <Alert severity={d.multiple_testing.exceeds_chance ? 'success' : 'info'} sx={{ mb: 1.5, py: 0.5 }}>
@@ -210,7 +217,18 @@ export default function PatternMiningPanel({
                     {(p.stability ?? 0).toFixed(2)}
                   </TableCell>
                   <TableCell align="right" sx={{ fontSize: 11 }}>
-                    {(p.permutation_p ?? 1).toFixed(3)}
+                    <Stack direction="row" spacing={0.3} justifyContent="flex-end" alignItems="center">
+                      <span>{(p.permutation_p ?? 1).toFixed(3)}</span>
+                      {p.last_gate && (
+                        <Chip
+                          size="small"
+                          color={p.last_gate.scoring_allowed ? 'success' : 'warning'}
+                          variant="outlined"
+                          label={p.last_gate.scoring_allowed ? 'gate✓' : 'gate✗'}
+                          sx={{ height: 16, fontSize: 8 }}
+                        />
+                      )}
+                    </Stack>
                   </TableCell>
                 </TableRow>
               ))}

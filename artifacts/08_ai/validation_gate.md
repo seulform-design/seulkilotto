@@ -69,5 +69,6 @@ Gate 실패 시 Ensemble/추천 주입 스킵, Explain에 reject 근거만.
 - [x] 게이트 체크리스트·GateResult 스키마
 - [x] 공통 `evaluate_gate()` / feature·pattern 어댑터
 - [x] Feature/Pattern 응답 `last_gate` · `validation_gates` 요약
-- [ ] Model Registry UI `last_gate` 표시
+- [x] Feature/Pattern 패널 Gate·scoring 허용 UI
+- [ ] Model Registry Rollback·토너먼트 UI
 - [ ] 점수 경로에 Experimental 유입 테스트 (CI e2e)

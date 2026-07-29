@@ -14,12 +14,11 @@
 
 ## 갭
 
-- decade hit_rate 자동 산출 미통일 (스키마상 null 허용)
 - 스냅샷 버전 히스토리 스토어(누적 파일)는 후속
 
 ## 구현
 
-- Serializer: `backend/app/epo/statistics_snapshot.py`
+- Serializer: `backend/app/epo/statistics_snapshot.py` (decade hit_rate 포함)
 - API: `GET /api/v1/stats/snapshot` (점수 미연결)
 
 ## 규칙

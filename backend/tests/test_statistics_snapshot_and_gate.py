@@ -71,6 +71,10 @@ def test_build_snapshot_from_history_and_fallback():
     assert snap["source"]["rounds"]["from"] == 100
     assert snap["frequency"]["number_counts"]
     assert len(snap["decade_bands"]["labels"]) == 5
+    rates = snap["decade_bands"]["hit_rate_per_band"]
+    assert all(r is not None for r in rates)
+    assert abs(sum(rates) - 1.0) < 1e-6
+    assert len(snap["decade_bands"]["expected_per_band"]) == 5
 
     recent = build_snapshot_from_history(df, recent_n=2)
     assert recent["frequency"]["window"] == "last_N"

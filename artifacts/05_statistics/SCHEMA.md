@@ -39,8 +39,9 @@
   },
   "decade_bands": {
     "labels": ["1-10", "11-20", "21-30", "31-40", "41-45"],
-    "hit_rate_per_band": [null, null, null, null, null],
-    "note": "용지 L3/decade UI와 동일 5밴드; null이면 미산출"
+    "hit_rate_per_band": [0.2, 0.2, 0.2, 0.2, 0.2],
+    "expected_per_band": [0.222222, 0.222222, 0.222222, 0.222222, 0.111111],
+    "note": "용지 L3/decade UI와 동일 5밴드; 관측 비율(점수 미연결)"
   },
   "frequency": {
     "number_counts": {},

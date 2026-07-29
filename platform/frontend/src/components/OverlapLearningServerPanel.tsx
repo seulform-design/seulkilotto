@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import LottoBall from './LottoBall';
 import { ENGINE_BALL, EngineSection, EngineStatusChip, EngineSubBlock } from './EngineSection';
+import { ExplainArtifactBlock } from './ExplainArtifactBlock';
 import { v1Api } from '../api/v1Api';
 
 export default function OverlapLearningServerPanel({
@@ -88,6 +89,10 @@ export default function OverlapLearningServerPanel({
         </>
       }
     >
+      <ExplainArtifactBlock
+        explain={d.explain}
+        title={`Explain — 줄겹침 (${d.explain?.decision ?? 'neutral'})`}
+      />
       <Stack spacing={1.25}>
         <EngineSubBlock tone="success" title="A. 크기별 lift">
           <Stack spacing={0.4}>

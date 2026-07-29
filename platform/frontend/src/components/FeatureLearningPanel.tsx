@@ -17,6 +17,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import LottoBall from './LottoBall';
 import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
+import { ExplainArtifactBlock, ValidationGatesBlock } from './ExplainArtifactBlock';
 import { v1Api, type FeatureLearningFeatureReport } from '../api/v1Api';
 
 /**
@@ -122,6 +123,12 @@ export default function FeatureLearningPanel({
           <Typography variant="caption">{d.honesty}</Typography>
         </Alert>
       )}
+
+      <ExplainArtifactBlock
+        explain={d.explain}
+        title={`Explain — Feature (${d.explain?.decision ?? 'neutral'})`}
+      />
+      <ValidationGatesBlock gates={d.validation_gates} />
 
       {/* 파이프라인 */}
       {d.pipeline && (
@@ -398,12 +405,23 @@ function FeatureTable({
                 {(f.bootstrap_ci95?.[0] ?? 0).toFixed(2)}–{(f.bootstrap_ci95?.[1] ?? 0).toFixed(2)}
               </TableCell>
               <TableCell>
-                <Chip
-                  size="small"
-                  color={f.adopted ? 'success' : 'default'}
-                  label={f.adopted ? '채택' : (f.exclude_reason?.[0] ?? '제외').slice(0, 28)}
-                  sx={{ height: 18, fontSize: 9, maxWidth: 180 }}
-                />
+                <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                  <Chip
+                    size="small"
+                    color={f.adopted ? 'success' : 'default'}
+                    label={f.adopted ? '채택' : (f.exclude_reason?.[0] ?? '제외').slice(0, 28)}
+                    sx={{ height: 18, fontSize: 9, maxWidth: 180 }}
+                  />
+                  {f.last_gate && (
+                    <Chip
+                      size="small"
+                      color={f.last_gate.scoring_allowed ? 'success' : 'warning'}
+                      variant="outlined"
+                      label={f.last_gate.scoring_allowed ? 'gate✓' : 'gate✗'}
+                      sx={{ height: 18, fontSize: 9 }}
+                    />
+                  )}
+                </Stack>
               </TableCell>
             </TableRow>
           ))}

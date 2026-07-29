@@ -1264,26 +1264,50 @@ export interface ReviewVerificationResponse {
   summary?: { best_top6: number; best_top18: number; best_label: string | null };
   honesty?: string;
   /** Explain Artifact 표준 스키마 (artifacts/10_explain/SCHEMA.md). */
-  explain?: {
-    version: string;
-    subject: { type: string; value: string | number | null };
-    decision: string;
-    confidence: {
-      overall: number;
-      statistics: number;
-      pattern: number;
-      model: number;
-      simulation: number;
-      backtest: number;
-    };
-    evidence: { kind: string; detail: string; weight: number }[];
-    used_data: { intent: string; rounds: number[]; artifact_versions: string[] };
-    algorithms: string[];
-    backtest: { metric: string; value: number | null; baseline: number | null; small_sample: boolean };
-    limits: string[];
-    improvements: string[];
-    honesty: string;
+  explain?: ExplainPayload;
+}
+
+/** Explain Artifact — 엔진 공통 페이로드. */
+export interface ExplainPayload {
+  version: string;
+  subject: { type: string; value: string | number | null };
+  decision: string;
+  confidence: {
+    overall: number;
+    statistics: number;
+    pattern: number;
+    model: number;
+    simulation: number;
+    backtest: number;
   };
+  evidence: { kind: string; detail: string; weight: number }[];
+  used_data: { intent: string; rounds: number[]; artifact_versions: string[] };
+  algorithms: string[];
+  backtest: { metric: string; value: number | null; baseline: number | null; small_sample: boolean };
+  limits: string[];
+  improvements: string[];
+  honesty: string;
+}
+
+/** Validation Gate 응답 요약 (artifacts/08_ai/validation_gate.md). */
+export interface ValidationGatesSummary {
+  version?: string;
+  passed: string[];
+  rejected: string[];
+  scoring_allowed_ids: string[];
+  demo_blocked: boolean;
+  count: number;
+}
+
+export interface GateResult {
+  version?: string;
+  model_id: string;
+  status: string;
+  scoring_allowed: boolean;
+  checks?: { id: string; ok: boolean; detail: string }[];
+  metrics?: Record<string, number | boolean | null>;
+  honesty?: string;
+  at?: string;
 }
 
 /** 줄겹침(2·3·4번호) 역산 학습 — 겹침 조합이 실제 당첨을 얼마나 담았는지. */
@@ -1316,6 +1340,7 @@ export interface OverlapLearningResponse {
     verdict?: string;
   };
   honesty?: string;
+  explain?: ExplainPayload;
 }
 
 /** 전체 당첨 이력 워크포워드 백테스트 — 흔한 전략이 무작위를 이기나(다중검정 보정). */
@@ -1392,6 +1417,7 @@ export interface FeatureLearningFeatureReport {
   validation_passed: boolean;
   use_reason: string[];
   exclude_reason: string[];
+  last_gate?: GateResult;
 }
 
 export interface FeatureLearningResponse {
@@ -1447,6 +1473,8 @@ export interface FeatureLearningResponse {
   baselines?: { uniform_top6_hits: number; uniform_hit_rate: number };
   pipeline?: string[];
   honesty?: string;
+  explain?: ExplainPayload;
+  validation_gates?: ValidationGatesSummary;
 }
 
 /** 복기 Pattern Mining 엔진 응답. */
@@ -1474,6 +1502,7 @@ export interface PatternMiningPattern {
   use_reasons: string[];
   exclude_reasons: string[];
   per_round?: { round_no: number; fired: boolean; win_overlap: number | null; top_hits: number | null }[];
+  last_gate?: GateResult;
 }
 
 export interface PatternMiningResponse {
@@ -1555,6 +1584,8 @@ export interface PatternMiningResponse {
   pipeline?: string[];
   baselines?: { uniform_top6_hits: number };
   honesty?: string;
+  explain?: ExplainPayload;
+  validation_gates?: ValidationGatesSummary;
 }
 
 /** 다회차 학습 — 보관 회차 용지 + 실제 당첨 대조 캘리브레이션. */
@@ -1606,6 +1637,7 @@ export interface RoundLearningResponse {
     top6_significance?: BinomialSignificance;
   };
   honesty?: string;
+  explain?: ExplainPayload;
 }
 
 /** 회차별 용지 데이터 분리 — review(복기 저장분) / archived(롤오버 보관분). */

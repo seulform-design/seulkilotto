@@ -5,6 +5,7 @@ import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
 import SharingBadge from './SharingBadge';
 import { ENGINE_BALL, EngineSection, EngineStatusChip, EngineSubBlock } from './EngineSection';
+import { ExplainArtifactBlock } from './ExplainArtifactBlock';
 import { v1Api } from '../api/v1Api';
 
 /**
@@ -105,6 +106,10 @@ export default function RoundLearningPanel({
         </>
       }
     >
+      <ExplainArtifactBlock
+        explain={d.explain}
+        title={`Explain — 다회차 (${d.explain?.decision ?? 'neutral'})`}
+      />
       <Stack spacing={1.25}>
         <EngineSubBlock
           tone="primary"

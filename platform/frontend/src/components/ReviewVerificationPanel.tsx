@@ -5,6 +5,7 @@ import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
 import SharingBadge from './SharingBadge';
 import { ENGINE_BALL, EngineSection, EngineStatusChip } from './EngineSection';
+import { ExplainArtifactBlock } from './ExplainArtifactBlock';
 import { v1Api } from '../api/v1Api';
 
 /**
@@ -175,60 +176,11 @@ export default function ReviewVerificationPanel() {
         </Box>
       )}
 
-      {/* 📘 Explain Artifact — confidence·근거·한계 (스키마 artifacts/10_explain) */}
-      {d.explain && (
-        <Box sx={{ mb: 1.5, p: 1.25, borderRadius: 1, border: '1px dashed', borderColor: 'info.main' }}>
-          <Typography variant="caption" fontWeight={800} sx={{ display: 'block', mb: 0.5 }}>
-            📘 Explain — 왜 이 커버리지인가 ({d.explain.decision})
-          </Typography>
-          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-            <Chip
-              size="small"
-              color={d.explain.confidence.overall >= 40 ? 'success' : 'default'}
-              label={`신뢰도 ${d.explain.confidence.overall}/100`}
-              sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }}
-            />
-            <Chip
-              size="small"
-              variant="outlined"
-              label={`백테스트 ${d.explain.confidence.backtest}/100`}
-              sx={{ height: 18, fontSize: 9.5 }}
-            />
-            {(d.explain.algorithms ?? []).slice(0, 4).map((a) => (
-              <Chip key={a} size="small" variant="outlined" label={a} sx={{ height: 18, fontSize: 9 }} />
-            ))}
-            {d.explain.backtest?.small_sample && (
-              <Chip size="small" color="warning" label="소표본" sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
-            )}
-          </Stack>
-          {(d.explain.evidence?.length ?? 0) > 0 && (
-            <Stack spacing={0.2} sx={{ mb: 0.5 }}>
-              {d.explain.evidence.map((e, i) => (
-                <Typography key={`${e.kind}-${i}`} variant="caption" sx={{ fontSize: 9.5, color: 'text.secondary' }}>
-                  · [{e.kind}] {e.detail}
-                </Typography>
-              ))}
-            </Stack>
-          )}
-          {d.explain.backtest?.metric && (
-            <Typography variant="caption" sx={{ display: 'block', fontSize: 9.5, mb: 0.3 }}>
-              {d.explain.backtest.metric}={d.explain.backtest.value ?? '—'}
-              {d.explain.backtest.baseline != null ? ` (무작위≈${d.explain.backtest.baseline})` : ''}
-              {(d.explain.used_data?.rounds?.length ?? 0) > 0
-                ? ` · 회차 ${d.explain.used_data.rounds.length}개`
-                : ''}
-            </Typography>
-          )}
-          {(d.explain.limits?.length ?? 0) > 0 && (
-            <Typography variant="caption" color="warning.main" sx={{ display: 'block', fontSize: 9.5 }}>
-              한계: {d.explain.limits.slice(0, 3).join(' · ')}
-            </Typography>
-          )}
-          <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontSize: 9, mt: 0.4, fontStyle: 'italic' }}>
-            ⚠️ {d.explain.honesty}
-          </Typography>
-        </Box>
-      )}
+      {/* Explain Artifact — confidence·근거·한계 */}
+      <ExplainArtifactBlock
+        explain={d.explain}
+        title={`Explain — 왜 이 커버리지인가 (${d.explain?.decision ?? 'coverage'})`}
+      />
 
       {/* 🧪 다회차 백테스트 — 보관 전 회차의 지지(고정수 제외) 상위 K 커버리지 + 이월 */}
       {d.multi_round_backtest && d.multi_round_backtest.rounds > 1 && (

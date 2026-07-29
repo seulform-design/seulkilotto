@@ -269,7 +269,7 @@ export default function ComposedAnalysisPage() {
         </Button>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        용지 1:1 전수비교 + 평행회차(강수·기대) + 미출수(강수·기대) — 3축 합의 + 🎰 용지 예상번호 추첨
+        용지분석 ③ 번호추천에 포함 · 용지 1:1 전수비교 + 평행회차(강수·기대) + 미출수(강수·기대) — 3축 합의 + 🎰 용지 예상번호 추첨
       </Typography>
 
       <Alert severity="warning" sx={{ mb: 2 }} icon={false}>

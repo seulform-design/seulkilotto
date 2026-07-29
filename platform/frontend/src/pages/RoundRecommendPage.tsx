@@ -49,7 +49,7 @@ export default function RoundRecommendPage() {
         회차 추천
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        {meta.data?.current_round ?? '—'}회 추첨 기준 · 호기 패턴 5게임
+        용지분석 ③ 번호추천에 포함 · {meta.data?.current_round ?? '—'}회 추첨 기준 · 호기 패턴 5게임
         {meta.data ? ` (데이터 ${meta.data.row_count}건)` : ''}
       </Typography>
       <Alert severity="success" sx={{ mb: 2 }}>

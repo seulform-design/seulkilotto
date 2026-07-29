@@ -4,6 +4,9 @@
  * 성능: 페이지는 React.lazy 로 라우트 단위 코드 스플리팅.
  *      탭 전환 시 처음 진입한 페이지만 다운로드되어 초기 번들이 작아짐.
  *      Suspense fallback 으로 로딩 인디케이터 노출.
+ *
+ * IA: 종합분석·추첨기 추천은 상단 탭에서 제거하고
+ *     용지분석 → ③ 번호추천 안으로 이동(딥링크·임베드).
  */
 import { Suspense, lazy, useEffect, useState } from 'react';
 import {
@@ -18,14 +21,12 @@ import {
   Typography,
 } from '@mui/material';
 import AppStatusBar from './components/AppStatusBar';
+import { setPhotoFocus } from './utils/photoFocus';
 
-// 라우트 단위 코드 스플리팅 — 각 페이지는 첫 진입 시 동적 import
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const PostOccurrencePage = lazy(() => import('./pages/PostOccurrencePage'));
 const RoundsPage = lazy(() => import('./pages/RoundsPage'));
-const RoundRecommendPage = lazy(() => import('./pages/RoundRecommendPage'));
 const PhotoAnalysisPage = lazy(() => import('./pages/PhotoAnalysisPage'));
-const ComposedAnalysisPage = lazy(() => import('./pages/ComposedAnalysisPage'));
 const FortunePickPage = lazy(() => import('./pages/FortunePickPage'));
 
 function PageFallback() {
@@ -42,25 +43,34 @@ function PageFallback() {
 /**
  * 탭 분류:
  *  - 데이터: dashboard, rounds
- *  - 분석·추천: composite, recommend, post, photo
+ *  - 분석·추천: photo(용지=번호추천에 종합·추첨기 포함), post
  */
 const TABS = [
   { id: 'dashboard', label: '대시보드' },
   { id: 'rounds', label: '회차' },
-  { id: 'composite', label: '🎯 종합 분석' },
-  { id: 'recommend', label: '추첨기 추천' },
-  { id: 'post', label: '후속 출현 통계' },
   { id: 'photo', label: '용지 분석' },
+  { id: 'post', label: '후속 출현 통계' },
   { id: 'fortune', label: '👵 할매 예상' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
 const APP_TAB_STORAGE_KEY = 'lotto:app:active-tab:v1';
 
+/** 구 상단탭 → 용지분석 + 포커스 */
+const LEGACY_TAB_FOCUS: Record<string, 'composite' | 'machine'> = {
+  composite: 'composite',
+  recommend: 'machine',
+};
+
 function loadInitialTab(): TabId {
   if (typeof window === 'undefined') return 'dashboard';
   try {
     const raw = window.localStorage.getItem(APP_TAB_STORAGE_KEY);
+    if (raw && LEGACY_TAB_FOCUS[raw]) {
+      setPhotoFocus(LEGACY_TAB_FOCUS[raw]);
+      window.localStorage.setItem(APP_TAB_STORAGE_KEY, 'photo');
+      return 'photo';
+    }
     if (raw && TABS.some((t) => t.id === raw)) {
       return raw as TabId;
     }
@@ -93,7 +103,7 @@ export default function App() {
         </Toolbar>
         <Tabs
           value={tab}
-          onChange={(_, v) => setTab(v)}
+          onChange={(_, v: TabId) => setTab(v)}
           variant="scrollable"
           scrollButtons="auto"
           sx={{ px: 1, bgcolor: '#1C1F24' }}
@@ -108,10 +118,8 @@ export default function App() {
         <Suspense fallback={<PageFallback />}>
           {tab === 'dashboard' && <DashboardPage />}
           {tab === 'rounds' && <RoundsPage />}
-          {tab === 'composite' && <ComposedAnalysisPage />}
           {tab === 'post' && <PostOccurrencePage />}
           {tab === 'photo' && <PhotoAnalysisPage />}
-          {tab === 'recommend' && <RoundRecommendPage />}
           {tab === 'fortune' && <FortunePickPage />}
         </Suspense>
       </Container>

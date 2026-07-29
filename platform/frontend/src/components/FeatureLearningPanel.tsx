@@ -267,9 +267,17 @@ export default function FeatureLearningPanel({
         </Alert>
       ) : (
         <>
+          {typeof rec.source === 'string' && rec.source.startsWith('archived_demo_') && (
+            <Alert severity="warning" sx={{ py: 0.5, mb: 1 }}>
+              <Typography variant="caption">
+                시연 추천({rec.source}) — 이번회차 용지가 없어 보관 회차로 표시만 합니다.
+                <strong> 점수·검증학습에는 주입되지 않습니다.</strong>
+              </Typography>
+            </Alert>
+          )}
           <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
             <Typography variant="caption" color="text.secondary">
-              Top6
+              Top6{typeof rec.source === 'string' && rec.source.startsWith('archived_demo_') ? ' (시연)' : ''}
             </Typography>
             {(rec.top6 ?? []).map((n) => (
               <LottoBall key={`top6-${n}`} number={n} size={ENGINE_BALL.list} />
@@ -294,7 +302,7 @@ export default function FeatureLearningPanel({
                   >
                     <LottoBall number={row.number} size={ENGINE_BALL.list} />
                     <Typography sx={{ fontWeight: 700, fontSize: 12, minWidth: 64 }}>
-                      점수 {row.score.toFixed(3)}
+                      점수 {(row.score ?? 0).toFixed(3)}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }} noWrap>
                       {(row.contributions ?? [])

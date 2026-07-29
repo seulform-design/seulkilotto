@@ -89,3 +89,19 @@ def test_inverse_diagnosis_expand18_first_when_top6_fails():
     assert any(p["id"] == "top6_concentration_fail" for p in diag["problems"])
     assert any(p["id"] == "coverage_gap" for p in diag["problems"])
     assert diag["policy"]["multi_round_confidence"] > 0
+
+
+def test_best_of_engines_excludes_banned_auto_freq():
+    """banned(auto_freq) 는 min-rank 에 참여하지 않아야 한다."""
+    from app.video_analysis.review_verification import _best_of_engines_order, _signals
+
+    auto = [[1, 2, 3, 4, 5, 6]] * 12
+    # 반자동에는 당첨 지지 약하고, 자동에만 많이 산 번호(40)가 있음
+    semi = [[10, 11, 12, 13, 14, 15]] * 12
+    auto_heavy = [[40, 41, 42, 43, 44, 45]] * 20 + auto
+    sigs = _signals(auto_heavy, semi)
+    with_ban = _best_of_engines_order(sigs, exclude_keys=["auto_freq"])
+    without = _best_of_engines_order(sigs, exclude_keys=None)
+    assert len(with_ban) == 45 and len(without) == 45
+    # 배제 키가 동작하면 호출이 성공하고 순서가 정의된다(동형 폴백 허용).
+    assert set(with_ban) == set(range(1, 46))

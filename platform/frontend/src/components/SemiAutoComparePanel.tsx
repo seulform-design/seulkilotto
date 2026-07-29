@@ -1040,7 +1040,7 @@ function SignalExplanationPanel({
               <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
                 <LottoBall number={item.number} size={ENGINE_BALL.emphasis} />
                 <EngineStatusChip
-                  label={`${item.grade} · 점수 ${item.score.toFixed(1)}`}
+                  label={`${item.grade} · 점수 ${(item.score ?? 0).toFixed(1)}`}
                   sx={{
                     bgcolor: GRADE_COLORS[item.grade],
                     color: item.grade === 'C' ? 'text.primary' : '#fff',
@@ -1057,7 +1057,7 @@ function SignalExplanationPanel({
                     variant="outlined"
                     label={
                       predictionSignals?.source_weights?.[src] != null
-                        ? `${signalSourceLabel(src)} (+${predictionSignals.source_weights[src].toFixed(1)})`
+                        ? `${signalSourceLabel(src)} (+${(predictionSignals.source_weights[src] ?? 0).toFixed(1)})`
                         : signalSourceLabel(src)
                     }
                   />
@@ -1541,11 +1541,12 @@ export default function SemiAutoComparePanel({
     }
 
     const rv = reviewVerificationQuery.data;
-    // 탭별 커버리지: 복기=복기 용지 세트 / 이번회차=다음 회차 세트.
-    // 역산 정책(앙상블 실증): core6=best 단일신호, expand18=min-rank(합의 희석 금지).
-    const cov = forwardLearning ? rv?.current_coverage_set : rv?.review_coverage_set;
-    const consensus = forwardLearning ? rv?.consensus_coverage : rv?.review_consensus_coverage;
-    if (rv?.ok && (cov || consensus)) {
+    // 이번회차만 커버리지 점수 주입 — 복기 탭에 넣으면 같은 용지 세트로 점수를 끌어
+    // '검증이 스스로 자신을 강화'하는 순환이 된다. 복기 커버리지는 히어로 표시만.
+    // 역산 정책: core6=best 단일신호, expand18=min-rank(합의 희석 금지).
+    const cov = forwardLearning ? rv?.current_coverage_set : undefined;
+    const consensus = forwardLearning ? rv?.consensus_coverage : undefined;
+    if (forwardLearning && rv?.ok && (cov || consensus)) {
       const policy = rv.inverse_diagnosis?.policy;
       // prefer_consensus 는 항상 false(하위호환). core6/expand18 모드는 정책 명시값 우선.
       const coreMode = policy?.core6_mode ?? (policy?.prefer_consensus ? 'consensus' : 'best_single');
@@ -2970,11 +2971,14 @@ export default function SemiAutoComparePanel({
     const LW: Record<number, number> = { 6: 10, 5: 8, 4: 6, 3: 4, 2: 2 };
     const win = (n: number) => (winningSet != null && winningSet.size > 0 ? winningSet.has(n) : false);
 
-    // (1) 등장 빈도 — 자동/반자동/전체 (줄 단위 distinct)
+    // (1) 등장 빈도 — 자동/반자동/전체 (줄 단위 distinct). 반자동 고정수는 0 처리.
+    const fixedSet = fixedSemiNumbers.set;
     const af: Record<number, number> = {};
     const sf: Record<number, number> = {};
     for (const l of auto) for (const n of new Set(l)) if (n >= 1 && n <= 45) af[n] = (af[n] ?? 0) + 1;
-    for (const l of semi) for (const n of new Set(l)) if (n >= 1 && n <= 45) sf[n] = (sf[n] ?? 0) + 1;
+    for (const l of semi) for (const n of new Set(l)) {
+      if (n >= 1 && n <= 45 && !fixedSet.has(n)) sf[n] = (sf[n] ?? 0) + 1;
+    }
 
     // (2) 일치개수 가중치 점수 + (5/6) 공출현 네트워크(허브/중심성)
     const wscore: Record<number, number> = {};
@@ -3070,6 +3074,7 @@ export default function SemiAutoComparePanel({
     const nD = norm(deg);
     const nS = norm(setSupport);
     const composite = ensembleNums
+      .filter((n) => !fixedSet.has(n))
       .map((n) => ({
         number: n,
         score: Math.round((nC(n) * 0.5 + nW(n) * 0.3 + nS(n) * 0.1 + nD(n) * 0.1) * 1000),
@@ -3238,11 +3243,15 @@ export default function SemiAutoComparePanel({
     groupLineMatching.allSemiNumbers,
     crossSetPatterns,
     winningSet,
+    fixedSemiNumbers,
   ]);
 
 
-  // L8 → 점수 경로 연결: composite TOP을 deep 소스로 주입 (L1-B·③·최종강수)
+  // L8 → 점수 경로 연결: composite TOP을 deep 소스로 주입 (L1-B·③·최종강수).
+  // 이번회차만 — 복기 탭 deep 주입은 같은 회차 용지로 점수를 끌어올리는 순환.
+  // fixed_semi 는 composite 단계에서 이미 제외됨.
   const deepInjectSignals = useMemo((): ValidatedLearningSignal[] => {
+    if (sheetIntent !== 'current_round') return [];
     const comp = deepAnalysis?.composite ?? [];
     if (!comp.length) return [];
     const maxScore = Math.max(1, comp[0]?.score ?? 1);
@@ -3252,7 +3261,7 @@ export default function SemiAutoComparePanel({
       source: 'deep' as const,
       label: '심층역산',
     }));
-  }, [deepAnalysis]);
+  }, [deepAnalysis, sheetIntent]);
 
   const sheetLearningSignals = useMemo(
     () => [...validatedLearning, ...deepInjectSignals],
@@ -3465,23 +3474,31 @@ export default function SemiAutoComparePanel({
         : rv.current_coverage_set
       : undefined;
     const lb = rv?.ok ? rv.signal_leaderboard : undefined;
-    const best = lb?.leaderboard?.[0];
+    const policy = rv?.ok ? rv.inverse_diagnosis?.policy : undefined;
+    const best =
+      lb?.leaderboard?.find((e) => e.key === lb.best_signal_multi) ?? lb?.leaderboard?.[0];
     const clean = (arr: number[] | undefined) =>
       Array.from(new Set((arr ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= 45)));
-    // 핵심6: 다회차 best 단일신호(cov=review/current_coverage_set) 우선. 다중신호 '합의'는
-    // 약한 신호가 최고 신호를 희석해 커버리지가 오히려 낮다 — 앙상블 백테스트로 실증(합산
-    // top18 2.75 < 최고단일 4.0), 실측 1234 도 합의가 당첨 43 을 비당첨 39 로 바꿔 2/6→1/6
-    // 이 됐다. 확장18(넓은 그물)은 합의 우선(더 넓고 구간균형) → '집중 실패'를 그물로 보정.
-    let core6 = clean(cov?.core6);
-    let source: 'consensus' | 'coverage' | 'forecast' | 'repeat' = 'coverage';
+    // 정책 정렬: core6=best_single(cov), expand18=best_of_engines(cov.min-rank). 합의는 폴백만.
+    const coreMode = policy?.core6_mode ?? (policy?.prefer_consensus ? 'consensus' : 'best_single');
+    const expandMode = policy?.expand18_mode ?? 'best_of_engines';
+    let core6 = clean(
+      coreMode === 'consensus' ? (consensus?.core6 ?? cov?.core6) : (cov?.core6 ?? consensus?.core6)
+    );
+    let source: 'consensus' | 'coverage' | 'forecast' | 'repeat' =
+      coreMode === 'consensus' && (consensus?.core6?.length ?? 0) >= 6 ? 'consensus' : 'coverage';
     if (core6.length < 6) {
-      core6 = clean(consensus?.core6);
-      source = 'consensus';
+      core6 = clean(coreMode === 'consensus' ? cov?.core6 : consensus?.core6);
+      if (core6.length >= 6) source = coreMode === 'consensus' ? 'coverage' : 'consensus';
     }
-    // 확장18(넓은 그물) = 전 엔진 '최선순위' 커버리지(cov.expand18) 우선 — 어느 엔진이든
-    // 상위로 꼽은 catchable 당첨을 담는다(합의는 특정 엔진만 잡은 번호를 놓침). 합의는 폴백.
-    let expand18 = clean(cov?.expand18);
-    if (expand18.length < 6) expand18 = clean(consensus?.expand18);
+    let expand18 = clean(
+      expandMode === 'consensus'
+        ? (consensus?.expand18 ?? cov?.expand18)
+        : (cov?.expand18 ?? consensus?.expand18)
+    );
+    if (expand18.length < 6) {
+      expand18 = clean(expandMode === 'consensus' ? cov?.expand18 : consensus?.expand18);
+    }
     if (core6.length < 6 || expand18.length < 6) {
       // 폴백 — 서버 커버리지가 없으면 해당 탭 로컬 신호로 부족한 쪽만 채운다.
       const rep = !compareWinning ? (currentRoundForecast?.representative ?? []) : [];

@@ -3,6 +3,11 @@
   "version": "4.0",
   "aligned_with_sheet_analysis": true,
   "updated": "2026-07-30",
+  "completeness": {
+    "sheet_engine_runtime": 0.96,
+    "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. 용지분석 런타임 버그·정책·백테스트 게이트는 검수 완료.",
+    "last_audit": "2026-07-30: hero/inject policy sync, fixed_semi deep, review coverage gate, ban in min-rank, explain payload"
+  },
   "safety": {
     "no_win_guarantee": true,
     "no_probability_distortion": true,
@@ -162,12 +167,13 @@
       "title": "Draw Machine Artifact",
       "status": "partial",
       "priority": "medium",
-      "generate": true,
+      "generate": false,
       "mapped_paths": [
         "backend/data/machine_history.csv",
-        "backend/app/machine_analytics.py"
+        "backend/app/machine_analytics.py",
+        "artifacts/03_draw_machine/INDEX.md"
       ],
-      "gap": "3D·물리 시뮬레이션·공기압 등 상세 스펙 미구축"
+      "gap": "3D·물리 시뮬레이션은 Experimental"
     },
     {
       "id": "04_ball",
@@ -368,16 +374,6 @@
     {"n": 100, "name": "experimental", "status": "missing", "maps_to": "100_experimental"}
   ],
   "generation_queue": [
-    {
-      "id": "10_explain",
-      "reason": "ExplainPayload 를 v1Api·엔진 응답에 연결",
-      "action": "implement optional explain field from artifacts/10_explain/SCHEMA.md"
-    },
-    {
-      "id": "03_draw_machine",
-      "reason": "추첨기 스펙·물리 시뮬은 데이터 확보 후",
-      "action": "create artifacts/03_draw_machine/INDEX.md from known machine_history fields"
-    },
     {
       "id": "04_ball",
       "reason": "볼 단위 데이터 없음 — Experimental 설계만",

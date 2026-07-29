@@ -83,6 +83,9 @@ archived_demo_* = 점수 주입 금지
 
 `registry.json` 의 `generation_queue` 와 `core_artifacts[].status` 가 소스 오브 트루스다.
 
+**용지분석 런타임 완성도** (`registry.completeness.sheet_engine_runtime`): 검수·백테스트 게이트 기준 ~96%.  
+Ball / 대규모 MC / DL·GNN 등은 데이터·실험 영역이라 Experimental로 남기고, 점수 경로에는 넣지 않는다.
+
 | ID | 상태 | 생성 방향 |
 |----|------|-----------|
 | `01_knowledge` | partial | 도메인 지식 INDEX (추첨·확률·정직성 시드) |

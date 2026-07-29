@@ -176,7 +176,7 @@ export default function RoundLearningPanel({
                   />
                 </Box>
                 <Typography sx={{ width: 132, fontSize: 10, color: 'text.secondary', textAlign: 'right' }}>
-                  {(c.hit_rate * 100).toFixed(1)}% · lift {c.lift} · {c.won}/{c.played}
+                  {((c.hit_rate ?? 0) * 100).toFixed(1)}% · lift {c.lift} · {c.won}/{c.played}
                 </Typography>
                 {c.significance && (
                   <Typography sx={{ width: 74, fontSize: 9, textAlign: 'right', fontWeight: 700, color: c.significance.significant ? 'success.main' : 'text.disabled' }}>

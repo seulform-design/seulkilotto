@@ -53,6 +53,10 @@ def build_ensemble_backtest(samples: Any = None) -> Dict[str, Any]:
         }
 
     keys = list(_SIGNAL_LABELS.keys())
+    lb = _signal_leaderboard(samples)
+    ban = list(lb.get("underperforming_keys") or [])
+    if "auto_freq" not in ban:
+        ban.append("auto_freq")
     ens_hits = {k: 0 for k in ENSEMBLE_KS}
     boe_hits = {k: 0 for k in ENSEMBLE_KS}  # best-of-engines(최선순위) 넓은 그물
     per_round: List[Dict[str, Any]] = []
@@ -62,7 +66,7 @@ def build_ensemble_backtest(samples: Any = None) -> Dict[str, Any]:
         order = _ensemble_order(sigs, keys)
         pos = {n: i + 1 for i, n in enumerate(order)}
         ens_pos_by_round.append(pos)
-        boe_pos = {n: i + 1 for i, n in enumerate(_best_of_engines_order(sigs))}
+        boe_pos = {n: i + 1 for i, n in enumerate(_best_of_engines_order(sigs, exclude_keys=ban))}
         row: Dict[str, Any] = {"round_no": s.round_no, "winning": list(s.winning)}
         for k in ENSEMBLE_KS:
             h = sum(1 for n in s.winning if pos[n] <= k)
@@ -78,10 +82,10 @@ def build_ensemble_backtest(samples: Any = None) -> Dict[str, Any]:
     boe_sig = {str(k): _coverage_significance(boe_hits[k], rounds, k) for k in ENSEMBLE_KS}
     boe_mean = {str(k): round(boe_hits[k] / rounds, 3) for k in ENSEMBLE_KS}
 
-    # 최고 단일 신호(다회차 상위18) 와 비교 — 앙상블이 그보다 나은가?
-    lb = _signal_leaderboard(samples)
+    # 최고 단일 신호(다회차 상위18, auto_freq 후순위 정책 반영) 와 비교.
     board = lb.get("leaderboard") or []
-    best_single = board[0] if board else None
+    best_key = lb.get("best_signal_multi")
+    best_single = next((e for e in board if e.get("key") == best_key), board[0] if board else None)
     random_top18 = round(18 * 6 / 45, 3)  # ≈ 2.4
     random_top6 = round(6 * 6 / 45, 3)    # ≈ 0.8
 

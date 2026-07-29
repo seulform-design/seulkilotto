@@ -1263,6 +1263,27 @@ export interface ReviewVerificationResponse {
   };
   summary?: { best_top6: number; best_top18: number; best_label: string | null };
   honesty?: string;
+  /** Explain Artifact 표준 스키마 (artifacts/10_explain/SCHEMA.md). */
+  explain?: {
+    version: string;
+    subject: { type: string; value: string | number | null };
+    decision: string;
+    confidence: {
+      overall: number;
+      statistics: number;
+      pattern: number;
+      model: number;
+      simulation: number;
+      backtest: number;
+    };
+    evidence: { kind: string; detail: string; weight: number }[];
+    used_data: { intent: string; rounds: number[]; artifact_versions: string[] };
+    algorithms: string[];
+    backtest: { metric: string; value: number | null; baseline: number | null; small_sample: boolean };
+    limits: string[];
+    improvements: string[];
+    honesty: string;
+  };
 }
 
 /** 줄겹침(2·3·4번호) 역산 학습 — 겹침 조합이 실제 당첨을 얼마나 담았는지. */

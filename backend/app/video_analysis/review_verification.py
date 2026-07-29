@@ -474,13 +474,24 @@ def _signal_leaderboard(samples=None) -> Dict[str, Any]:
     }
 
 
-def _best_of_engines_order(sigs: Dict[str, Dict[int, float]]) -> List[int]:
+def _best_of_engines_order(
+    sigs: Dict[str, Dict[int, float]],
+    *,
+    exclude_keys: List[str] | None = None,
+) -> List[int]:
     """전 신호의 '최선(최소) 순위'로 번호를 정렬 — 어느 엔진이든 상위로 꼽은 번호를 앞에
     둔다. 넓은 그물(expand18)의 본령: 합의·평균은 약신호가 최고신호를 희석하고 특정 엔진만
     잡은 catchable 당첨을 놓치지만(예: 조합강도만 잡은 번호), 최선순위는 '어느 엔진이든
     잡았으면 포함'이라 상위K 로 담을 수 있는 당첨을 최대한 담는다. 동률은 총 등장으로 정렬.
+
+    exclude_keys: 저성과·auto_freq 등 banned 신호 — 단독 커버리지뿐 아니라 min-rank 에도
+    넣어 약한 신호가 expand18 상위를 오염시키지 않게 한다. 제외 후 신호가 2개 미만이면
+    전체 키로 폴백(빈 그물 방지).
     ⚠️ 확률 불변 — 넓은 그물의 recall 을 높일 뿐, 잭팟·부분일치 기대값은 안 변한다."""
-    keys = list(_SIGNAL_LABELS.keys())
+    ban = set(exclude_keys or [])
+    keys = [k for k in _SIGNAL_LABELS.keys() if k not in ban and k in sigs]
+    if len(keys) < 2:
+        keys = [k for k in _SIGNAL_LABELS.keys() if k in sigs]
     tb = sigs.get("total_freq", {})
     af = sigs.get("auto_freq", {})
     pos = {sk: {n: i for i, n in enumerate(_rank_signal(sigs[sk], tb, af))} for sk in keys}
@@ -493,12 +504,14 @@ def _coverage_set_from_signals(
     *,
     signal_key: str,
     selected_by: str,
+    exclude_keys: List[str] | None = None,
 ) -> Dict[str, Any]:
     """단일 신호 랭킹으로 core6 + 구간균형 expand18 커버리지 세트를 만든다.
 
     - core6: 최고 단일신호(집중 픽) — 합의/평균은 약신호가 희석하므로 단일 우선.
     - expand18: 전 엔진 '최선순위'(min-rank) 넓은 그물 — 어느 엔진이든 잡은 catchable
       당첨을 최대한 담는다(단일 신호가 놓친 번호도 포함). core6 ⊂ expand18 유지.
+      banned(저성과·auto_freq) 는 min-rank 에서 제외.
     """
     ranked = _rank_signal(
         sigs.get(signal_key, sigs["support"]),
@@ -508,7 +521,7 @@ def _coverage_set_from_signals(
     present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
     raw_expand = ranked[:18]
     single_expand = _balance_expand(ranked, ranked[:6], present, 18)
-    boe_order = _best_of_engines_order(sigs)
+    boe_order = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
     boe_expand = _balance_expand(boe_order, ranked[:6], present, 18)
     return {
         "signal": signal_key,
@@ -520,6 +533,7 @@ def _coverage_set_from_signals(
         "expand18_single": single_expand,
         "expand18_raw": raw_expand,
         "decade_balance": _decade_balance_info(boe_expand, raw_expand, present),
+        "excluded_signals": list(exclude_keys or []),
     }
 
 
@@ -845,12 +859,16 @@ def build_review_verification() -> Dict[str, Any]:
     multi_key = leaderboard.get("best_signal_multi")
     bkey = multi_key or analysis.get("best_signal_key") or "support"
     selected_by = "multi_round" if multi_key else "single_round"
+    # min-rank 에서도 저성과·auto_freq 제외 (단독 커버리지와 동일 정책).
+    ban_keys = list(leaderboard.get("underperforming_keys") or [])
+    if "auto_freq" not in ban_keys:
+        ban_keys.append("auto_freq")
 
     # 복기 회차 커버리지 — 그 회차 용지 신호로 core6/expand18 (당첨 대조용).
     # 이번회차 세트와 분리해야 탭별로 추천이 달라진다.
     review_sigs = _signals(auto, semi)
     review_coverage_set = _coverage_set_from_signals(
-        review_sigs, signal_key=bkey, selected_by=selected_by
+        review_sigs, signal_key=bkey, selected_by=selected_by, exclude_keys=ban_keys
     )
     review_consensus_coverage = _consensus_coverage(review_sigs, leaderboard)
 
@@ -864,7 +882,7 @@ def build_review_verification() -> Dict[str, Any]:
     if cur_auto or cur_semi:
         csig = _signals(cur_auto, cur_semi)
         current_coverage_set = _coverage_set_from_signals(
-            csig, signal_key=bkey, selected_by=selected_by
+            csig, signal_key=bkey, selected_by=selected_by, exclude_keys=ban_keys
         )
         consensus_coverage = _consensus_coverage(csig, leaderboard)
 
@@ -891,6 +909,50 @@ def build_review_verification() -> Dict[str, Any]:
         missed=missed_winner_analysis,
         summary=summary,
     )
+    honesty = (
+        f"{review_round}회 당첨 6개 중 어떤 신호도 top-6 로는 최대 {t6}개만 잡았고, "
+        f"top-18 로 넓히면 {t18}개까지 잡혔습니다. 즉 '집중 예측' 은 구조적으로 실패하고 "
+        "'넓은 커버리지' 만 유효합니다 — 많이 산 번호(고지지 최상위)는 추첨과 무관하기 "
+        "때문입니다. 이는 로또가 균등 무작위라는 사실의 직접 증거이며, 1등 확률"
+        "(1/8,145,060)은 어떤 신호로도 변하지 않습니다."
+    )
+    policy = inverse_diagnosis.get("policy") or {}
+    explain = {
+        "version": "0.1.0",
+        "subject": {"type": "signal", "value": bkey},
+        "decision": "coverage",
+        "confidence": {
+            "overall": int(round(float(policy.get("multi_round_confidence") or 0) * 100)),
+            "statistics": int(round(float(policy.get("multi_round_confidence") or 0) * 100)),
+            "pattern": 0,
+            "model": 0,
+            "simulation": 0,
+            "backtest": int(round(float(policy.get("multi_round_confidence") or 0) * 100)),
+        },
+        "evidence": [
+            {"kind": "policy", "detail": f"core6={policy.get('core6_mode')} expand18={policy.get('expand18_mode')}", "weight": 1.0},
+            {"kind": "backtest", "detail": f"다회차 best={bkey} top18={summary.get('best_top18')}", "weight": 0.8},
+        ],
+        "used_data": {
+            "intent": "review",
+            "rounds": [s.round_no for s in _samples],
+            "artifact_versions": ["review_verification", "inverse_diagnosis"],
+        },
+        "algorithms": ["best_single", "best_of_engines_min_rank", "decade_balance"],
+        "backtest": {
+            "metric": "mean_top18",
+            "value": next(
+                (e.get("mean_top18") for e in (leaderboard.get("leaderboard") or [])
+                 if e.get("key") == leaderboard.get("best_signal_multi")),
+                None,
+            ),
+            "baseline": 18 * 6 / 45,
+            "small_sample": bool(leaderboard.get("small_sample")),
+        },
+        "limits": [p.get("title") for p in (inverse_diagnosis.get("problems") or [])],
+        "improvements": list(inverse_diagnosis.get("actions") or []),
+        "honesty": honesty,
+    }
 
     return {
         "ok": True,
@@ -913,12 +975,7 @@ def build_review_verification() -> Dict[str, Any]:
         "decade_catch": _decade_catch(_samples),
         "ensemble_backtest": ensemble_backtest,
         "inverse_diagnosis": inverse_diagnosis,
+        "explain": explain,
         "summary": summary,
-        "honesty": (
-            f"{review_round}회 당첨 6개 중 어떤 신호도 top-6 로는 최대 {t6}개만 잡았고, "
-            f"top-18 로 넓히면 {t18}개까지 잡혔습니다. 즉 '집중 예측' 은 구조적으로 실패하고 "
-            "'넓은 커버리지' 만 유효합니다 — 많이 산 번호(고지지 최상위)는 추첨과 무관하기 "
-            "때문입니다. 이는 로또가 균등 무작위라는 사실의 직접 증거이며, 1등 확률"
-            "(1/8,145,060)은 어떤 신호로도 변하지 않습니다."
-        ),
+        "honesty": honesty,
     }

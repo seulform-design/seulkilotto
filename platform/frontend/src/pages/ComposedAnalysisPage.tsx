@@ -20,6 +20,7 @@ import SharingBadge from '../components/SharingBadge';
 import { ExperimentalBanner } from '../components/ExplainArtifactBlock';
 import { optimizeForSharing } from '../utils/jackpotSharing';
 import LottoBall from '../components/LottoBall';
+import { ENGINE_BALL } from '../components/EngineSection';
 import MetricChips from '../components/MetricChips';
 import WalkForwardPanel from '../components/WalkForwardPanel';
 import {
@@ -60,7 +61,7 @@ const HONESTY_FOOTER =
 
 const GRADE_ORDER: ConsensusGrade[] = ['S', 'A', 'B', 'C', 'X'];
 
-export default function ComposedAnalysisPage() {
+export default function ComposedAnalysisPage({ embedded = false }: { embedded?: boolean } = {}) {
   const queries = useQueries({
     queries: [
       {
@@ -253,12 +254,21 @@ export default function ComposedAnalysisPage() {
   const sStrongNumbers = composite.byGrade.S;
   const aStrongNumbers = composite.byGrade.A;
 
+  const paperSx = embedded ? { p: 1.25, mb: 1.25 } : { p: 2, mb: 2 };
+
   return (
-    <Box>
+    <Box sx={embedded ? { '& .MuiTypography-h3': { fontSize: '1.35rem' } } : undefined}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Typography variant="h5" fontWeight={800}>
-          🎯 종합 분석
-        </Typography>
+        {!embedded && (
+          <Typography variant="h5" fontWeight={800}>
+            🎯 종합 분석
+          </Typography>
+        )}
+        {embedded && (
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+            3축 합의 · Venus · Walk-Forward
+          </Typography>
+        )}
         <Button
           size="small"
           variant="outlined"
@@ -268,16 +278,18 @@ export default function ComposedAnalysisPage() {
           {isLoading ? <CircularProgress size={18} /> : '↻ 새로 합성'}
         </Button>
       </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        용지분석 ③ 번호추천에 포함 · 용지 1:1 전수비교 + 평행회차(강수·기대) + 미출수(강수·기대) — 3축 합의 + 🎰 용지 예상번호 추첨
-      </Typography>
+      {!embedded && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          용지 1:1 전수비교 + 평행회차(강수·기대) + 미출수(강수·기대) — 3축 합의 + 🎰 용지 예상번호 추첨
+        </Typography>
+      )}
 
-      <Alert severity="warning" sx={{ mb: 2 }} icon={false}>
-        {HONESTY_HEADER}
+      <Alert severity="warning" sx={{ mb: embedded ? 1.25 : 2, py: 0.5 }} icon={false}>
+        <Typography variant="caption">{HONESTY_HEADER}</Typography>
       </Alert>
 
       {/* 데이터 소스 상태 */}
-      <Paper sx={{ p: 2, mb: 2 }}>
+      <Paper sx={paperSx}>
         <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
           📡 데이터 소스 상태 (합의 {composite.sourceCount}/3)
         </Typography>
@@ -346,7 +358,7 @@ export default function ComposedAnalysisPage() {
       )}
 
       {/* 합의 상위 번호 */}
-      <Paper sx={{ p: 2, mb: 2 }}>
+      <Paper sx={paperSx}>
         <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
           🏆 합의 상위 번호
         </Typography>
@@ -363,7 +375,7 @@ export default function ComposedAnalysisPage() {
                   title={composite.perNumber[n].sources.map((s) => SOURCE_LABELS[s] ?? s).join(' · ')}
                 >
                   <Box>
-                    <LottoBall number={n} size={36} />
+                    <LottoBall number={n} size={ENGINE_BALL.hero} />
                   </Box>
                 </Tooltip>
               ))}
@@ -383,7 +395,7 @@ export default function ComposedAnalysisPage() {
                   title={composite.perNumber[n].sources.map((s) => SOURCE_LABELS[s] ?? s).join(' · ')}
                 >
                   <Box>
-                    <LottoBall number={n} size={32} />
+                    <LottoBall number={n} size={ENGINE_BALL.list} />
                   </Box>
                 </Tooltip>
               ))}
@@ -399,7 +411,7 @@ export default function ComposedAnalysisPage() {
       </Paper>
 
       {/* 🎯 상세분석 예상번호 → 1호기 물리/학습 추첨기 연동 소스 */}
-      <Paper sx={{ p: 2, mb: 2, border: '1px solid', borderColor: photoExpected.length ? 'success.main' : 'divider' }}>
+      <Paper sx={{ ...paperSx, border: '1px solid', borderColor: photoExpected.length ? 'success.main' : 'divider' }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
           <Typography variant="subtitle1" fontWeight={700}>
             🎯 {targetRound ?? '?'}회 상세분석 당첨예상번호 → {machineId}호기 추첨 소스
@@ -430,7 +442,7 @@ export default function ComposedAnalysisPage() {
           <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="flex-start">
             {photoExpected.slice(0, 18).map((p) => (
               <Box key={`pe-${p.number}`} sx={{ textAlign: 'center', minWidth: 36 }}>
-                <LottoBall number={p.number} size={34} />
+                <LottoBall number={p.number} size={ENGINE_BALL.hero} />
                 <Typography variant="caption" sx={{ display: 'block', fontSize: 9, color: 'text.disabled', lineHeight: 1.1 }}>
                   #{p.rank} · {p.confidence}%
                 </Typography>
@@ -459,7 +471,7 @@ export default function ComposedAnalysisPage() {
 
       {/* 🎡 물리 추첨기 — 1234회 예상 1호기 + 상세예상 favor */}
       {drawMachine && (
-        <Paper sx={{ p: 2, mb: 2 }}>
+        <Paper sx={paperSx}>
           <ExperimentalBanner
             show
             label="물리 추첨기·상세예상 가중은 Experimental/체험용입니다. 히어로·용지 점수에 주입하지 않으며 당첨 확률은 변하지 않습니다."
@@ -512,7 +524,7 @@ export default function ComposedAnalysisPage() {
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
                 {drawMachine.representative.map((n) => (
-                  <LottoBall key={`pw-${n}`} number={n} size={30} />
+                  <LottoBall key={`pw-${n}`} number={n} size={ENGINE_BALL.list} />
                 ))}
                 <ComboActions numbers={drawMachine.representative} source="unknown" label="종합 학습 추첨 예상" />
               </Stack>
@@ -523,7 +535,7 @@ export default function ComposedAnalysisPage() {
 
       {/* 🎰 학습 추첨기 시뮬레이터 */}
       {drawMachine && (
-        <Paper sx={{ p: 2, mb: 2, border: '1px solid', borderColor: 'warning.main' }}>
+        <Paper sx={{ ...paperSx, border: '1px solid', borderColor: 'warning.main' }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant="subtitle1" fontWeight={700}>
               🎰 {drawMachine.machineId ?? '1'}호기 학습 추첨
@@ -581,7 +593,7 @@ export default function ComposedAnalysisPage() {
           </Typography>
           <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mb: 1 }}>
             {drawMachine.representative.map((n) => (
-              <LottoBall key={`rep-${n}`} number={n} size={36} />
+              <LottoBall key={`rep-${n}`} number={n} size={ENGINE_BALL.hero} />
             ))}
             <SharingBadge numbers={drawMachine.representative} />
             <ComboActions numbers={drawMachine.representative} source="unknown" label="추첨기 대표 조합" />
@@ -600,7 +612,7 @@ export default function ComposedAnalysisPage() {
                 </Typography>
                 <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
                   {opt.numbers.map((n) => (
-                    <LottoBall key={`opt-${n}`} number={n} size={32} />
+                    <LottoBall key={`opt-${n}`} number={n} size={ENGINE_BALL.list} />
                   ))}
                   <SharingBadge numbers={opt.numbers} />
                   <ComboActions numbers={opt.numbers} source="unknown" label="분산 최적화 조합" />
@@ -621,7 +633,7 @@ export default function ComposedAnalysisPage() {
           <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
             {drawMachine.ranked.slice(0, 12).map((r) => (
               <Box key={`dm-${r.number}`} sx={{ textAlign: 'center', minWidth: 40 }}>
-                <LottoBall number={r.number} size={30} />
+                <LottoBall number={r.number} size={ENGINE_BALL.list} />
                 <Typography variant="caption" sx={{ display: 'block', fontSize: 9, lineHeight: 1.1, color: 'text.disabled' }}>
                   {r.pct}%
                 </Typography>
@@ -642,7 +654,7 @@ export default function ComposedAnalysisPage() {
                   <Stack key={`smp-${i}`} direction="row" spacing={0.4} alignItems="center" flexWrap="wrap" useFlexGap>
                     <Typography variant="caption" sx={{ minWidth: 16, color: 'text.disabled', fontSize: 10 }}>{i + 1}</Typography>
                     {s.map((n) => (
-                      <LottoBall key={`smp-${i}-${n}`} number={n} size={22} />
+                      <LottoBall key={`smp-${i}-${n}`} number={n} size={ENGINE_BALL.table} />
                     ))}
                   </Stack>
                 ))}
@@ -653,7 +665,7 @@ export default function ComposedAnalysisPage() {
       )}
 
       {/* 1~45 합의 맵 */}
-      <Paper sx={{ p: 2, mb: 2 }}>
+      <Paper sx={paperSx}>
         <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
           📊 1~45 번호 합의 맵
         </Typography>
@@ -757,7 +769,7 @@ export default function ComposedAnalysisPage() {
       </Paper>
 
       {/* 합의 기반 5게임 */}
-      <Paper sx={{ p: 2, mb: 2 }}>
+      <Paper sx={paperSx}>
         <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
           ⚙ 합의 기반 5게임
         </Typography>
@@ -797,7 +809,7 @@ export default function ComposedAnalysisPage() {
                 sx={{ flex: 1 }}
               >
                 {combo.map((n) => (
-                  <LottoBall key={n} number={n} size={36} />
+                  <LottoBall key={n} number={n} size={ENGINE_BALL.hero} />
                 ))}
               </Stack>
               <ComboActions

@@ -28,6 +28,8 @@ import PhotoBacktestPanel from '../components/PhotoBacktestPanel';
 import OverlapPatternLearnPanel from '../components/OverlapPatternLearnPanel';
 import OverlapLearningServerPanel from '../components/OverlapLearningServerPanel';
 import RoundDataBreakdownPanel from '../components/RoundDataBreakdownPanel';
+import NestedCvPanel from '../components/NestedCvPanel';
+import ShapDriftPanel from '../components/ShapDriftPanel';
 import RoundLearningPanel from '../components/RoundLearningPanel';
 import FullHistoryBacktestPanel from '../components/FullHistoryBacktestPanel';
 import ReviewVerificationPanel from '../components/ReviewVerificationPanel';
@@ -1812,6 +1814,8 @@ export default function PhotoAnalysisPage() {
           <Stack spacing={1.5}>
             <FullHistoryBacktestPanel />
             <FeatureLearningPanel sheetIntent={activeTab} />
+            <NestedCvPanel />
+            <ShapDriftPanel />
             <PatternMiningPanel sheetIntent={activeTab} />
             <RoundLearningPanel sheetIntent={activeTab} />
             <OverlapLearningServerPanel sheetIntent={activeTab} />

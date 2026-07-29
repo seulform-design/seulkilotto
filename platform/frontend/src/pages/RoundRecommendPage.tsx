@@ -15,6 +15,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ComboActions from '../components/ComboActions';
 import LottoBall from '../components/LottoBall';
+import { ENGINE_BALL } from '../components/EngineSection';
 import MetricChips from '../components/MetricChips';
 import MachineDrawSimulator from '../components/MachineDrawSimulator';
 import { v1Api } from '../api/v1Api';
@@ -26,7 +27,7 @@ const MACHINE_COLORS: Record<number, string> = { 1: '#E8570D', 2: '#0D8A3E', 3: 
 
 type MachineChoice = 'auto' | 1 | 2 | 3;
 
-export default function RoundRecommendPage() {
+export default function RoundRecommendPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [machine, setMachine] = useState<MachineChoice>('auto');
 
   const meta = useQuery({ queryKey: ['v1-meta'], queryFn: v1Api.getMeta });
@@ -43,16 +44,28 @@ export default function RoundRecommendPage() {
   const data = recommend.data;
   const ov = overview.data;
 
+  const paperSx = embedded ? { p: 1.25, mb: 1.25 } : { p: 2, mb: 2 };
+
   return (
     <Box>
-      <Typography variant="h5" fontWeight={800} gutterBottom>
-        회차 추천
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        용지분석 ③ 번호추천에 포함 · {meta.data?.current_round ?? '—'}회 추첨 기준 · 호기 패턴 5게임
-        {meta.data ? ` (데이터 ${meta.data.row_count}건)` : ''}
-      </Typography>
-      <Alert severity="success" sx={{ mb: 2 }}>
+      {!embedded && (
+        <>
+          <Typography variant="h5" fontWeight={800} gutterBottom>
+            회차 추천
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            {meta.data?.current_round ?? '—'}회 추첨 기준 · 호기 패턴 5게임
+            {meta.data ? ` (데이터 ${meta.data.row_count}건)` : ''}
+          </Typography>
+        </>
+      )}
+      {embedded && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontWeight: 700 }}>
+          {meta.data?.current_round ?? '—'}회 · 호기 패턴 5게임
+          {meta.data ? ` · 데이터 ${meta.data.row_count}건` : ''}
+        </Typography>
+      )}
+      <Alert severity="success" sx={{ mb: embedded ? 1.25 : 2, py: 0.5 }}>
         호기는 <b>실측 데이터</b>입니다 — lottotapa {ov?.coverage.confirmed_count ?? 969}회
         ({ov?.coverage.min_round ?? 262}~{ov?.coverage.max_round ?? 1230}) 당첨번호 100% 대조 검증.
         1~261회는 기록 미확보로 월별순환 추정, 다음 회차는 1→2→3 순환 예측입니다.
@@ -61,7 +74,7 @@ export default function RoundRecommendPage() {
       <MachineDrawSimulator />
 
       {ov && (
-        <Paper sx={{ p: 2, mb: 2 }}>
+        <Paper sx={paperSx}>
           <Typography variant="subtitle1" fontWeight={700} gutterBottom>
             🎰 추첨기(호기) 현황
           </Typography>
@@ -119,11 +132,11 @@ export default function RoundRecommendPage() {
       )}
 
       {data && (
-        <Paper sx={{ p: 2, mb: 2, bgcolor: '#69C8F2', color: '#10202A' }}>
+        <Paper sx={{ ...paperSx, bgcolor: '#69C8F2', color: '#10202A' }}>
           <Typography variant="caption" fontWeight={600}>
             추천 대상
           </Typography>
-          <Typography variant="h3" fontWeight={800}>
+          <Typography variant={embedded ? 'h5' : 'h3'} fontWeight={800}>
             {data.next_round}회
           </Typography>
           <Typography variant="body2">
@@ -135,7 +148,7 @@ export default function RoundRecommendPage() {
         </Paper>
       )}
 
-      <Paper sx={{ p: 2, mb: 2 }}>
+      <Paper sx={paperSx}>
         <Typography variant="subtitle2" gutterBottom>
           분석 호기
         </Typography>
@@ -175,7 +188,7 @@ export default function RoundRecommendPage() {
       )}
 
       {data && data.stats.draw_count > 0 && (
-        <Paper sx={{ p: 2, mb: 2 }}>
+        <Paper sx={paperSx}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
             <Typography variant="subtitle1" fontWeight={700}>
               호기 통계 요약
@@ -319,7 +332,7 @@ export default function RoundRecommendPage() {
       )}
 
       {data?.top_scored && data.top_scored.length > 0 && (
-        <Paper sx={{ p: 2, mb: 2 }}>
+        <Paper sx={paperSx}>
           <Typography variant="subtitle1" fontWeight={700} gutterBottom>
             🎯 상위 신호 번호 (근거)
           </Typography>
@@ -377,7 +390,7 @@ export default function RoundRecommendPage() {
                   sx={{ flex: 1 }}
                 >
                   {combo.numbers.map((n) => (
-                    <LottoBall key={n} number={n} size={38} />
+                    <LottoBall key={n} number={n} size={ENGINE_BALL.hero} />
                   ))}
                 </Stack>
                 <ComboActions

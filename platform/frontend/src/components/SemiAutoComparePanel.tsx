@@ -1219,10 +1219,11 @@ export default function SemiAutoComparePanel({
     if (focus === 'composite') {
       setShowCompositeEmbed(true);
       window.setTimeout(() => scrollToPhotoRecommend({ embed: 'composite' }), 120);
-    } else if (focus === 'machine' || focus === 'recommend') {
+    } else if (focus === 'machine') {
       setShowMachineEmbed(true);
       window.setTimeout(() => scrollToPhotoRecommend({ embed: 'machine' }), 120);
     } else {
+      // recommend: ③ 번호추천 섹션 자체로 스크롤 (추첨기 임베드 강제 오픈 안 함)
       window.setTimeout(() => scrollToPhotoRecommend(), 80);
     }
   }, []);
@@ -5080,7 +5081,7 @@ export default function SemiAutoComparePanel({
 
       {/* ════════ ③ 번호 추천 (기본 펼침 · 추천 상세는 항상 표시) ════════ */}
       <Paper id="photo-section-recommend" sx={{ p: 2 }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showRecommendSection ? 1 : 0 }} spacing={1}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 1 }} spacing={1}>
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <Typography variant="subtitle1" fontWeight={800}>
             ③ 번호 추천
@@ -5101,16 +5102,58 @@ export default function SemiAutoComparePanel({
           {showRecommendSection ? '접기 ▲' : '펼치기 ▼'}
         </Button>
       </Stack>
+      <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+        <Chip
+          size="small"
+          variant="outlined"
+          label="핵심"
+          onClick={() => {
+            setShowRecommendSection(true);
+            document.getElementById('photo-rec-hero')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
+          sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+        />
+        <Chip
+          size="small"
+          variant="outlined"
+          label="5세트"
+          onClick={() => {
+            setShowRecommendSection(true);
+            document.getElementById('photo-rec-sets')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
+          sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+        />
+        <Chip
+          size="small"
+          variant="outlined"
+          label="종합분석"
+          onClick={() => {
+            setShowCompositeEmbed(true);
+            window.setTimeout(() => scrollToPhotoRecommend({ embed: 'composite' }), 60);
+          }}
+          sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+        />
+        <Chip
+          size="small"
+          variant="outlined"
+          label="추첨기"
+          onClick={() => {
+            setShowMachineEmbed(true);
+            window.setTimeout(() => scrollToPhotoRecommend({ embed: 'machine' }), 60);
+          }}
+          sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+        />
+      </Stack>
       {!showRecommendSection && (
-        <Typography variant="caption" color="text.secondary">
-          핵심 추천 · 용지 통계 5세트 · 강수·기대수 · 종합 예측 · 종합분석 · 추첨기 추천
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          핵심 추천 · 용지 통계 5세트 · 강수·기대수 · 종합 예측 — 접힘. 아래 종합분석·추첨기는 별도 유지.
         </Typography>
       )}
       {showRecommendSection && (
       <>
       {/* 🎯 핵심 추천 */}
       {heroRecommendation.ready && (
-        <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
+        <Paper id="photo-rec-hero" variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
               <Typography variant="body1" fontWeight={800}>
@@ -5166,7 +5209,7 @@ export default function SemiAutoComparePanel({
                 <Box key={`hero-c-${n}`} sx={{ textAlign: 'center', minWidth: 30 }}>
                   <LottoBall
                     number={n}
-                    size={ENGINE_BALL.list}
+                    size={ENGINE_BALL.hero}
                     dimmed={Boolean(heroRecommendation.showWinning && winningSet && !isWin)}
                   />
                   {heroRecommendation.agreement[String(n)] != null && (
@@ -5262,7 +5305,7 @@ export default function SemiAutoComparePanel({
             조합(합 극단·전부 홀짝·4연속 등)을 제외합니다.
           </Typography>
           {recommendations.length > 0 && (
-            <Stack spacing={0.75}>
+            <Stack id="photo-rec-sets" spacing={0.75}>
               {recommendations.map((rec, idx) => (
                 <Stack
                   key={`rec-${idx}`}
@@ -5570,67 +5613,64 @@ export default function SemiAutoComparePanel({
         </Paper>
       )}
 
-      {/* ── 구 상단탭 이동: 종합 분석 · 추첨기 추천 ── */}
+      </>
+      )}
+
+      {/* ── 종합 분석 · 추첨기 추천 (③ 접힘과 무관 — 딥링크 타깃 항상 마운트) ── */}
       <Divider sx={{ my: 1.5 }} />
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        예전 상단의 <strong>종합 분석</strong>·<strong>추첨기 추천</strong>은 여기(③ 번호 추천)로 옮겼습니다. 필요할 때만 펼치세요.
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: 10 }}>
+        종합 분석·추첨기 추천은 용지분석 공 규격과 동일한 밀도로 표시됩니다.
       </Typography>
       <Stack spacing={1}>
         <Paper id="photo-embed-composite" variant="outlined" sx={{ p: 1.25 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
-            <Typography variant="subtitle2" fontWeight={800}>
-              🎯 종합 분석 (3축 합의 · Venus 추첨기)
+            <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13 }}>
+              종합 분석 · 3축 합의 · Venus
             </Typography>
             <Button size="small" variant="outlined" onClick={() => setShowCompositeEmbed((v) => !v)}>
               {showCompositeEmbed ? '접기 ▲' : '펼치기 ▼'}
             </Button>
           </Stack>
           {showCompositeEmbed && (
-            <Box sx={{ mt: 1.25 }}>
+            <Box sx={{ mt: 1 }}>
               <Suspense
                 fallback={
-                  <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 2 }}>
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1.5 }}>
                     <CircularProgress size={18} />
-                    <Typography variant="caption" color="text.secondary">
-                      종합 분석 로딩…
-                    </Typography>
+                    <Typography variant="caption" color="text.secondary">종합 분석 로딩…</Typography>
                   </Stack>
                 }
               >
-                <ComposedAnalysisPage />
+                <ComposedAnalysisPage embedded />
               </Suspense>
             </Box>
           )}
         </Paper>
         <Paper id="photo-embed-machine" variant="outlined" sx={{ p: 1.25 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
-            <Typography variant="subtitle2" fontWeight={800}>
-              🎱 추첨기 추천 (호기별)
+            <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13 }}>
+              추첨기 추천 · 호기별
             </Typography>
             <Button size="small" variant="outlined" onClick={() => setShowMachineEmbed((v) => !v)}>
               {showMachineEmbed ? '접기 ▲' : '펼치기 ▼'}
             </Button>
           </Stack>
           {showMachineEmbed && (
-            <Box sx={{ mt: 1.25 }}>
+            <Box sx={{ mt: 1 }}>
               <Suspense
                 fallback={
-                  <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 2 }}>
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1.5 }}>
                     <CircularProgress size={18} />
-                    <Typography variant="caption" color="text.secondary">
-                      추첨기 추천 로딩…
-                    </Typography>
+                    <Typography variant="caption" color="text.secondary">추첨기 추천 로딩…</Typography>
                   </Stack>
                 }
               >
-                <RoundRecommendPage />
+                <RoundRecommendPage embedded />
               </Suspense>
             </Box>
           )}
         </Paper>
       </Stack>
-      </>
-      )}
       </Paper>
 
       {/* ════════ ④ 패턴 분석 엔진 (기본 접힘 · 복기검증/백테스트 포함) ════════ */}
@@ -6899,6 +6939,8 @@ export default function SemiAutoComparePanel({
           {(
             [
               ['learn-v1', 'V1 Feature'],
+              ['learn-nested-cv', 'Nested CV'],
+              ['learn-shap-drift', 'SHAP/Drift'],
               ['learn-v2', 'V2 Pattern'],
               ['learn-v3', 'V3 다회차'],
               ['learn-v4a', 'V4-A 서버겹침'],

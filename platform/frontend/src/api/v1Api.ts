@@ -599,6 +599,19 @@ export const v1Api = {
     );
   },
 
+  /** Nested CV — outer top6 hits 리포트 (read-only, scoring_allowed=false). */
+  getNestedCv: (seed = 42) =>
+    fetchJson<NestedCvResponse>(`/api/v1/photo-analysis/nested-cv?seed=${seed}`, {
+      timeoutMs: 180_000,
+    }),
+
+  /** Experimental SHAP/Drift proxy — 점수 주입 금지. */
+  getShapDrift: (seed = 42) =>
+    fetchJson<ShapDriftResponse>(
+      `/api/v1/photo-analysis/experimental/shap-drift?seed=${seed}`,
+      { timeoutMs: 180_000 },
+    ),
+
   /** 복기 Pattern Mining — 전수 학습·검증·Cluster·설명가능 추천. */
   getPatternMining: (seed = 42, opts?: { applyIntent?: 'review' | 'current_round' }) => {
     const q = new URLSearchParams({ seed: String(seed) });
@@ -1496,6 +1509,71 @@ export interface FeatureLearningResponse {
     auto_mutate_scoring?: boolean;
     honesty?: string;
   };
+}
+
+/** Nested CV 리포트 — Gate·승인 전 scoring 금지. */
+export interface NestedCvPickedModel {
+  outer_test_index: number;
+  outer_round_no: number;
+  train_rounds: number[];
+  adopted_count: number;
+  mean_lift_vs_uniform: number;
+  picked: string[];
+  top6: number[];
+  top6_hits: number;
+  winning: number[];
+}
+
+export interface NestedCvResponse {
+  version?: string;
+  ok: boolean;
+  experimental?: boolean;
+  outer_folds?: number;
+  inner_folds?: number;
+  mean_top6?: number | null;
+  baseline_top6?: number;
+  lift_vs_uniform?: number | null;
+  lift_vs_baseline_hits?: number | null;
+  small_sample?: boolean;
+  picked_models?: NestedCvPickedModel[];
+  scoring_allowed: boolean;
+  honesty?: string;
+  note?: string;
+  reason?: string;
+  run_at?: string;
+}
+
+/** Experimental SHAP/Drift proxy. */
+export interface ShapDriftResponse {
+  ok: boolean;
+  version?: string;
+  experimental?: boolean;
+  scoring_allowed: boolean;
+  model_id?: string;
+  shap?: {
+    method: string;
+    values: Record<string, number>;
+    baseline: number;
+    small_sample: boolean;
+    labels?: Record<string, string>;
+  };
+  drift?: {
+    metric: string;
+    window: string;
+    score: number | null;
+    alert: boolean;
+  };
+  feature_reports_summary?: {
+    key?: string;
+    adopted?: boolean;
+    lift_vs_uniform?: number;
+    permutation_p?: number;
+    proxy_shap?: number;
+  }[];
+  explain?: ExplainPayload;
+  honesty?: string;
+  reason?: string;
+  run_at?: string;
 }
 
 /** 복기 Pattern Mining 엔진 응답. */

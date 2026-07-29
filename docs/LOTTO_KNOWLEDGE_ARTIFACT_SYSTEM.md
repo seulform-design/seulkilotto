@@ -93,9 +93,10 @@ Ball / 대규모 MC / DL·GNN 등은 데이터·실험 영역이라 Experimental
 | `04_ball` | missing | 볼 단위 스펙 — 데이터 없으면 Experimental 설계만 |
 | `05_statistics` | partial | snapshot·decade·히스토리 스토어 완료 |
 | `07_simulation` | partial | 대규모 MC는 Experimental 스펙 후 검증 |
-| `08_ai` | partial | Registry UI · SHAP/Drift Experimental 설계 |
-| `09_validation` | active | propose·disable·nested stub · outer hit 후속 |
+| `08_ai` | partial | Registry · SHAP stub API (Experimental) |
+| `09_validation` | active | nested outer hits · UI 패널 후속 |
 | `10_explain` | partial | Explain + Experimental 배너 완료 |
+| `100_experimental` | partial | shap_drift API · 점수 금지 |
 | `100_experimental` | partial | 볼·대규모 MC 가설 격리 |
 | Enterprise 32 graph, 39 markov, 40 bayesian, 42–44 DL, 66 shap, 67 drift, 80 event, 87 registry… | missing | 필요 시 템플릿으로 추가, **점수 연결은 Validation 통과 후** |
 

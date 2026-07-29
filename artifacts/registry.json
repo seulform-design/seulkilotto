@@ -6,7 +6,7 @@
   "completeness": {
     "sheet_engine_runtime": 0.96,
     "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. 용지분석 런타임 버그·정책·백테스트 게이트는 검수 완료.",
-    "last_audit": "2026-07-30: nested CV stub; Experimental banner (decision-agnostic)"
+    "last_audit": "2026-07-30: nested outer hits 0.2; experimental shap-drift API"
   },
   "safety": {
     "no_win_guarantee": true,
@@ -244,9 +244,10 @@
         "artifacts/08_ai/model_registry.md",
         "artifacts/08_ai/validation_gate.md",
         "platform/frontend/src/components/ModelRegistryBlock.tsx",
-        "artifacts/100_experimental/shap_drift.md"
+        "artifacts/100_experimental/shap_drift.md",
+        "backend/app/video_analysis/shap_drift_stub.py"
       ],
-      "gap": "Registry·Gate UI 완료 — SHAP/Drift는 Experimental 설계만"
+      "gap": "Registry UI·SHAP stub API 완료 — 실 SHAP/Drift는 Experimental 유지"
     },
     {
       "id": "09_validation",
@@ -265,7 +266,7 @@
         "artifacts/09_validation/nested_cv.md",
         "backend/tests"
       ],
-      "gap": "propose·disable·nested stub 완료 — outer hit 집계·Nested CV 승격 후속"
+      "gap": "outer hit 집계 완료 — Gate 승격·Nested≥5 안정성 후속"
     },
     {
       "id": "10_explain",
@@ -296,7 +297,7 @@
         "artifacts/100_experimental/simulation_scale.md",
         "artifacts/100_experimental/shap_drift.md"
       ],
-      "gap": "hypotheses/superstition 콘텐츠는 필요 시 추가 — 점수 주입 금지"
+      "gap": "shap_drift API 스텁 포함 — 점수 주입 금지"
     }
   ],
   "enterprise_directory": [
@@ -409,14 +410,14 @@
       "blocked": true
     },
     {
-      "id": "09_validation_nested_hits",
-      "reason": "Nested CV outer hit 집계",
-      "action": "compute mean_top6 on outer folds; keep scoring_allowed=false until gate"
+      "id": "09_validation_nested_ui",
+      "reason": "Nested CV 리포트 패널 UI",
+      "action": "read-only panel under V1; show mean_top6 vs baseline; no scoring"
     },
     {
-      "id": "08_ai_shap_stub_api",
-      "reason": "SHAP/Drift 읽기 API 스텁",
-      "action": "GET experimental shap report; scoring_allowed=false always"
+      "id": "08_ai_shap_panel",
+      "reason": "Experimental SHAP 패널 UI",
+      "action": "Feature panel optional collapse; ExperimentalBanner required"
     }
   ]
 }

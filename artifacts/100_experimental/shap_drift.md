@@ -57,5 +57,6 @@ Feature/Pattern 기여도를 사후 설명(SHAP류)하고,
 ## 6. Acceptance
 
 - [x] Experimental 설계 문서
-- [ ] 공통 API stub (optional, scoring_allowed=false 고정)
-- [ ] UI 배너 “실험·점수 미연결”
+- [x] 공통 API stub (`GET /api/v1/photo-analysis/experimental/shap-drift`, scoring_allowed=false)
+- [x] Explain `experimental: true` → UI 배너
+- [ ] 실 SHAP 라이브러리·PSI (Validation 후)

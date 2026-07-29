@@ -417,12 +417,22 @@ def get_feature_learning(
 
 @router.get("/nested-cv")
 def get_nested_cv(seed: int = Query(42, ge=0, le=999_999)):
-    """Nested walk-forward CV 스텁 리포트 — scoring_allowed 항상 false."""
+    """Nested walk-forward CV 리포트 — scoring_allowed 항상 false."""
     from ..video_analysis.feature_learning_engine import collect_round_samples
     from ..video_analysis.nested_cv import run_nested_feature_cv
 
     samples = collect_round_samples()
     return to_jsonable(run_nested_feature_cv(samples, seed=seed))
+
+
+@router.get("/experimental/shap-drift")
+def get_experimental_shap_drift(seed: int = Query(42, ge=0, le=999_999)):
+    """Experimental SHAP/Drift 스텁 — scoring_allowed=false 고정."""
+    from ..video_analysis.feature_learning_engine import collect_round_samples
+    from ..video_analysis.shap_drift_stub import build_shap_drift_report
+
+    samples = collect_round_samples()
+    return to_jsonable(build_shap_drift_report(samples, seed=seed))
 
 
 class ModelRegistryActionBody(BaseModel):

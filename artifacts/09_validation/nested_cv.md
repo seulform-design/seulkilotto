@@ -59,13 +59,13 @@ aggregate(scores) → NestedCVReport
 
 ## 6. 구현 스케치
 
-- `backend/app/video_analysis/nested_cv.py` — `run_nested_feature_cv(samples)` 스텁 → 리포트만
-- API: `GET .../validation/nested-cv` (읽기)
-- UI: Explain에 backtest.metric=`nested_mean_top6` (실험 플래그 시 Experimental 배너)
+- `backend/app/video_analysis/nested_cv.py` — `run_nested_feature_cv` (**0.2.0** outer top6 hits)
+- API: `GET /api/v1/photo-analysis/nested-cv`
+- **scoring_allowed=false** 고정 (Gate·사람 승인 전)
 
 ## 7. Acceptance
 
 - [x] 설계 문서
-- [x] 스텁 함수 (scoring_allowed=false 고정)
-- [ ] 실데이터 outer≥5 폴드 리포트
+- [x] 스텁 + outer top6 hit 집계
+- [ ] outer≥5 실운영 표본에서 안정성 리포트
 - [ ] Gate 연동 후 선택적 승격

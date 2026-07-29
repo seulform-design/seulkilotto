@@ -1,0 +1,35 @@
+---
+description: 용지분석 Lotto Knowledge Artifact 원칙·갭 생성 규칙
+globs: artifacts/**/*,docs/LOTTO_KNOWLEDGE_ARTIFACT_SYSTEM.md,backend/app/video_analysis/**/*,platform/frontend/src/components/{SemiAutoComparePanel,FeatureLearningPanel,PatternMiningPanel,ReviewVerificationPanel,RoundLearningPanel,Overlap*}*
+alwaysApply: false
+---
+
+# Lotto Knowledge Artifact (용지분석)
+
+작업 전 [`artifacts/registry.json`](artifacts/registry.json) 과 [`docs/LOTTO_KNOWLEDGE_ARTIFACT_SYSTEM.md`](docs/LOTTO_KNOWLEDGE_ARTIFACT_SYSTEM.md) 를 본다.
+
+## Safety (위반 금지)
+
+- 당첨 보장·확률 향상 단정 금지. 응답/UI에 `honesty`·한계를 남긴다.
+- Experimental(`artifacts/100_experimental/`, 무속·미검증 가설)은 **추천 점수·validatedLearning 주입 금지**.
+- 복기(`review`) 사후 용지를 학습 표본에 누수시키지 않는다. `apply_intent` 분리 유지.
+- `archived_demo_*` 는 표시용 — forward 점수 주입 금지.
+
+## 확정 추천 정책
+
+- **핵심6** = `best_single` (다회차 1위 단일신호). 합의로 core6 만들지 말 것.
+- **확장18** = `best_of_engines` (min-rank). 합의는 폴백만.
+- `prefer_consensus` = false. `_inverse_diagnosis.policy` 와 히어로·주입을 일치시킬 것.
+- 반자동 **고정수**(`fixed_semi`)는 지지·패턴·랭킹에서 제외.
+
+## 없는 Artifact 추가
+
+1. `registry.json` 에서 `status: missing|partial` + `generate: true` 확인  
+2. `artifacts/_templates/new_artifact.md` → `artifacts/<id>/`  
+3. 기존 L1–L9 / V1–V4 를 깨지 않는 독립 모듈  
+4. Validation(다회차·WF·소표본 보수) 전 점수 경로 연결 금지  
+5. registry `mapped_paths` / `status` / `generation_queue` 갱신  
+
+## 출력 계약 (신규 API·리포트)
+
+가능하면: confidence, used_data, algorithms, backtest, limits, improvements, honesty.

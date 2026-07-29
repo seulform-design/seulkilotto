@@ -12,6 +12,7 @@
 **v1 설계서:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)  
 **v2 실행:** [platform/README.md](platform/README.md)  
 **데이터 격리:** [docs/DATA_ISOLATION.md](docs/DATA_ISOLATION.md)  
+**Knowledge Artifact (용지분석):** [docs/LOTTO_KNOWLEDGE_ARTIFACT_SYSTEM.md](docs/LOTTO_KNOWLEDGE_ARTIFACT_SYSTEM.md) · [artifacts/](artifacts/)  
 **공개 저장소:** [github.com/seulform-design/seulkilotto](https://github.com/seulform-design/seulkilotto)  
 **공개 앱 (Railway):** https://lotto-analyzer-production-8678.up.railway.app/
 

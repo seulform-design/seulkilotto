@@ -1,0 +1,392 @@
+{
+  "system": "Lotto Knowledge Artifact System",
+  "version": "4.0",
+  "aligned_with_sheet_analysis": true,
+  "updated": "2026-07-30",
+  "safety": {
+    "no_win_guarantee": true,
+    "no_probability_distortion": true,
+    "experimental_never_in_scoring": true,
+    "require_honesty_meta": true,
+    "jackpot_odds": "1/8145060"
+  },
+  "recommendation_policy": {
+    "core6_mode": "best_single",
+    "expand18_mode": "best_of_engines",
+    "prefer_consensus": false,
+    "source": "backend/app/video_analysis/review_verification.py#_inverse_diagnosis"
+  },
+  "learning_cycle": [
+    "Data",
+    "Knowledge",
+    "Intelligence",
+    "Validation",
+    "Learning"
+  ],
+  "analysis_pipeline": [
+    "collect",
+    "clean",
+    "validate",
+    "statistics",
+    "pattern",
+    "simulation",
+    "ai",
+    "ensemble",
+    "explain",
+    "backtest",
+    "store"
+  ],
+  "output_required_fields": [
+    "confidence",
+    "used_data",
+    "analysis_time",
+    "algorithms",
+    "backtest",
+    "pros_cons",
+    "limits",
+    "improvements"
+  ],
+  "sheet_engines": {
+    "engine1_L1": {
+      "name": "1:1 반복도·교차검증",
+      "status": "active",
+      "path": "platform/frontend/src/components/SemiAutoComparePanel.tsx"
+    },
+    "engine1_L2": {
+      "name": "당첨 패턴 학습",
+      "status": "active",
+      "path": "platform/frontend/src/components/SemiAutoComparePanel.tsx"
+    },
+    "engine1_L3": {
+      "name": "당첨번호 출현 패턴",
+      "status": "active",
+      "path": "platform/frontend/src/components/SemiAutoComparePanel.tsx"
+    },
+    "engine1_L4": {
+      "name": "번호별 반복 정밀 역산",
+      "status": "active"
+    },
+    "engine1_L5": {
+      "name": "현재 1:1 강한 패턴",
+      "status": "active"
+    },
+    "engine1_L6": {
+      "name": "일치 레벨 역산",
+      "status": "active"
+    },
+    "engine1_L7": {
+      "name": "세트 중복 역산",
+      "status": "active"
+    },
+    "engine1_L8": {
+      "name": "심층 역산",
+      "status": "active"
+    },
+    "engine2_parallel": {
+      "name": "평행회차",
+      "status": "active",
+      "path": "platform/frontend/src/components/ParallelRoundPanel.tsx"
+    },
+    "engine3_V1": {
+      "name": "Feature 학습",
+      "status": "active",
+      "path": "backend/app/video_analysis/feature_learning_engine.py"
+    },
+    "engine3_V2": {
+      "name": "Pattern Mining",
+      "status": "active",
+      "path": "backend/app/video_analysis/pattern_mining_engine.py"
+    },
+    "engine3_V3": {
+      "name": "다회차 지지 캘리브",
+      "status": "active",
+      "path": "backend/app/video_analysis/round_learning.py"
+    },
+    "engine3_V4": {
+      "name": "줄겹침 학습",
+      "status": "active",
+      "path": "backend/app/video_analysis/overlap_learning.py"
+    },
+    "engine4_L9": {
+      "name": "서버 통합 예측신호",
+      "status": "active",
+      "path": "backend/app/prediction_signals.py"
+    },
+    "validation_inverse": {
+      "name": "복기 역산·inverse_diagnosis",
+      "status": "active",
+      "path": "backend/app/video_analysis/review_verification.py"
+    },
+    "validation_ensemble": {
+      "name": "앙상블 커버리지 천장",
+      "status": "active",
+      "path": "backend/app/video_analysis/ensemble_backtest.py"
+    },
+    "validation_full_history": {
+      "name": "전체 이력 워크포워드",
+      "status": "active",
+      "path": "backend/app/video_analysis/full_history_backtest.py"
+    }
+  },
+  "core_artifacts": [
+    {
+      "id": "01_knowledge",
+      "title": "Knowledge Artifact",
+      "status": "partial",
+      "priority": "high",
+      "generate": true,
+      "covers": ["추첨방식", "확률이론", "조합론", "랜덤성", "통계", "ML개념", "정직성원칙"],
+      "mapped_paths": [
+        "artifacts/README.md",
+        "artifacts/01_knowledge/INDEX.md",
+        "docs/LOTTO_KNOWLEDGE_ARTIFACT_SYSTEM.md",
+        "docs/DATA_ISOLATION.md"
+      ],
+      "gap": "공식 출처 URL·버전드 JSON export 추가 여지"
+    },
+    {
+      "id": "02_historical",
+      "title": "Historical Artifact",
+      "status": "partial",
+      "priority": "high",
+      "generate": false,
+      "mapped_paths": [
+        "backend/app/datasets/historical.py",
+        "backend/data/lotto_history.csv",
+        "docs/DATA_ISOLATION.md"
+      ],
+      "gap": "판매점·판매금액 등 메타 일부 미수집"
+    },
+    {
+      "id": "03_draw_machine",
+      "title": "Draw Machine Artifact",
+      "status": "partial",
+      "priority": "medium",
+      "generate": true,
+      "mapped_paths": [
+        "backend/data/machine_history.csv",
+        "backend/app/machine_analytics.py"
+      ],
+      "gap": "3D·물리 시뮬레이션·공기압 등 상세 스펙 미구축"
+    },
+    {
+      "id": "04_ball",
+      "title": "Ball Artifact",
+      "status": "missing",
+      "priority": "low",
+      "generate": true,
+      "mapped_paths": [],
+      "gap": "볼 단위 무게·마모·이력 없음 (UI LottoBall만 존재)"
+    },
+    {
+      "id": "05_statistics",
+      "title": "Statistics Artifact",
+      "status": "partial",
+      "priority": "medium",
+      "generate": false,
+      "mapped_paths": [
+        "backend/app/video_analysis/stats.py",
+        "backend/app/epo"
+      ],
+      "gap": "통합 Statistics Artifact 스키마·버전드 스냅샷 미통일"
+    },
+    {
+      "id": "06_pattern",
+      "title": "Pattern Artifact",
+      "status": "active",
+      "priority": "medium",
+      "generate": false,
+      "mapped_paths": [
+        "backend/app/video_analysis/pattern_mining_engine.py",
+        "platform/frontend/src/components/PatternMiningPanel.tsx"
+      ],
+      "gap": "Association/FP-Growth 등 자동 발굴은 일부만"
+    },
+    {
+      "id": "07_simulation",
+      "title": "Simulation Artifact",
+      "status": "partial",
+      "priority": "medium",
+      "generate": true,
+      "mapped_paths": [
+        "backend/app/video_analysis/feature_learning_engine.py"
+      ],
+      "gap": "대규모 MC(백만~억) GPU 파이프라인 없음 — 엔진 내 bootstrap/MC만"
+    },
+    {
+      "id": "08_ai",
+      "title": "AI / Model Registry Artifact",
+      "status": "partial",
+      "priority": "medium",
+      "generate": true,
+      "mapped_paths": [
+        "backend/app/video_analysis/feature_learning_engine.py",
+        "backend/app/video_analysis/vision_llm.py",
+        "artifacts/08_ai/model_registry.md"
+      ],
+      "gap": "Model Rollback·토너먼트 UI·SHAP/Drift 미구축"
+    },
+    {
+      "id": "09_validation",
+      "title": "Validation Artifact",
+      "status": "active",
+      "priority": "high",
+      "generate": false,
+      "mapped_paths": [
+        "backend/app/video_analysis/review_verification.py",
+        "backend/app/video_analysis/ensemble_backtest.py",
+        "backend/app/video_analysis/full_history_backtest.py",
+        "backend/tests"
+      ],
+      "gap": "Nested CV·자동 전략 폐기 오케스트레이션은 미완"
+    },
+    {
+      "id": "10_explain",
+      "title": "Explain Artifact",
+      "status": "partial",
+      "priority": "high",
+      "generate": true,
+      "mapped_paths": [
+        "platform/frontend/src/components/SemiAutoComparePanel.tsx",
+        "platform/frontend/src/components/FeatureLearningPanel.tsx",
+        "artifacts/10_explain/SCHEMA.md"
+      ],
+      "gap": "ExplainPayload 를 API 타입·응답에 정식 연결"
+    },
+    {
+      "id": "100_experimental",
+      "title": "Experimental Artifact",
+      "status": "partial",
+      "priority": "high",
+      "generate": false,
+      "mapped_paths": [
+        "artifacts/100_experimental/INDEX.md"
+      ],
+      "gap": "hypotheses/superstition/research 하위 콘텐츠는 필요 시 추가 — 점수 주입 금지"
+    }
+  ],
+  "enterprise_directory": [
+    {"n": 1, "name": "system", "status": "partial", "note": "플랫폼 README·deploy"},
+    {"n": 2, "name": "configuration", "status": "partial"},
+    {"n": 3, "name": "logs", "status": "partial"},
+    {"n": 4, "name": "metadata", "status": "partial"},
+    {"n": 5, "name": "history", "status": "partial", "maps_to": "02_historical"},
+    {"n": 6, "name": "draw_machine", "status": "partial", "maps_to": "03_draw_machine"},
+    {"n": 7, "name": "ball", "status": "missing", "maps_to": "04_ball"},
+    {"n": 8, "name": "round", "status": "active"},
+    {"n": 9, "name": "ticket", "status": "active", "note": "용지 store"},
+    {"n": 10, "name": "number", "status": "active"},
+    {"n": 11, "name": "combination", "status": "partial"},
+    {"n": 12, "name": "statistics", "status": "partial", "maps_to": "05_statistics"},
+    {"n": 13, "name": "pattern", "status": "active", "maps_to": "06_pattern"},
+    {"n": 14, "name": "sequence", "status": "partial"},
+    {"n": 15, "name": "frequency", "status": "partial"},
+    {"n": 16, "name": "repeat", "status": "active", "note": "L1 1:1"},
+    {"n": 17, "name": "neighbor", "status": "partial"},
+    {"n": 18, "name": "hotcold", "status": "partial"},
+    {"n": 19, "name": "section", "status": "active", "note": "decade bands"},
+    {"n": 20, "name": "diagonal", "status": "missing"},
+    {"n": 21, "name": "grid", "status": "partial", "note": "sheet_grid"},
+    {"n": 22, "name": "sum", "status": "partial"},
+    {"n": 23, "name": "gap", "status": "partial"},
+    {"n": 24, "name": "ac", "status": "partial"},
+    {"n": 25, "name": "prime", "status": "partial"},
+    {"n": 26, "name": "evenodd", "status": "partial"},
+    {"n": 27, "name": "highlow", "status": "partial"},
+    {"n": 28, "name": "distribution", "status": "partial"},
+    {"n": 29, "name": "cluster", "status": "partial"},
+    {"n": 30, "name": "pair", "status": "partial"},
+    {"n": 31, "name": "triplet", "status": "partial"},
+    {"n": 32, "name": "graph", "status": "missing"},
+    {"n": 33, "name": "network", "status": "partial", "note": "L8 hub"},
+    {"n": 34, "name": "entropy", "status": "missing"},
+    {"n": 35, "name": "probability", "status": "partial"},
+    {"n": 36, "name": "randomness", "status": "partial"},
+    {"n": 37, "name": "simulation", "status": "partial", "maps_to": "07_simulation"},
+    {"n": 38, "name": "montecarlo", "status": "partial"},
+    {"n": 39, "name": "markov", "status": "missing"},
+    {"n": 40, "name": "bayesian", "status": "missing"},
+    {"n": 41, "name": "machinelearning", "status": "partial", "maps_to": "08_ai"},
+    {"n": 42, "name": "deeplearning", "status": "missing"},
+    {"n": 43, "name": "transformer", "status": "missing"},
+    {"n": 44, "name": "gnn", "status": "missing"},
+    {"n": 45, "name": "ensemble", "status": "partial"},
+    {"n": 46, "name": "prediction", "status": "active", "note": "L9"},
+    {"n": 47, "name": "validation", "status": "active", "maps_to": "09_validation"},
+    {"n": 48, "name": "backtest", "status": "active"},
+    {"n": 49, "name": "walkforward", "status": "active"},
+    {"n": 50, "name": "timeseries", "status": "partial"},
+    {"n": 51, "name": "crossvalidation", "status": "partial", "note": "LOO"},
+    {"n": 52, "name": "experiment", "status": "missing"},
+    {"n": 53, "name": "hypothesis", "status": "missing"},
+    {"n": 54, "name": "explain", "status": "partial", "maps_to": "10_explain"},
+    {"n": 55, "name": "dashboard", "status": "partial"},
+    {"n": 56, "name": "api", "status": "active"},
+    {"n": 57, "name": "database", "status": "active"},
+    {"n": 58, "name": "cache", "status": "partial"},
+    {"n": 59, "name": "scheduler", "status": "partial"},
+    {"n": 60, "name": "monitoring", "status": "missing"},
+    {"n": 61, "name": "version", "status": "partial"},
+    {"n": 62, "name": "feedback", "status": "partial", "note": "복기 역산"},
+    {"n": 63, "name": "learning", "status": "active", "note": "V1-V4"},
+    {"n": 64, "name": "optimizer", "status": "partial"},
+    {"n": 65, "name": "feature", "status": "active", "note": "V1"},
+    {"n": 66, "name": "shap", "status": "missing"},
+    {"n": 67, "name": "drift", "status": "missing"},
+    {"n": 68, "name": "quality", "status": "partial"},
+    {"n": 69, "name": "report", "status": "partial"},
+    {"n": 70, "name": "document", "status": "partial"},
+    {"n": 71, "name": "export", "status": "partial"},
+    {"n": 72, "name": "import", "status": "partial"},
+    {"n": 73, "name": "security", "status": "partial"},
+    {"n": 74, "name": "permission", "status": "missing"},
+    {"n": 75, "name": "user", "status": "partial"},
+    {"n": 76, "name": "workspace", "status": "partial"},
+    {"n": 77, "name": "plugin", "status": "missing"},
+    {"n": 78, "name": "connector", "status": "missing"},
+    {"n": 79, "name": "pipeline", "status": "partial"},
+    {"n": 80, "name": "event", "status": "missing"},
+    {"n": 81, "name": "queue", "status": "missing"},
+    {"n": 82, "name": "storage", "status": "active"},
+    {"n": 83, "name": "archive", "status": "partial"},
+    {"n": 84, "name": "snapshot", "status": "partial"},
+    {"n": 85, "name": "restore", "status": "missing"},
+    {"n": 86, "name": "retrain", "status": "partial"},
+    {"n": 87, "name": "model_registry", "status": "missing"},
+    {"n": 88, "name": "model_compare", "status": "partial"},
+    {"n": 89, "name": "benchmark", "status": "partial"},
+    {"n": 90, "name": "metrics", "status": "partial"},
+    {"n": 91, "name": "ci", "status": "partial"},
+    {"n": 92, "name": "cd", "status": "partial", "note": "deploy-to-main"},
+    {"n": 93, "name": "test", "status": "active"},
+    {"n": 94, "name": "unit_test", "status": "active"},
+    {"n": 95, "name": "integration_test", "status": "partial"},
+    {"n": 96, "name": "e2e", "status": "missing"},
+    {"n": 97, "name": "performance", "status": "missing"},
+    {"n": 98, "name": "debug", "status": "partial"},
+    {"n": 99, "name": "research", "status": "missing"},
+    {"n": 100, "name": "experimental", "status": "missing", "maps_to": "100_experimental"}
+  ],
+  "generation_queue": [
+    {
+      "id": "10_explain",
+      "reason": "ExplainPayload 를 v1Api·엔진 응답에 연결",
+      "action": "implement optional explain field from artifacts/10_explain/SCHEMA.md"
+    },
+    {
+      "id": "03_draw_machine",
+      "reason": "추첨기 스펙·물리 시뮬은 데이터 확보 후",
+      "action": "create artifacts/03_draw_machine/INDEX.md from known machine_history fields"
+    },
+    {
+      "id": "04_ball",
+      "reason": "볼 단위 데이터 없음 — Experimental 설계만",
+      "action": "spec under 100_experimental until data exists"
+    },
+    {
+      "id": "07_simulation",
+      "reason": "대규모 MC는 Experimental로 설계 후 검증",
+      "action": "spec only under experimental until validated"
+    }
+  ]
+}

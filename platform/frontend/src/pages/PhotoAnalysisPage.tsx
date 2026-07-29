@@ -30,6 +30,7 @@ import OverlapLearningServerPanel from '../components/OverlapLearningServerPanel
 import RoundDataBreakdownPanel from '../components/RoundDataBreakdownPanel';
 import NestedCvPanel from '../components/NestedCvPanel';
 import ShapDriftPanel from '../components/ShapDriftPanel';
+import WalkForwardPanel from '../components/WalkForwardPanel';
 import RoundLearningPanel from '../components/RoundLearningPanel';
 import FullHistoryBacktestPanel from '../components/FullHistoryBacktestPanel';
 import ReviewVerificationPanel from '../components/ReviewVerificationPanel';
@@ -1801,6 +1802,10 @@ export default function PhotoAnalysisPage() {
           <Stack spacing={1.5}>
             <ReviewVerificationPanel />
             {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
+            <WalkForwardPanel
+              title="종합 분석 vs 베이스라인 — Walk-Forward"
+              defaultIncludeComposite
+            />
           </Stack>
         }
         parallelEngineSlot={

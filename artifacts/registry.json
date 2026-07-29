@@ -6,7 +6,7 @@
   "completeness": {
     "sheet_engine_runtime": 0.96,
     "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. 용지분석 런타임 버그·정책·백테스트 게이트는 검수 완료. IA: 종합분석·추첨기추천 → 용지분석 ③ 번호추천.",
-    "last_audit": "2026-07-30: photo ③ size unify + Nested CV/SHAP panels; tab move; nested outer hits 0.2"
+    "last_audit": "2026-07-30: ③에서 WF백테스트·중복Venus 제거 → ④검증; Nested CV/SHAP; size unify"
   },
   "safety": {
     "no_win_guarantee": true,

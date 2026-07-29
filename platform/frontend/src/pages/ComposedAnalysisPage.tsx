@@ -463,8 +463,10 @@ export default function ComposedAnalysisPage({ embedded = false }: { embedded?: 
         )}
         {!detailBridge && photoExpected.length > 0 && (
           <Alert severity="warning" sx={{ mt: 1, py: 0.5 }} icon={false}>
-            상세분석과 순위가 다를 수 있습니다. 용지분석 → 이번회차에서{' '}
-            <strong>[상세 분석 모두 보기]</strong>를 연 뒤 이 페이지를 새로고침하면 동일 데이터로 동기화됩니다.
+            <Typography variant="caption">
+              상세분석 스냅샷과 순위가 다를 수 있습니다. 용지분석 이번회차에서 ③ 추천·상세가 계산된 뒤
+              [↻ 새로 합성]을 누르면 동일 데이터로 동기화됩니다.
+            </Typography>
           </Alert>
         )}
       </Paper>
@@ -477,7 +479,7 @@ export default function ComposedAnalysisPage({ embedded = false }: { embedded?: 
             label="물리 추첨기·상세예상 가중은 Experimental/체험용입니다. 히어로·용지 점수에 주입하지 않으며 당첨 확률은 변하지 않습니다."
           />
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-            <Typography variant="subtitle1" fontWeight={700}>
+            <Typography variant={embedded ? 'subtitle2' : 'subtitle1'} fontWeight={700}>
               🎡 물리 추첨기 — {targetRound ?? drawMachine.nextRound ?? '?'}회 예상 {machineId}호기
             </Typography>
             <Tooltip title={photoExpectedNums.length < 6 ? '상세예상번호 6개 이상 필요' : '상세분석 예상번호를 물리적으로 더 잘 뜨게 함'}>
@@ -533,8 +535,8 @@ export default function ComposedAnalysisPage({ embedded = false }: { embedded?: 
         </Paper>
       )}
 
-      {/* 🎰 학습 추첨기 시뮬레이터 */}
-      {drawMachine && (
+      {/* 🎰 학습 추첨기 시뮬레이터 — ③ 임베드 시 Venus 1대만 유지(중복 제거) */}
+      {drawMachine && !embedded && (
         <Paper sx={{ ...paperSx, border: '1px solid', borderColor: 'warning.main' }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Typography variant="subtitle1" fontWeight={700}>
@@ -843,26 +845,38 @@ export default function ComposedAnalysisPage({ embedded = false }: { embedded?: 
         ))}
       </Paper>
 
-      {/* 백테스트 검증 — 합성 전략의 historical hit rate 측정 */}
-      <Divider sx={{ my: 2 }} />
-      <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
-        🧪 백테스트 검증
-      </Typography>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-        과거 회차로 합성 전략의 적중 분포를 측정 — 시뮬레이션 실행 후 차트 확인
-      </Typography>
-      <Alert severity="info" sx={{ mb: 2 }} icon={false}>
-        <strong>🟡 디렉터 사전 안내:</strong> 합성 전략의 historical 평균 적중은
-        통상 baseline(0.8) 과 통계적 동등이거나 약간 낮습니다 (concentration 으로
-        coverage 가 줄어듦). 이는 알고리즘 부족이 아니라 게임의 본질이며,
-        본 백테스트의 가치는 그 진실을 시각적으로 입증하는 것입니다.
-      </Alert>
-      <WalkForwardPanel
-        title="종합 분석 vs 베이스라인 — Walk-Forward"
-        defaultIncludeComposite
-      />
+      {/* 백테스트 검증 — 번호추천(③)이 아니라 ④ 검증·백테스트 탭으로 이동 */}
+      {!embedded && (
+        <>
+          <Divider sx={{ my: 2 }} />
+          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
+            🧪 백테스트 검증
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+            과거 회차로 합성 전략의 적중 분포를 측정 — 시뮬레이션 실행 후 차트 확인
+          </Typography>
+          <Alert severity="info" sx={{ mb: 2 }} icon={false}>
+            <strong>🟡 디렉터 사전 안내:</strong> 합성 전략의 historical 평균 적중은
+            통상 baseline(0.8) 과 통계적 동등이거나 약간 낮습니다 (concentration 으로
+            coverage 가 줄어듦). 이는 알고리즘 부족이 아니라 게임의 본질이며,
+            본 백테스트의 가치는 그 진실을 시각적으로 입증하는 것입니다.
+          </Alert>
+          <WalkForwardPanel
+            title="종합 분석 vs 베이스라인 — Walk-Forward"
+            defaultIncludeComposite
+          />
+        </>
+      )}
+      {embedded && (
+        <Alert severity="info" sx={{ mt: 1.25, mb: 1, py: 0.5 }} icon={false}>
+          <Typography variant="caption">
+            Walk-Forward 백테스트는 <strong>④ 패턴 분석 엔진 → 검증·백테스트</strong> 탭에서 실행합니다.
+            번호 추천 탭에는 합의 번호·Venus 추첨기만 둡니다.
+          </Typography>
+        </Alert>
+      )}
 
-      <Divider sx={{ my: 2 }} />
+      <Divider sx={{ my: embedded ? 1.25 : 2 }} />
       <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block' }}>
         {HONESTY_FOOTER}
       </Typography>

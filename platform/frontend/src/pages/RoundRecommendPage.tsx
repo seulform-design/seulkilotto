@@ -66,12 +66,21 @@ export default function RoundRecommendPage({ embedded = false }: { embedded?: bo
         </Typography>
       )}
       <Alert severity="success" sx={{ mb: embedded ? 1.25 : 2, py: 0.5 }}>
-        호기는 <b>실측 데이터</b>입니다 — lottotapa {ov?.coverage.confirmed_count ?? 969}회
-        ({ov?.coverage.min_round ?? 262}~{ov?.coverage.max_round ?? 1230}) 당첨번호 100% 대조 검증.
-        1~261회는 기록 미확보로 월별순환 추정, 다음 회차는 1→2→3 순환 예측입니다.
+        {embedded ? (
+          <Typography variant="caption">
+            호기 실측(lottotapa) 기반 패턴 추천 · Venus 물리 추첨기는 위 <strong>종합 합의</strong>에만 있습니다.
+          </Typography>
+        ) : (
+          <>
+            호기는 <b>실측 데이터</b>입니다 — lottotapa {ov?.coverage.confirmed_count ?? 969}회
+            ({ov?.coverage.min_round ?? 262}~{ov?.coverage.max_round ?? 1230}) 당첨번호 100% 대조 검증.
+            1~261회는 기록 미확보로 월별순환 추정, 다음 회차는 1→2→3 순환 예측입니다.
+          </>
+        )}
       </Alert>
 
-      <MachineDrawSimulator />
+      {/* ③ 임베드: Venus는 종합분석에 1대만 — 여기서 물리 추첨기 중복 금지 */}
+      {!embedded && <MachineDrawSimulator />}
 
       {ov && (
         <Paper sx={paperSx}>
@@ -286,7 +295,17 @@ export default function RoundRecommendPage({ embedded = false }: { embedded?: bo
         </Paper>
       )}
 
-      {data?.backtest?.available && (
+      {embedded && data?.backtest?.available && (
+        <Alert severity="success" sx={{ mb: 1.25, py: 0.5 }} icon={false}>
+          <Typography variant="caption">
+            호기 엔진 lift {(data.backtest.improvement ?? 0) >= 0 ? '+' : ''}
+            {data.backtest.improvement ?? '—'}
+            · 상세 Walk-Forward는 <strong>④ 검증·백테스트</strong> 탭.
+          </Typography>
+        </Alert>
+      )}
+
+      {!embedded && data?.backtest?.available && (
         <Paper sx={{ p: 2, mb: 2, borderLeft: '4px solid', borderColor: 'success.main' }}>
           <Typography variant="subtitle1" fontWeight={700} gutterBottom>
             📈 엔진 성능 검증 (walk-forward 백테스트)

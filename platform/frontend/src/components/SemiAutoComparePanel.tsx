@@ -5143,10 +5143,24 @@ export default function SemiAutoComparePanel({
           }}
           sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
         />
+        <Chip
+          size="small"
+          variant="outlined"
+          color="info"
+          label="검증 WF → ④"
+          onClick={() => {
+            setShowPredictionDetail(true);
+            setEngineTab('verify');
+            window.setTimeout(() => {
+              document.getElementById('engine-verify-wf')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 80);
+          }}
+          sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+        />
       </Stack>
       {!showRecommendSection && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          핵심 추천 · 용지 통계 5세트 · 강수·기대수 · 종합 예측 — 접힘. 아래 종합분석·추첨기는 별도 유지.
+          핵심 · 5세트 · 합의/Venus · 호기 추천 — 접힘. 백테스트는 ④ 검증 탭.
         </Typography>
       )}
       {showRecommendSection && (
@@ -5616,16 +5630,17 @@ export default function SemiAutoComparePanel({
       </>
       )}
 
-      {/* ── 종합 분석 · 추첨기 추천 (③ 접힘과 무관 — 딥링크 타깃 항상 마운트) ── */}
+      {/* ── 종합 분석 · 호기 추천 (③ 접힘과 무관 — Venus 추첨기는 종합분석에만 1대) ── */}
       <Divider sx={{ my: 1.5 }} />
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: 10 }}>
-        종합 분석·추첨기 추천은 용지분석 공 규격과 동일한 밀도로 표시됩니다.
+        합의 번호·Venus 물리 추첨기(1대) · 호기 패턴 추천. Walk-Forward 백테스트는{' '}
+        <strong>④ 검증·백테스트</strong>로 분리했습니다.
       </Typography>
       <Stack spacing={1}>
         <Paper id="photo-embed-composite" variant="outlined" sx={{ p: 1.25 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
             <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13 }}>
-              종합 분석 · 3축 합의 · Venus
+              종합 합의 · Venus 추첨기
             </Typography>
             <Button size="small" variant="outlined" onClick={() => setShowCompositeEmbed((v) => !v)}>
               {showCompositeEmbed ? '접기 ▲' : '펼치기 ▼'}
@@ -5649,7 +5664,7 @@ export default function SemiAutoComparePanel({
         <Paper id="photo-embed-machine" variant="outlined" sx={{ p: 1.25 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
             <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13 }}>
-              추첨기 추천 · 호기별
+              호기 추천 5게임 (물리 추첨기 없음)
             </Typography>
             <Button size="small" variant="outlined" onClick={() => setShowMachineEmbed((v) => !v)}>
               {showMachineEmbed ? '접기 ▲' : '펼치기 ▼'}
@@ -7160,16 +7175,17 @@ export default function SemiAutoComparePanel({
         chips={
           <>
             <EngineStatusChip color="info" label="복기 역산 검증" />
-            <EngineStatusChip variant="outlined" label="백테스트 · 티켓 당첨 대조" />
+            <EngineStatusChip variant="outlined" label="Walk-Forward · 티켓 대조" />
           </>
         }
         intent={
           <>
-            신호 성적·다회차 백테스트·놓친 당첨·구간 커버리지로 상단 <strong>③ 번호 추천</strong>을 점검합니다.
-            역산·평행·검증학습은 <strong>학습 레이어</strong> · 후속·gap은 <strong>후속·gap</strong> 탭.
+            신호 성적·다회차 백테스트·Walk-Forward(종합 vs 베이스라인)·놓친 당첨·구간 커버리지로 상단{' '}
+            <strong>③ 번호 추천</strong>을 점검합니다. 물리 Venus 추첨기는 ③ 종합 합의에만 1대 둡니다.
           </>
         }
       />
+      <Box id="engine-verify-wf" />
       {verificationSlot}
 
       {/* ── 용지 티켓 당첨 대조 (④ 엔진 · 복기 검증) ── */}

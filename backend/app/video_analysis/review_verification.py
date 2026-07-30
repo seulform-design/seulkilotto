@@ -139,10 +139,12 @@ def _decade_balance_info(
     balanced: List[int], raw: List[int], present: set
 ) -> Dict[str, Any]:
     """구간 균형 진단 — 보정 세트의 구간 분포 + 보정으로 새로 채운 구간 + 티켓에
-    후보가 아예 없는(구조적 미포착) 구간."""
+    후보가 아예 없는(구조적 미포착) 구간 + raw→balanced 교체 감사."""
     present_decades = {_decade(n) for n in present}
     raw_decades = {_decade(n) for n in raw}
     bal_decades = {_decade(n) for n in balanced}
+    raw_set = set(raw)
+    bal_set = set(balanced)
     return {
         "spread": {DECADE_LABELS[d]: sum(1 for n in balanced if _decade(n) == d) for d in range(5)},
         "filled_decades": [
@@ -150,6 +152,258 @@ def _decade_balance_info(
             if d in present_decades and d not in raw_decades and d in bal_decades
         ],
         "empty_decades": [DECADE_LABELS[d] for d in range(5) if d not in present_decades],
+        # 구간 보정이 raw top18 멤버십을 바꿨는지 — 적중 하락 원인 추적.
+        "displaced": sorted(raw_set - bal_set),
+        "promoted": sorted(bal_set - raw_set),
+    }
+
+
+EXPAND_MODE_LABELS = {
+    "boe_balanced": "전엔진 min-rank + 구간균형",
+    "boe_raw": "전엔진 min-rank (균형 없음)",
+    "single_balanced": "단일신호 top18 + 구간균형",
+    "single_raw": "단일신호 top18",
+    "merge_balanced": "단일∪min-rank 병합 + 구간균형",
+    "merge_raw": "단일∪min-rank 병합 (넓은 recall)",
+}
+
+
+def _merge_expand_order(
+    ranked: List[int],
+    boe_order: List[int],
+    core: List[int],
+    *,
+    size: int = 18,
+) -> List[int]:
+    """core → min-rank → 단일신호 순으로 합쳐 recall 후보풀을 만든다(중복 제거)."""
+    order: List[int] = []
+    seen: set = set()
+    for n in list(core) + list(boe_order) + list(ranked):
+        if n in seen:
+            continue
+        order.append(n)
+        seen.add(n)
+        if len(order) >= max(size * 2, 30):
+            break
+    return order
+
+
+def _expand_from_mode(
+    ranked: List[int],
+    boe_order: List[int],
+    core: List[int],
+    present: set,
+    mode: str,
+    *,
+    size: int = 18,
+) -> List[int]:
+    """expand18 구성 모드 — walk-forward 가 고른 모드를 그대로 재현."""
+    if mode == "single_raw":
+        return ranked[:size]
+    if mode == "single_balanced":
+        return _balance_expand(ranked, core, present, size)
+    if mode == "boe_raw":
+        out: List[int] = list(core)
+        seen = set(out)
+        for n in boe_order:
+            if n in seen:
+                continue
+            out.append(n)
+            seen.add(n)
+            if len(out) >= size:
+                break
+        return out[:size]
+    if mode == "merge_raw":
+        return _merge_expand_order(ranked, boe_order, core, size=size)[:size]
+    if mode == "merge_balanced":
+        merged = _merge_expand_order(ranked, boe_order, core, size=size)
+        return _balance_expand(merged, core, present, size)
+    # default / boe_balanced
+    return _balance_expand(boe_order, core, present, size)
+
+
+def _loo_best_signal_key(
+    samples,
+    held_i: int,
+    *,
+    pos_by_round: List[Dict[str, Dict[int, int]]] | None = None,
+) -> str:
+    """held 회차를 빼고 다회차 top18 성적으로 신호를 고른다(누수 없음)."""
+    keys = list(_SIGNAL_LABELS.keys())
+    rounds = len(samples)
+    random_top18 = 18 * 6 / 45
+    if pos_by_round is None:
+        pos_by_round = []
+        for s in samples:
+            sigs = _signals(s.auto_lines, s.semi_lines)
+            per_sig: Dict[str, Dict[int, int]] = {}
+            for sk in keys:
+                ranked = _rank_signal(sigs[sk], sigs["total_freq"], sigs.get("auto_freq"))
+                rank_of = {num: idx + 1 for idx, num in enumerate(ranked)}
+                per_sig[sk] = {num: rank_of[num] for num in s.winning}
+            pos_by_round.append(per_sig)
+    best_sk, best_score = None, -1
+    for sk in keys:
+        if sk == "auto_freq":
+            continue
+        tot = sum(
+            sum(1 for r in pos_by_round[j][sk].values() if r <= 18)
+            for j in range(rounds)
+            if j != held_i
+        )
+        held_n = rounds - 1
+        mean18 = tot / held_n if held_n else 0
+        if mean18 <= random_top18:
+            continue
+        if tot > best_score:
+            best_score, best_sk = tot, sk
+    if best_sk is None:
+        for sk in [k for k in keys if k != "auto_freq"] or keys:
+            tot = sum(
+                sum(1 for r in pos_by_round[j][sk].values() if r <= 18)
+                for j in range(rounds)
+                if j != held_i
+            )
+            if tot > best_score:
+                best_score, best_sk = tot, sk
+    return best_sk or "support"
+
+
+def _walkforward_expand_policy(
+    samples,
+    *,
+    exclude_keys: List[str] | None = None,
+) -> Dict[str, Any]:
+    """보관 회차 LOO 로 expand18 구성 모드를 고른다.
+
+    각 held-out 회차: 나머지 회차로 신호 선택 → held 용지에 모드별 expand18 적중 비교.
+    평균 적중이 가장 높은 모드를 채택(동점이면 merge_raw → boe_balanced 우선).
+    표본 부족(<2)이면 기본 boe_balanced.
+    """
+    modes = list(EXPAND_MODE_LABELS.keys())
+    prefer_tie = ["merge_raw", "merge_balanced", "boe_balanced", "boe_raw", "single_raw", "single_balanced"]
+    random_top18 = round(18 * 6 / 45, 3)
+    rounds = len(samples)
+    if rounds < 2:
+        return {
+            "ok": False,
+            "selected_mode": "boe_balanced",
+            "selected_label": EXPAND_MODE_LABELS["boe_balanced"],
+            "rounds": rounds,
+            "random_baseline": random_top18,
+            "means": {},
+            "per_round": [],
+            "beats_random": False,
+            "beats_legacy_boe_balanced": False,
+            "reason": "표본 2회차 미만 — 기본 min-rank+균형 유지",
+        }
+
+    keys = list(_SIGNAL_LABELS.keys())
+    pos_by_round: List[Dict[str, Dict[int, int]]] = []
+    for s in samples:
+        sigs = _signals(s.auto_lines, s.semi_lines)
+        per_sig: Dict[str, Dict[int, int]] = {}
+        for sk in keys:
+            ranked = _rank_signal(sigs[sk], sigs["total_freq"], sigs.get("auto_freq"))
+            rank_of = {num: idx + 1 for idx, num in enumerate(ranked)}
+            per_sig[sk] = {num: rank_of[num] for num in s.winning}
+        pos_by_round.append(per_sig)
+
+    hit_sums = {m: 0 for m in modes}
+    per_round: List[Dict[str, Any]] = []
+    for i, s in enumerate(samples):
+        sk = _loo_best_signal_key(samples, i, pos_by_round=pos_by_round)
+        sigs = _signals(s.auto_lines, s.semi_lines)
+        ranked = _rank_signal(sigs.get(sk, sigs["support"]), sigs["total_freq"], sigs.get("auto_freq"))
+        core = ranked[:6]
+        present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
+        boe = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
+        win = set(s.winning)
+        row_hits = {}
+        for m in modes:
+            expand = _expand_from_mode(ranked, boe, core, present, m)
+            row_hits[m] = len(win & set(expand))
+            hit_sums[m] += row_hits[m]
+        per_round.append({
+            "held_round": s.round_no,
+            "chosen_signal": sk,
+            "hits": row_hits,
+        })
+
+    means = {m: round(hit_sums[m] / rounds, 3) for m in modes}
+    # 최고 평균 — 동점이면 prefer_tie 순서.
+    best_mean = max(means.values()) if means else 0.0
+    tied = [m for m in prefer_tie if means.get(m) == best_mean]
+    selected = tied[0] if tied else "boe_balanced"
+    legacy = means.get("boe_balanced", 0.0)
+    return {
+        "ok": True,
+        "selected_mode": selected,
+        "selected_label": EXPAND_MODE_LABELS.get(selected, selected),
+        "rounds": rounds,
+        "random_baseline": random_top18,
+        "means": means,
+        "per_round": per_round,
+        "beats_random": best_mean > random_top18,
+        "beats_legacy_boe_balanced": means.get(selected, 0) > legacy + 1e-9,
+        "legacy_boe_balanced_mean": legacy,
+        "selected_mean": means.get(selected),
+    }
+
+
+def _coverage_hit_audit(
+    sigs: Dict[str, Dict[int, float]],
+    cov: Dict[str, Any],
+    winning: List[int],
+    *,
+    exclude_keys: List[str] | None = None,
+) -> Dict[str, Any]:
+    """이 회차 추천 vs 당첨 — 티켓 천장·놓친 catchable·신호 순위 감사."""
+    win = [int(n) for n in winning if 1 <= int(n) <= 45]
+    win_set = set(win)
+    present = {n for n in range(1, 46) if sigs.get("total_freq", {}).get(n, 0) > 0}
+    catchable = sorted(win_set & present)
+    uncatchable = sorted(win_set - present)
+    core = set(cov.get("core6") or [])
+    expand = set(cov.get("expand18") or [])
+    ban = list(exclude_keys or [])
+    boe = _best_of_engines_order(sigs, exclude_keys=ban)
+    boe_rank = {n: i + 1 for i, n in enumerate(boe)}
+    sk = cov.get("signal") or "support"
+    ranked = _rank_signal(sigs.get(sk, sigs["support"]), sigs.get("total_freq"), sigs.get("auto_freq"))
+    single_rank = {n: i + 1 for i, n in enumerate(ranked)}
+    missed = sorted(set(catchable) - expand)
+    missed_detail = [
+        {
+            "number": n,
+            "single_rank": single_rank.get(n),
+            "boe_rank": boe_rank.get(n),
+            "in_raw_expand": n in set(cov.get("expand18_raw") or []),
+            "in_single_expand": n in set(cov.get("expand18_single") or []),
+        }
+        for n in missed
+    ]
+    random6 = round(6 * 6 / 45, 3)
+    random18 = round(18 * 6 / 45, 3)
+    return {
+        "winning": win,
+        "catchable": catchable,
+        "uncatchable": uncatchable,
+        "catchable_count": len(catchable),
+        "core6_hit": sorted(core & win_set),
+        "expand18_hit": sorted(expand & win_set),
+        "core6_count": len(core & win_set),
+        "expand18_count": len(expand & win_set),
+        "missed_catchable": missed,
+        "missed_detail": missed_detail,
+        "random_expect_core6": random6,
+        "random_expect_expand18": random18,
+        "vs_random_expand": round(len(expand & win_set) - random18, 3),
+        "ceiling_note": (
+            f"티켓 미등장 당첨 {len(uncatchable)}개 = 구조적 천장"
+            if uncatchable
+            else "당첨 6개 모두 용지 후보에 존재(천장=엔진 순위)"
+        ),
     }
 
 
@@ -505,34 +759,52 @@ def _coverage_set_from_signals(
     signal_key: str,
     selected_by: str,
     exclude_keys: List[str] | None = None,
+    expand_mode: str | None = None,
 ) -> Dict[str, Any]:
-    """단일 신호 랭킹으로 core6 + 구간균형 expand18 커버리지 세트를 만든다.
+    """단일 신호 랭킹으로 core6 + expand18 커버리지 세트를 만든다.
 
     - core6: 최고 단일신호(집중 픽) — 합의/평균은 약신호가 희석하므로 단일 우선.
-    - expand18: 전 엔진 '최선순위'(min-rank) 넓은 그물 — 어느 엔진이든 잡은 catchable
-      당첨을 최대한 담는다(단일 신호가 놓친 번호도 포함). core6 ⊂ expand18 유지.
-      banned(저성과·auto_freq) 는 min-rank 에서 제외.
+    - expand18: walk-forward 가 고른 모드(기본 merge_raw 또는 boe_balanced).
+      banned(저성과·auto_freq) 는 min-rank 에서 제외. core6 ⊂ expand18 유지.
     """
     ranked = _rank_signal(
         sigs.get(signal_key, sigs["support"]),
         sigs.get("total_freq"),
         sigs.get("auto_freq"),
     )
+    core = ranked[:6]
     present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
     raw_expand = ranked[:18]
-    single_expand = _balance_expand(ranked, ranked[:6], present, 18)
+    single_expand = _balance_expand(ranked, core, present, 18)
     boe_order = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
-    boe_expand = _balance_expand(boe_order, ranked[:6], present, 18)
+    mode = expand_mode or "boe_balanced"
+    if mode not in EXPAND_MODE_LABELS:
+        mode = "boe_balanced"
+    expand18 = _expand_from_mode(ranked, boe_order, core, present, mode)
+    # core ⊂ expand 강제 — 모드가 raw 라도 핵심6 누락 방지.
+    if not set(core).issubset(set(expand18)):
+        merged = list(core)
+        seen = set(merged)
+        for n in expand18:
+            if n not in seen:
+                merged.append(n)
+                seen.add(n)
+            if len(merged) >= 18:
+                break
+        expand18 = merged[:18]
+    boe_expand = _balance_expand(boe_order, core, present, 18)
     return {
         "signal": signal_key,
         "signal_label": _SIGNAL_LABELS.get(signal_key, signal_key),
         "selected_by": selected_by,
-        "core6": ranked[:6],
-        # 넓은 그물 = 전 엔진 최선순위(recall↑). 단일신호 그물은 참고로 병기.
-        "expand18": boe_expand,
+        "core6": core,
+        "expand18": expand18,
+        "expand18_mode": mode,
+        "expand18_mode_label": EXPAND_MODE_LABELS.get(mode, mode),
         "expand18_single": single_expand,
         "expand18_raw": raw_expand,
-        "decade_balance": _decade_balance_info(boe_expand, raw_expand, present),
+        "expand18_boe_balanced": boe_expand,
+        "decade_balance": _decade_balance_info(expand18, raw_expand, present),
         "excluded_signals": list(exclude_keys or []),
     }
 
@@ -663,6 +935,7 @@ def _inverse_diagnosis(
     multi_round: Dict[str, Any],
     missed: Dict[str, Any],
     summary: Dict[str, Any],
+    expand_wf: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """시니어/디렉터 관점 역산 진단 — 왜 엔진 당첨률(특히 top-6)이 낮았는지 문제→정책.
 
@@ -688,6 +961,9 @@ def _inverse_diagnosis(
     top18_any_pct = round(100.0 * int(miss_agg.get("top18_any") or 0) / total_w, 1)
     loo = leaderboard.get("loo") or {}
     small = bool(leaderboard.get("small_sample") or multi_round.get("small_sample"))
+    wf = expand_wf or {}
+    expand_mode = str(wf.get("selected_mode") or "boe_balanced")
+    expand_label = str(wf.get("selected_label") or EXPAND_MODE_LABELS.get(expand_mode, expand_mode))
 
     problems: List[Dict[str, Any]] = []
     # P1 — top-6 집중 실패 (구조)
@@ -753,10 +1029,32 @@ def _inverse_diagnosis(
                 + ". 순위·lift 는 참고용 — 유의성 게이트를 유지한다."
             ),
         })
+    # P6 — 구간균형이 walk-forward 에서 레거시보다 못하면 고지
+    if wf.get("ok") and wf.get("beats_legacy_boe_balanced"):
+        problems.append({
+            "id": "expand_mode_upgraded",
+            "severity": "low",
+            "title": "확장18 구성 모드 walk-forward 승격",
+            "detail": (
+                f"LOO {wf.get('rounds')}회차 기준 '{expand_label}' 평균 "
+                f"{wf.get('selected_mean')}/6 > 기존 min-rank+균형 {wf.get('legacy_boe_balanced_mean')}/6. "
+                "구간균형이 recall 을 깎던 경우를 보정한다."
+            ),
+        })
+    elif wf.get("ok") and not wf.get("beats_random"):
+        problems.append({
+            "id": "expand_wf_near_random",
+            "severity": "medium",
+            "title": "확장18 walk-forward ≈ 무작위",
+            "detail": (
+                f"선택된 모드 평균 {wf.get('selected_mean')} (무작위 {wf.get('random_baseline')}). "
+                "넓은 그물도 우연 수준 — 과신 금지, 티켓 천장·소표본을 함께 본다."
+            ),
+        })
 
     # 주입/추천 정책 — 프론트·히어로가 그대로 따른다.
     # 앙상블 백테스트 실증: 다중신호 '합의'는 약신호가 최고신호를 희석(합산 top18 < 최고단일).
-    # 정립 원칙 — core6=다회차 best 단일신호(정밀) / expand18=전 엔진 min-rank(recall).
+    # 정립 원칙 — core6=다회차 best 단일신호(정밀) / expand18=WF 선택 모드(recall).
     # prefer_consensus 는 항상 False(하위호환 필드 유지). 합의 세트는 폴백·참고용만.
     expand_first = any(p["id"] in ("top6_concentration_fail", "coverage_gap") for p in problems)
     # core6 가중 하향 / expand18 상향 (기존 0.85/0.45 → 역전)
@@ -768,11 +1066,17 @@ def _inverse_diagnosis(
         e for e in lb_rows
         if e.get("beats_random18") and e.get("key") != "auto_freq"
     ])
+    # API 하위호환: expand18_mode 는 best_of_engines|consensus 계열 + WF 세부 모드.
+    expand18_mode_api = (
+        "best_of_engines"
+        if expand_mode.startswith("boe_")
+        else ("merge_recall" if expand_mode.startswith("merge_") else "best_of_engines")
+    )
 
     actions = [
         "저성과·자동빈도 신호를 단독 커버리지에서 제외",
         "핵심6: 다회차 성적 1위 단일신호(합의 희석 금지)",
-        "확장18: 전 엔진 최선순위(min-rank) 넓은 그물",
+        f"확장18: walk-forward '{expand_label}'",
         "주입 가중: expand18 > core6 (집중 실패 시)" if expand_first else "주입 가중: 균형",
         "티켓 미등장 당첨은 분석 천장으로 고지(확률 불변)",
     ]
@@ -782,9 +1086,13 @@ def _inverse_diagnosis(
         "actions": actions,
         "verdict": (
             "집중 예측은 구조적으로 실패한다. 핵심6은 최고 단일신호로 정밀하게, "
-            "확장18은 전 엔진 min-rank 로 recall 을 확보한다. 합의·평균은 희석이므로 쓰지 않는다."
+            f"확장18은 walk-forward('{expand_label}')로 recall 을 확보한다. "
+            "합의·평균은 희석이므로 쓰지 않는다."
             if expand_first
-            else "신호 성적이 무작위와 비슷하다 — 과신 없이 best 단일·min-rank 그물만 유지한다."
+            else (
+                f"신호 성적이 무작위와 비슷하다 — 과신 없이 best 단일·"
+                f"WF expand({expand_label}) 그물만 유지한다."
+            )
         ),
         "metrics": {
             "best_signal": best.get("key") if best else None,
@@ -802,6 +1110,8 @@ def _inverse_diagnosis(
             "small_sample": small,
             "loo_generalizes": loo.get("generalizes"),
             "good_signal_count": n_good,
+            "expand_wf_mean": wf.get("selected_mean"),
+            "expand_wf_mode": expand_mode,
         },
         "policy": {
             "coverage_mode": "expand18_first" if expand_first else "balanced",
@@ -811,7 +1121,9 @@ def _inverse_diagnosis(
             # 하위호환: 합의 희석이 실증됐으므로 항상 False. 프론트는 core6_mode/expand18_mode 우선.
             "prefer_consensus": False,
             "core6_mode": "best_single",
-            "expand18_mode": "best_of_engines",
+            "expand18_mode": expand18_mode_api,
+            "expand18_variant": expand_mode,
+            "expand18_variant_label": expand_label,
             "banned_signals": under + (["auto_freq"] if "auto_freq" not in under else []),
             "preferred_signal": leaderboard.get("best_signal_multi"),
         },
@@ -864,13 +1176,24 @@ def build_review_verification() -> Dict[str, Any]:
     if "auto_freq" not in ban_keys:
         ban_keys.append("auto_freq")
 
+    # expand18 구성 모드 — 보관 회차 LOO walk-forward 로 채택(구간균형이 recall 깎는지 검증).
+    expand_wf = _walkforward_expand_policy(_samples, exclude_keys=ban_keys)
+    expand_mode = str(expand_wf.get("selected_mode") or "boe_balanced")
+
     # 복기 회차 커버리지 — 그 회차 용지 신호로 core6/expand18 (당첨 대조용).
     # 이번회차 세트와 분리해야 탭별로 추천이 달라진다.
     review_sigs = _signals(auto, semi)
     review_coverage_set = _coverage_set_from_signals(
-        review_sigs, signal_key=bkey, selected_by=selected_by, exclude_keys=ban_keys
+        review_sigs,
+        signal_key=bkey,
+        selected_by=selected_by,
+        exclude_keys=ban_keys,
+        expand_mode=expand_mode,
     )
     review_consensus_coverage = _consensus_coverage(review_sigs, leaderboard)
+    review_hit_audit = _coverage_hit_audit(
+        review_sigs, review_coverage_set, winning, exclude_keys=ban_keys
+    )
 
     # 이번회차 — 같은 신호 기준으로 '다음 회차' 커버리지 세트.
     cur = _load_current_raw()
@@ -882,7 +1205,11 @@ def build_review_verification() -> Dict[str, Any]:
     if cur_auto or cur_semi:
         csig = _signals(cur_auto, cur_semi)
         current_coverage_set = _coverage_set_from_signals(
-            csig, signal_key=bkey, selected_by=selected_by, exclude_keys=ban_keys
+            csig,
+            signal_key=bkey,
+            selected_by=selected_by,
+            exclude_keys=ban_keys,
+            expand_mode=expand_mode,
         )
         consensus_coverage = _consensus_coverage(csig, leaderboard)
 
@@ -908,6 +1235,7 @@ def build_review_verification() -> Dict[str, Any]:
         multi_round=multi_round_backtest,
         missed=missed_winner_analysis,
         summary=summary,
+        expand_wf=expand_wf,
     )
     honesty = (
         f"{review_round}회 당첨 6개 중 어떤 신호도 top-6 로는 최대 {t6}개만 잡았고, "
@@ -916,6 +1244,11 @@ def build_review_verification() -> Dict[str, Any]:
         "때문입니다. 이는 로또가 균등 무작위라는 사실의 직접 증거이며, 1등 확률"
         "(1/8,145,060)은 어떤 신호로도 변하지 않습니다."
     )
+    if review_hit_audit.get("uncatchable"):
+        honesty += (
+            f" 이번 회차 티켓 미등장 당첨 {review_hit_audit['uncatchable']} "
+            f"= 용지 기반 천장({review_hit_audit.get('ceiling_note')})."
+        )
     policy = inverse_diagnosis.get("policy") or {}
     from .explain import build_explain_payload
 
@@ -927,16 +1260,27 @@ def build_review_verification() -> Dict[str, Any]:
         honesty=honesty,
         intent="review",
         rounds=[s.round_no for s in _samples],
-        algorithms=["best_single", "best_of_engines_min_rank", "decade_balance"],
+        algorithms=[
+            "best_single",
+            "best_of_engines_min_rank",
+            "expand_walkforward",
+            str(expand_mode),
+        ],
         evidence=[
             {
                 "kind": "policy",
-                "detail": f"core6={policy.get('core6_mode')} expand18={policy.get('expand18_mode')}",
+                "detail": (
+                    f"core6={policy.get('core6_mode')} expand18={policy.get('expand18_mode')}"
+                    f" variant={policy.get('expand18_variant')}"
+                ),
                 "weight": 1.0,
             },
             {
                 "kind": "backtest",
-                "detail": f"다회차 best={bkey} top18={summary.get('best_top18')}",
+                "detail": (
+                    f"다회차 best={bkey} · WF expand={expand_mode}"
+                    f" mean={expand_wf.get('selected_mean')}"
+                ),
                 "weight": 0.8,
             },
         ],
@@ -979,6 +1323,8 @@ def build_review_verification() -> Dict[str, Any]:
         "current_round_no": int(get_current_round_no()),
         "review_coverage_set": review_coverage_set,
         "review_consensus_coverage": review_consensus_coverage,
+        "review_hit_audit": review_hit_audit,
+        "expand_walkforward": expand_wf,
         "current_coverage_set": current_coverage_set,
         "consensus_coverage": consensus_coverage,
         "multi_round_backtest": multi_round_backtest,

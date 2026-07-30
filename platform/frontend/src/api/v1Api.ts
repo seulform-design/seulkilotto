@@ -1153,6 +1153,10 @@ export interface DecadeBalance {
   filled_decades: string[];
   /** 티켓에 후보가 아예 없는(구조적 미포착) 구간. */
   empty_decades: string[];
+  /** 구간균형이 raw top18에서 밀어낸 번호 */
+  displaced?: number[];
+  /** 구간균형이 새로 올린 번호 */
+  promoted?: number[];
 }
 
 export interface ReviewVerificationResponse {
@@ -1180,8 +1184,13 @@ export interface ReviewVerificationResponse {
     selected_by?: 'multi_round' | 'single_round';
     core6: number[];
     expand18: number[];
+    expand18_mode?: string;
+    expand18_mode_label?: string;
     expand18_raw?: number[];
+    expand18_single?: number[];
+    expand18_boe_balanced?: number[];
     decade_balance?: DecadeBalance;
+    excluded_signals?: string[];
   };
   /** 복기 회차 다중신호 합의 커버리지. */
   review_consensus_coverage?: {
@@ -1193,14 +1202,56 @@ export interface ReviewVerificationResponse {
     need?: number;
     decade_balance?: DecadeBalance;
   };
+  /** 복기 추천 vs 당첨 — 티켓 천장·놓친 catchable 감사. */
+  review_hit_audit?: {
+    winning: number[];
+    catchable: number[];
+    uncatchable: number[];
+    catchable_count: number;
+    core6_hit: number[];
+    expand18_hit: number[];
+    core6_count: number;
+    expand18_count: number;
+    missed_catchable: number[];
+    missed_detail?: {
+      number: number;
+      single_rank?: number;
+      boe_rank?: number;
+      in_raw_expand?: boolean;
+      in_single_expand?: boolean;
+    }[];
+    random_expect_core6: number;
+    random_expect_expand18: number;
+    vs_random_expand?: number;
+    ceiling_note?: string;
+  };
+  /** expand18 구성 모드 LOO walk-forward. */
+  expand_walkforward?: {
+    ok: boolean;
+    selected_mode: string;
+    selected_label?: string;
+    rounds: number;
+    random_baseline: number;
+    means?: Record<string, number>;
+    beats_random?: boolean;
+    beats_legacy_boe_balanced?: boolean;
+    legacy_boe_balanced_mean?: number;
+    selected_mean?: number;
+    reason?: string;
+  };
   current_coverage_set?: {
     signal: string;
     signal_label: string;
     selected_by?: 'multi_round' | 'single_round';
     core6: number[];
     expand18: number[];
+    expand18_mode?: string;
+    expand18_mode_label?: string;
     expand18_raw?: number[];
+    expand18_single?: number[];
+    expand18_boe_balanced?: number[];
     decade_balance?: DecadeBalance;
+    excluded_signals?: string[];
   };
   /** 이번회차 다중신호 합의 커버리지 — 검증 통과 신호들이 함께 가리키는 번호. */
   consensus_coverage?: {
@@ -1309,8 +1360,11 @@ export interface ReviewVerificationResponse {
       prefer_consensus: boolean;
       /** 핵심6: best_single(다회차 1위) | consensus(폴백만) */
       core6_mode?: 'best_single' | 'consensus';
-      /** 확장18: best_of_engines(min-rank) | consensus */
-      expand18_mode?: 'best_of_engines' | 'consensus';
+      /** 확장18: best_of_engines(min-rank) | consensus | merge_recall */
+      expand18_mode?: 'best_of_engines' | 'consensus' | 'merge_recall' | string;
+      /** WF가 고른 세부 구성(merge_raw, boe_balanced 등) */
+      expand18_variant?: string;
+      expand18_variant_label?: string;
       banned_signals: string[];
       preferred_signal?: string | null;
     };

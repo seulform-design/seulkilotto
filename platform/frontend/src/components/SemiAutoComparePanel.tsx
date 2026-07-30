@@ -3554,6 +3554,9 @@ export default function SemiAutoComparePanel({
     const shareResult = ready ? optimizeForSharing(expand18, Math.min(18, expand18.length)) : null;
     const shareOpt = shareResult ? shareResult.numbers.slice(0, 6) : [];
     const agreement = consensus?.agreement ?? {};
+    const hitAudit = compareWinning && rv?.ok ? rv.review_hit_audit : undefined;
+    const expandWf = rv?.ok ? rv.expand_walkforward : undefined;
+    const decadeBal = cov?.decade_balance;
     return {
       ready,
       core6: [...core6].slice(0, 6).sort((a, b) => a - b),
@@ -3569,6 +3572,18 @@ export default function SemiAutoComparePanel({
       // 복기 탭만 당첨 대조(같은 회차 추천 vs 실제 당첨).
       showWinning: compareWinning,
       coverageMode: rv?.ok ? rv.inverse_diagnosis?.policy?.coverage_mode ?? null : null,
+      expandModeLabel:
+        cov?.expand18_mode_label
+        ?? rv?.inverse_diagnosis?.policy?.expand18_variant_label
+        ?? null,
+      expandVariant: cov?.expand18_mode ?? rv?.inverse_diagnosis?.policy?.expand18_variant ?? null,
+      expandWfMean: expandWf?.selected_mean ?? null,
+      expandWfBeatsLegacy: Boolean(expandWf?.beats_legacy_boe_balanced),
+      expandWfRounds: expandWf?.rounds ?? 0,
+      hitAudit: hitAudit ?? null,
+      decadeDisplaced: decadeBal?.displaced ?? [],
+      decadePromoted: decadeBal?.promoted ?? [],
+      problems: rv?.ok ? (rv.inverse_diagnosis?.problems ?? []).slice(0, 3) : [],
     };
   }, [
     compareWinning,
@@ -5225,11 +5240,66 @@ export default function SemiAutoComparePanel({
                 {heroRecommendation.coverageMode === 'expand18_first'
                   ? ' 역산 정책: expand18 우선 주입(집중 실패 보정).'
                   : ''}
-                {heroRecommendation.showWinning && winningSet && winningSet.size > 0
-                  ? ` 핵심6 당첨 ${heroRecommendation.core6.filter((n) => winningSet.has(n)).length}/6 · 확장18 당첨 ${heroRecommendation.expand18.filter((n) => winningSet.has(n)).length}/6.`
+                {heroRecommendation.expandModeLabel
+                  ? ` 확장18 구성: ${heroRecommendation.expandModeLabel}`
+                    + (heroRecommendation.expandWfMean != null
+                      ? ` (WF ${heroRecommendation.expandWfRounds}회 평균 ${heroRecommendation.expandWfMean}/6`
+                        + (heroRecommendation.expandWfBeatsLegacy ? ', 기존 min-rank+균형 대비↑' : '')
+                        + ').'
+                      : '.')
                   : ''}
+                {heroRecommendation.showWinning && heroRecommendation.hitAudit
+                  ? ` 핵심6 당첨 ${heroRecommendation.hitAudit.core6_count}/6 · 확장18 당첨 ${heroRecommendation.hitAudit.expand18_count}/6`
+                    + ` (무작위 기대 core≈${heroRecommendation.hitAudit.random_expect_core6} · expand≈${heroRecommendation.hitAudit.random_expect_expand18}).`
+                  : heroRecommendation.showWinning && winningSet && winningSet.size > 0
+                    ? ` 핵심6 당첨 ${heroRecommendation.core6.filter((n) => winningSet.has(n)).length}/6 · 확장18 당첨 ${heroRecommendation.expand18.filter((n) => winningSet.has(n)).length}/6.`
+                    : ''}
               </Typography>
             </Alert>
+          )}
+          {heroRecommendation.showWinning && heroRecommendation.hitAudit && (
+            <Stack spacing={0.5} sx={{ mb: 1 }}>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                <Chip
+                  size="small"
+                  color={heroRecommendation.hitAudit.uncatchable.length ? 'warning' : 'default'}
+                  label={`포착가능 ${heroRecommendation.hitAudit.catchable_count}/6 · 티켓미등장 ${heroRecommendation.hitAudit.uncatchable.length}`}
+                  sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+                />
+                {heroRecommendation.hitAudit.missed_catchable.length > 0 && (
+                  <Chip
+                    size="small"
+                    color="error"
+                    variant="outlined"
+                    label={`놓친 catchable ${heroRecommendation.hitAudit.missed_catchable.join(',')}`}
+                    sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+                  />
+                )}
+                {heroRecommendation.decadeDisplaced.length > 0 && (
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`구간보정 교체 −${heroRecommendation.decadeDisplaced.join(',')} +${heroRecommendation.decadePromoted.join(',') || '—'}`}
+                    sx={{ height: 20, fontSize: 10 }}
+                  />
+                )}
+              </Stack>
+              {heroRecommendation.hitAudit.ceiling_note && (
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                  {heroRecommendation.hitAudit.ceiling_note}
+                  {heroRecommendation.hitAudit.missed_detail && heroRecommendation.hitAudit.missed_detail.length > 0
+                    ? ` · 놓친 번호 순위: ${heroRecommendation.hitAudit.missed_detail
+                        .map((m) => `${m.number}(단일${m.single_rank ?? '?'}·min${m.boe_rank ?? '?'})`)
+                        .join(' · ')}`
+                    : ''}
+                </Typography>
+              )}
+              {heroRecommendation.problems.length > 0 && (
+                <Typography variant="caption" color="warning.main" sx={{ fontSize: 10 }}>
+                  단점: {heroRecommendation.problems.map((p) => p.title).join(' · ')}
+                </Typography>
+              )}
+            </Stack>
           )}
           <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>핵심 6</Typography>
@@ -5285,7 +5355,8 @@ export default function SemiAutoComparePanel({
               : compareWinning
                 ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다. '
                 : '이번회차 탭: 미추첨이라 당첨 대조 없음. '}
-            핵심 6 = 집중 픽 · 확장 18 = 넓은 그물 · 분산 최적 = 공동당첨 회피.
+            핵심 6 = 집중 픽 · 확장 18 = walk-forward 넓은 그물 · 분산 최적 = 공동당첨 회피.
+            {' '}복기 탭은 다음회차 학습·호기 혼입 없이 같은 회차 용지만 대조합니다(누수 방지).
             {' '}아래: 용지 통계 5세트 → 강수·기대·종합 예측. 역산·학습·검증은 <strong>④ 엔진</strong>.
           </Typography>
         </Paper>

@@ -443,6 +443,32 @@ export default function ReviewVerificationPanel() {
               {d.current_coverage_set.decade_balance.empty_decades.length > 0
                 ? ` · 티켓 후보 없는 구간: ${d.current_coverage_set.decade_balance.empty_decades.join(', ')}`
                 : ''}
+              {(d.current_coverage_set.decade_balance.displaced?.length ?? 0) > 0
+                ? ` · 교체 −${d.current_coverage_set.decade_balance.displaced!.join(',')}`
+                : ''}
+            </Typography>
+          )}
+          {d.expand_walkforward && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.35 }}>
+              📐 expand WF: {d.expand_walkforward.selected_label ?? d.expand_walkforward.selected_mode}
+              {d.expand_walkforward.selected_mean != null
+                ? ` · LOO 평균 ${d.expand_walkforward.selected_mean}/6 (무작위 ${d.expand_walkforward.random_baseline})`
+                : ''}
+              {d.current_coverage_set.expand18_mode_label
+                ? ` · 적용 ${d.current_coverage_set.expand18_mode_label}`
+                : ''}
+            </Typography>
+          )}
+          {d.review_hit_audit && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.35 }}>
+              🎯 복기 적중 감사: core {d.review_hit_audit.core6_count}/6 · expand {d.review_hit_audit.expand18_count}/6
+              {' '}· 포착가능 {d.review_hit_audit.catchable_count}/6
+              {d.review_hit_audit.missed_catchable.length
+                ? ` · 놓침 ${d.review_hit_audit.missed_catchable.join(',')}`
+                : ''}
+              {d.review_hit_audit.uncatchable.length
+                ? ` · 티켓미등장 ${d.review_hit_audit.uncatchable.join(',')}`
+                : ''}
             </Typography>
           )}
         </Box>

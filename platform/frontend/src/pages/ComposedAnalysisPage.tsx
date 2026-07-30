@@ -177,16 +177,34 @@ export default function ComposedAnalysisPage({
     bridgeTick,
     sheetIntent,
   ]);
-  // 이번회차: 지난 회차 스냅샷이 남아 있으면 폐기. 복기: 해당 intent 스냅샷 유지.
+  // 이번회차: 지난 회차 스냅샷이 남아 있으면 폐기. 복기: 활성 복기 회차와 불일치하면 폐기.
   const detailBridge = useMemo(() => {
     if (!detailBridgeRaw) return null;
-    if (sheetIntent === 'review') return detailBridgeRaw;
+    if (sheetIntent === 'review') {
+      const reviewRound = photoQuery.data?.by_intent?.review?.ticket_round
+        ? Number(photoQuery.data.by_intent.review.ticket_round)
+        : null;
+      if (
+        reviewRound != null
+        && Number.isFinite(reviewRound)
+        && detailBridgeRaw.round != null
+        && detailBridgeRaw.round !== reviewRound
+      ) {
+        return null;
+      }
+      return detailBridgeRaw;
+    }
     const next = machineQuery.data?.next_round;
     if (next != null && detailBridgeRaw.round != null && detailBridgeRaw.round !== next) {
       return null;
     }
     return detailBridgeRaw;
-  }, [detailBridgeRaw, machineQuery.data?.next_round, sheetIntent]);
+  }, [
+    detailBridgeRaw,
+    machineQuery.data?.next_round,
+    sheetIntent,
+    photoQuery.data?.by_intent?.review?.ticket_round,
+  ]);
 
   const photoExpected = useMemo((): (PhotoExpectedNumber & { detailSource?: string })[] => {
     // ① 상세분석 스냅샷 — expand18(커버리지) 우선

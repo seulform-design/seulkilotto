@@ -342,6 +342,14 @@ class PatternScore:
     exclude_reasons: List[str]
     use_reasons: List[str]
     per_round: List[Dict[str, Any]]
+    base_hits: float = 0.0
+    # ── 진짜 out-of-sample(확장윈도우 walk-forward) 지표 — build 단계에서 채움 ──
+    in_sample_adopted: bool = False
+    oos_available: bool = False
+    oos_appear: int = 0
+    oos_mean_hits: float = 0.0
+    oos_lift: float = 0.0
+    oos_confirmed: bool = False
 
 
 def _pattern_win_overlap(p: Pattern, sheet: RoundSheet) -> float:
@@ -538,7 +546,41 @@ def validate_pattern(p: Pattern, rounds: List[RoundSheet], rng: random.Random) -
         exclude_reasons=exclude,
         use_reasons=use,
         per_round=per_round,
+        base_hits=round(base_hits, 4),
     )
+
+
+# ---------------------------------------------------------------------------
+# Genuine out-of-sample validation (expanding-window walk-forward)
+# ---------------------------------------------------------------------------
+
+def walk_forward_oos(
+    full_patterns: List[Pattern], rounds: List[RoundSheet]
+) -> Tuple[Dict[str, int], Dict[str, List[float]]]:
+    """확장 윈도우 walk-forward — **진짜 out-of-sample** 채점.
+
+    기존 validate_pattern 은 mine 에 쓴 회차와 **같은** 회차로 채점하는 in-sample 이라
+    lift/perm 이 낙관적이다. 여기서는 회차를 시간순으로 두고, 각 시점 R(2번째 회차부터)을
+    **그 이전 회차(prefix)만으로 mine 된 Pattern** 에 한해서만 R 의 용지에서 fire 하는지 보고,
+    fire 하면 R 의 당첨과 겹침(top_hits)을 기록한다.
+
+    Pattern 의 '존재(mine 여부)'와 '점수(hit)' 모두 R 을 학습에 쓰지 않으므로 in-sample
+    낙관이 제거된다(누수 없음: winning 은 채점에만 사용, mine·fire 는 용지 구조만).
+    """
+    by_id = {p.id: p for p in full_patterns}
+    oos_fire: Dict[str, int] = {p.id: 0 for p in full_patterns}
+    oos_hits: Dict[str, List[float]] = {p.id: [] for p in full_patterns}
+    for i in range(1, len(rounds)):
+        train = rounds[:i]
+        test = rounds[i]
+        mined_ids = {p.id for p in mine_patterns(train)}
+        for pid in mined_ids:
+            p = by_id.get(pid)
+            if p is None or not p.fires(test):
+                continue
+            oos_fire[pid] += 1
+            oos_hits[pid].append(_pattern_top_hits(p, test))
+    return oos_fire, oos_hits
 
 
 # ---------------------------------------------------------------------------
@@ -846,7 +888,33 @@ def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") ->
     rng = random.Random(seed)
     patterns = mine_patterns(rounds)
     scores = [validate_pattern(p, rounds, rng) for p in patterns]
-    scores.sort(key=lambda s: (-int(s.adopted), -s.lift_vs_baseline, s.permutation_p))
+
+    # ── 진짜 out-of-sample(확장윈도우 walk-forward)로 채택을 조인다 ─────────────────
+    # 기존 검증(wf_mean/lift/perm)은 mine 에 쓴 회차와 같은 회차로 채점한 in-sample 이라
+    # 낙관적이다. 회차가 3개 이상이면 각 회차를 '그 이전 회차로만 mine 된 Pattern' 으로만
+    # 소급 채점(누수 없음)하고, out-of-sample 재현(≥1 회차 fire + 기대치 이상 적중)을 만족한
+    # Pattern 만 최종 채택으로 남긴다. 표본이 작으면(<3회차) OOS 불가 → in-sample 유지.
+    oos_available = len(rounds) >= 3
+    oos_fire, oos_hits = walk_forward_oos(patterns, rounds) if oos_available else ({}, {})
+    for s in scores:
+        pid = s.pattern.id
+        hits = oos_hits.get(pid, []) if oos_available else []
+        s.oos_available = oos_available
+        s.oos_appear = len(hits)
+        s.oos_mean_hits = round(float(np.mean(hits)), 4) if hits else 0.0
+        s.oos_lift = round(s.oos_mean_hits / s.base_hits, 3) if s.base_hits else 0.0
+        # out-of-sample 에서 최소 1회 재현 + 기대치(base_hits) 이상 적중해야 확인.
+        s.oos_confirmed = bool(s.oos_appear >= 1 and s.oos_mean_hits >= s.base_hits)
+        s.in_sample_adopted = s.adopted
+        if oos_available:
+            s.adopted = bool(s.adopted and s.oos_confirmed)
+            if s.in_sample_adopted and not s.oos_confirmed:
+                s.exclude_reasons = list(s.exclude_reasons) + [
+                    f"out-of-sample 미재현 (OOS fire {s.oos_appear}·lift {s.oos_lift})"
+                ]
+    scores.sort(
+        key=lambda s: (-int(s.adopted), -s.oos_lift, -s.lift_vs_baseline, s.permutation_p)
+    )
     adopted = [s for s in scores if s.adopted]
     from .stats import expected_false_positives
     _mt = expected_false_positives(len(scores), P_ADOPT)
@@ -888,15 +956,29 @@ def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") ->
             "wf_mean_hits": s.wf_mean_hits,
             "lift_vs_baseline": s.lift_vs_baseline,
             "permutation_p": s.permutation_p,
+            "base_hits": s.base_hits,
+            "in_sample_adopted": s.in_sample_adopted,
+            "oos_available": s.oos_available,
+            "oos_appear": s.oos_appear,
+            "oos_mean_hits": s.oos_mean_hits,
+            "oos_lift": s.oos_lift,
+            "oos_confirmed": s.oos_confirmed,
             "adopted": s.adopted,
             "use_reasons": s.use_reasons,
             "exclude_reasons": s.exclude_reasons,
             "per_round": s.per_round,
         }
 
+    _in_sample_n = sum(1 for s in scores if s.in_sample_adopted)
     honesty = (
         f"보관 {len(rounds)}개 회차로 Pattern {len(scores)}개를 탐색·검증했습니다. "
-        "목표는 패턴을 사실로 단정하는 것이 아니라, 재현되는 후보만 골라 설명 가능하게 쓰는 것입니다. "
+        + (
+            f"in-sample 통과 {_in_sample_n}개 중 out-of-sample(확장윈도우 walk-forward, "
+            f"이전 회차로만 학습→다음 회차로 채점) 재현까지 통과한 {len(adopted)}개만 최종 채택했습니다. "
+            if oos_available
+            else "회차가 3개 미만이라 out-of-sample 재확인은 아직 불가합니다(회차 누적 필요). "
+        )
+        + "목표는 패턴을 사실로 단정하는 것이 아니라, 재현되는 후보만 골라 설명 가능하게 쓰는 것입니다. "
         "1등 확률(1/8,145,060)은 변하지 않습니다."
     )
     demo_blocked = str(source).startswith("archived_demo_")
@@ -992,6 +1074,20 @@ def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") ->
             "adopted_count": len(adopted),
             "exceeds_chance": bool(len(adopted) > _mt["expected_false_positives"]),
         },
+        # in-sample 통과분 중 진짜 out-of-sample(확장윈도우 walk-forward)까지 재현한 수.
+        "oos_summary": {
+            "available": oos_available,
+            "in_sample_adopted": _in_sample_n,
+            "oos_confirmed": len(adopted),
+            "dropped_by_oos": max(0, _in_sample_n - len(adopted)) if oos_available else 0,
+            "test_rounds": max(0, len(rounds) - 1) if oos_available else 0,
+            "note": (
+                "확장윈도우 walk-forward: 각 회차를 '그 이전 회차로만 학습된 Pattern' 으로만 "
+                "소급 채점(누수 없음). in-sample 우수해도 out-of-sample 재현 못하면 채택 제외."
+                if oos_available
+                else "회차 3개 미만 — out-of-sample 검증 불가(in-sample 채택 유지, 회차 누적 필요)."
+            ),
+        },
         "patterns": pattern_rows,
         "adopted_patterns": adopted_rows,
         "clusters": clusters[:30],
@@ -1004,11 +1100,12 @@ def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") ->
         "pipeline": [
             "전수 학습(자동·반자동·매치·강한후보·구조)",
             "Pattern Mining(조합·배치·거리·관계)",
-            "Walk-Forward / Rolling / Time-Split / Backtest",
+            "In-sample 검증(lift·permutation·time-split)",
+            "진짜 OOS 재확인(확장윈도우 walk-forward — 이전 회차로만 학습→다음 회차 채점)",
             "Pattern Score·Cluster",
             "Auto Feature Engineering",
             "Feature Selection(MI/Corr/Perm)",
-            "검증 통과 Pattern만 추천·근거 출력",
+            "in-sample+OOS 통과 Pattern만 추천·근거 출력",
             "새 복기 추가 시 전체 재탐색(호출 시 재계산)",
         ],
         "baselines": {"uniform_top6_hits": round(BASELINE_TOP6, 4)},

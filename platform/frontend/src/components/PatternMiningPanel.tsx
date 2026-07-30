@@ -104,8 +104,9 @@ export default function PatternMiningPanel({
       intent={
         <>
           자동·반자동·매치카드·강한후보·간격·구간배치를 <strong>전수 학습</strong>해 Pattern 을 자동
-          생성하고, Walk-Forward / Rolling / Time-Split / Backtest 로 검증합니다. 검증 통과분만
-          추천하며, 각 번호에 Pattern·Cluster·기여도를 함께 표시합니다.
+          생성하고, in-sample(lift·permutation) 검증 후 <strong>진짜 out-of-sample</strong>(확장윈도우
+          walk-forward — 이전 회차로만 학습→다음 회차로 채점, 누수 없음)까지 재현한 Pattern 만
+          추천합니다. 각 번호에 Pattern·Cluster·기여도를 함께 표시합니다.
         </>
       }
     >
@@ -141,6 +142,28 @@ export default function PatternMiningPanel({
               ? '기대 오탐을 넘어 신호 가능성(그래도 소표본 주의).'
               : '기대 오탐 이하 → 우연 채택과 구분되지 않습니다(과신 금물).'}
             {' '}엄격 기준(Bonferroni) p&lt;{d.multiple_testing.bonferroni_alpha}. 확률 불변.
+          </Typography>
+        </Alert>
+      )}
+
+      {d.oos_summary && (
+        <Alert
+          severity={d.oos_summary.available ? (d.oos_summary.oos_confirmed > 0 ? 'success' : 'info') : 'warning'}
+          sx={{ mb: 1.5, py: 0.5 }}
+        >
+          <Typography variant="caption">
+            🧪 <strong>진짜 out-of-sample 검증</strong>(확장윈도우 walk-forward):{' '}
+            {d.oos_summary.available ? (
+              <>
+                in-sample 통과 <strong>{d.oos_summary.in_sample_adopted}개</strong> 중 이전 회차로만
+                학습해 다음 회차에서도 재현된 <strong>{d.oos_summary.oos_confirmed}개</strong>만 최종
+                채택(누수 없음). in-sample만 통과하고 OOS 미재현{' '}
+                <strong>{d.oos_summary.dropped_by_oos}개</strong>는 제외 · 검증 회차{' '}
+                {d.oos_summary.test_rounds}개. 확률 불변.
+              </>
+            ) : (
+              <>회차 3개 미만 — out-of-sample 재확인 불가(in-sample 채택 유지, 회차 누적 필요).</>
+            )}
           </Typography>
         </Alert>
       )}
@@ -207,6 +230,7 @@ export default function PatternMiningPanel({
                 <TableCell align="right">출현</TableCell>
                 <TableCell align="right">WF</TableCell>
                 <TableCell align="right">Lift</TableCell>
+                <TableCell align="right">OOS</TableCell>
                 <TableCell align="right">안정성</TableCell>
                 <TableCell align="right">p</TableCell>
               </TableRow>
@@ -224,6 +248,19 @@ export default function PatternMiningPanel({
                   </TableCell>
                   <TableCell align="right" sx={{ fontSize: 11 }}>
                     {(p.lift_vs_baseline ?? 0).toFixed(2)}
+                  </TableCell>
+                  <TableCell align="right" sx={{ fontSize: 11 }}>
+                    {p.oos_confirmed ? (
+                      <Chip
+                        size="small"
+                        color="success"
+                        variant="outlined"
+                        label={`OOS ${(p.oos_lift ?? 0).toFixed(1)}×`}
+                        sx={{ height: 16, fontSize: 8 }}
+                      />
+                    ) : (
+                      <span style={{ opacity: 0.5 }}>—</span>
+                    )}
                   </TableCell>
                   <TableCell align="right" sx={{ fontSize: 11 }}>
                     {(p.stability ?? 0).toFixed(2)}

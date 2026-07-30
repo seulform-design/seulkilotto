@@ -1786,6 +1786,15 @@ export interface PatternMiningPattern {
   wf_mean_hits: number;
   lift_vs_baseline: number;
   permutation_p: number;
+  base_hits?: number;
+  /** in-sample(mine 와 같은 회차로 채점) 채택 여부 — 낙관적. */
+  in_sample_adopted?: boolean;
+  /** 진짜 out-of-sample(확장윈도우 walk-forward) 지표. */
+  oos_available?: boolean;
+  oos_appear?: number;
+  oos_mean_hits?: number;
+  oos_lift?: number;
+  oos_confirmed?: boolean;
   adopted: boolean;
   use_reasons: string[];
   exclude_reasons: string[];
@@ -1809,6 +1818,15 @@ export interface PatternMiningResponse {
     bonferroni_alpha: number;
     adopted_count: number;
     exceeds_chance: boolean;
+  };
+  /** in-sample 통과 중 진짜 out-of-sample(확장윈도우 walk-forward)까지 재현한 수. */
+  oos_summary?: {
+    available: boolean;
+    in_sample_adopted: number;
+    oos_confirmed: number;
+    dropped_by_oos: number;
+    test_rounds: number;
+    note?: string;
   };
   dataset?: {
     rounds: {

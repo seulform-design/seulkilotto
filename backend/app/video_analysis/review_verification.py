@@ -161,11 +161,17 @@ def _decade_balance_info(
 EXPAND_MODE_LABELS = {
     "boe_balanced": "전엔진 min-rank + 구간균형",
     "boe_raw": "전엔진 min-rank (균형 없음)",
-    "single_balanced": "단일신호 top18 + 구간균형",
-    "single_raw": "단일신호 top18",
+    "single_balanced": "단일신호 topK + 구간균형",
+    "single_raw": "단일신호 topK",
     "merge_balanced": "단일∪min-rank 병합 + 구간균형",
     "merge_raw": "단일∪min-rank 병합 (넓은 recall)",
 }
+
+# 넓은 그물 후보 크기 — 1234 실측: support top18=3/6, top24=5/6 (19·35가 23–24위).
+# 18만 쓰면 '가까운 미포착대'를 구조적으로 자른다.
+EXPAND_SIZE_CANDIDATES = (18, 24)
+DEFAULT_EXPAND_SIZE = 24
+DEFAULT_EXPAND_MODE = "single_raw"
 
 
 def _merge_expand_order(
@@ -195,9 +201,10 @@ def _expand_from_mode(
     present: set,
     mode: str,
     *,
-    size: int = 18,
+    size: int = DEFAULT_EXPAND_SIZE,
 ) -> List[int]:
-    """expand18 구성 모드 — walk-forward 가 고른 모드를 그대로 재현."""
+    """expand 넓은 그물 구성 모드 — walk-forward 가 고른 (mode, size) 를 그대로 재현."""
+    size = max(6, min(30, int(size)))
     if mode == "single_raw":
         return ranked[:size]
     if mode == "single_balanced":
@@ -220,6 +227,20 @@ def _expand_from_mode(
         return _balance_expand(merged, core, present, size)
     # default / boe_balanced
     return _balance_expand(boe_order, core, present, size)
+
+
+def _ensure_core_subset(expand: List[int], core: List[int], size: int) -> List[int]:
+    if set(core).issubset(set(expand)):
+        return expand[:size]
+    merged = list(core)
+    seen = set(merged)
+    for n in expand:
+        if n not in seen:
+            merged.append(n)
+            seen.add(n)
+        if len(merged) >= size:
+            break
+    return merged[:size]
 
 
 def _loo_best_signal_key(
@@ -274,28 +295,46 @@ def _walkforward_expand_policy(
     *,
     exclude_keys: List[str] | None = None,
 ) -> Dict[str, Any]:
-    """보관 회차 LOO 로 expand18 구성 모드를 고른다.
+    """보관 회차 LOO 로 expand (mode × size) 를 고른다.
 
-    각 held-out 회차: 나머지 회차로 신호 선택 → held 용지에 모드별 expand18 적중 비교.
-    평균 적중이 가장 높은 모드를 채택(동점이면 merge_raw → boe_balanced 우선).
-    표본 부족(<2)이면 기본 boe_balanced.
+    각 held-out 회차: 나머지 회차로 신호 선택 → held 용지에 모드·크기별 적중 비교.
+    평균 적중 최대를 채택. 동점이면 더 큰 size(가까운 미포착대 보존) →
+    single_balanced → merge → boe → single_raw 순.
+    표본 부족(<2)이면 기본 single_raw@24 (1234 실측: top18이 23–24위 당첨을 자르던 실패 보정).
     """
     modes = list(EXPAND_MODE_LABELS.keys())
-    prefer_tie = ["merge_raw", "merge_balanced", "boe_balanced", "boe_raw", "single_raw", "single_balanced"]
-    random_top18 = round(18 * 6 / 45, 3)
+    sizes = list(EXPAND_SIZE_CANDIDATES)
+    # 동점 시: 큰 그물 우선(recall) · 균형 우선 · raw 단일은 최후
+    prefer_tie = [
+        (m, s)
+        for s in sorted(sizes, reverse=True)
+        for m in (
+            "single_balanced",
+            "merge_balanced",
+            "merge_raw",
+            "boe_balanced",
+            "boe_raw",
+            "single_raw",
+        )
+        if m in modes
+    ]
     rounds = len(samples)
     if rounds < 2:
         return {
             "ok": False,
-            "selected_mode": "boe_balanced",
-            "selected_label": EXPAND_MODE_LABELS["boe_balanced"],
+            "selected_mode": DEFAULT_EXPAND_MODE,
+            "selected_size": DEFAULT_EXPAND_SIZE,
+            "selected_label": (
+                f"{EXPAND_MODE_LABELS[DEFAULT_EXPAND_MODE]} · top{DEFAULT_EXPAND_SIZE}"
+            ),
             "rounds": rounds,
-            "random_baseline": random_top18,
+            "random_baseline": round(DEFAULT_EXPAND_SIZE * 6 / 45, 3),
             "means": {},
+            "means_by_size": {},
             "per_round": [],
             "beats_random": False,
             "beats_legacy_boe_balanced": False,
-            "reason": "표본 2회차 미만 — 기본 min-rank+균형 유지",
+            "reason": f"표본 2회차 미만 — 기본 {DEFAULT_EXPAND_MODE}@{DEFAULT_EXPAND_SIZE}",
         }
 
     keys = list(_SIGNAL_LABELS.keys())
@@ -309,7 +348,8 @@ def _walkforward_expand_policy(
             per_sig[sk] = {num: rank_of[num] for num in s.winning}
         pos_by_round.append(per_sig)
 
-    hit_sums = {m: 0 for m in modes}
+    combos = [(m, s) for m in modes for s in sizes]
+    hit_sums = {f"{m}@{s}": 0 for m, s in combos}
     per_round: List[Dict[str, Any]] = []
     for i, s in enumerate(samples):
         sk = _loo_best_signal_key(samples, i, pos_by_round=pos_by_round)
@@ -319,35 +359,52 @@ def _walkforward_expand_policy(
         present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
         boe = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
         win = set(s.winning)
-        row_hits = {}
-        for m in modes:
-            expand = _expand_from_mode(ranked, boe, core, present, m)
-            row_hits[m] = len(win & set(expand))
-            hit_sums[m] += row_hits[m]
+        row_hits: Dict[str, int] = {}
+        for m, sz in combos:
+            expand = _expand_from_mode(ranked, boe, core, present, m, size=sz)
+            key = f"{m}@{sz}"
+            row_hits[key] = len(win & set(expand))
+            hit_sums[key] += row_hits[key]
         per_round.append({
             "held_round": s.round_no,
             "chosen_signal": sk,
             "hits": row_hits,
         })
 
-    means = {m: round(hit_sums[m] / rounds, 3) for m in modes}
-    # 최고 평균 — 동점이면 prefer_tie 순서.
+    means = {k: round(hit_sums[k] / rounds, 3) for k in hit_sums}
+    means_by_size = {
+        str(sz): round(
+            max(hit_sums[f"{m}@{sz}"] for m in modes) / rounds,
+            3,
+        )
+        for sz in sizes
+    }
     best_mean = max(means.values()) if means else 0.0
-    tied = [m for m in prefer_tie if means.get(m) == best_mean]
-    selected = tied[0] if tied else "boe_balanced"
-    legacy = means.get("boe_balanced", 0.0)
+    tied = [pair for pair in prefer_tie if means.get(f"{pair[0]}@{pair[1]}") == best_mean]
+    selected_mode, selected_size = tied[0] if tied else (DEFAULT_EXPAND_MODE, DEFAULT_EXPAND_SIZE)
+    legacy_key = "boe_balanced@18"
+    legacy = means.get(legacy_key, means.get("boe_balanced@24", 0.0))
+    selected_key = f"{selected_mode}@{selected_size}"
+    random_base = round(selected_size * 6 / 45, 3)
+    # top24 가 top18 최고보다 유의하게 크면 크기 승격 근거로 고지
+    lift_24 = means_by_size.get("24", 0) - means_by_size.get("18", 0)
     return {
         "ok": True,
-        "selected_mode": selected,
-        "selected_label": EXPAND_MODE_LABELS.get(selected, selected),
+        "selected_mode": selected_mode,
+        "selected_size": selected_size,
+        "selected_label": (
+            f"{EXPAND_MODE_LABELS.get(selected_mode, selected_mode)} · top{selected_size}"
+        ),
         "rounds": rounds,
-        "random_baseline": random_top18,
+        "random_baseline": random_base,
         "means": means,
+        "means_by_size": means_by_size,
+        "size_lift_24_vs_18": round(lift_24, 3),
         "per_round": per_round,
-        "beats_random": best_mean > random_top18,
-        "beats_legacy_boe_balanced": means.get(selected, 0) > legacy + 1e-9,
+        "beats_random": best_mean > random_base,
+        "beats_legacy_boe_balanced": means.get(selected_key, 0) > legacy + 1e-9,
         "legacy_boe_balanced_mean": legacy,
-        "selected_mean": means.get(selected),
+        "selected_mean": means.get(selected_key),
     }
 
 
@@ -384,7 +441,9 @@ def _coverage_hit_audit(
         for n in missed
     ]
     random6 = round(6 * 6 / 45, 3)
-    random18 = round(18 * 6 / 45, 3)
+    expand_n = max(1, len(expand))
+    random_expand = round(expand_n * 6 / 45, 3)
+    top18_hit = len(win_set & set(cov.get("expand18_precision") or cov.get("expand18_raw") or []))
     return {
         "winning": win,
         "catchable": catchable,
@@ -394,11 +453,13 @@ def _coverage_hit_audit(
         "expand18_hit": sorted(expand & win_set),
         "core6_count": len(core & win_set),
         "expand18_count": len(expand & win_set),
+        "expand_size": expand_n,
+        "expand18_precision_count": top18_hit,
         "missed_catchable": missed,
         "missed_detail": missed_detail,
         "random_expect_core6": random6,
-        "random_expect_expand18": random18,
-        "vs_random_expand": round(len(expand & win_set) - random18, 3),
+        "random_expect_expand18": random_expand,
+        "vs_random_expand": round(len(expand & win_set) - random_expand, 3),
         "ceiling_note": (
             f"티켓 미등장 당첨 {len(uncatchable)}개 = 구조적 천장"
             if uncatchable
@@ -760,12 +821,13 @@ def _coverage_set_from_signals(
     selected_by: str,
     exclude_keys: List[str] | None = None,
     expand_mode: str | None = None,
+    expand_size: int | None = None,
 ) -> Dict[str, Any]:
-    """단일 신호 랭킹으로 core6 + expand18 커버리지 세트를 만든다.
+    """단일 신호 랭킹으로 core6 + expand 넓은 그물 커버리지 세트를 만든다.
 
     - core6: 최고 단일신호(집중 픽) — 합의/평균은 약신호가 희석하므로 단일 우선.
-    - expand18: walk-forward 가 고른 모드(기본 merge_raw 또는 boe_balanced).
-      banned(저성과·auto_freq) 는 min-rank 에서 제외. core6 ⊂ expand18 유지.
+    - expand: walk-forward 가 고른 (mode, size). size=24 기본 — top18이 자르던
+      가까운 미포착대(예: 1234회 19·35 = 지지 23–24위)를 담는다.
     """
     ranked = _rank_signal(
         sigs.get(signal_key, sigs["support"]),
@@ -774,38 +836,45 @@ def _coverage_set_from_signals(
     )
     core = ranked[:6]
     present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
-    raw_expand = ranked[:18]
+    precision18 = ranked[:18]
     single_expand = _balance_expand(ranked, core, present, 18)
     boe_order = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
-    mode = expand_mode or "boe_balanced"
+    mode = expand_mode or DEFAULT_EXPAND_MODE
     if mode not in EXPAND_MODE_LABELS:
-        mode = "boe_balanced"
-    expand18 = _expand_from_mode(ranked, boe_order, core, present, mode)
-    # core ⊂ expand 강제 — 모드가 raw 라도 핵심6 누락 방지.
-    if not set(core).issubset(set(expand18)):
-        merged = list(core)
-        seen = set(merged)
-        for n in expand18:
-            if n not in seen:
-                merged.append(n)
-                seen.add(n)
-            if len(merged) >= 18:
-                break
-        expand18 = merged[:18]
-    boe_expand = _balance_expand(boe_order, core, present, 18)
+        mode = DEFAULT_EXPAND_MODE
+    size = int(expand_size or DEFAULT_EXPAND_SIZE)
+    if size not in EXPAND_SIZE_CANDIDATES:
+        size = DEFAULT_EXPAND_SIZE
+    expand = _ensure_core_subset(
+        _expand_from_mode(ranked, boe_order, core, present, mode, size=size),
+        core,
+        size,
+    )
+    boe_expand = _balance_expand(boe_order, core, present, size)
     return {
         "signal": signal_key,
         "signal_label": _SIGNAL_LABELS.get(signal_key, signal_key),
         "selected_by": selected_by,
         "core6": core,
-        "expand18": expand18,
+        # 하위호환: 필드명 expand18 유지 — 실제 길이는 expand_size(18|24).
+        "expand18": expand,
+        "expand_size": size,
         "expand18_mode": mode,
-        "expand18_mode_label": EXPAND_MODE_LABELS.get(mode, mode),
+        "expand18_mode_label": (
+            f"{EXPAND_MODE_LABELS.get(mode, mode)} · top{size}"
+        ),
+        "expand18_precision": precision18,
         "expand18_single": single_expand,
-        "expand18_raw": raw_expand,
+        "expand18_raw": precision18,
         "expand18_boe_balanced": boe_expand,
-        "decade_balance": _decade_balance_info(expand18, raw_expand, present),
+        "decade_balance": _decade_balance_info(expand, precision18, present),
         "excluded_signals": list(exclude_keys or []),
+        # 진단: 이 회차 신호 top18 vs top24 적중 차이(당첨 알 때 복기 전용).
+        "precision_gap_hint": {
+            "top18": 18,
+            "top24": 24,
+            "note": "가까운 미포착대는 top18~top24에 몰리는 경우가 많음",
+        },
     }
 
 
@@ -962,8 +1031,12 @@ def _inverse_diagnosis(
     loo = leaderboard.get("loo") or {}
     small = bool(leaderboard.get("small_sample") or multi_round.get("small_sample"))
     wf = expand_wf or {}
-    expand_mode = str(wf.get("selected_mode") or "boe_balanced")
-    expand_label = str(wf.get("selected_label") or EXPAND_MODE_LABELS.get(expand_mode, expand_mode))
+    expand_mode = str(wf.get("selected_mode") or DEFAULT_EXPAND_MODE)
+    expand_size = int(wf.get("selected_size") or DEFAULT_EXPAND_SIZE)
+    expand_label = str(
+        wf.get("selected_label")
+        or f"{EXPAND_MODE_LABELS.get(expand_mode, expand_mode)} · top{expand_size}"
+    )
 
     problems: List[Dict[str, Any]] = []
     # P1 — top-6 집중 실패 (구조)
@@ -1029,23 +1102,32 @@ def _inverse_diagnosis(
                 + ". 순위·lift 는 참고용 — 유의성 게이트를 유지한다."
             ),
         })
-    # P6 — 구간균형이 walk-forward 에서 레거시보다 못하면 고지
+    # P6 — 구간균형/크기 walk-forward
+    if wf.get("ok") and float(wf.get("size_lift_24_vs_18") or 0) >= 0.5:
+        problems.append({
+            "id": "expand_top18_truncation",
+            "severity": "high",
+            "title": "top18 절단이 가까운 당첨을 놓침",
+            "detail": (
+                f"LOO 기준 top24 최고평균 − top18 최고평균 = {wf.get('size_lift_24_vs_18')}/6. "
+                "지지 신호 19–24위 대역(예: 1234회 19·35)이 top18에서 잘린다 → 확장망 top24."
+            ),
+        })
     if wf.get("ok") and wf.get("beats_legacy_boe_balanced"):
         problems.append({
             "id": "expand_mode_upgraded",
             "severity": "low",
-            "title": "확장18 구성 모드 walk-forward 승격",
+            "title": "확장 그물 walk-forward 승격",
             "detail": (
                 f"LOO {wf.get('rounds')}회차 기준 '{expand_label}' 평균 "
-                f"{wf.get('selected_mean')}/6 > 기존 min-rank+균형 {wf.get('legacy_boe_balanced_mean')}/6. "
-                "구간균형이 recall 을 깎던 경우를 보정한다."
+                f"{wf.get('selected_mean')}/6 > 레거시 min-rank@18 {wf.get('legacy_boe_balanced_mean')}/6."
             ),
         })
     elif wf.get("ok") and not wf.get("beats_random"):
         problems.append({
             "id": "expand_wf_near_random",
             "severity": "medium",
-            "title": "확장18 walk-forward ≈ 무작위",
+            "title": "확장 그물 walk-forward ≈ 무작위",
             "detail": (
                 f"선택된 모드 평균 {wf.get('selected_mean')} (무작위 {wf.get('random_baseline')}). "
                 "넓은 그물도 우연 수준 — 과신 금지, 티켓 천장·소표본을 함께 본다."
@@ -1076,8 +1158,8 @@ def _inverse_diagnosis(
     actions = [
         "저성과·자동빈도 신호를 단독 커버리지에서 제외",
         "핵심6: 다회차 성적 1위 단일신호(합의 희석 금지)",
-        f"확장18: walk-forward '{expand_label}'",
-        "주입 가중: expand18 > core6 (집중 실패 시)" if expand_first else "주입 가중: 균형",
+        f"확장 top{expand_size}: walk-forward '{expand_label}'",
+        "주입 가중: expand > core6 (집중 실패 시)" if expand_first else "주입 가중: 균형",
         "티켓 미등장 당첨은 분석 천장으로 고지(확률 불변)",
     ]
 
@@ -1086,7 +1168,7 @@ def _inverse_diagnosis(
         "actions": actions,
         "verdict": (
             "집중 예측은 구조적으로 실패한다. 핵심6은 최고 단일신호로 정밀하게, "
-            f"확장18은 walk-forward('{expand_label}')로 recall 을 확보한다. "
+            f"확장 top{expand_size}는 walk-forward('{expand_label}')로 recall 을 확보한다. "
             "합의·평균은 희석이므로 쓰지 않는다."
             if expand_first
             else (
@@ -1112,6 +1194,8 @@ def _inverse_diagnosis(
             "good_signal_count": n_good,
             "expand_wf_mean": wf.get("selected_mean"),
             "expand_wf_mode": expand_mode,
+            "expand_wf_size": expand_size,
+            "expand_size_lift_24_vs_18": wf.get("size_lift_24_vs_18"),
         },
         "policy": {
             "coverage_mode": "expand18_first" if expand_first else "balanced",
@@ -1124,6 +1208,7 @@ def _inverse_diagnosis(
             "expand18_mode": expand18_mode_api,
             "expand18_variant": expand_mode,
             "expand18_variant_label": expand_label,
+            "expand_size": expand_size,
             "banned_signals": under + (["auto_freq"] if "auto_freq" not in under else []),
             "preferred_signal": leaderboard.get("best_signal_multi"),
         },
@@ -1178,9 +1263,10 @@ def build_review_verification() -> Dict[str, Any]:
 
     # expand18 구성 모드 — 보관 회차 LOO walk-forward 로 채택(구간균형이 recall 깎는지 검증).
     expand_wf = _walkforward_expand_policy(_samples, exclude_keys=ban_keys)
-    expand_mode = str(expand_wf.get("selected_mode") or "boe_balanced")
+    expand_mode = str(expand_wf.get("selected_mode") or DEFAULT_EXPAND_MODE)
+    expand_size = int(expand_wf.get("selected_size") or DEFAULT_EXPAND_SIZE)
 
-    # 복기 회차 커버리지 — 그 회차 용지 신호로 core6/expand18 (당첨 대조용).
+    # 복기 회차 커버리지 — 그 회차 용지 신호로 core6/expand (당첨 대조용).
     # 이번회차 세트와 분리해야 탭별로 추천이 달라진다.
     review_sigs = _signals(auto, semi)
     review_coverage_set = _coverage_set_from_signals(
@@ -1189,6 +1275,7 @@ def build_review_verification() -> Dict[str, Any]:
         selected_by=selected_by,
         exclude_keys=ban_keys,
         expand_mode=expand_mode,
+        expand_size=expand_size,
     )
     review_consensus_coverage = _consensus_coverage(review_sigs, leaderboard)
     review_hit_audit = _coverage_hit_audit(
@@ -1210,6 +1297,7 @@ def build_review_verification() -> Dict[str, Any]:
             selected_by=selected_by,
             exclude_keys=ban_keys,
             expand_mode=expand_mode,
+            expand_size=expand_size,
         )
         consensus_coverage = _consensus_coverage(csig, leaderboard)
 

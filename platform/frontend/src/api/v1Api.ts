@@ -1184,8 +1184,10 @@ export interface ReviewVerificationResponse {
     selected_by?: 'multi_round' | 'single_round';
     core6: number[];
     expand18: number[];
+    expand_size?: number;
     expand18_mode?: string;
     expand18_mode_label?: string;
+    expand18_precision?: number[];
     expand18_raw?: number[];
     expand18_single?: number[];
     expand18_boe_balanced?: number[];
@@ -1212,6 +1214,8 @@ export interface ReviewVerificationResponse {
     expand18_hit: number[];
     core6_count: number;
     expand18_count: number;
+    expand_size?: number;
+    expand18_precision_count?: number;
     missed_catchable: number[];
     missed_detail?: {
       number: number;
@@ -1229,10 +1233,13 @@ export interface ReviewVerificationResponse {
   expand_walkforward?: {
     ok: boolean;
     selected_mode: string;
+    selected_size?: number;
     selected_label?: string;
     rounds: number;
     random_baseline: number;
     means?: Record<string, number>;
+    means_by_size?: Record<string, number>;
+    size_lift_24_vs_18?: number;
     beats_random?: boolean;
     beats_legacy_boe_balanced?: boolean;
     legacy_boe_balanced_mean?: number;
@@ -1245,8 +1252,10 @@ export interface ReviewVerificationResponse {
     selected_by?: 'multi_round' | 'single_round';
     core6: number[];
     expand18: number[];
+    expand_size?: number;
     expand18_mode?: string;
     expand18_mode_label?: string;
+    expand18_precision?: number[];
     expand18_raw?: number[];
     expand18_single?: number[];
     expand18_boe_balanced?: number[];
@@ -1365,6 +1374,7 @@ export interface ReviewVerificationResponse {
       /** WF가 고른 세부 구성(merge_raw, boe_balanced 등) */
       expand18_variant?: string;
       expand18_variant_label?: string;
+      expand_size?: number;
       banned_signals: string[];
       preferred_signal?: string | null;
     };

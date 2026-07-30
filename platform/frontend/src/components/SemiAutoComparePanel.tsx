@@ -3535,6 +3535,10 @@ export default function SemiAutoComparePanel({
     if (expand18.length < 6) {
       expand18 = clean(expandMode === 'consensus' ? cov?.expand18 : consensus?.expand18);
     }
+    const expandSize = Math.max(
+      expand18.length,
+      Number(cov?.expand_size ?? policy?.expand_size ?? 18) || 18,
+    );
     if (core6.length < 6 || expand18.length < 6) {
       // 폴백 — 서버 커버리지가 없으면 해당 탭 로컬 신호로 부족한 쪽만 채운다.
       const rep = !compareWinning ? (currentRoundForecast?.representative ?? []) : [];
@@ -3548,19 +3552,23 @@ export default function SemiAutoComparePanel({
         core6 = clean(rep.length >= 6 ? rep : pool.slice(0, 6));
         source = rep.length >= 6 ? 'forecast' : 'repeat';
       }
-      if (expand18.length < 6) expand18 = clean(pool.slice(0, 18));
+      if (expand18.length < 6) expand18 = clean(pool.slice(0, expandSize));
     }
     const ready = core6.length >= 6 && expand18.length >= 6;
-    const shareResult = ready ? optimizeForSharing(expand18, Math.min(18, expand18.length)) : null;
+    const wide = clean(expand18).slice(0, Math.min(30, Math.max(expandSize, expand18.length)));
+    const shareResult = ready ? optimizeForSharing(wide, Math.min(24, wide.length)) : null;
     const shareOpt = shareResult ? shareResult.numbers.slice(0, 6) : [];
     const agreement = consensus?.agreement ?? {};
     const hitAudit = compareWinning && rv?.ok ? rv.review_hit_audit : undefined;
     const expandWf = rv?.ok ? rv.expand_walkforward : undefined;
     const decadeBal = cov?.decade_balance;
+    const precision18 = clean(cov?.expand18_precision ?? cov?.expand18_raw).slice(0, 18);
     return {
       ready,
       core6: [...core6].slice(0, 6).sort((a, b) => a - b),
-      expand18: [...expand18].slice(0, 18).sort((a, b) => a - b),
+      expand18: [...wide].sort((a, b) => a - b),
+      expandSize: wide.length,
+      precision18: [...precision18].sort((a, b) => a - b),
       shareOpt: [...shareOpt].sort((a, b) => a - b),
       source,
       signalLabel: cov?.signal_label ?? best?.label ?? '자동↔반자동 양쪽 지지',
@@ -3580,6 +3588,7 @@ export default function SemiAutoComparePanel({
       expandWfMean: expandWf?.selected_mean ?? null,
       expandWfBeatsLegacy: Boolean(expandWf?.beats_legacy_boe_balanced),
       expandWfRounds: expandWf?.rounds ?? 0,
+      sizeLift24: expandWf?.size_lift_24_vs_18 ?? null,
       hitAudit: hitAudit ?? null,
       decadeDisplaced: decadeBal?.displaced ?? [],
       decadePromoted: decadeBal?.promoted ?? [],
@@ -5249,11 +5258,17 @@ export default function SemiAutoComparePanel({
                       : '.')
                   : ''}
                 {heroRecommendation.showWinning && heroRecommendation.hitAudit
-                  ? ` 핵심6 당첨 ${heroRecommendation.hitAudit.core6_count}/6 · 확장18 당첨 ${heroRecommendation.hitAudit.expand18_count}/6`
+                  ? ` 핵심6 당첨 ${heroRecommendation.hitAudit.core6_count}/6 · 확장${heroRecommendation.expandSize} 당첨 ${heroRecommendation.hitAudit.expand18_count}/6`
+                    + (heroRecommendation.hitAudit.expand18_precision_count != null
+                      ? ` (정밀18이면 ${heroRecommendation.hitAudit.expand18_precision_count}/6)`
+                      : '')
                     + ` (무작위 기대 core≈${heroRecommendation.hitAudit.random_expect_core6} · expand≈${heroRecommendation.hitAudit.random_expect_expand18}).`
                   : heroRecommendation.showWinning && winningSet && winningSet.size > 0
-                    ? ` 핵심6 당첨 ${heroRecommendation.core6.filter((n) => winningSet.has(n)).length}/6 · 확장18 당첨 ${heroRecommendation.expand18.filter((n) => winningSet.has(n)).length}/6.`
+                    ? ` 핵심6 당첨 ${heroRecommendation.core6.filter((n) => winningSet.has(n)).length}/6 · 확장${heroRecommendation.expandSize} 당첨 ${heroRecommendation.expand18.filter((n) => winningSet.has(n)).length}/6.`
                     : ''}
+                {heroRecommendation.sizeLift24 != null && heroRecommendation.sizeLift24 >= 0.5
+                  ? ` ⚠ top18→top24 LOO 리프트 +${heroRecommendation.sizeLift24}/6 — 가까운 미포착대 보존.`
+                  : ''}
               </Typography>
             </Alert>
           )}
@@ -5339,7 +5354,9 @@ export default function SemiAutoComparePanel({
             </Stack>
           )}
           <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>확장 18</Typography>
+            <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>
+              확장 {heroRecommendation.expandSize}
+            </Typography>
             {heroRecommendation.expand18.map((n) => (
               <LottoBall
                 key={`hero-e-${n}`}
@@ -5349,13 +5366,27 @@ export default function SemiAutoComparePanel({
               />
             ))}
           </Stack>
+          {heroRecommendation.precision18.length === 18
+            && heroRecommendation.expandSize > 18
+            && heroRecommendation.showWinning
+            && winningSet
+            && winningSet.size > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mt: 0.5 }}>
+              정밀18 대비 추가분:{' '}
+              {heroRecommendation.expand18
+                .filter((n) => !heroRecommendation.precision18.includes(n))
+                .map((n) => (winningSet.has(n) ? `${n}✓` : `${n}`))
+                .join(', ') || '—'}
+              {' '}← top18이 자르던 가까운 미포착대.
+            </Typography>
+          )}
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
             {compareWinning && winningSet && winningSet.size > 0
               ? `밝은 공 = ${effectiveRound ?? '?'}회 실제 당첨 · 회색 = 비당첨. `
               : compareWinning
                 ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다. '
                 : '이번회차 탭: 미추첨이라 당첨 대조 없음. '}
-            핵심 6 = 집중 픽 · 확장 18 = walk-forward 넓은 그물 · 분산 최적 = 공동당첨 회피.
+            핵심 6 = 집중 픽 · 확장 {heroRecommendation.expandSize} = walk-forward 넓은 그물 · 분산 최적 = 공동당첨 회피.
             {' '}복기 탭은 다음회차 학습·호기 혼입 없이 같은 회차 용지만 대조합니다(누수 방지).
             {' '}아래: 용지 통계 5세트 → 강수·기대·종합 예측. 역산·학습·검증은 <strong>④ 엔진</strong>.
           </Typography>

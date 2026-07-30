@@ -107,11 +107,11 @@ export function buildDetailForecastSnapshot(input: {
 }): DetailForecastSnapshot | null {
   const forecast = (input.forecastRanked ?? [])
     .filter((r) => Number.isInteger(r.number) && r.number >= 1 && r.number <= 45)
-    .slice(0, 18);
+    .slice(0, 24);
   const predicted = (input.predictedRanked ?? [])
     .filter((r) => Number.isInteger(r.number) && r.number >= 1 && r.number <= 45)
-    .slice(0, 18);
-  const expand18 = cleanNums(input.expand18).slice(0, 18);
+    .slice(0, 24);
+  const expand18 = cleanNums(input.expand18).slice(0, 24);
   const core6 = cleanNums(input.core6).slice(0, 6);
   const representative = cleanNums(input.representative).slice(0, 6);
 
@@ -163,7 +163,7 @@ export function buildDetailForecastSnapshot(input: {
     savedAt: new Date().toISOString(),
     ranked,
     core6: core6.length >= 6 ? core6 : ranked.slice(0, 6).map((r) => r.number).sort((a, b) => a - b),
-    expand18: expand18.length >= 6 ? expand18 : ranked.map((r) => r.number).slice(0, 18),
+    expand18: expand18.length >= 6 ? expand18 : ranked.map((r) => r.number).slice(0, 24),
     representative:
       representative.length >= 6
         ? representative

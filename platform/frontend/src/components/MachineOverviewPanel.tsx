@@ -71,14 +71,14 @@ export default function MachineOverviewPanel({ defaultOpen = false }: { defaultO
         최근 호기 순환 이력
       </Typography>
       <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-        {ov.recent_history.map((h) => (
+        {(ov.recent_history ?? []).map((h) => (
           <Chip
             key={h.round}
             size="small"
             label={`${h.round}·${h.machine}호`}
             title={h.confirmed ? '실측 확정' : '추정'}
             sx={{
-              bgcolor: MACHINE_COLORS[h.machine],
+              bgcolor: MACHINE_COLORS[h.machine] ?? '#666',
               color: '#fff',
               fontWeight: 700,
               opacity: h.confirmed ? 1 : 0.5,

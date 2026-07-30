@@ -6,7 +6,7 @@
   "completeness": {
     "sheet_engine_runtime": 0.97,
     "note": "Ball/GNN/대규모MC 등 데이터·실험 영역은 의도적 Experimental. Stats snapshot UI·Model Registry disable UI·Nested/Pattern 레지스트리 패리티 반영.",
-    "last_audit": "2026-07-30: ③ 5게임·호기현황 중복제거, Venus intent 분리, 복기 적중 착시 안내"
+    "last_audit": "2026-07-30: 복기 Venus 브리지 intent 슬롯·parallel 혼입 수정 + Registry gate disable"
   },
   "safety": {
     "no_win_guarantee": true,

@@ -72,8 +72,10 @@ export default function ComposedAnalysisPage({
     queries: [
       {
         queryKey: ['composite', 'machine', sheetIntent],
+        // 복기 탭: 다음 회차 recommend hot 통계를 합의에 섞지 않음(아래 buildComposite에서 null).
         queryFn: () => v1Api.getRoundRecommend(),
         staleTime: 60_000,
+        enabled: sheetIntent === 'current_round',
       },
       {
         queryKey: ['composite', 'machine-overview'],
@@ -81,8 +83,14 @@ export default function ComposedAnalysisPage({
         staleTime: 60_000,
       },
       {
-        queryKey: ['composite', 'parallel'],
-        queryFn: () => v1Api.getParallelRoundAnalysis(),
+        queryKey: ['composite', 'parallel', sheetIntent],
+        queryFn: async () => {
+          if (sheetIntent === 'review') {
+            const ov = await v1Api.getMachineOverview();
+            return v1Api.getParallelRoundAnalysis(ov.latest_round);
+          }
+          return v1Api.getParallelRoundAnalysis();
+        },
         staleTime: 60_000,
       },
       {
@@ -128,13 +136,21 @@ export default function ComposedAnalysisPage({
   const composite = useMemo(
     () =>
       buildComposite(
-        machineQuery.data ?? null,
+        // 복기: 다음 회차 호기 hot 가중 혼입 금지
+        sheetIntent === 'review' ? null : (machineQuery.data ?? null),
         parallelQuery.data ?? null,
         temperatureQuery.data ?? null,
         photoQuery.data ?? null,
         photoIntentUsed
       ),
-    [machineQuery.data, parallelQuery.data, temperatureQuery.data, photoQuery.data, photoIntentUsed]
+    [
+      machineQuery.data,
+      parallelQuery.data,
+      temperatureQuery.data,
+      photoQuery.data,
+      photoIntentUsed,
+      sheetIntent,
+    ]
   );
 
   const [machineSeed, setMachineSeed] = useState(1);
@@ -256,13 +272,24 @@ export default function ComposedAnalysisPage({
 
   const drawMachine = useMemo(
     () =>
-      simulateDrawMachine(composite, machineQuery.data ?? null, {
-        iterations: 6000,
-        seed: machineSeed,
-        mode: effectiveDrawMode,
-        photoExpected: photoExpectedNums,
-      }),
-    [composite, machineQuery.data, machineSeed, effectiveDrawMode, photoExpectedNums]
+      simulateDrawMachine(
+        composite,
+        sheetIntent === 'review' ? null : (machineQuery.data ?? null),
+        {
+          iterations: 6000,
+          seed: machineSeed,
+          mode: effectiveDrawMode,
+          photoExpected: photoExpectedNums,
+        },
+      ),
+    [
+      composite,
+      machineQuery.data,
+      machineSeed,
+      effectiveDrawMode,
+      photoExpectedNums,
+      sheetIntent,
+    ],
   );
 
   // favor = top-18 커버리지 전체(고지지 top-6/12 집중 완화)
@@ -326,8 +353,10 @@ export default function ComposedAnalysisPage({
               photoQuery.isLoading
                 ? '용지 1:1 전수비교 (로딩)'
                 : composite.sourcesAvailable.oneToOne
-                  ? '용지 1:1 전수비교 (이번회차)'
-                  : '용지 1:1 (없음 — 이번회차 등록 시 합쳐짐)'
+                  ? `용지 1:1 전수비교 (${sheetIntent === 'review' ? '복기' : '이번회차'})`
+                  : sheetIntent === 'review'
+                    ? '용지 1:1 (없음 — 복기 탭에서 용지 등록)'
+                    : '용지 1:1 (없음 — 이번회차 등록 시 합쳐짐)'
             }
           />
           <Chip
@@ -359,18 +388,24 @@ export default function ComposedAnalysisPage({
             color="info"
             variant="outlined"
             label={
-              machineQuery.isLoading
-                ? '추첨 엔진 (로딩)'
-                : composite.sourcesAvailable.machine
-                  ? `추첨 엔진 ${machineQuery.data?.machine_id ?? '?'}호기`
-                  : '추첨 엔진 (실패)'
+              sheetIntent === 'review'
+                ? `Venus 호기 ${machineId}호기 (복기 확정)`
+                : machineQuery.isLoading
+                  ? '추첨 엔진 (로딩)'
+                  : composite.sourcesAvailable.machine
+                    ? `추첨 엔진 ${machineQuery.data?.machine_id ?? '?'}호기`
+                    : '추첨 엔진 (실패)'
             }
           />
         </Stack>
         {composite.sourceCount < 3 && (
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
             ※ {3 - composite.sourceCount}개 합의 소스 미가용 — 합의 등급이 낮게 산정될 수 있습니다.
-            {!composite.sourcesAvailable.oneToOne ? ' (용지분석 이번회차 탭에서 자동/반자동을 등록·저장하면 1:1 전수비교가 합쳐집니다.)' : ''}
+            {!composite.sourcesAvailable.oneToOne
+              ? sheetIntent === 'review'
+                ? ' (복기 탭에서 자동/반자동을 등록하면 1:1 전수비교가 합쳐집니다.)'
+                : ' (용지분석 이번회차 탭에서 자동/반자동을 등록·저장하면 1:1 전수비교가 합쳐집니다.)'
+              : ''}
           </Typography>
         )}
       </Paper>

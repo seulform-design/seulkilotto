@@ -121,14 +121,14 @@ export default function RoundRecommendPage({
             최근 호기 순환 이력
           </Typography>
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
-            {ov.recent_history.map((h) => (
+            {(ov.recent_history ?? []).map((h) => (
               <Chip
                 key={h.round}
                 size="small"
                 label={`${h.round}·${h.machine}호`}
                 title={h.confirmed ? '실측 확정' : '추정'}
                 sx={{
-                  bgcolor: MACHINE_COLORS[h.machine],
+                  bgcolor: MACHINE_COLORS[h.machine] ?? '#666',
                   color: '#fff',
                   fontWeight: 700,
                   opacity: h.confirmed ? 1 : 0.5,
@@ -379,18 +379,21 @@ export default function RoundRecommendPage({
             구간별 미출현(전역 최강 신호) + 호기 평균회귀의 가중 점수 상위. 칩의 회차는 보너스 포함 미출현 기간.
           </Typography>
           <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-            {data.top_scored.slice(0, 12).map((t) => (
+            {data.top_scored.slice(0, 12).map((t) => {
+              const accent = MACHINE_COLORS[data.machine_id] ?? '#888888';
+              return (
               <Chip
                 key={t.number}
                 size="small"
                 label={`${t.number} · ${t.gap}회 미출`}
                 sx={{
-                  bgcolor: MACHINE_COLORS[data.machine_id] + '22',
-                  border: `1px solid ${MACHINE_COLORS[data.machine_id]}66`,
+                  bgcolor: accent + '22',
+                  border: `1px solid ${accent}66`,
                   fontWeight: 700,
                 }}
               />
-            ))}
+              );
+            })}
           </Stack>
         </Paper>
       )}

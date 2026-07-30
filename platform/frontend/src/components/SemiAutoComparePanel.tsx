@@ -3578,14 +3578,13 @@ export default function SemiAutoComparePanel({
     predictionSignals?.strong_candidates,
   ]);
 
-  // 종합분석 1호기 물리/학습 추첨기용 — 상세분석 산출 스냅샷 영속.
-  // (strong_candidates 가 null 이어도 화면의 종합예측·당첨예상을 그대로 넘긴다.)
+  // 종합분석 Venus/학습 추첨용 — intent별 스냅샷(복기·이번회차 분리 저장).
   useEffect(() => {
-    if (sheetIntent !== 'current_round') return;
     const snap = buildDetailForecastSnapshot({
-      intent: 'current_round',
-      round: effectiveRound ?? currentRound ?? null,
-      forecastRanked: currentRoundForecast?.ranked ?? null,
+      intent: sheetIntent,
+      round: effectiveRound ?? (sheetIntent === 'current_round' ? currentRound : null) ?? null,
+      forecastRanked:
+        sheetIntent === 'current_round' ? (currentRoundForecast?.ranked ?? null) : null,
       predictedRanked: predictedNumbers.map((p) => ({
         number: p.number,
         confidence: p.confidence,
@@ -3593,7 +3592,10 @@ export default function SemiAutoComparePanel({
       })),
       core6: heroRecommendation.core6,
       expand18: heroRecommendation.expand18,
-      representative: currentRoundForecast?.representative ?? heroRecommendation.core6,
+      representative:
+        sheetIntent === 'current_round'
+          ? (currentRoundForecast?.representative ?? heroRecommendation.core6)
+          : heroRecommendation.core6,
     });
     if (snap) saveDetailForecast(snap);
   }, [

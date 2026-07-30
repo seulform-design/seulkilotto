@@ -300,6 +300,34 @@ export function ModelRegistryBlock({
         </Box>
       )}
 
+      {/* Gate 거절 목록에서도 직접 비활성 가능(제안 없을 때) */}
+      {!hasOrch && rejected.length > 0 && (
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.3 }}>
+            Gate 거절 → 사람 비활성
+          </Typography>
+          <Stack spacing={0.35}>
+            {rejected.slice(0, 6).map((id) => (
+              <Stack key={`rej-${id}`} direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: 9, flex: 1, minWidth: 120 }}>
+                  · {id}
+                </Typography>
+                <Button
+                  size="small"
+                  color="warning"
+                  variant="outlined"
+                  disabled={disabledIds.includes(id)}
+                  onClick={() => openDisable(id, 'gate_rejected')}
+                  sx={{ minWidth: 0, px: 0.75, py: 0, fontSize: 9 }}
+                >
+                  {disabledIds.includes(id) ? '이미 비활성' : '비활성'}
+                </Button>
+              </Stack>
+            ))}
+          </Stack>
+        </Box>
+      )}
+
       <Dialog open={Boolean(pending)} onClose={() => !busy && setPending(null)} fullWidth maxWidth="xs">
         <DialogTitle sx={{ fontSize: 16, fontWeight: 800 }}>
           {pending?.kind === 'disable' ? 'Model 비활성 확인' : 'Model 재활성 확인'}

@@ -26,6 +26,7 @@ import WalkForwardPanel from '../components/WalkForwardPanel';
 import {
   buildComposite,
   extractPhotoExpectedNumbers,
+  PHOTO_COVER_COUNT,
   simulateDrawMachine,
   GRADE_COLORS,
   GRADE_LABELS,
@@ -39,15 +40,15 @@ import { v1Api } from '../api/v1Api';
 
 const DRAW_MODE_LABELS: Record<DrawMachineMode, string> = {
   consensus: '합의 가중',
-  'photo-expected': '지지18 가중',
-  'photo-pool': '지지18 풀',
+  'photo-expected': '확장망 가중',
+  'photo-pool': '확장망 풀',
 };
 
 const DETAIL_SOURCE_LABELS: Record<string, string> = {
   forecast: '상세·종합예측',
   predicted: '상세·당첨예상',
-  hero: '상세·확장18커버리지',
-  lines: '양쪽지지 top-18',
+  hero: `상세·확장${PHOTO_COVER_COUNT}커버리지`,
+  lines: `양쪽지지 top-${PHOTO_COVER_COUNT}`,
   merged: '양쪽지지+통합신호',
 };
 
@@ -207,18 +208,19 @@ export default function ComposedAnalysisPage({
   ]);
 
   const photoExpected = useMemo((): (PhotoExpectedNumber & { detailSource?: string })[] => {
-    // ① 상세분석 스냅샷 — expand18(커버리지) 우선
+    // ① 상세분석 스냅샷 — 확장망(커버리지 top24) 우선
     if (detailBridge && detailBridge.ranked.length >= 6) {
       const pool =
         detailBridge.expand18?.length >= 6
           ? detailBridge.expand18
           : detailBridge.ranked.map((r) => r.number);
       const confOf = new Map(detailBridge.ranked.map((r) => [r.number, r.confidence]));
-      return pool.slice(0, 18).map((n, i) => ({
+      const coverN = PHOTO_COVER_COUNT;
+      return pool.slice(0, coverN).map((n, i) => ({
         number: n,
         rank: i + 1,
-        score: confOf.get(n) ?? Math.max(1, 18 - i),
-        confidence: confOf.get(n) ?? Math.round(((18 - i) / 18) * 100),
+        score: confOf.get(n) ?? Math.max(1, coverN - i),
+        confidence: confOf.get(n) ?? Math.round(((coverN - i) / coverN) * 100),
         auto: 0,
         semi: 0,
         support: 0,
@@ -227,13 +229,17 @@ export default function ComposedAnalysisPage({
       }));
     }
 
-    // ② 폴백: 양쪽 지지(고정수 제외) top-18 + 통합신호·평행 보조
+    // ② 폴백: 양쪽 지지(고정수 제외) top24 + 통합신호·평행 보조
     const score: Record<number, number> = {};
     const add = (n: number, w: number) => {
       if (!Number.isInteger(n) || n < 1 || n > 45 || w <= 0) return;
       score[n] = (score[n] ?? 0) + w;
     };
-    const fromLines = extractPhotoExpectedNumbers(photoQuery.data ?? null, photoIntentUsed, 18);
+    const fromLines = extractPhotoExpectedNumbers(
+      photoQuery.data ?? null,
+      photoIntentUsed,
+      PHOTO_COVER_COUNT,
+    );
     fromLines.forEach((p, i) => add(p.number, Math.max(4, 16 - i)));
     (signalsQuery.data?.strong_candidates ?? []).forEach((n, i) => add(n, Math.max(1.5, 6 - i * 0.35)));
     (parallelQuery.data?.parallel_strong ?? []).forEach((n, i) => add(n, Math.max(1, 4 - i * 0.3)));
@@ -243,7 +249,7 @@ export default function ComposedAnalysisPage({
       .map(Number)
       .map((n) => ({ number: n, score: score[n] }))
       .sort((a, b) => b.score - a.score || a.number - b.number)
-      .slice(0, 18);
+      .slice(0, PHOTO_COVER_COUNT);
     if (ranked.length >= 6) {
       const maxScore = ranked[0].score || 1;
       const lineMap = new Map(fromLines.map((p) => [p.number, p]));
@@ -310,10 +316,10 @@ export default function ComposedAnalysisPage({
     ],
   );
 
-  // favor = top-18 커버리지 전체(고지지 top-6/12 집중 완화)
+  // favor = 확장망 top24 전체(고지지 top-6/12 집중 완화)
   const venusFavorQuery =
     venusUseFavor && photoExpectedNums.length >= 6
-      ? `&favor=${photoExpectedNums.slice(0, 18).join(',')}`
+      ? `&favor=${photoExpectedNums.slice(0, PHOTO_COVER_COUNT).join(',')}`
       : '';
 
   const handleRefresh = () => {
@@ -502,7 +508,7 @@ export default function ComposedAnalysisPage({
           )}
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          복기 진단: <strong>양쪽 지지 top-18 커버리지</strong>(반자동 고정수 제외)를 추첨 풀로 씁니다.
+          복기 진단: <strong>양쪽 지지 확장망 top-{PHOTO_COVER_COUNT}</strong>(반자동 고정수 제외)를 추첨 풀로 씁니다.
           top-6 집중·자동 빈도는 구조적으로 약합니다.
           {detailBridge
             ? ' (상세분석 스냅샷 동기화됨)'
@@ -517,7 +523,7 @@ export default function ComposedAnalysisPage({
         )}
         {photoExpected.length > 0 && (
           <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="flex-start">
-            {photoExpected.slice(0, 18).map((p) => (
+            {photoExpected.slice(0, PHOTO_COVER_COUNT).map((p) => (
               <Box key={`pe-${p.number}`} sx={{ textAlign: 'center', minWidth: 36 }}>
                 <LottoBall number={p.number} size={ENGINE_BALL.hero} />
                 <Typography variant="caption" sx={{ display: 'block', fontSize: 9, color: 'text.disabled', lineHeight: 1.1 }}>
@@ -580,7 +586,7 @@ export default function ComposedAnalysisPage({
             {machineQuery.data?.machine_source === 'estimated' ? ' (순환 추정)' : ''}.
             {venusUseFavor && photoExpectedNums.length >= 6 ? (
               <>
-                {' '}양쪽 지지 <strong>top-18 커버리지</strong>({photoExpectedNums.slice(0, 6).join(', ')}…)에{' '}
+                {' '}양쪽 지지 <strong>확장망 top-{PHOTO_COVER_COUNT}</strong>({photoExpectedNums.slice(0, 6).join(', ')}…)에{' '}
                 <strong>상승·흡입 가중</strong>을 적용합니다(체험용). 실제 당첨 확률은 변하지 않습니다.
               </>
             ) : (
@@ -637,10 +643,10 @@ export default function ComposedAnalysisPage({
           >
             <ToggleButton value="consensus">합의 가중</ToggleButton>
             <ToggleButton value="photo-expected" disabled={photoExpectedNums.length === 0}>
-              지지18 가중
+              확장망 가중
             </ToggleButton>
             <ToggleButton value="photo-pool" disabled={photoExpectedNums.length < 6}>
-              지지18 풀만
+              확장망 풀만
             </ToggleButton>
           </ToggleButtonGroup>
 

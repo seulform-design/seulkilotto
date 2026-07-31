@@ -2,7 +2,7 @@
  * 용지분석 [상세 분석] 산출 예상번호 → Venus/학습 추첨 브리지.
  *
  * intent별 localStorage 슬롯으로 복기·이번회차가 서로 덮어쓰지 않게 한다.
- * 복기 검증: expand18(넓은 그물) 우선.
+ * 복기 검증: expand18 필드(실제 길이=확장망 top24) 우선.
  */
 
 export type DetailForecastSource =

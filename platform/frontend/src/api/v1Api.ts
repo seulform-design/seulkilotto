@@ -1380,7 +1380,7 @@ export interface ReviewVerificationResponse {
       prefer_consensus: boolean;
       /** 핵심6: best_single(다회차 1위) | consensus(폴백만) */
       core6_mode?: 'best_single' | 'consensus';
-      /** 확장18: best_of_engines(min-rank) | consensus | merge_recall */
+      /** 확장망: best_of_engines(min-rank) | consensus | merge_recall */
       expand18_mode?: 'best_of_engines' | 'consensus' | 'merge_recall' | string;
       /** WF가 고른 세부 구성(merge_raw, boe_balanced 등) */
       expand18_variant?: string;

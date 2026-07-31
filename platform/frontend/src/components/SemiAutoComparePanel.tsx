@@ -451,7 +451,7 @@ function getIntentStrongCandidates(
     const ranked = Object.entries(votes)
       .sort(([, a], [, b]) => b - a || Number(a) - Number(b))
       .map(([n]) => Number(n));
-    if (ranked.length) return ranked.slice(0, 18);
+    if (ranked.length) return ranked.slice(0, 24);
   }
   return [];
 }
@@ -1524,7 +1524,7 @@ export default function SemiAutoComparePanel({
     ) {
       const nums = feat.recommendation.numbers ?? [];
       const maxAbs = Math.max(0.01, ...nums.map((x) => Math.abs(x.score)));
-      for (const row of nums.slice(0, 18)) {
+      for (const row of nums.slice(0, 24)) {
         push(row.number, 0.35 + 0.65 * (Math.abs(row.score) / maxAbs), 'feature', '검증Feature');
       }
     }
@@ -5198,7 +5198,7 @@ export default function SemiAutoComparePanel({
       </Stack>
       {!showRecommendSection && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          핵심 · 용지 5세트 · 합의/Venus · 호기 신호 — 접힘. 호기 현황·백테스트는 ④.
+          핵심 · 용지 5세트 · 강수/기대 · 종합예측 — 접힘. 합의/Venus·호기 신호는 아래 개별 토글. 호기 현황·백테스트는 ④.
         </Typography>
       )}
       {showRecommendSection && (
@@ -5238,8 +5238,10 @@ export default function SemiAutoComparePanel({
                 {!compareWinning && currentRound != null ? ` → 적용 대상 ${currentRound}회` : ''}
                 {' '}— 당첨을 가장 잘 잡은 신호는{' '}
                 <strong>{heroRecommendation.signalLabel}</strong>{heroRecommendation.selectedByMulti ? '(다회차 1위)' : ''}
-                {heroRecommendation.bestTop18 != null ? `, 상위18에 평균 ${heroRecommendation.bestTop18}/6 담음` : ''}.
-                {' '}→ {recommendHeroHint}
+                {heroRecommendation.bestTop18 != null
+                  ? `, 신호 상위18 평균 ${heroRecommendation.bestTop18}/6 · 확장망 top${heroRecommendation.expandSize}`
+                  : ` · 확장망 top${heroRecommendation.expandSize}`}
+                .{' '}→ {recommendHeroHint}
                 {heroRecommendation.goodSignalCount > 0
                   ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다(공에 '몇 신호').`
                   : ` 아래 핵심 6은 다회차 1위 신호(${heroRecommendation.signalLabel}) 상위6입니다 — 여러 신호를 '합의'로 섞으면 약한 신호가 최고 신호를 희석해 오히려 덜 잡습니다(앙상블 백테스트로 실증).`}{' '}
@@ -5333,7 +5335,7 @@ export default function SemiAutoComparePanel({
 
 
         {/* 🎲 용지 통계 종합 추천 — ③ 번호 추천 */}
-        <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
+        <Paper id="photo-rec-sets" variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'success.main' }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }} spacing={1}>
             <Typography variant="body2" fontWeight={700}>
               🎲 용지 통계 종합 추천 조합{compareWinning ? ' (복기 검증)' : ` (${currentRound ?? effectiveRound ?? '?'}회 예상)`}
@@ -5386,7 +5388,7 @@ export default function SemiAutoComparePanel({
             조합(합 극단·전부 홀짝·4연속 등)을 제외합니다.
           </Typography>
           {recommendations.length > 0 && (
-            <Stack id="photo-rec-sets" spacing={0.75}>
+            <Stack spacing={0.75}>
               {recommendations.map((rec, idx) => (
                 <Stack
                   key={`rec-${idx}`}
@@ -5399,7 +5401,12 @@ export default function SemiAutoComparePanel({
                   <Chip size="small" label={`${idx + 1}`} variant="outlined" sx={{ minWidth: 32, fontWeight: 700 }} />
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                     {rec.combo.map((n) => (
-                      <LottoBall key={n} number={n} size={ENGINE_BALL.list} dimmed={winningSet ? !winningSet.has(n) : false} />
+                      <LottoBall
+                        key={n}
+                        number={n}
+                        size={ENGINE_BALL.list}
+                        dimmed={Boolean(compareWinning && winningSet && !winningSet.has(n))}
+                      />
                     ))}
                   </Stack>
                   {compareWinning && winningSet && (
@@ -5486,7 +5493,7 @@ export default function SemiAutoComparePanel({
                         {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
                         {b.expected.map((s) => (
                           <Box key={`ex-${s.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
-                            <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : true} />
+                            <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : false} />
                             <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
                               {s.auto}/{s.semi}
                             </Typography>
@@ -5579,7 +5586,7 @@ export default function SemiAutoComparePanel({
                         {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
                         {b.expected.map((s) => (
                           <Box key={`fse2-${s.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                            <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : true} />
+                            <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : false} />
                             <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
                               {s.glyphs}
                             </Typography>

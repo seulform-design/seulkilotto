@@ -80,8 +80,9 @@ const SOURCE_IDS = {
   photoExcluded: 'photo-excluded',
 } as const;
 
-/** 용지 축·예상번호 풀 — 복기 검증상 top-6 집중은 실패, top-18 커버리지가 유효 */
-const PHOTO_TOP_COUNT = 18;
+/** 용지 축·예상번호 풀 — top-6 집중 실패, 확장망 top24(가까운 미포착대 보존). */
+export const PHOTO_COVER_COUNT = 24;
+const PHOTO_TOP_COUNT = PHOTO_COVER_COUNT;
 
 function emptyConsensus(): Record<number, ConsensusNumber> {
   const out: Record<number, ConsensusNumber> = {};
@@ -425,7 +426,7 @@ export function detectFixedSemiNumbers(
  *
  * 복기 검증 진단:
  *   - 고지지 최상위(가장 많이 산 번호) ≠ 당첨 → top-6 집중 실패
- *   - 당첨은 중간 지지대 → top-18 커버리지가 유효
+ *   - 당첨은 중간 지지대 → 확장망 top24 커버리지가 유효
  *   - '자동 빈도' 최악, '양쪽 지지' 최선
  *   - 반자동 고정수는 거의 모든 줄에 반복돼 지지 신호를 왜곡 → 제외
  *
@@ -434,7 +435,7 @@ export function detectFixedSemiNumbers(
 export function extractPhotoExpectedNumbers(
   photo: PhotoAnalysisAccumulated | null | undefined,
   intent: 'review' | 'current_round' = 'current_round',
-  topN = 18,
+  topN = PHOTO_COVER_COUNT,
 ): PhotoExpectedNumber[] {
   if (!photo) return [];
   const slice = photo.by_intent?.[intent];
@@ -579,13 +580,13 @@ export function simulateDrawMachine(
   const rankOf = new Map(photoExpected.map((n, i) => [n, i]));
 
   if (mode === 'photo-pool') {
-    // 예상번호(top-18 커버리지) 풀에서만 추출 — 순위 기울기를 완만히 해 top-6 집중을 완화.
+    // 예상번호(확장망 top24) 풀에서만 추출 — 순위 기울기를 완만히 해 top-6 집중을 완화.
     for (let n = 1; n <= 45; n += 1) weight[n] = 0.0001;
     photoExpected.forEach((n, i) => {
       weight[n] = Math.max(1.4, 7.5 - i * 0.22);
     });
   } else if (mode === 'photo-expected') {
-    // 용지 예상(양쪽 지지 top-18)을 가중 — 중간 지지대도 살아남도록 완만한 기울기.
+    // 용지 예상(양쪽 지지 확장망)을 가중 — 중간 지지대도 살아남도록 완만한 기울기.
     for (let n = 1; n <= 45; n += 1) {
       const item = composite.perNumber[n];
       let wv = 0.35;

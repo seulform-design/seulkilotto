@@ -374,7 +374,7 @@ export default function ReviewVerificationPanel() {
             📊 구간(10단위) 커버리지 진단 ({d.decade_catch.rounds}개 회차 집계)
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-            구간별 당첨번호를 <strong>양쪽 지지 상위18</strong>이 얼마나 담았나(잡음/당첨) — 낮은 구간은 넓은 그물이 놓치던 곳입니다.
+            구간별 당첨번호를 <strong>양쪽 지지 상위(진단 top18)</strong>이 얼마나 담았나(잡음/당첨) — 낮은 구간은 실제 확장망(top24)으로 보정합니다.
           </Typography>
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             {d.decade_catch.per_decade.map((r) => {

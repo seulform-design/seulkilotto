@@ -220,7 +220,7 @@ function scoreCombo(
   const validatedTop = new Set(
     (ctx.validatedLearning ?? [])
       .filter((v) => v.weight >= 0.35)
-      .slice(0, 18)
+      .slice(0, 24)
       .map((v) => v.number),
   );
   const valHit = combo.filter((n) => validatedTop.has(n)).length;

@@ -29,11 +29,14 @@ const photo = {
   },
 } as unknown as PhotoAnalysisAccumulated;
 
-const ranked = extractPhotoExpectedNumbers(photo, 'current_round', 18);
+const ranked = extractPhotoExpectedNumbers(photo, 'current_round');
 assert(ranked.every((r) => r.number !== 7), '고정수 7은 예상번호에서 제외');
 assert(ranked.some((r) => r.number === 10), '양쪽 지지 번호(10)는 포함');
 assert(ranked[0].support > 0, '1위는 양쪽 지지 > 0');
-assert(ranked.length <= 18, '최대 top-18');
+assert(ranked.length <= 24, '기본 최대 top-24(확장망)');
+
+const ranked18 = extractPhotoExpectedNumbers(photo, 'current_round', 18);
+assert(ranked18.length <= 18, '명시 topN=18 존중');
 
 console.log('compositeAnalysis.support.test.ts OK', {
   fixed: [...fixed],

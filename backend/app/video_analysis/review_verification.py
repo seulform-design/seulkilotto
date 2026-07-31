@@ -167,11 +167,13 @@ EXPAND_MODE_LABELS = {
     "merge_raw": "단일∪min-rank 병합 (넓은 recall)",
 }
 
-# 넓은 그물 후보 크기 — 1234 실측: support top18=3/6, top24=5/6 (19·35가 23–24위).
-# 18만 쓰면 '가까운 미포착대'를 구조적으로 자른다.
+# WF 진단용 크기 후보(18 vs 24 리프트). 실제 방출 그물은 항상 DEFAULT_EXPAND_SIZE.
+# 1234 실측: support top18=3/6 · top24=5/6 (19·35 = 지지 23–24위) — top18 선택 시 절단.
 EXPAND_SIZE_CANDIDATES = (18, 24)
 DEFAULT_EXPAND_SIZE = 24
 DEFAULT_EXPAND_MODE = "single_raw"
+# 배포 스모크·프론트 캐시 무효 확인용(강제 top24 방출).
+COVERAGE_BUILD_ID = "expand24-v3"
 
 
 def _merge_expand_order(
@@ -415,12 +417,12 @@ def _coverage_hit_audit(
     *,
     exclude_keys: List[str] | None = None,
 ) -> Dict[str, Any]:
-    """이 회차 추천 vs 당첨 — 티켓 천장·놓친 catchable·신호 순위 감사."""
+    """이 회차 추천 vs 당첨 — 티켓 천장·확장망 밖 당첨·신호 순위 감사."""
     win = [int(n) for n in winning if 1 <= int(n) <= 45]
     win_set = set(win)
     present = {n for n in range(1, 46) if sigs.get("total_freq", {}).get(n, 0) > 0}
-    catchable = sorted(win_set & present)
-    uncatchable = sorted(win_set - present)
+    on_ticket = sorted(win_set & present)
+    missing_ticket = sorted(win_set - present)
     core = set(cov.get("core6") or [])
     expand = set(cov.get("expand18") or [])
     ban = list(exclude_keys or [])
@@ -429,8 +431,8 @@ def _coverage_hit_audit(
     sk = cov.get("signal") or "support"
     ranked = _rank_signal(sigs.get(sk, sigs["support"]), sigs.get("total_freq"), sigs.get("auto_freq"))
     single_rank = {n: i + 1 for i, n in enumerate(ranked)}
-    missed = sorted(set(catchable) - expand)
-    missed_detail = [
+    outside = sorted(set(on_ticket) - expand)
+    outside_detail = [
         {
             "number": n,
             "single_rank": single_rank.get(n),
@@ -438,7 +440,7 @@ def _coverage_hit_audit(
             "in_raw_expand": n in set(cov.get("expand18_raw") or []),
             "in_single_expand": n in set(cov.get("expand18_single") or []),
         }
-        for n in missed
+        for n in outside
     ]
     random6 = round(6 * 6 / 45, 3)
     expand_n = max(1, len(expand))
@@ -446,24 +448,29 @@ def _coverage_hit_audit(
     top18_hit = len(win_set & set(cov.get("expand18_precision") or cov.get("expand18_raw") or []))
     return {
         "winning": win,
-        "catchable": catchable,
-        "uncatchable": uncatchable,
-        "catchable_count": len(catchable),
+        # 하위호환 필드명 유지(프론트 구버전). UI 라벨에는 쓰지 말 것.
+        "catchable": on_ticket,
+        "uncatchable": missing_ticket,
+        "catchable_count": len(on_ticket),
+        "on_ticket": on_ticket,
+        "missing_ticket": missing_ticket,
+        "on_ticket_count": len(on_ticket),
         "core6_hit": sorted(core & win_set),
         "expand18_hit": sorted(expand & win_set),
         "core6_count": len(core & win_set),
         "expand18_count": len(expand & win_set),
         "expand_size": expand_n,
         "expand18_precision_count": top18_hit,
-        "missed_catchable": missed,
-        "missed_detail": missed_detail,
+        "outside_expand": outside,
+        "missed_catchable": outside,  # 하위호환
+        "missed_detail": outside_detail,
         "random_expect_core6": random6,
         "random_expect_expand18": random_expand,
         "vs_random_expand": round(len(expand & win_set) - random_expand, 3),
         "ceiling_note": (
-            f"티켓 미등장 당첨 {len(uncatchable)}개 = 구조적 천장"
-            if uncatchable
-            else "당첨 6개 모두 용지 후보에 존재(천장=엔진 순위)"
+            f"티켓에 없는 당첨 {len(missing_ticket)}개 = 구조적 천장"
+            if missing_ticket
+            else "당첨 6개 모두 용지에 존재(천장=엔진 순위)"
         ),
     }
 
@@ -842,9 +849,9 @@ def _coverage_set_from_signals(
     mode = expand_mode or DEFAULT_EXPAND_MODE
     if mode not in EXPAND_MODE_LABELS:
         mode = DEFAULT_EXPAND_MODE
-    size = int(expand_size or DEFAULT_EXPAND_SIZE)
-    if size not in EXPAND_SIZE_CANDIDATES:
-        size = DEFAULT_EXPAND_SIZE
+    # WF가 18을 골라도 방출 그물은 항상 24 — top18 절단 회귀 금지.
+    _ = expand_size  # 호출부 하위호환(무시)
+    size = DEFAULT_EXPAND_SIZE
     expand = _ensure_core_subset(
         _expand_from_mode(ranked, boe_order, core, present, mode, size=size),
         core,
@@ -869,6 +876,7 @@ def _coverage_set_from_signals(
         "expand18_boe_balanced": boe_expand,
         "decade_balance": _decade_balance_info(expand, precision18, present),
         "excluded_signals": list(exclude_keys or []),
+        "coverage_build": COVERAGE_BUILD_ID,
         # 진단: 이 회차 신호 top18 vs top24 적중 차이(당첨 알 때 복기 전용).
         "precision_gap_hint": {
             "top18": 18,
@@ -922,15 +930,17 @@ def _consensus_coverage(
     core = [n for n in order if agree[n] >= need][:6]
     if len(core) < 6:
         core = order[:6]
-    raw_expand = order[:18]
+    size = DEFAULT_EXPAND_SIZE
+    raw_expand = order[:size]
     # 넓은 그물이 티켓 후보 있는 5개 구간을 모두 커버하도록 보정(core ⊂ expand 유지).
     present = {n for n in range(1, 46) if cur_signals.get("total_freq", {}).get(n, 0) > 0}
-    expand = _balance_expand(order, core, present, 18)
+    expand = _balance_expand(order, core, present, size)
     return {
         "good_signal_count": len(good),
         "good_signals": good,
         "core6": core,
         "expand18": expand,
+        "expand_size": size,
         "agreement": {str(n): agree[n] for n in expand},
         "need": need,
         "decade_balance": _decade_balance_info(expand, raw_expand, present),
@@ -1032,10 +1042,10 @@ def _inverse_diagnosis(
     small = bool(leaderboard.get("small_sample") or multi_round.get("small_sample"))
     wf = expand_wf or {}
     expand_mode = str(wf.get("selected_mode") or DEFAULT_EXPAND_MODE)
-    expand_size = int(wf.get("selected_size") or DEFAULT_EXPAND_SIZE)
-    expand_label = str(
-        wf.get("selected_label")
-        or f"{EXPAND_MODE_LABELS.get(expand_mode, expand_mode)} · top{expand_size}"
+    # 정책·히어로 라벨은 실제 방출 크기(24). WF selected_size 는 진단용만.
+    expand_size = DEFAULT_EXPAND_SIZE
+    expand_label = (
+        f"{EXPAND_MODE_LABELS.get(expand_mode, expand_mode)} · top{expand_size}"
     )
 
     problems: List[Dict[str, Any]] = []
@@ -1261,10 +1271,11 @@ def build_review_verification() -> Dict[str, Any]:
     if "auto_freq" not in ban_keys:
         ban_keys.append("auto_freq")
 
-    # expand18 구성 모드 — 보관 회차 LOO walk-forward 로 채택(구간균형이 recall 깎는지 검증).
+    # expand 구성 모드 — 보관 회차 LOO walk-forward 로 채택(구간균형이 recall 깎는지 검증).
+    # 크기는 진단만 하고 방출은 항상 DEFAULT_EXPAND_SIZE(24).
     expand_wf = _walkforward_expand_policy(_samples, exclude_keys=ban_keys)
     expand_mode = str(expand_wf.get("selected_mode") or DEFAULT_EXPAND_MODE)
-    expand_size = int(expand_wf.get("selected_size") or DEFAULT_EXPAND_SIZE)
+    expand_size = DEFAULT_EXPAND_SIZE
 
     # 복기 회차 커버리지 — 그 회차 용지 신호로 core6/expand (당첨 대조용).
     # 이번회차 세트와 분리해야 탭별로 추천이 달라진다.
@@ -1400,6 +1411,7 @@ def build_review_verification() -> Dict[str, Any]:
 
     return {
         "ok": True,
+        "coverage_build": COVERAGE_BUILD_ID,
         "round_no": review_round,
         "winning_numbers": winning,
         "auto_line_count": len(auto),

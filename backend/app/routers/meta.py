@@ -11,7 +11,12 @@ router = APIRouter(prefix="/api/v1", tags=["meta"])
 @router.get("/meta")
 def get_meta():
     """프론트/운영용: 데이터 소스, 최신 회차, 현재 회차, 누락 회차 수."""
-    return get_history_meta()
+    from ..video_analysis.review_verification import COVERAGE_BUILD_ID
+
+    out = dict(get_history_meta())
+    # 배포 스모크: Railway 가 옛 이미지를 남기면 이 값이 안 바뀐다.
+    out["coverage_build"] = COVERAGE_BUILD_ID
+    return out
 
 
 @router.get("/round-status")

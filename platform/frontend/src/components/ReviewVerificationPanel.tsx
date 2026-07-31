@@ -19,7 +19,7 @@ export default function ReviewVerificationPanel() {
   const [open, setOpen] = useState(false);
   const q = useQuery({
     // round_no 가 응답에 포함되므로 stale 시 회차 업그레이드 후 옛 검증이 남을 수 있음 → 재조회 주기 단축
-    queryKey: ['v1-photo-review-verification'],
+    queryKey: ['v1-photo-review-verification', 'expand24-v3'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     refetchOnMount: 'always',
@@ -410,7 +410,11 @@ export default function ReviewVerificationPanel() {
             {d.current_coverage_set.selected_by === 'multi_round' ? ' (다회차 성적 1위 신호)' : ''}
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
-            top-6 '집중' 대신 <strong>핵심 6 + 확장 12(합 18)</strong>로 제시합니다(복기 검증상 확장이 더 잡음).
+            top-6 '집중' 대신{' '}
+            <strong>
+              핵심 6 + 확장망(합 {d.current_coverage_set.expand_size ?? d.current_coverage_set.expand18?.length ?? 24})
+            </strong>
+            으로 제시합니다(복기 검증상 확장이 더 잡음).
             {' '}{d.current_round_no}회는 아직 추첨 전이라 대조하지 않습니다.
           </Typography>
           <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
@@ -423,8 +427,10 @@ export default function ReviewVerificationPanel() {
             <ComboActions numbers={[...d.current_coverage_set.core6].sort((a, b) => a - b)} source="unknown" label="복기검증 핵심6" />
           </Stack>
           <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
-            {/* 확장은 핵심 6 을 제외한 나머지(7~18위)만 — '핵심 6 + 확장' 이 실제로 합 18 이 되게. */}
-            <Typography variant="caption" fontWeight={700} sx={{ fontSize: 11 }}>확장 +12:</Typography>
+            {/* 확장은 핵심 6 제외 나머지 — 합 = expand_size(기본 24). */}
+            <Typography variant="caption" fontWeight={700} sx={{ fontSize: 11 }}>
+              확장 +{(d.current_coverage_set.expand18 ?? []).filter((n) => !d.current_coverage_set!.core6.includes(n)).length}:
+            </Typography>
             {d.current_coverage_set.expand18
               .filter((n) => !d.current_coverage_set!.core6.includes(n))
               .map((n) => (
@@ -450,25 +456,12 @@ export default function ReviewVerificationPanel() {
           )}
           {d.expand_walkforward && (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.35 }}>
-              📐 expand WF: {d.expand_walkforward.selected_label ?? d.expand_walkforward.selected_mode}
-              {d.expand_walkforward.selected_mean != null
-                ? ` · LOO 평균 ${d.expand_walkforward.selected_mean}/6 (무작위 ${d.expand_walkforward.random_baseline})`
-                : ''}
-              {d.current_coverage_set.expand18_mode_label
-                ? ` · 적용 ${d.current_coverage_set.expand18_mode_label}`
-                : ''}
-            </Typography>
-          )}
-          {d.review_hit_audit && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.35 }}>
-              🎯 복기 적중 감사: core {d.review_hit_audit.core6_count}/6 · expand {d.review_hit_audit.expand18_count}/6
-              {' '}· 포착가능 {d.review_hit_audit.catchable_count}/6
-              {d.review_hit_audit.missed_catchable.length
-                ? ` · 놓침 ${d.review_hit_audit.missed_catchable.join(',')}`
-                : ''}
-              {d.review_hit_audit.uncatchable.length
-                ? ` · 티켓미등장 ${d.review_hit_audit.uncatchable.join(',')}`
-                : ''}
+              📐 확장망: {d.expand_walkforward.selected_label ?? d.expand_walkforward.selected_mode}
+              {d.current_coverage_set.expand_size
+                ? ` · ${d.current_coverage_set.expand_size}개`
+                : d.current_coverage_set.expand18
+                  ? ` · ${d.current_coverage_set.expand18.length}개`
+                  : ''}
             </Typography>
           )}
         </Box>

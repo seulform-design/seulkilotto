@@ -9,6 +9,8 @@ export interface AppMeta {
   row_count: number;
   gap_count: number;
   is_complete: boolean;
+  /** 확장망 빌드 스모크(강제 top24). */
+  coverage_build?: string;
 }
 
 export interface RoundStatus {
@@ -1204,18 +1206,26 @@ export interface ReviewVerificationResponse {
     need?: number;
     decade_balance?: DecadeBalance;
   };
-  /** 복기 추천 vs 당첨 — 티켓 천장·놓친 catchable 감사. */
+  /** 복기 추천 vs 당첨 — 티켓 천장·확장망 밖 당첨 감사. */
   review_hit_audit?: {
     winning: number[];
+    /** @deprecated UI 라벨 금지 — on_ticket 사용 */
     catchable: number[];
+    /** @deprecated UI 라벨 금지 — missing_ticket 사용 */
     uncatchable: number[];
     catchable_count: number;
+    on_ticket?: number[];
+    missing_ticket?: number[];
+    on_ticket_count?: number;
     core6_hit: number[];
     expand18_hit: number[];
     core6_count: number;
     expand18_count: number;
     expand_size?: number;
     expand18_precision_count?: number;
+    /** 용지에는 있으나 확장망 순위 밖인 당첨 */
+    outside_expand?: number[];
+    /** @deprecated outside_expand 와 동일(하위호환) */
     missed_catchable: number[];
     missed_detail?: {
       number: number;
@@ -1229,6 +1239,7 @@ export interface ReviewVerificationResponse {
     vs_random_expand?: number;
     ceiling_note?: string;
   };
+  coverage_build?: string;
   /** expand18 구성 모드 LOO walk-forward. */
   expand_walkforward?: {
     ok: boolean;

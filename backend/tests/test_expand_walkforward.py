@@ -60,15 +60,17 @@ def test_walkforward_picks_expand_mode_and_coverage_includes_core():
         selected_by="multi_round",
         exclude_keys=ban,
         expand_mode=wf["selected_mode"],
-        expand_size=wf["selected_size"],
+        expand_size=wf["selected_size"],  # WF가 18이어도 방출은 24
     )
     assert set(cov["core6"]).issubset(set(cov["expand18"]))
-    assert len(cov["expand18"]) == wf["selected_size"]
-    assert cov["expand_size"] == wf["selected_size"]
+    assert len(cov["expand18"]) == DEFAULT_EXPAND_SIZE
+    assert cov["expand_size"] == DEFAULT_EXPAND_SIZE
+    assert cov["coverage_build"] == "expand24-v3"
 
     audit = _coverage_hit_audit(sigs, cov, s1.winning, exclude_keys=ban)
     assert audit["catchable_count"] + len(audit["uncatchable"]) == 6
     assert audit["expand_size"] == len(cov["expand18"])
+    assert "outside_expand" in audit
 
 
 def test_walkforward_fallback_when_too_few_samples():
@@ -77,33 +79,18 @@ def test_walkforward_fallback_when_too_few_samples():
     assert wf["selected_size"] == DEFAULT_EXPAND_SIZE
 
 
-def test_top24_recovers_near_miss_band_like_1234():
-    """1234 유형: 당첨이 지지 23–24위에 있으면 top18은 놓치고 top24는 잡는다."""
-    # 인위적 줄 — support 순위에서 당첨 일부가 뒤로 밀리게.
-    auto = _lines(
-        *[(i, i + 1, i + 2, i + 3, i + 4, i + 5) for i in range(1, 20, 2)],
-        (19, 20, 21, 22, 23, 24),
-        (25, 26, 27, 28, 29, 30),
-        (31, 32, 33, 34, 35, 36),
-    )
-    semi = _lines(
-        *[(i, i + 1, i + 2, i + 3, i + 4, i + 5) for i in range(1, 20, 2)],
-        (19, 21, 23, 25, 27, 29),
-        (31, 33, 35, 37, 39, 41),
-    )
-    winning = [1, 2, 3, 19, 35, 43]
-    # 43을 support에 올리기 위해 양쪽 줄에 반복 삽입
-    auto = auto + _lines((15, 21, 23, 30, 36, 43), (15, 21, 23, 30, 36, 43))
-    semi = semi + _lines((15, 21, 23, 30, 36, 43), (15, 21, 23, 30, 36, 43))
+def test_coverage_always_emits_24():
+    auto = _lines((1, 2, 3, 7, 8, 9), (1, 2, 4, 10, 11, 12), (3, 5, 6, 13, 14, 15))
+    semi = _lines((1, 2, 3, 16, 17, 18), (4, 5, 6, 19, 20, 21), (7, 8, 9, 22, 23, 24))
     sigs = _signals(auto, semi)
-    cov18 = _coverage_set_from_signals(
-        sigs, signal_key="support", selected_by="t", exclude_keys=["auto_freq"],
-        expand_mode="single_raw", expand_size=18,
+    cov = _coverage_set_from_signals(
+        sigs,
+        signal_key="support",
+        selected_by="t",
+        exclude_keys=["auto_freq"],
+        expand_mode="single_raw",
+        expand_size=18,  # 요청이 18이어도 후보는 24만 허용 → DEFAULT 로 승격
     )
-    cov24 = _coverage_set_from_signals(
-        sigs, signal_key="support", selected_by="t", exclude_keys=["auto_freq"],
-        expand_mode="single_raw", expand_size=24,
-    )
-    assert len(cov24["expand18"]) == 24
-    # top24 ⊇ top18
-    assert set(cov18["expand18"]).issubset(set(cov24["expand18"]))
+    assert cov["expand_size"] == 24
+    assert len(cov["expand18"]) == 24
+    assert cov["coverage_build"] == "expand24-v3"

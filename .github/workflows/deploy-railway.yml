@@ -66,17 +66,49 @@ jobs:
         if: ${{ steps.cfg.outputs.configured == 'true' && env.RAILWAY_PUBLIC_URL != '' }}
         run: |
           python3 - <<'PY'
-          import json, sys, urllib.request
+          import json, sys, time, urllib.request
           base = "${RAILWAY_PUBLIC_URL}".rstrip("/")
-          url = f"{base}/api/v1/meta"
-          try:
-              with urllib.request.urlopen(url, timeout=60) as r:
-                  body = r.read().decode("utf-8", "ignore")
-              data = json.loads(body)
-              if not isinstance(data, dict) or "latest_round" not in data:
-                  raise RuntimeError(f"unexpected response: {body[:300]}")
-              print(f"Smoke test OK: {url} -> latest_round={data.get('latest_round')}, current_round={data.get('current_round')}")
-          except Exception as exc:
-              print(f"Smoke test failed for {url}: {exc}", file=sys.stderr)
-              raise
+          expected_build = "expand24-v3"
+
+          def get(url, timeout=90):
+              with urllib.request.urlopen(url, timeout=timeout) as r:
+                  return json.loads(r.read().decode("utf-8", "ignore"))
+
+          meta_url = f"{base}/api/v1/meta"
+          # Railway 빌드가 Actions 종료 후에도 이어질 수 있어 재시도.
+          meta = None
+          last_err = None
+          for i in range(24):
+              try:
+                  meta = get(meta_url, timeout=30)
+                  build = meta.get("coverage_build")
+                  if build == expected_build:
+                      break
+                  last_err = f"coverage_build={build!r} (want {expected_build})"
+              except Exception as exc:
+                  last_err = str(exc)
+              time.sleep(15)
+          else:
+              print(f"Smoke test failed for {meta_url}: {last_err}", file=sys.stderr)
+              raise SystemExit(1)
+
+          if not isinstance(meta, dict) or "latest_round" not in meta:
+              raise RuntimeError(f"unexpected meta: {meta}")
+          print(f"Smoke meta OK: coverage_build={meta.get('coverage_build')} latest_round={meta.get('latest_round')}")
+
+          rv_url = f"{base}/api/v1/photo-analysis/review-verification"
+          rv = get(rv_url, timeout=120)
+          cov = rv.get("review_coverage_set") or {}
+          expand = cov.get("expand18") or []
+          size = cov.get("expand_size") or len(expand)
+          if size < 24 or len(expand) < 24:
+              raise RuntimeError(
+                  f"expand too small after deploy: size={size} len={len(expand)} build={rv.get('coverage_build')}"
+              )
+          if rv.get("coverage_build") != expected_build:
+              raise RuntimeError(f"review-verification build mismatch: {rv.get('coverage_build')}")
+          print(
+              f"Smoke review OK: expand_len={len(expand)} expand_size={size} "
+              f"mode={cov.get('expand18_mode')} build={rv.get('coverage_build')}"
+          )
           PY

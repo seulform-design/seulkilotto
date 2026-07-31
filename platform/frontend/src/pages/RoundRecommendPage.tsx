@@ -68,17 +68,17 @@ export default function RoundRecommendPage({
       {embedded && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontWeight: 700 }}>
           {sheetIntent === 'review' ? '복기 탭 · ' : '이번회차 탭 · '}
-          호기 패턴 신호(다음 회차) · 용지 5세트와 별개
+          ④ 후속·gap · 호기 패턴(다음 회차 참고) · ③ 용지 추천과 점수 분리
           {meta.data ? ` · 데이터 ${meta.data.row_count}건` : ''}
         </Typography>
       )}
       <Alert severity="success" sx={{ mb: embedded ? 1.25 : 2, py: 0.5 }}>
         {embedded ? (
           <Typography variant="caption">
-            호기 실측 신호만 표시합니다. <strong>추천 5게임·호기 현황</strong>은 ③에서 제거했습니다
-            (용지 통계 5세트와 중복 · 호기 현황은 ④ 후속·gap). Venus는 위 종합 합의에만 있습니다.
+            호기 실측 신호만 표시합니다. ③ 번호추천 점수·용지 5세트에는 넣지 않습니다
+            (추정 신뢰도·중복 방지). 호기 현황은 위 패널, Venus는 ③ 종합 합의.
             {sheetIntent === 'review'
-              ? ' 복기 탭에서는 당첨 대조용 용지 추천(위)을 우선하세요 — 호기 패턴은 다음 회차 예측용입니다.'
+              ? ' 복기 탭의 당첨 대조는 ③ 용지 추천을 우선하세요 — 여기는 다음 회차 패턴 참고입니다.'
               : ''}
           </Typography>
         ) : (
@@ -364,8 +364,8 @@ export default function RoundRecommendPage({
       {embedded && data && (
         <Alert severity="info" sx={{ mb: 1.25, py: 0.5 }} icon={false}>
           <Typography variant="caption">
-            다음 {data.next_round}회 · {data.machine_id}호기 패턴. 조합 5게임은 용지 통계{' '}
-            <strong>추천 5세트</strong>만 사용하세요(중복 제거).
+            다음 {data.next_round}회 · {data.machine_id}호기 패턴 참고. 조합 추천은 ③ 용지{' '}
+            <strong>5세트</strong>만 사용하세요.
           </Typography>
         </Alert>
       )}

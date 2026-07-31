@@ -1186,9 +1186,8 @@ export default function SemiAutoComparePanel({
   const [showRegister, setShowRegister] = useState(true);
   const [showAnalysisSection, setShowAnalysisSection] = useState(false);
   const [showRecommendSection, setShowRecommendSection] = useState(true);
-  /** 구 상단탭(종합분석·추첨기추천) — ③ 안 임베드 (기본 접힘, 딥링크 시 자동 펼침) */
+  /** 구 상단탭 종합분석 → ③ Venus 임베드 (기본 접힘, 딥링크 시 자동 펼침) */
   const [showCompositeEmbed, setShowCompositeEmbed] = useState(false);
-  const [showMachineEmbed, setShowMachineEmbed] = useState(false);
   const [showPredictionDetail, setShowPredictionDetail] = useState(false);
   const [showTicketCompare, setShowTicketCompare] = useState(false);
   /** 1:1 전수비교 상세(매칭 카드) — 요약만 기본, 상세 보기로 펼침 */
@@ -1212,19 +1211,21 @@ export default function SemiAutoComparePanel({
     setRecommendations([]);
   }, [sheetIntent]);
 
-  // 구 상단탭(종합분석/추첨기추천) → 용지분석 ③ 딥링크
+  // 구 상단탭(종합분석/추첨기추천) → 용지분석 딥링크
+  // composite → ③ Venus · machine → ④ 후속·gap 호기 · recommend → ③ 번호추천
   useEffect(() => {
     const focus = takePhotoFocus();
     if (!focus) return;
-    setShowRecommendSection(true);
     if (focus === 'composite') {
+      setShowRecommendSection(true);
       setShowCompositeEmbed(true);
       window.setTimeout(() => scrollToPhotoRecommend({ embed: 'composite' }), 120);
     } else if (focus === 'machine') {
-      setShowMachineEmbed(true);
+      setShowPredictionDetail(true);
+      setEngineTab('aux');
       window.setTimeout(() => scrollToPhotoRecommend({ embed: 'machine' }), 120);
     } else {
-      // recommend: ③ 번호추천 섹션 자체로 스크롤 (추첨기 임베드 강제 오픈 안 함)
+      setShowRecommendSection(true);
       window.setTimeout(() => scrollToPhotoRecommend(), 80);
     }
   }, []);
@@ -5161,17 +5162,7 @@ export default function SemiAutoComparePanel({
         <Chip
           size="small"
           variant="outlined"
-          label="호기신호"
-          onClick={() => {
-            setShowMachineEmbed(true);
-            window.setTimeout(() => scrollToPhotoRecommend({ embed: 'machine' }), 60);
-          }}
-          sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
-        />
-        <Chip
-          size="small"
-          variant="outlined"
-          label="호기현황 → ④"
+          label="호기 → ④"
           onClick={() => {
             setShowPredictionDetail(true);
             setEngineTab('aux');
@@ -5198,7 +5189,7 @@ export default function SemiAutoComparePanel({
       </Stack>
       {!showRecommendSection && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          핵심 · 용지 5세트 · 강수/기대 · 종합예측 — 접힘. 합의/Venus·호기 신호는 아래 개별 토글. 호기 현황·백테스트는 ④.
+          핵심 · 용지 5세트 · 강수/기대 · 종합예측 — 접힘. 합의/Venus는 아래 토글. 호기 패턴·현황·백테스트는 ④.
         </Typography>
       )}
       {showRecommendSection && (
@@ -5704,62 +5695,36 @@ export default function SemiAutoComparePanel({
       </>
       )}
 
-      {/* ── 종합 합의·Venus(intent별) · 호기 신호(5게임/호기현황 제외) ── */}
+      {/* ── 종합 합의·Venus(intent별) — 호기 패턴/현황은 ④ 후속·gap ── */}
       <Divider sx={{ my: 1.5 }} />
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: 10 }}>
-        Venus는 탭별로 분리됩니다(복기=확정 호기 · 이번회차=예상 호기). 용지 <strong>5세트</strong>만
-        조합 추천으로 쓰고, 호기 현황·Walk-Forward는 <strong>④</strong>로 보냅니다.
+        Venus는 탭별로 분리됩니다(복기=확정 호기 · 이번회차=예상 호기). 조합 추천은 용지{' '}
+        <strong>5세트</strong>만. 호기 패턴·현황·Walk-Forward는 점수에 안 쓰이므로 <strong>④</strong>.
       </Typography>
-      <Stack spacing={1}>
-        <Paper id="photo-embed-composite" variant="outlined" sx={{ p: 1.25 }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
-            <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13 }}>
-              종합 합의 · Venus ({intentSectionLabel})
-            </Typography>
-            <Button size="small" variant="outlined" onClick={() => setShowCompositeEmbed((v) => !v)}>
-              {showCompositeEmbed ? '접기 ▲' : '펼치기 ▼'}
-            </Button>
-          </Stack>
-          {showCompositeEmbed && (
-            <Box sx={{ mt: 1 }}>
-              <Suspense
-                fallback={
-                  <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1.5 }}>
-                    <CircularProgress size={18} />
-                    <Typography variant="caption" color="text.secondary">종합 분석 로딩…</Typography>
-                  </Stack>
-                }
-              >
-                <ComposedAnalysisPage embedded sheetIntent={sheetIntent} />
-              </Suspense>
-            </Box>
-          )}
-        </Paper>
-        <Paper id="photo-embed-machine" variant="outlined" sx={{ p: 1.25 }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
-            <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13 }}>
-              호기 패턴 신호 (5게임·호기현황 없음)
-            </Typography>
-            <Button size="small" variant="outlined" onClick={() => setShowMachineEmbed((v) => !v)}>
-              {showMachineEmbed ? '접기 ▲' : '펼치기 ▼'}
-            </Button>
-          </Stack>
-          {showMachineEmbed && (
-            <Box sx={{ mt: 1 }}>
-              <Suspense
-                fallback={
-                  <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1.5 }}>
-                    <CircularProgress size={18} />
-                    <Typography variant="caption" color="text.secondary">호기 신호 로딩…</Typography>
-                  </Stack>
-                }
-              >
-                <RoundRecommendPage embedded sheetIntent={sheetIntent} />
-              </Suspense>
-            </Box>
-          )}
-        </Paper>
-      </Stack>
+      <Paper id="photo-embed-composite" variant="outlined" sx={{ p: 1.25 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
+          <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13 }}>
+            종합 합의 · Venus ({intentSectionLabel})
+          </Typography>
+          <Button size="small" variant="outlined" onClick={() => setShowCompositeEmbed((v) => !v)}>
+            {showCompositeEmbed ? '접기 ▲' : '펼치기 ▼'}
+          </Button>
+        </Stack>
+        {showCompositeEmbed && (
+          <Box sx={{ mt: 1 }}>
+            <Suspense
+              fallback={
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1.5 }}>
+                  <CircularProgress size={18} />
+                  <Typography variant="caption" color="text.secondary">종합 분석 로딩…</Typography>
+                </Stack>
+              }
+            >
+              <ComposedAnalysisPage embedded sheetIntent={sheetIntent} />
+            </Suspense>
+          </Box>
+        )}
+      </Paper>
       </Paper>
 
       {/* ════════ ④ 패턴 분석 엔진 (기본 접힘 · 복기검증/백테스트 포함) ════════ */}
@@ -5811,6 +5776,25 @@ export default function SemiAutoComparePanel({
           {engineTab === 'aux' && (
             <>
               <MachineOverviewPanel defaultOpen />
+              <Paper id="engine-machine-patterns" variant="outlined" sx={{ p: 1.25, mb: 1.5 }}>
+                <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13, mb: 0.75 }}>
+                  호기 패턴 신호
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: 10 }}>
+                  다음 회차 호기 실측 신호(참고). ③ 용지 점수·5세트에는 주입하지 않습니다.
+                  조합 5게임·Walk-Forward 상세는 이 패널/검증 탭에서만.
+                </Typography>
+                <Suspense
+                  fallback={
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1.5 }}>
+                      <CircularProgress size={18} />
+                      <Typography variant="caption" color="text.secondary">호기 신호 로딩…</Typography>
+                    </Stack>
+                  }
+                >
+                  <RoundRecommendPage embedded sheetIntent={sheetIntent} />
+                </Suspense>
+              </Paper>
               <EngineAuxSignalsPanel
                 intentLabel={intentSectionLabel}
                 roundNo={effectiveRound}

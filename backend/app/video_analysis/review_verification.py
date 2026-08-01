@@ -549,10 +549,14 @@ def _signals(auto: List[List[int]], semi: List[List[int]]) -> Dict[str, Dict[int
     from .overlap_learning import combo_strength_by_number
 
     combo_strength = combo_strength_by_number(auto, "rv")
+    # 반자동 전용 빈도(고정수 제외) — 사용자 관찰('반자동에 자주 나온 번호')을
+    # 다회차 상위K 커버리지로 정직하게 검증. 자동 빈도와 대칭이되, 고정수 왜곡은 제거.
+    semi_freq = dict(sc_sup)
 
     return {
         "support": support,
         "auto_freq": {n: float(ac.get(n, 0)) for n in range(1, 46)},
+        "semi_freq": semi_freq,
         "total_freq": total,
         "balanced": balanced_val,
         "combo_strength": combo_strength,
@@ -562,10 +566,87 @@ def _signals(auto: List[List[int]], semi: List[List[int]]) -> Dict[str, Dict[int
 _SIGNAL_LABELS = {
     "support": "양쪽 지지(자동∩반자동)",
     "auto_freq": "자동 빈도",
+    "semi_freq": "반자동 빈도(고정수 제외)",
     "total_freq": "전체 빈도(자동+반자동)",
     "balanced": "구간 균형 커버리지",
     "combo_strength": "조합 강도(반복줄×lift)",
 }
+
+
+def _build_semi_signal_report(
+    *,
+    leaderboard: Dict[str, Any],
+    current_sigs: Dict[str, Dict[int, float]],
+    current_semi: List[List[int]],
+    current_fixed: List[int],
+) -> Dict[str, Any]:
+    """반자동 빈도 신호의 다회차 검증 요약 + 이번회차 상위 번호.
+
+    확률을 올리지 않는다. 복기 보관 회차에서 top18 커버리지가 무작위(≈2.4)를
+    넘는지·소표본인지 정직히 고지하고, 이번회차 반자동 시트 상위만 보여준다.
+    """
+    lb_rows = list(leaderboard.get("leaderboard") or [])
+    entry = next((e for e in lb_rows if e.get("key") == "semi_freq"), None)
+    rounds = int(leaderboard.get("rounds") or 0)
+    small = bool(leaderboard.get("small_sample"))
+    random18 = float((leaderboard.get("random_baseline") or {}).get("top18") or (18 * 6 / 45))
+    if entry is None:
+        return {
+            "ok": False,
+            "reason": "반자동 빈도 신호 집계 없음(복기 표본 부족)",
+            "rounds": rounds,
+            "small_sample": small,
+        }
+    mean18 = float(entry.get("mean_top18") or 0)
+    mean6 = float(entry.get("mean_top6") or 0)
+    beats = bool(entry.get("beats_random18"))
+    under = bool(entry.get("underperforming"))
+    sig = entry.get("significance") or {}
+    if rounds < 2:
+        verdict = "표본 부족 — 참고만"
+    elif small and beats:
+        verdict = "소표본 · 우연 가능 — 참고만"
+    elif beats and not under:
+        verdict = "복기 검증 통과(상위18 > 무작위) — 참고 표시"
+    else:
+        verdict = "평탄(무작위와 구분 안 됨) — 추천 가중 없음"
+
+    top12: List[int] = []
+    top18: List[int] = []
+    if current_sigs.get("semi_freq") and current_semi:
+        ranked = _rank_signal(
+            current_sigs["semi_freq"],
+            current_sigs.get("total_freq"),
+            current_sigs.get("auto_freq"),
+        )
+        # 빈도 0(고정수·미등장)은 제외
+        present = [n for n in ranked if float(current_sigs["semi_freq"].get(n, 0)) > 0]
+        top12 = present[:12]
+        top18 = present[:18]
+
+    return {
+        "ok": True,
+        "key": "semi_freq",
+        "label": _SIGNAL_LABELS["semi_freq"],
+        "rounds": rounds,
+        "small_sample": small,
+        "mean_top6": mean6,
+        "mean_top18": mean18,
+        "random_top18": round(random18, 3),
+        "beats_random18": beats,
+        "underperforming": under,
+        "significance": sig,
+        "verdict": verdict,
+        "show_in_recommend": bool(beats and not under and rounds >= 2 and top12),
+        "current_top12": top12,
+        "current_top18": top18,
+        "current_fixed_excluded": list(current_fixed),
+        "current_semi_line_count": len(current_semi),
+        "honesty": (
+            "1등 확률(1/8,145,060)은 불변. 반자동 등장 상위는 복기 커버리지 검증 참고이며 "
+            "핵심6·용지 5세트를 대체하지 않습니다. 고정수는 제외합니다."
+        ),
+    }
 
 
 def _analyze(auto: List[List[int]], semi: List[List[int]], winning: List[int]) -> Dict[str, Any]:
@@ -1300,6 +1381,7 @@ def build_review_verification() -> Dict[str, Any]:
     cur_semi = _manual_saved_lines(cur_entries, "반자동", include_photo=True)
     current_coverage_set: Dict[str, Any] = {}
     consensus_coverage: Dict[str, Any] = {}
+    csig: Dict[str, Dict[int, float]] = {}
     if cur_auto or cur_semi:
         csig = _signals(cur_auto, cur_semi)
         current_coverage_set = _coverage_set_from_signals(
@@ -1409,6 +1491,14 @@ def build_review_verification() -> Dict[str, Any]:
         artifact_versions=["review_verification", "inverse_diagnosis", "10_explain@0.1.0"],
     )
 
+    # 반자동 빈도 신호 — 복기 다회차 검증 + 이번회차 상위 번호(③ 섹션용).
+    semi_signal_report = _build_semi_signal_report(
+        leaderboard=leaderboard,
+        current_sigs=csig,
+        current_semi=cur_semi,
+        current_fixed=sorted(_detect_fixed_semi(cur_semi)) if cur_semi else [],
+    )
+
     return {
         "ok": True,
         "coverage_build": COVERAGE_BUILD_ID,
@@ -1427,6 +1517,7 @@ def build_review_verification() -> Dict[str, Any]:
         "expand_walkforward": expand_wf,
         "current_coverage_set": current_coverage_set,
         "consensus_coverage": consensus_coverage,
+        "semi_signal_report": semi_signal_report,
         "multi_round_backtest": multi_round_backtest,
         "signal_leaderboard": leaderboard,
         "missed_winner_analysis": missed_winner_analysis,

@@ -1325,6 +1325,28 @@ export interface ReviewVerificationResponse {
       missed: { number: number; best_rank: number; in_ticket: boolean }[];
     }[];
   };
+  /** 반자동 빈도 신호 — 복기 다회차 검증 + 이번회차 상위(③ 섹션). */
+  semi_signal_report?: {
+    ok: boolean;
+    reason?: string;
+    key?: string;
+    label?: string;
+    rounds?: number;
+    small_sample?: boolean;
+    mean_top6?: number;
+    mean_top18?: number;
+    random_top18?: number;
+    beats_random18?: boolean;
+    underperforming?: boolean;
+    significance?: CoverageSignificance;
+    verdict?: string;
+    show_in_recommend?: boolean;
+    current_top12?: number[];
+    current_top18?: number[];
+    current_fixed_excluded?: number[];
+    current_semi_line_count?: number;
+    honesty?: string;
+  };
   /** 다회차 신호 순위표 — 어느 신호가 당첨을 가장 잘 잡았나(고정수 제외). */
   signal_leaderboard?: {
     rounds: number;

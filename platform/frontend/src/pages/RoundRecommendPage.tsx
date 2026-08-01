@@ -75,10 +75,10 @@ export default function RoundRecommendPage({
       <Alert severity="success" sx={{ mb: embedded ? 1.25 : 2, py: 0.5 }}>
         {embedded ? (
           <Typography variant="caption">
-            호기 실측 신호만 표시합니다. ③ 번호추천 점수·용지 5세트에는 넣지 않습니다
-            (추정 신뢰도·중복 방지). 호기 현황은 위 패널, Venus는 ③ 종합 합의.
+            ④ 엔진 · 호기·후속 탭 전용입니다. ③ 번호추천 점수·용지 5세트에는 넣지 않습니다
+            (추정 신뢰도·중복 방지). 호기 현황은 위 패널.
             {sheetIntent === 'review'
-              ? ' 복기 탭의 당첨 대조는 ③ 용지 추천을 우선하세요 — 여기는 다음 회차 패턴 참고입니다.'
+              ? ' 복기 당첨 대조는 ③ 용지 추천을 우선하세요 — 여기는 다음 회차 패턴 참고입니다.'
               : ''}
           </Typography>
         ) : (

@@ -1192,7 +1192,7 @@ export default function SemiAutoComparePanel({
   const [showTicketCompare, setShowTicketCompare] = useState(false);
   /** 1:1 전수비교 상세(매칭 카드) — 요약만 기본, 상세 보기로 펼침 */
   const [showLineMatchDetail, setShowLineMatchDetail] = useState(false);
-  /** 학습 엔진(역산·통합신호·검증학습) | 후속·gap | 검증 — 용지미출 탭/섹션 없음 */
+  /** 학습 엔진 | 호기·후속 | 검증 — 용지미출 탭/섹션 없음. 호기 패턴은 여기(aux)만. */
   const [engineTab, setEngineTab] = useState<'learn' | 'aux' | 'verify'>('learn');
 
   // 탭 전환 시 해당 탭 전용 localStorage 로드
@@ -5167,7 +5167,10 @@ export default function SemiAutoComparePanel({
             setShowPredictionDetail(true);
             setEngineTab('aux');
             window.setTimeout(() => {
-              document.getElementById('engine-machine-overview')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              const el =
+                document.getElementById('engine-machine-patterns')
+                ?? document.getElementById('engine-machine-overview');
+              el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 80);
           }}
           sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
@@ -5738,7 +5741,7 @@ export default function SemiAutoComparePanel({
           endIcon={<span>{showPredictionDetail ? '▲' : '▼'}</span>}
         >
           ④ 패턴 분석 엔진 {showPredictionDetail ? '접기' : '펼치기'}
-          （용지역산 · 평행 · 검증학습 · 후속·gap · 검증）
+          （용지역산 · 평행 · 검증학습 · 호기·후속 · 검증）
         </Button>
       {showPredictionDetail && (
         <Paper variant="outlined" sx={{ p: 1.5 }}>
@@ -5750,7 +5753,7 @@ export default function SemiAutoComparePanel({
             sx={{ mb: 1, minHeight: 36, '& .MuiTab-root': { minHeight: 36, py: 0.5, textTransform: 'none', fontWeight: 700, fontSize: 12 } }}
           >
             <Tab value="learn" label="학습 레이어" />
-            <Tab value="aux" label="후속·gap" />
+            <Tab value="aux" label="호기·후속" />
             <Tab value="verify" label="검증·백테스트" />
           </Tabs>
           {/* 엔진 공통 상태 — 탭과 무관하게 진단 포인트 고정 노출 */}
@@ -5775,15 +5778,38 @@ export default function SemiAutoComparePanel({
           <Stack spacing={1.5}>
           {engineTab === 'aux' && (
             <>
+              <EngineTabBanner
+                title={`호기·후속 · ${intentSectionLabel} ${effectiveRound ?? '?'}회`}
+                chips={
+                  <>
+                    <EngineStatusChip
+                      variant="outlined"
+                      label="호기현황"
+                      onClick={() =>
+                        document.getElementById('engine-machine-overview')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      }
+                      sx={{ cursor: 'pointer' }}
+                    />
+                    <EngineStatusChip
+                      variant="outlined"
+                      label="호기패턴"
+                      onClick={() =>
+                        document.getElementById('engine-machine-patterns')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      }
+                      sx={{ cursor: 'pointer' }}
+                    />
+                  </>
+                }
+              />
               <MachineOverviewPanel defaultOpen />
-              <Paper id="engine-machine-patterns" variant="outlined" sx={{ p: 1.25, mb: 1.5 }}>
-                <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13, mb: 0.75 }}>
-                  호기 패턴 신호
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: 10 }}>
-                  다음 회차 호기 실측 신호(참고). ③ 용지 점수·5세트에는 주입하지 않습니다.
-                  조합 5게임·Walk-Forward 상세는 이 패널/검증 탭에서만.
-                </Typography>
+              <EngineSection
+                id="engine-machine-patterns"
+                tone="secondary"
+                title="호기 패턴 신호"
+                defaultOpen
+                intent="다음 회차 호기 실측 신호(참고). ③ 번호추천 점수·용지 5세트에는 넣지 않습니다."
+                sx={{ mb: 1.5 }}
+              >
                 <Suspense
                   fallback={
                     <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1.5 }}>
@@ -5794,7 +5820,7 @@ export default function SemiAutoComparePanel({
                 >
                   <RoundRecommendPage embedded sheetIntent={sheetIntent} />
                 </Suspense>
-              </Paper>
+              </EngineSection>
               <EngineAuxSignalsPanel
                 intentLabel={intentSectionLabel}
                 roundNo={effectiveRound}

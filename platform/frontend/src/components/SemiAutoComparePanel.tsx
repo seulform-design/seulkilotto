@@ -1515,13 +1515,13 @@ export default function SemiAutoComparePanel({
   });
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand24-v12-full-catch', 'pair-product'],
+    queryKey: ['v1-photo-review-verification', 'expand24-v13-catch-universe', 'pair-product'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v11-full-catch', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v12-catch-universe', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,
@@ -3619,7 +3619,7 @@ export default function SemiAutoComparePanel({
         outsideCoreInExpand: audit?.outside_core_in_expand ?? [],
         dataUsed: api.data_used ?? null,
         backtest: api.backtest ?? null,
-        graftBuild: api.graft_build ?? 'graft-v11-full-catch',
+        graftBuild: api.graft_build ?? 'graft-v12-catch-universe',
         honesty: api.honesty ?? null,
         rankSource: 'api_pair_product' as const,
         decadeDropped: audit?.decade_dropped_vs_raw ?? [],
@@ -3990,6 +3990,7 @@ export default function SemiAutoComparePanel({
     const winsReady = Boolean(winningSet && winningSet.size > 0);
     const audit = compareWinning && rv?.ok ? rv.review_hit_audit as {
       outside_expand?: number[];
+      outside_precision?: number[];
       missed_catchable?: number[];
       missed_detail?: { number: number; single_rank?: number; boe_rank?: number }[];
       expand18_count?: number;
@@ -4028,9 +4029,12 @@ export default function SemiAutoComparePanel({
         }
       : null;
     // 서버 audit 만 사용 — 폴백 expand 에 당첨 차집합을 붙이면 레이스 중 수치가 흔들림.
-    const outsideExpand = clean(audit?.outside_expand ?? audit?.missed_catchable).sort(
-      (a, b) => a - b,
-    );
+    // 본망=통합정밀 — 밖은 정밀 미포함(확장 밖이 아님)
+    const outsideExpand = clean(
+      audit?.outside_precision
+      ?? audit?.outside_expand
+      ?? audit?.missed_catchable,
+    ).sort((a, b) => a - b);
     const missedDetail = (audit?.missed_detail ?? []).filter((m) =>
       outsideExpand.includes(m.number),
     );
@@ -5900,7 +5904,7 @@ export default function SemiAutoComparePanel({
                   <LottoBall key={`hero-out-${n}`} number={n} size={ENGINE_BALL.list} />
                 ))}
                 <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                  용지 등장 당첨이나 정밀/확장 순위 밖 (엔진 한계)
+                  용지 등장 당첨이나 통합정밀14 밖 (티켓밖·풀밖·엔진 한계)
                 </Typography>
               </Stack>
             </Stack>

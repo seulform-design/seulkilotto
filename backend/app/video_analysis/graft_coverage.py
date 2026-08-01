@@ -12,8 +12,8 @@ import math
 from itertools import combinations
 from typing import Any, Dict, List, Sequence, Tuple
 
-# v11: 전엔진 역산·정밀구출·catchable 보존(검증 커버리지 v12와 동일).
-GRAFT_BUILD_ID = "graft-v11-full-catch"
+# v12: 정밀우주(와치+구출)·정밀⊆확장 (검증 커버리지 v13과 동일).
+GRAFT_BUILD_ID = "graft-v12-catch-universe"
 
 DECADE_LABELS = ("단번대", "10번대", "20번대", "30번대", "40번대")
 

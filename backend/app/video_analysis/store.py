@@ -1,15 +1,17 @@
 """용지 사진 분석 결과 누적 저장 (SQLite-backed)."""
 from __future__ import annotations
 
+import contextvars
 import functools
 import json
 import sqlite3
 import threading
 import uuid
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from . import pg_store
 from .dedup import compute_content_fingerprint, compute_ticket_fingerprint, find_duplicate_entry
@@ -30,6 +32,48 @@ def _synchronized(fn):
             return fn(*args, **kwargs)
 
     return _wrapper
+
+
+# ── 요청 단위 읽기 캐시 ──────────────────────────────────────────────────────
+# build_accumulated 등 한 호출에서 _load_historical_raw() 가 3~4회 불린다(직접 +
+# _live_entries + _review_entries_for_round …). 각 호출이 pg 신규 연결 + 24MB
+# json.loads + normalize 라, 아카이브가 쌓이면(24MB+) 한 요청이 60s 게이트웨이
+# 한도를 넘어 502/504 로 끊긴다(→ 앱이 옛 회차에 멈춤). 이 컨텍스트 안에서 같은
+# 스코프를 1회만 로드하도록 캐시하고, 쓰기(save) 시 해당 스코프를 무효화한다.
+# 스코프 밖(캐시 None)에서는 기존과 동일하게 매번 로드한다(동작 불변).
+_read_cache_var: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.ContextVar(
+    "_store_read_cache", default=None
+)
+
+
+@contextmanager
+def store_read_cache():
+    """이 블록 동안 historical/current 원본을 스코프 1회만 로드(읽기 전용 경로 가속)."""
+    token = _read_cache_var.set({})
+    try:
+        yield
+    finally:
+        _read_cache_var.reset(token)
+
+
+def _read_cache_get(scope: str):
+    cache = _read_cache_var.get()
+    if cache is not None and scope in cache:
+        return cache[scope]
+    return None
+
+
+def _read_cache_put(scope: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    cache = _read_cache_var.get()
+    if cache is not None:
+        cache[scope] = data
+    return data
+
+
+def _read_cache_invalidate(scope: str) -> None:
+    cache = _read_cache_var.get()
+    if cache is not None:
+        cache.pop(scope, None)
 
 
 class DuplicateAnalysisError(Exception):
@@ -409,11 +453,16 @@ def _normalize_current(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _load_historical_raw() -> Dict[str, Any]:
+    cached = _read_cache_get("historical")
+    if cached is not None:
+        return cached
     if pg_store.enabled():
-        return _normalize_historical(pg_store.load("historical") or _empty_historical_raw())
-    _ensure_db_ready()
-    with _connect_db() as conn:
-        return _read_historical_raw_db(conn)
+        data = _normalize_historical(pg_store.load("historical") or _empty_historical_raw())
+    else:
+        _ensure_db_ready()
+        with _connect_db() as conn:
+            data = _read_historical_raw_db(conn)
+    return _read_cache_put("historical", data)
 
 
 def _save_historical_raw(data: Dict[str, Any]) -> None:
@@ -423,6 +472,7 @@ def _save_historical_raw(data: Dict[str, Any]) -> None:
     payload.setdefault("archived_current_rounds", [])
     payload.setdefault("version", HISTORICAL_STORE_VERSION)
     payload["updated_at"] = _now_iso()
+    _read_cache_invalidate("historical")  # 저장 후 스코프 내 후속 읽기는 최신으로
     if pg_store.enabled():
         pg_store.save("historical", payload)
         return
@@ -2062,6 +2112,14 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
 
 
 def build_accumulated() -> Dict[str, Any]:
+    # 요청 단위 읽기 캐시로 24MB historical 반복 로드(3~4회)를 1회로 줄인다 —
+    # 큰 아카이브에서 accumulated 가 60s 게이트웨이 한도를 넘어 502/504 로 끊겨
+    # 앱이 옛 회차에 멈추던 문제 방지. (align 등 쓰기가 나면 save 가 캐시 무효화.)
+    with store_read_cache():
+        return _build_accumulated_impl()
+
+
+def _build_accumulated_impl() -> Dict[str, Any]:
     # 읽기 경로 자기치유 — 외부 크론이 CSV 를 올려 이번회차 샌드박스 회차가 이미
     # 추첨 완료됐는데 아직 롤오버되지 않았으면(이번회차 라벨이 실제 회차와 어긋나고
     # 이미 추첨된 티켓이 '다음 회차'로 오표기되는 문제), 최신 이번회차까지 정렬해

@@ -1402,6 +1402,43 @@ export default function SemiAutoComparePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accumulated, sheetIntent, reviewDataRound, localRoundNo, lastSavedAt, localLineTotal]);
 
+  // 이번회차 회차 롤오버 자기치유 — 새 회차가 추첨되면(currentRound 전진) 이번회차 탭의
+  // 반자동 로컬은 옛 회차(예: 1235) 용지·stamp 를 그대로 물고 있어 '반자동이 이번회차에
+  // 남고 복기로 안 넘어간다'. 자동(§1)은 PhotoAnalysisPage rolloverClearedRef 가 자동
+  // 드래프트를 비우고 clearSemiAutoLocal('current_round') 로 반자동 localStorage 도
+  // 지우지만, **마운트된 이 패널의 React state(semiCurrentLines/semiSlipQueue/bulkTickets)
+  // 는 그대로 남는다**(localStorage 만 지워도 화면 state 는 안 바뀜) — 그게 이번 버그.
+  // 서버는 롤오버로 그 회차 용지를 보관(복기에 노출)하므로, 이미 저장된(lastSavedAt) 이번
+  // 회차 로컬에 한해 비우고 새 회차 기준으로 다시 시작한다(미저장 작업물은 보존).
+  const currentRolloverHealedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (sheetIntent !== 'current_round' || currentRound == null) return;
+    if (localLineTotal === 0 || lastSavedAt == null) return; // 저장분만 정리(미저장 보존)
+    // (1) 회차 stamp 가 현재 이번회차보다 과거 → 확실히 롤오버됨.
+    const stampStale = localRoundNo != null && localRoundNo < currentRound;
+    // (2) stamp 없는 레거시 저장분 → 서버 이번회차가 비었고 복기에 반자동이 있으면 롤오버 완료.
+    const serverCur = accumulated?.by_intent?.current_round;
+    const serverRev = accumulated?.by_intent?.review;
+    const legacyRolled =
+      localRoundNo == null &&
+      (serverCur?.saved_semi_lines?.length ?? 0) === 0 &&
+      (serverRev?.saved_semi_lines?.length ?? 0) > 0;
+    if ((!stampStale && !legacyRolled) || currentRolloverHealedRef.current === currentRound) return;
+    currentRolloverHealedRef.current = currentRound;
+    hydratedIntentRef.current[sheetIntent] = true; // 방금 비웠으니 재하이드레이션 중복 방지
+    const prevRound = localRoundNo;
+    setBulkTickets([]);
+    setSemiSlipQueue([]);
+    setSemiCurrentLines([]);
+    setPicked([]);
+    setLocalRoundNo(currentRound);
+    setLastSavedAt(null);
+    setSaveNotice(
+      `🔄 ${prevRound != null ? `${prevRound}회` : '지난 회차'}가 추첨 완료되어 이번회차 반자동 입력이 복기로 이동했습니다. 이번회차를 ${currentRound}회 기준으로 새로 시작합니다.`
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheetIntent, currentRound, localRoundNo, lastSavedAt, localLineTotal, accumulated]);
+
   const autoOnlyLines = useMemo(
     () => collectAutoOnlyLines(currentSlipLines, slipQueue, bulkAutoTickets),
     [currentSlipLines, slipQueue, bulkAutoTickets]

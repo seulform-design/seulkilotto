@@ -174,9 +174,8 @@ DEFAULT_EXPAND_SIZE = 24
 # 방출 고정 24. WF 후보는 진단만(30까지) — 방출에 selected_size 쓰지 않음.
 WF_MAX_EXPAND_SIZE = 30
 DEFAULT_EXPAND_MODE = "single_raw"
-# v6: 방출 top24 고정 + 다중엔진 순위(LOO신호·1:1곱·min-rank·구간 강수/기대)
-# — 그물 키우지 않고 엔진 합의로 중하위 당첨(1235:7)을 top24에 올린다.
-COVERAGE_BUILD_ID = "expand24-v6-multi"
+# v7: 전엔진 교차검증 + 역산(일치레벨) 접목 → core6/expand24/recall-EV 단일 방출
+COVERAGE_BUILD_ID = "expand24-v7-reverse-graft"
 
 
 def _merge_expand_order(
@@ -222,19 +221,135 @@ def _decade_tier_sets(sigs: Dict[str, Dict[int, float]]) -> tuple[set, set]:
     return strong, expected
 
 
+def _match_level_reverse_scores(
+    auto: List[List[int]], semi: List[List[int]]
+) -> Dict[int, float]:
+    """L6 일치개수 역산(서버) — 자동×반자동 줄 교집합 크기로 번호 가산.
+
+    당첨 미사용. 5·4일치에 반복 등장한 번호를 확장망으로 끌어올린다.
+    """
+    weights = {6: 6.0, 5: 5.0, 4: 3.0, 3: 1.5, 2: 0.5}
+    scores = {n: 0.0 for n in range(1, 46)}
+    auto_sets = []
+    for line in auto:
+        s = {int(x) for x in line if isinstance(x, (int, float)) and 1 <= int(x) <= 45}
+        if len(s) >= 6:
+            auto_sets.append(s)
+    semi_sets = []
+    for line in semi:
+        s = {int(x) for x in line if isinstance(x, (int, float)) and 1 <= int(x) <= 45}
+        if len(s) >= 6:
+            semi_sets.append(s)
+    if not auto_sets or not semi_sets:
+        return scores
+    # 폭주 방지: 줄이 많으면 상한
+    if len(auto_sets) * len(semi_sets) > 80_000:
+        auto_sets = auto_sets[:200]
+        semi_sets = semi_sets[:200]
+    for sa in auto_sets:
+        for sb in semi_sets:
+            inter = sa & sb
+            m = len(inter)
+            if m < 2:
+                continue
+            wt = weights.get(m, 0.25)
+            for n in inter:
+                scores[n] += wt
+    return scores
+
+
+def _loo_axis_weights(
+    samples,
+    *,
+    exclude_keys: List[str] | None = None,
+    held_round: int | None = None,
+) -> Dict[str, float]:
+    """보관 회차 LOO로 축별 가중 — held 회차 당첨은 학습에 안 씀(누수 없음).
+
+    각 train 회차에서 축 단독 top24 적중 평균이 무작위(≈3.2)를 넘을수록 가중↑.
+    """
+    ban = set(exclude_keys or [])
+    random24 = 24 * 6 / 45
+    base = {
+        "primary": 3.0,
+        "pair_product": 2.5,
+        "min_rank": 2.0,
+        "decade": 1.0,
+        "match_level": 1.2,
+        "combo_strength": 1.0,
+        "balanced": 0.8,
+    }
+    train = [
+        s for s in (samples or [])
+        if held_round is None or int(s.round_no) != int(held_round)
+    ]
+    if len(train) < 2:
+        return base
+    hits = {k: 0.0 for k in base}
+    rounds = 0
+    for s in train:
+        sigs = _signals(s.auto_lines, s.semi_lines)
+        # train 안에서의 주신호 = support (held 제외 표본에 multi를 다시 돌리면 무거움)
+        sk = "support" if "support" not in ban else "pair_product"
+        primary = _rank_signal(sigs.get(sk, {}), sigs.get("total_freq"), sigs.get("auto_freq"))
+        pair = _rank_signal(sigs.get("pair_product", {}), sigs.get("total_freq"), sigs.get("auto_freq"))
+        boe = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
+        strong, expected = _decade_tier_sets(sigs)
+        decade_order = list(strong) + [n for n in expected if n not in strong]
+        decade_order += [n for n in primary if n not in set(decade_order)]
+        match_sc = _match_level_reverse_scores(s.auto_lines, s.semi_lines)
+        match_order = sorted(range(1, 46), key=lambda n: (-match_sc.get(n, 0.0), n))
+        combo = _rank_signal(sigs.get("combo_strength", {}), sigs.get("total_freq"), sigs.get("auto_freq"))
+        bal = _rank_signal(sigs.get("balanced", {}), sigs.get("total_freq"), sigs.get("auto_freq"))
+        win = set(s.winning)
+        axis_sets = {
+            "primary": primary[:24],
+            "pair_product": pair[:24],
+            "min_rank": boe[:24],
+            "decade": decade_order[:24],
+            "match_level": match_order[:24],
+            "combo_strength": combo[:24],
+            "balanced": bal[:24],
+        }
+        for k, nums in axis_sets.items():
+            hits[k] += len(win & set(nums))
+        rounds += 1
+    if rounds <= 0:
+        return base
+    out = dict(base)
+    for k in out:
+        mean = hits[k] / rounds
+        # 무작위 대비 lift 를 가중 배율로 (0.5~1.8)
+        lift = mean / random24 if random24 > 0 else 1.0
+        out[k] = round(base[k] * max(0.5, min(1.8, lift)), 3)
+    return out
+
+
 def _multi_engine_order(
     sigs: Dict[str, Dict[int, float]],
     signal_key: str,
     *,
     exclude_keys: List[str] | None = None,
+    auto_lines: List[List[int]] | None = None,
+    semi_lines: List[List[int]] | None = None,
+    axis_weights: Dict[str, float] | None = None,
 ) -> tuple[List[int], Dict[str, Any]]:
-    """번호추천 확장망용 다중엔진 순위 — 그물 크기↑ 대신 엔진 합의↑.
+    """전엔진 교차검증 가중 + 역산 접목 순위.
 
-    축: LOO/주신호 순위 · 1:1 pair_product · 전엔진 min-rank · 구간 강수/기대.
+    축: 주신호 · 1:1곱 · min-rank · 구간강수/기대 · 일치레벨역산 · 조합강도 · 구간균형.
     당첨번호 미사용(누수 없음).
     """
     tb = sigs.get("total_freq") or {}
     af = sigs.get("auto_freq") or {}
+    w = axis_weights or {
+        "primary": 3.0,
+        "pair_product": 2.5,
+        "min_rank": 2.0,
+        "decade": 1.0,
+        "match_level": 1.2,
+        "combo_strength": 1.0,
+        "balanced": 0.8,
+    }
     primary = _rank_signal(
         sigs.get(signal_key, sigs.get("support", {})),
         tb,
@@ -242,30 +357,68 @@ def _multi_engine_order(
     )
     pair = _rank_signal(sigs.get("pair_product", sigs.get("support", {})), tb, af)
     boe = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
+    combo = _rank_signal(sigs.get("combo_strength", {}), tb, af)
+    bal = _rank_signal(sigs.get("balanced", {}), tb, af)
     strong, expected = _decade_tier_sets(sigs)
+    match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+    match_order = sorted(range(1, 46), key=lambda n: (-match_sc.get(n, 0.0), n))
     pri_pos = {n: i for i, n in enumerate(primary)}
     pair_pos = {n: i for i, n in enumerate(pair)}
     boe_pos = {n: i for i, n in enumerate(boe)}
+    combo_pos = {n: i for i, n in enumerate(combo)}
+    bal_pos = {n: i for i, n in enumerate(bal)}
+    match_pos = {n: i for i, n in enumerate(match_order)}
+    match_max = max(match_sc.values()) if match_sc else 0.0
 
     def score(n: int) -> float:
-        # 순위 앞쪽일수록 가산. 구간 강수/기대는 프론트에서 당첨을 잘 담던 축.
         s = 0.0
-        s += max(0, 45 - pri_pos.get(n, 45)) * 3.0
-        s += max(0, 45 - pair_pos.get(n, 45)) * 2.5
-        s += max(0, 45 - boe_pos.get(n, 45)) * 2.0
+        s += max(0, 45 - pri_pos.get(n, 45)) * float(w.get("primary", 3.0))
+        s += max(0, 45 - pair_pos.get(n, 45)) * float(w.get("pair_product", 2.5))
+        s += max(0, 45 - boe_pos.get(n, 45)) * float(w.get("min_rank", 2.0))
+        s += max(0, 45 - combo_pos.get(n, 45)) * float(w.get("combo_strength", 1.0))
+        s += max(0, 45 - bal_pos.get(n, 45)) * float(w.get("balanced", 0.8))
+        s += max(0, 45 - match_pos.get(n, 45)) * float(w.get("match_level", 1.2)) * 0.15
+        if match_max > 0:
+            s += (float(match_sc.get(n, 0)) / match_max) * 22.0 * float(w.get("match_level", 1.2))
+        decade_w = float(w.get("decade", 1.0))
         if n in strong:
-            s += 28.0
+            s += 28.0 * decade_w
         elif n in expected:
-            s += 20.0
+            s += 20.0 * decade_w
         s += float(tb.get(n, 0)) * 0.05
         return s
 
     order = sorted(range(1, 46), key=lambda n: (-score(n), n))
+    # 교차 합의: 여러 축 top18에 동시에 든 번호
+    top_sets = [
+        set(primary[:18]),
+        set(pair[:18]),
+        set(boe[:18]),
+        set(match_order[:18]),
+        set(combo[:18]),
+    ]
+    agreement = {
+        n: sum(1 for ts in top_sets if n in ts)
+        for n in range(1, 46)
+    }
     meta = {
-        "engines": ["primary", "pair_product", "min_rank", "decade_strong", "decade_expected"],
+        "engines": [
+            "primary",
+            "pair_product",
+            "min_rank",
+            "decade_strong",
+            "decade_expected",
+            "match_level_reverse",
+            "combo_strength",
+            "balanced",
+        ],
+        "axis_weights": w,
         "decade_strong": sorted(strong),
         "decade_expected": sorted(expected),
         "primary_signal": signal_key,
+        "match_level_top12": [n for n in match_order if match_sc.get(n, 0) > 0][:12],
+        "cross_agree_ge2": sorted(n for n, c in agreement.items() if c >= 2)[:24],
+        "cross_agree_ge3": sorted(n for n, c in agreement.items() if c >= 3)[:18],
     }
     return order, meta
 
@@ -1026,12 +1179,16 @@ def _coverage_set_from_signals(
     exclude_keys: List[str] | None = None,
     expand_mode: str | None = None,
     expand_size: int | None = None,
+    auto_lines: List[List[int]] | None = None,
+    semi_lines: List[List[int]] | None = None,
+    samples=None,
+    held_round: int | None = None,
 ) -> Dict[str, Any]:
-    """core6 + expand24 커버리지.
+    """core6 + expand24 + recall-EV 커버리지.
 
     - core6: 주신호(집중) — 약신호 희석 방지.
-    - expand24: 다중엔진 순위 top24 (주신호·1:1곱·min-rank·구간 강수/기대).
-      그물 크기를 30/36으로 키우지 않고, UI에 이미 있는 엔진 축을 추천에 끌어온다.
+    - expand24: 전엔진 교차검증 가중 + 일치레벨 역산 접목 top24.
+    - share_opt: 확장망 위 recall-EV(상위 바닥) — 히어로·접목 단일 소스.
     """
     ranked = _rank_signal(
         sigs.get(signal_key, sigs["support"]),
@@ -1049,8 +1206,16 @@ def _coverage_set_from_signals(
     # 방출 크기 고정 24 — WF selected_size(30 등)는 진단 전용.
     _ = expand_size
     size = DEFAULT_EXPAND_SIZE
+    axis_weights = _loo_axis_weights(
+        samples, exclude_keys=exclude_keys, held_round=held_round
+    ) if samples is not None else None
     multi_order, multi_meta = _multi_engine_order(
-        sigs, signal_key, exclude_keys=exclude_keys
+        sigs,
+        signal_key,
+        exclude_keys=exclude_keys,
+        auto_lines=auto_lines,
+        semi_lines=semi_lines,
+        axis_weights=axis_weights,
     )
     # 다중엔진 top24 를 본망으로. merge_raw 등 모드망은 진단·폴백.
     mode_expand = _expand_from_mode(ranked, boe_order, core, present, mode, size=size)
@@ -1070,6 +1235,12 @@ def _coverage_set_from_signals(
                 expand_present.append(n)
     expand = expand_present[:size]
     boe_expand = _balance_expand(boe_order, core, present, size)
+    from .graft_coverage import optimize_sharing_from_raw
+
+    share = optimize_sharing_from_raw(expand, core)
+    share_opt = list((share or {}).get("numbers") or [])[:6]
+    match_top = list(multi_meta.get("match_level_top12") or [])
+    agree3 = list(multi_meta.get("cross_agree_ge3") or [])
     return {
         "signal": signal_key,
         "signal_label": _SIGNAL_LABELS.get(signal_key, signal_key),
@@ -1078,21 +1249,40 @@ def _coverage_set_from_signals(
         # 하위호환: 필드명 expand18 유지 — 실제 길이는 expand_size(24).
         "expand18": expand,
         "expand_size": size,
-        "expand18_mode": "multi_engine",
+        "expand18_mode": "multi_engine_reverse_graft",
         "expand18_mode_label": (
-            f"다중엔진(주신호+1:1곱+min-rank+구간강수/기대) · top{size}"
+            f"전엔진교차검증+일치레벨역산 · top{size}"
         ),
         "expand18_precision": precision18,
         "expand18_single": single_expand,
         "expand18_raw": mode_expand,
         "expand18_boe_balanced": boe_expand,
+        "share_opt": share_opt,
+        "share_opt_meta": {
+            "mode": (share or {}).get("mode"),
+            "risk": (share or {}).get("risk"),
+            "ev_score": (share or {}).get("ev_score"),
+        } if share else None,
         "decade_balance": _decade_balance_info(expand, precision18, present),
         "excluded_signals": list(exclude_keys or []),
         "coverage_build": COVERAGE_BUILD_ID,
         "multi_engine": multi_meta,
+        "reverse_graft": {
+            "match_level_top12": match_top,
+            "cross_agree_ge3": agree3,
+            "cross_agree_ge2": list(multi_meta.get("cross_agree_ge2") or []),
+            "axis_weights": multi_meta.get("axis_weights"),
+            "note": (
+                "LOO 축가중 × 일치레벨 역산 × 전엔진 min-rank/구간/조합 — "
+                "당첨 미사용(누수 없음)."
+            ),
+        },
         "precision_gap_hint": {
             "top24": 24,
-            "note": "확장24=다중엔진 합의. 크기를 키우지 않고 구간 강수/기대·1:1곱을 끌어온다.",
+            "note": (
+                "확장24=전엔진 교차검증+역산 접목. "
+                "그물 크기↑ 금지 — 엔진·역산을 추천 멤버십에 끌어온다."
+            ),
         },
     }
 
@@ -1500,7 +1690,7 @@ def build_review_verification() -> Dict[str, Any]:
     # 복기 expand 모드 힌트(merge_raw) — 실제 방출은 multi_engine top24.
     review_expand_mode = _review_expand_mode(expand_mode)
 
-    # 복기 회차 커버리지 — 그 회차 용지 + LOO 주신호 core + 다중엔진 expand.
+    # 복기 회차 커버리지 — LOO 주신호 core + 전엔진교차검증·역산 접목 expand.
     review_sigs = _signals(auto, semi)
     review_coverage_set = _coverage_set_from_signals(
         review_sigs,
@@ -1509,6 +1699,10 @@ def build_review_verification() -> Dict[str, Any]:
         exclude_keys=ban_keys,
         expand_mode=review_expand_mode,
         expand_size=expand_size,
+        auto_lines=auto,
+        semi_lines=semi,
+        samples=_samples,
+        held_round=review_round,
     )
     pair_ranked = _rank_signal(
         review_sigs.get("pair_product", review_sigs["support"]),
@@ -1546,6 +1740,10 @@ def build_review_verification() -> Dict[str, Any]:
             exclude_keys=ban_keys,
             expand_mode=expand_mode,
             expand_size=expand_size,
+            auto_lines=cur_auto,
+            semi_lines=cur_semi,
+            samples=_samples,
+            held_round=None,
         )
         consensus_coverage = _consensus_coverage(csig, leaderboard)
 

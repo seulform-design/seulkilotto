@@ -12,8 +12,8 @@ import math
 from itertools import combinations
 from typing import Any, Dict, List, Sequence, Tuple
 
-# v5: raw top6 + 다중엔진형 확장24(1:1×구간 강수/기대 가산). 크기↑ 금지.
-GRAFT_BUILD_ID = "graft-v5-multi24"
+# v6: 확장24 = review_verification 전엔진교차검증+역산 접목과 동일 소스. 크기↑ 금지.
+GRAFT_BUILD_ID = "graft-v6-reverse-graft"
 
 DECADE_LABELS = ("단번대", "10번대", "20번대", "30번대", "40번대")
 
@@ -266,37 +266,52 @@ def optimize_sharing_from_raw(
 
 
 def _build_sets_for_lines(
-    auto: List[List[int]], semi: List[List[int]]
+    auto: List[List[int]],
+    semi: List[List[int]],
+    *,
+    samples=None,
+    held_round: int | None = None,
+    exclude_keys: List[str] | None = None,
 ) -> Dict[str, Any] | None:
+    """접목 세트 — 확장24/share 는 검증 커버리지(역산·교차검증)와 동일 빌더."""
+    from .review_verification import _coverage_set_from_signals, _signals
+
     present, pair, auto_f, semi_f = _pair_product_rank(auto, semi)
     if len(present) < 6:
         return None
     scores = {n: float(pair.get(n, 0)) for n in present}
-    # 기본 골격 = 1:1 raw top6. 확장 = 순위 + 구간 강수/기대 가산 후 top24.
     raw_top6 = present[:6]
-    # 구간 강수/기대(프론트 ★1:1과 동일) — 확장망에 엔진 축을 끌어온다.
-    bands = ((1, 9), (10, 19), (20, 29), (30, 39), (40, 45))
-    strong: set = set()
-    expected: set = set()
-    for lo, hi in bands:
-        in_band = [n for n in present if lo <= n <= hi]
-        in_band.sort(key=lambda n: (-float(auto_f.get(n, 0) + semi_f.get(n, 0)), -scores.get(n, 0.0), n))
-        strong.update(in_band[:3])
-        expected.update(in_band[3:6])
-
-    def graft_key(n: int) -> float:
-        base = float(len(present) - present.index(n)) if n in present else 0.0
-        if n in strong:
-            base += 28.0
-        elif n in expected:
-            base += 20.0
-        return base
-
-    ranked_multi = sorted(present, key=lambda n: (-graft_key(n), n))
-    expand = ranked_multi[: min(24, len(ranked_multi))]
+    ban = list(exclude_keys or ["auto_freq"])
+    sigs = _signals(auto, semi)
+    cov = _coverage_set_from_signals(
+        sigs,
+        signal_key="pair_product",
+        selected_by="graft",
+        exclude_keys=ban,
+        expand_mode="single_raw",
+        expand_size=24,
+        auto_lines=auto,
+        semi_lines=semi,
+        samples=samples,
+        held_round=held_round,
+    )
+    expand = list(cov.get("expand18") or [])[:24]
+    if len(expand) < 6:
+        expand = present[:24]
     decade_core = pick_coverage_core6(expand, auto_f, semi_f, scores)
     pure_ev = optimize_sharing_recall(expand, top_window=min(24, len(expand)), min_from_top12=0)
-    recall_ev = optimize_sharing_from_raw(expand, raw_top6)
+    # 접목 share = 커버리지 share_opt 우선(동일 소스), 없으면 expand+raw 재계산
+    cov_share = list(cov.get("share_opt") or [])
+    recall_ev = (
+        {
+            "numbers": cov_share,
+            "mode": (cov.get("share_opt_meta") or {}).get("mode") or "recall_ev_top6floor",
+            "risk": (cov.get("share_opt_meta") or {}).get("risk"),
+            "ev_score": (cov.get("share_opt_meta") or {}).get("ev_score"),
+        }
+        if len(cov_share) == 6
+        else optimize_sharing_from_raw(expand, raw_top6)
+    )
     both = sum(1 for n in raw_top6 if auto_f.get(n, 0) > 0 and semi_f.get(n, 0) > 0)
     return {
         "ranked": present,
@@ -308,6 +323,8 @@ def _build_sets_for_lines(
         "recall_ev6": (recall_ev or {}).get("numbers") or [],
         "recall_ev": recall_ev,
         "both_side_core": both,
+        "coverage_build": cov.get("coverage_build"),
+        "reverse_graft": cov.get("reverse_graft"),
         "auto_freq": {str(k): v for k, v in auto_f.items() if v > 0},
         "semi_freq": {str(k): v for k, v in semi_f.items() if v > 0},
     }
@@ -319,7 +336,13 @@ def _loo_backtest(samples) -> Dict[str, Any]:
     sums = {m: 0 for m in modes}
     per_round: List[Dict[str, Any]] = []
     for s in samples:
-        built = _build_sets_for_lines(s.auto_lines, s.semi_lines)
+        built = _build_sets_for_lines(
+            s.auto_lines,
+            s.semi_lines,
+            samples=samples,
+            held_round=int(s.round_no),
+            exclude_keys=["auto_freq"],
+        )
         if not built:
             continue
         win = list(s.winning)
@@ -432,7 +455,13 @@ def build_graft_coverage(*, intent: str = "review") -> Dict[str, Any]:
             "backtest": backtest,
         }
 
-    built = _build_sets_for_lines(auto, semi)
+    built = _build_sets_for_lines(
+        auto,
+        semi,
+        samples=samples,
+        held_round=review_round if intent == "review" else None,
+        exclude_keys=["auto_freq"],
+    )
     if not built:
         return {
             "ok": False,
@@ -508,12 +537,14 @@ def build_graft_coverage(*, intent: str = "review") -> Dict[str, Any]:
             ),
             "ev_mode": "recall_ev_top6floor",
             "ev_mode_label": "분산최적 + 상위12≥4 + raw top6≥2",
-            "expand_mode": "multi_top24",
+            "expand_mode": "multi_engine_reverse_graft",
+            "coverage_build": built.get("coverage_build"),
             "note": (
-                "당첨은 순위 미사용(복기 사후 대조만). 평행·이월 forward OFF. "
-                "구간커버는 비교용 — raw보다 명확히 나을 때만 핵심 교체."
+                "확장24=검증 커버리지와 동일(전엔진교차검증+일치레벨역산). "
+                "당첨은 순위 미사용(복기 사후 대조만). 평행·이월 forward OFF."
             ),
         },
+        "reverse_graft": built.get("reverse_graft"),
         "raw_top6": built["raw_top6"],
         "core6": core6,
         "decade_core6": built["decade_core6"],

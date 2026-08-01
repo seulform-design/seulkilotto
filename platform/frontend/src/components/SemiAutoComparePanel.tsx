@@ -1514,13 +1514,13 @@ export default function SemiAutoComparePanel({
   });
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand24-v6-multi', 'semi-freq-v1', 'pair-product'],
+    queryKey: ['v1-photo-review-verification', 'expand24-v7-reverse-graft', 'semi-freq-v1', 'pair-product'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v5-multi24', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v6-reverse-graft', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,
@@ -3618,7 +3618,7 @@ export default function SemiAutoComparePanel({
         outsideCoreInExpand: audit?.outside_core_in_expand ?? [],
         dataUsed: api.data_used ?? null,
         backtest: api.backtest ?? null,
-        graftBuild: api.graft_build ?? 'graft-v5-multi24',
+        graftBuild: api.graft_build ?? 'graft-v6-reverse-graft',
         honesty: api.honesty ?? null,
         rankSource: 'api_pair_product' as const,
         decadeDropped: audit?.decade_dropped_vs_raw ?? [],
@@ -3784,6 +3784,9 @@ export default function SemiAutoComparePanel({
       selectedBy: null as string | null,
       pairDiag: null as { core6Count: number; expandCount: number } | null,
       sheetMeta: '' as string,
+      coverageBuild: '' as string,
+      reverseGraftNote: '' as string,
+      crossAgreeGe3: [] as number[],
     };
     const rv = reviewVerificationQuery.data;
     const clean = (arr: number[] | undefined) =>
@@ -3874,8 +3877,26 @@ export default function SemiAutoComparePanel({
       0,
       Math.min(30, Math.max(expand18.length, Number(cov?.expand_size) || 0)),
     );
-    const shareResult = ready ? optimizeForSharing(wide, Math.min(24, wide.length)) : null;
-    const shareOpt = shareResult ? shareResult.numbers.slice(0, 6) : [];
+    // 서버 recall-EV(역산접목 커버리지) 우선 — 로컬 분산최적은 폴백.
+    const serverShare = clean(
+      (cov as { share_opt?: number[] } | undefined)?.share_opt,
+    ).slice(0, 6);
+    const shareResult = ready && serverShare.length < 6
+      ? optimizeForSharing(wide, Math.min(24, wide.length))
+      : null;
+    const shareOpt = serverShare.length === 6
+      ? serverShare
+      : (shareResult ? shareResult.numbers.slice(0, 6) : []);
+    const reverseGraft = (cov as {
+      reverse_graft?: {
+        note?: string;
+        cross_agree_ge3?: number[];
+      };
+      coverage_build?: string;
+    } | undefined)?.reverse_graft;
+    const coverageBuild = String(
+      (cov as { coverage_build?: string } | undefined)?.coverage_build ?? '',
+    );
     const agreement = consensus?.agreement ?? {};
     const winsReady = Boolean(winningSet && winningSet.size > 0);
     const audit = compareWinning && rv?.ok ? rv.review_hit_audit : undefined;
@@ -3944,6 +3965,9 @@ export default function SemiAutoComparePanel({
           }
         : null,
       sheetMeta,
+      coverageBuild,
+      reverseGraftNote: reverseGraft?.note ?? '',
+      crossAgreeGe3: clean(reverseGraft?.cross_agree_ge3).slice(0, 18),
     };
   }, [
     compareWinning,
@@ -5656,6 +5680,15 @@ export default function SemiAutoComparePanel({
                   sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
                 />
               )}
+              {heroRecommendation.coverageBuild && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color="info"
+                  label={heroRecommendation.coverageBuild}
+                  sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+                />
+              )}
               {graftCoverageEV?.graftBuild && (
                 <Chip
                   size="small"
@@ -5670,7 +5703,7 @@ export default function SemiAutoComparePanel({
               size="small"
               variant="outlined"
               color="success"
-              label={compareWinning ? '검증+접목+Venus 통합' : '추천+접목+Venus 통합'}
+              label={compareWinning ? '교차검증·역산접목' : '교차검증·역산추천'}
               sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
             />
           </Stack>
@@ -5703,7 +5736,8 @@ export default function SemiAutoComparePanel({
                 {heroRecommendation.goodSignalCount > 0
                   ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다.`
                   : ` 아래 핵심 6은 주신호(${heroRecommendation.signalLabel}) 상위6입니다.`}{' '}
-                <strong>확장24는 다중엔진</strong>(주신호·1:1곱·min-rank·구간 강수/기대) 합의 — 그물만 키우지 않습니다.
+                <strong>확장24는 전엔진 교차검증 + 일치레벨 역산 접목</strong>
+                (주신호·1:1곱·min-rank·구간·조합·균형·일치레벨) — 그물만 키우지 않습니다.
                 {heroRecommendation.expandModeLabel
                   ? ` (${heroRecommendation.expandModeLabel})`
                   : ''}
@@ -5712,6 +5746,9 @@ export default function SemiAutoComparePanel({
                   : ''}
                 {heroRecommendation.selectedBy === 'loo_held'
                   ? ' 신호=이 회차 제외 LOO(다회차 multi가 이 용지와 어긋나 로컬 1:1보다 못 잡던 회귀 보정).'
+                  : ''}
+                {heroRecommendation.crossAgreeGe3.length > 0
+                  ? ` 교차합의≥3: ${heroRecommendation.crossAgreeGe3.slice(0, 12).join(', ')}.`
                   : ''}
                 {heroRecommendation.pairDiag
                   ? ` 1:1곱 패리티 참고: 핵심6 ${heroRecommendation.pairDiag.core6Count}/6 · 확장24 ${heroRecommendation.pairDiag.expandCount}/6.`

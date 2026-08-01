@@ -65,8 +65,10 @@ def test_walkforward_picks_expand_mode_and_coverage_emits_24():
     assert set(cov["core6"]).issubset(set(cov["expand18"]))
     assert len(cov["expand18"]) == DEFAULT_EXPAND_SIZE == 24
     assert cov["expand_size"] == 24
-    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v6-multi"
-    assert cov["expand18_mode"] == "multi_engine"
+    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v7-reverse-graft"
+    assert cov["expand18_mode"] == "multi_engine_reverse_graft"
+    assert "reverse_graft" in cov
+    assert len(cov.get("share_opt") or []) == 6
     assert "multi_engine" in cov
 
     audit = _coverage_hit_audit(sigs, cov, s1.winning, exclude_keys=ban)

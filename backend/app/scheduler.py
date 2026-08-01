@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 
 # 부팅 후 캐치업 크롤까지의 지연(초) — 서버가 뜨고 헬스체크를 통과한 뒤 실행되도록.
-BOOT_CATCHUP_DELAY_SEC = 20
+# 배포 직후 CSV 리셋 → 복기/이번회차 라벨이 밀리는 구간을 줄이기 위해 빠르게 캐치업.
+BOOT_CATCHUP_DELAY_SEC = 8
 
 
 def start_scheduler() -> None:

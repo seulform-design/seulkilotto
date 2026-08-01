@@ -24,6 +24,10 @@ _API_LATEST_TTL = 600  # 10분
 # 호출할 수 있다. 동시 크롤이 같은 CSV 를 덮어쓰면 손상되므로 한 번에 하나만
 # 실행하도록 직렬화한다(이미 진행 중이면 즉시 반환).
 _UPGRADE_LOCK = threading.Lock()
+# round-status / 메타 조회 시 백그라운드 캐치업(배포 후 CSV 리셋 자기치유).
+_BG_CATCHUP_LOCK = threading.Lock()
+_BG_CATCHUP_STARTED_AT = 0.0
+_BG_CATCHUP_COOLDOWN_SEC = 45.0
 
 
 def _crawl_module():
@@ -74,6 +78,7 @@ def get_upgrade_status() -> Dict[str, Any]:
             "pending_rounds": [],
             "pending_count": 0,
             "can_upgrade": False,
+            "csv_lagging": False,
             "api_error": str(exc),
         }
 
@@ -83,7 +88,62 @@ def get_upgrade_status() -> Dict[str, Any]:
         "pending_rounds": pending,
         "pending_count": len(pending),
         "can_upgrade": len(pending) > 0,
+        "csv_lagging": len(pending) > 0,
         "next_round": effective_current_round(latest_csv),
+    }
+
+
+def ensure_rounds_synced_async(*, reason: str = "on-demand") -> Dict[str, Any]:
+    """CSV가 공개 API보다 뒤처지면 백그라운드 업그레이드 1회 시작.
+
+    배포 시 이미지 베이스라인 CSV로 되돌아가 복기/이번회차가 한 회차 밀리는
+    회귀를, round-status·프론트 진입 시 자기치유한다. 이미 진행 중이면 중복 시작 안 함.
+    """
+    global _BG_CATCHUP_STARTED_AT
+    now = time.time()
+    with _BG_CATCHUP_LOCK:
+        if now - _BG_CATCHUP_STARTED_AT < _BG_CATCHUP_COOLDOWN_SEC:
+            return {"started": False, "reason": "cooldown", "syncing": True}
+        try:
+            st = get_upgrade_status()
+        except Exception as exc:  # noqa: BLE001
+            return {"started": False, "reason": f"status_error:{exc}", "syncing": False}
+        if not st.get("can_upgrade"):
+            return {
+                "started": False,
+                "reason": "up_to_date",
+                "syncing": False,
+                "latest_round": st.get("latest_round"),
+                "api_latest_round": st.get("api_latest_round"),
+            }
+        _BG_CATCHUP_STARTED_AT = now
+        pending = list(st.get("pending_rounds") or [])
+
+    def _run() -> None:
+        try:
+            result = upgrade_rounds()
+            logger = __import__("logging").getLogger(__name__)
+            logger.info(
+                "[%s] 회차 캐치업: before=%s after=%s new=%s",
+                reason,
+                result.get("before_latest"),
+                result.get("after_latest"),
+                result.get("new_rounds"),
+            )
+        except Exception:  # noqa: BLE001
+            __import__("logging").getLogger(__name__).exception(
+                "[%s] 회차 캐치업 실패", reason
+            )
+
+    threading.Thread(target=_run, name=f"round-catchup-{reason}", daemon=True).start()
+    return {
+        "started": True,
+        "reason": reason,
+        "syncing": True,
+        "pending_rounds": pending,
+        "pending_count": len(pending),
+        "api_latest_round": st.get("api_latest_round"),
+        "latest_round": st.get("latest_round"),
     }
 
 

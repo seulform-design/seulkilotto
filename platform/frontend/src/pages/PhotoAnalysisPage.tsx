@@ -19,7 +19,7 @@ import {
   Typography,
 } from '@mui/material';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import BulkLineInputDialog, { lineKey } from '../components/BulkLineInputDialog';
 import LottoBall from '../components/LottoBall';
 import NumberFrequencyPanel from '../components/NumberFrequencyPanel';
@@ -828,6 +828,15 @@ export default function PhotoAnalysisPage() {
   const [visionSaving, setVisionSaving] = useState(false);
   const [visionSaveMsg, setVisionSaveMsg] = useState<string | null>(null);
 
+  const qc = useQueryClient();
+  const catchupAttemptedRef = useRef(false);
+  const refreshAccumulated = useCallback(async () => {
+    try {
+      setAccumulated(await v1Api.getPhotoAnalysisAccumulated());
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const metaQuery = useQuery({
     queryKey: ['v1-meta'],
     queryFn: v1Api.getMeta,
@@ -836,16 +845,40 @@ export default function PhotoAnalysisPage() {
   const roundStatusQuery = useQuery({
     queryKey: ['v1-round-status'],
     queryFn: v1Api.getRoundStatus,
-    staleTime: 60_000,
+    staleTime: 15_000,
+    // 회차 캐치업 중이면 짧게 폴링해 복기/이번회차 라벨이 갱신되게 한다.
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      return d?.csv_lagging || d?.syncing || (d?.pending_count ?? 0) > 0 ? 8_000 : false;
+    },
   });
-
-  const refreshAccumulated = useCallback(async () => {
-    try {
-      setAccumulated(await v1Api.getPhotoAnalysisAccumulated());
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  const upgradeStatusQuery = useQuery({
+    queryKey: ['v1-upgrade-status'],
+    queryFn: v1Api.getUpgradeStatus,
+    staleTime: 30_000,
+  });
+  const catchupUpgrade = useMutation({
+    mutationFn: () => v1Api.runUpgrade(),
+    onSettled: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['v1-meta'] }),
+        qc.invalidateQueries({ queryKey: ['v1-round-status'] }),
+        qc.invalidateQueries({ queryKey: ['v1-upgrade-status'] }),
+        qc.invalidateQueries({ queryKey: ['v1-latest-for-semi-auto'] }),
+        qc.invalidateQueries({ queryKey: ['v1-photo-review-verification'] }),
+        qc.invalidateQueries({ queryKey: ['v1-photo-graft-coverage'] }),
+      ]);
+      void refreshAccumulated();
+    },
+  });
+  // 배포 후 CSV가 한 회차 밀리면 복기/이번회차를 못 읽은 것처럼 보임 → 자동 캐치업.
+  useEffect(() => {
+    const can = Boolean(upgradeStatusQuery.data?.can_upgrade);
+    if (!can || catchupUpgrade.isPending || catchupAttemptedRef.current) return;
+    catchupAttemptedRef.current = true;
+    catchupUpgrade.mutate();
+    // mutate 안정 참조만 의존 — mutation 객체 전체는 매 렌더 바뀌어 루프 위험이 있음
+  }, [upgradeStatusQuery.data?.can_upgrade, catchupUpgrade.isPending, catchupUpgrade.mutate]);
 
   useEffect(() => {
     refreshAccumulated();
@@ -869,41 +902,61 @@ export default function PhotoAnalysisPage() {
       ? (accumulated?.historical_dataset?.latest_archived_current_snapshot ?? null)
       : null;
 
+  const csvLagging = Boolean(
+    roundStatusQuery.data?.csv_lagging
+    || (roundStatusQuery.data?.pending_count ?? 0) > 0
+    || upgradeStatusQuery.data?.can_upgrade,
+  );
   const latestRound = useMemo(() => {
+    // CSV가 공개 API보다 늦을 때 target(공개 최신)을 우선 — 라벨이 한 회차 밀리지 않게.
+    const fromTarget = roundStatusQuery.data?.review_round_target;
+    if (csvLagging && fromTarget && fromTarget > 0) return fromTarget;
     const fromStatus = roundStatusQuery.data?.review_round ?? roundStatusQuery.data?.latest_round;
     if (fromStatus && fromStatus > 0) return fromStatus;
     const fromMeta = metaQuery.data?.latest_round;
     if (fromMeta && fromMeta > 0) return fromMeta;
+    const fromApi = roundStatusQuery.data?.api_latest_round ?? upgradeStatusQuery.data?.api_latest_round;
+    if (fromApi && fromApi > 0) return fromApi;
     const fromReviewSlice = parseRoundNo(accumulated?.by_intent?.review?.ticket_round);
     if (fromReviewSlice) return fromReviewSlice;
     const fromTemplate = parseRoundNo(accumulated?.by_intent?.review?.draw_template?.ticket_round);
     if (fromTemplate) return fromTemplate;
     return null;
-  }, [roundStatusQuery.data, metaQuery.data, accumulated]);
+  }, [roundStatusQuery.data, metaQuery.data, accumulated, csvLagging, upgradeStatusQuery.data]);
 
   const currentRound = useMemo(() => {
+    const fromTarget = roundStatusQuery.data?.current_round_target;
+    if (csvLagging && fromTarget && fromTarget > 0) return fromTarget;
     const fromStatus = roundStatusQuery.data?.current_round;
-    if (fromStatus && fromStatus > 0) return fromStatus;
+    if (fromStatus && fromStatus > 0) {
+      // CSV 지연 시 current==api_latest(이미 추첨된 회차)로 잡히므로 +1 보정
+      const api = roundStatusQuery.data?.api_latest_round;
+      if (csvLagging && api && fromStatus <= api) return api + 1;
+      return fromStatus;
+    }
     const fromMeta = metaQuery.data?.current_round ?? metaQuery.data?.next_round;
     if (fromMeta && fromMeta > 0) return fromMeta;
     const fromCurrentSlice = parseRoundNo(accumulated?.by_intent?.current_round?.ticket_round);
     if (fromCurrentSlice) return fromCurrentSlice;
     if (latestRound) return latestRound + 1;
     return null;
-  }, [roundStatusQuery.data, metaQuery.data, accumulated, latestRound]);
+  }, [roundStatusQuery.data, metaQuery.data, accumulated, latestRound, csvLagging]);
 
-  // 복기 회차 — 백엔드가 복기 엔트리 기준으로 stamp 한 슬라이스/템플릿 회차를 최우선.
-  // live latest_round 는 새 추첨 발표 후 복기 용지의 실제 회차와 어긋날 수 있어(예:
-  // 1231 용지인데 latest 1232) 당첨 대조·표시가 틀리므로 후순위 폴백으로만 쓴다.
+  // 복기 회차 — CSV 동기화 전에는 공개 API 최신(latestRound)을 우선.
+  // 동기화 후에는 슬라이스 stamp 가 CSV latest 와 같으므로 동일.
   const reviewRound = useMemo(() => {
+    if (csvLagging && latestRound != null) return latestRound;
     const fromSlice = parseRoundNo(accumulated?.by_intent?.review?.ticket_round);
     if (fromSlice) return fromSlice;
     const fromTemplate = parseRoundNo(accumulated?.by_intent?.review?.draw_template?.ticket_round);
     if (fromTemplate) return fromTemplate;
     return latestRound;
-  }, [accumulated, latestRound]);
+  }, [accumulated, latestRound, csvLagging]);
 
   const roundDrawn = roundStatusQuery.data?.drawn ?? false;
+  const roundSyncing = Boolean(
+    roundStatusQuery.data?.syncing || catchupUpgrade.isPending || csvLagging,
+  );
 
   const reviewWinningSet = useMemo(() => {
     if (activeTab !== 'review') return null;
@@ -1451,6 +1504,29 @@ export default function PhotoAnalysisPage() {
       {(metaQuery.isError || roundStatusQuery.isError) && latestRound == null && (
         <Alert severity="warning" sx={{ mb: 1 }}>
           회차 정보를 불러오지 못했습니다. 네트워크·API 연결을 확인한 뒤 새로고침해 주세요.
+        </Alert>
+      )}
+      {roundSyncing && latestRound != null && (
+        <Alert severity="warning" sx={{ mb: 1 }}>
+          회차 데이터를 동기화하는 중입니다 — 복기 <strong>{displayReviewRound}회</strong> · 이번회차{' '}
+          <strong>{displayCurrentRound}회</strong>
+          {(roundStatusQuery.data?.pending_count ?? 0) > 0
+            ? ` (공개 API 대비 ${roundStatusQuery.data?.pending_count}회 지연)`
+            : ''}
+          . 잠시 후 자동으로 맞춰집니다.
+          {!catchupUpgrade.isPending && (
+            <Button
+              type="button"
+              size="small"
+              sx={{ ml: 1 }}
+              onClick={() => {
+                catchupAttemptedRef.current = false;
+                catchupUpgrade.mutate();
+              }}
+            >
+              지금 동기화
+            </Button>
+          )}
         </Alert>
       )}
       <Alert severity="info">

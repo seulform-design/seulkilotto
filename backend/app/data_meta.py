@@ -25,6 +25,8 @@ def get_history_meta() -> Dict[str, Any]:
             "source": "error",
             "error": str(exc),
             "current_round": settings.CURRENT_ROUND,
+            "latest_round": max(0, settings.CURRENT_ROUND - 1),
+            "next_round": settings.CURRENT_ROUND,
             "row_count": 0,
         }
 
@@ -33,6 +35,8 @@ def get_history_meta() -> Dict[str, Any]:
             "ok": False,
             "source": source,
             "current_round": settings.CURRENT_ROUND,
+            "latest_round": max(0, settings.CURRENT_ROUND - 1),
+            "next_round": settings.CURRENT_ROUND,
             "row_count": 0,
             "message": "데이터가 비어 있습니다.",
         }

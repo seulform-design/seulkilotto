@@ -18,6 +18,13 @@ export interface RoundStatus {
   current_round: number;  // 다음 추첨 예정 회차 (이번회차)
   review_round: number;   // 복기 탭 기준 회차 (= latest_round)
   drawn: boolean;         // 이번회차 당첨번호 발표 여부 (True 면 CSV 업데이트 필요)
+  api_latest_round?: number | null;
+  pending_count?: number;
+  csv_lagging?: boolean;
+  syncing?: boolean;
+  /** CSV 동기화 전 UI 힌트 — 공개 API 기준 복기 회차 */
+  review_round_target?: number | null;
+  current_round_target?: number | null;
 }
 
 export interface LatestDraw {

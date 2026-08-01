@@ -373,7 +373,7 @@ function IntentAccumulatedPanel({
           <Alert severity="warning" sx={{ mt: 1 }}>
             이 회차({slice.ticket_round}회)에 해당하는 용지가 없어 <strong>회차 구분 없이 전체 복기
             엔트리</strong>를 표시합니다. 서로 다른 회차의 용지가 섞여 있을 수 있으며, 당첨 대조는{' '}
-            {slice.ticket_round}회 기준입니다. ② 하단 <strong>회차별 용지 데이터</strong>에서 [회차 재귀속]으로
+            {slice.ticket_round}회 기준입니다. ④ 엔진 · 검증 탭 <strong>회차별 용지 데이터</strong>에서 [회차 재귀속]으로
             정리하면 정확해집니다.
           </Alert>
         )}
@@ -1817,7 +1817,7 @@ export default function PhotoAnalysisPage() {
           <Stack spacing={1.5} sx={{ mt: 2 }}>
             <Divider textAlign="left">
               <Typography variant="caption" fontWeight={800} color="text.secondary">
-                누적 · 회차별 용지 데이터
+                의도별 누적 패턴
               </Typography>
             </Divider>
             <IntentAccumulatedPanel
@@ -1826,11 +1826,11 @@ export default function PhotoAnalysisPage() {
               legacyCount={accumulated?.legacy_entry_count}
               onDeleteEntry={deleteHistoryEntry}
             />
-            <RoundDataBreakdownPanel accumulated={accumulated} onAccumulatedChange={setAccumulated} />
           </Stack>
         }
         verificationSlot={
           <Stack spacing={1.5}>
+            <RoundDataBreakdownPanel accumulated={accumulated} onAccumulatedChange={setAccumulated} />
             <ReviewVerificationPanel />
             {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
             <WalkForwardPanel

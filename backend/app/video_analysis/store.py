@@ -1477,10 +1477,23 @@ def get_historical_dataset_state() -> Dict[str, Any]:
     return _load_historical_raw()
 
 
+def _is_orphan_review_slot(review: Dict[str, Any] | None, archived: Dict[str, Any] | None) -> bool:
+    """보관 정본과 줄 수가 같은 복기 저장분 = 고아(중복). 학습·표시 오염 대상."""
+    if not review or not archived:
+        return False
+    total = int(review.get("auto_lines") or 0) + int(review.get("semi_lines") or 0)
+    if total <= 0:
+        return False
+    return (
+        int(review.get("auto_lines") or 0) == int(archived.get("auto_lines") or 0)
+        and int(review.get("semi_lines") or 0) == int(archived.get("semi_lines") or 0)
+    )
+
+
 def _rounds_breakdown(
     historical: Dict[str, Any], live_entries: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
-    """회차별 용지 데이터 분리 뷰.
+    """회차별 용지 데이터 분리 뷰 (④ 엔진 · 데이터 정화용).
 
     같은 회차 라벨에 서로 다른 출처가 공존할 수 있다:
       - review  : 복기 탭으로 저장된 엔트리(저장 시점 최신 추첨 회차로 stamp 됨)
@@ -1488,6 +1501,8 @@ def _rounds_breakdown(
     둘을 합치면 어느 게 실제 그 회차에 산 용지인지 구분이 안 되므로 분리해 노출한다.
     (예: 1233 에 '복기 저장분(실제로는 이전 회차 용지가 재stamp 된 것)' 과
      '롤오버 보관분(진짜 1233 용지)' 이 함께 있는 상황.)
+
+    각 행에 hygiene 플래그를 붙여 엔진 UI가 서버 판정으로 고아/공존을 표시한다.
     """
     out: Dict[str, Dict[str, Any]] = {}
 
@@ -1518,11 +1533,30 @@ def _rounds_breakdown(
             "frozen_at": batch.get("frozen_at"),
         }
 
+    rows = list(out.values())
+    for item in rows:
+        rev = item.get("review")
+        arc = item.get("archived")
+        orphan = _is_orphan_review_slot(rev, arc)
+        coexist = bool(rev and arc and not orphan)
+        item["is_orphan_review"] = orphan
+        item["is_coexist"] = coexist
+        if orphan:
+            item["hygiene"] = "orphan_review"
+        elif coexist:
+            item["hygiene"] = "coexist"
+        elif arc and not rev:
+            item["hygiene"] = "archived_only"
+        elif rev and not arc:
+            item["hygiene"] = "review_only"
+        else:
+            item["hygiene"] = "empty"
+
     def _key(item: Dict[str, Any]) -> int:
         r = str(item.get("ticket_round") or "")
         return int(r) if r.isdigit() else 0
 
-    return sorted(out.values(), key=_key, reverse=True)
+    return sorted(rows, key=_key, reverse=True)
 
 
 def _latest_archived_current_snapshot(historical: Dict[str, Any]) -> Dict[str, Any] | None:

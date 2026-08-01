@@ -2101,6 +2101,11 @@ export interface RoundBreakdownItem {
     semi_lines: number;
     frozen_at?: string | null;
   } | null;
+  /** 서버 판정 — 보관과 줄 수 동일 복기(중복) */
+  is_orphan_review?: boolean;
+  /** 서버 판정 — 두 출처 공존(내용·줄 수 다름) */
+  is_coexist?: boolean;
+  hygiene?: 'orphan_review' | 'coexist' | 'archived_only' | 'review_only' | 'empty';
 }
 
 export interface PhotoAnalysisAccumulated {

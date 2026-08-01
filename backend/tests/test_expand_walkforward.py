@@ -65,7 +65,7 @@ def test_walkforward_picks_expand_mode_and_coverage_emits_24():
     assert set(cov["core6"]).issubset(set(cov["expand18"]))
     assert len(cov["expand18"]) == DEFAULT_EXPAND_SIZE == 24
     assert cov["expand_size"] == 24
-    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v10-precision-primary"
+    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v11-unified-trace"
     assert cov["expand18_mode"] == "precision_primary"
     assert 6 <= len(cov.get("precision14") or []) <= 14
     assert len(cov.get("decade_pool30") or []) >= 6
@@ -74,6 +74,11 @@ def test_walkforward_picks_expand_mode_and_coverage_emits_24():
     assert cov["expand_size"] == 24
     assert len(cov["expand18"]) == 24
     assert "multi_engine" in cov
+    uni = cov.get("unified_net") or {}
+    assert uni.get("numbers") == cov["precision14"]
+    assert 6 <= len(uni.get("focus6") or []) <= 6
+    assert isinstance(uni.get("provenance"), dict)
+    assert len(uni["provenance"]) == len(cov["precision14"])
 
     audit = _coverage_hit_audit(sigs, cov, s1.winning, exclude_keys=ban)
     assert audit["catchable_count"] + len(audit["uncatchable"]) == 6
@@ -194,6 +199,10 @@ def test_decade_pool_reverse_narrows_under_15():
     )
     assert len(cov["precision14"]) < 15
     assert set(cov["precision14"]).issubset(set(cov["decade_pool30"]) | set(cov["precision14"]))
+    uni = cov.get("unified_net") or {}
+    assert uni.get("size") == len(cov["precision14"])
+    assert uni.get("loo", {}).get("ok") is True
+    assert uni.get("provenance")
 
 
 def test_loo_rescue_pulls_mid_tier_winners_into_expand():

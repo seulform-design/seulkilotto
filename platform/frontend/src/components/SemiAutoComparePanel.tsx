@@ -1192,6 +1192,7 @@ export default function SemiAutoComparePanel({
   /** 통합 당첨포착 안 1:1 접목 비교 — 접목이 검증 확장보다 넓게 담으면 자동 펼침 */
   const [showGraftCompare, setShowGraftCompare] = useState(false);
   const [graftCompareTouched, setGraftCompareTouched] = useState(false);
+  const [showHeroRefNets, setShowHeroRefNets] = useState(false);
   const [showPredictionDetail, setShowPredictionDetail] = useState(false);
   const [showTicketCompare, setShowTicketCompare] = useState(false);
   /** 1:1 전수비교 상세(매칭 카드) — 요약만 기본, 상세 보기로 펼침 */
@@ -1514,13 +1515,13 @@ export default function SemiAutoComparePanel({
   });
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand24-v10-precision-primary', 'pair-product'],
+    queryKey: ['v1-photo-review-verification', 'expand24-v11-unified-trace', 'pair-product'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v9-precision-primary', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v10-unified-trace', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,
@@ -3618,7 +3619,7 @@ export default function SemiAutoComparePanel({
         outsideCoreInExpand: audit?.outside_core_in_expand ?? [],
         dataUsed: api.data_used ?? null,
         backtest: api.backtest ?? null,
-        graftBuild: api.graft_build ?? 'graft-v9-precision-primary',
+        graftBuild: api.graft_build ?? 'graft-v10-unified-trace',
         honesty: api.honesty ?? null,
         rankSource: 'api_pair_product' as const,
         decadeDropped: audit?.decade_dropped_vs_raw ?? [],
@@ -3794,6 +3795,16 @@ export default function SemiAutoComparePanel({
       precisionHitCount: null as number | null,
       decadePoolSize: 0,
       decadePoolHitCount: null as number | null,
+      focus6: [] as number[],
+      provenance: {} as Record<string, string[]>,
+      looInfo: null as null | {
+        ok: boolean;
+        rounds: number;
+        precisionSize: number;
+        poolCatchableMean: number | null;
+        precisionMean: number | null;
+        engineCatchableMeans: Record<string, number>;
+      },
     };
     const rv = reviewVerificationQuery.data;
     const clean = (arr: number[] | undefined) =>
@@ -3914,15 +3925,57 @@ export default function SemiAutoComparePanel({
       ?? reverseGraft?.rescue?.policy?.reason
       ?? '',
     );
+    const unified = (cov as {
+      unified_net?: {
+        numbers?: number[];
+        size?: number;
+        focus6?: number[];
+        provenance?: Record<string, string[]>;
+        pool_size?: number;
+        loo?: {
+          ok?: boolean;
+          rounds?: number;
+          precision_size?: number;
+          pool_catchable_mean?: number;
+          precision_means?: Record<string, number>;
+          engine_catchable_means?: Record<string, number>;
+        };
+      };
+    } | undefined)?.unified_net;
     const precision14 = clean(
-      (cov as { precision14?: number[] } | undefined)?.precision14,
+      unified?.numbers
+      ?? (cov as { precision14?: number[] } | undefined)?.precision14,
     ).slice(0, 14);
     const precisionSize = precision14.length
+      || Number(unified?.size)
       || Number((cov as { precision_size?: number } | undefined)?.precision_size)
       || 0;
+    const focus6 = clean(unified?.focus6).slice(0, 6);
+    const provenance = (unified?.provenance && typeof unified.provenance === 'object')
+      ? unified.provenance
+      : {};
     const decadePool = clean(
       (cov as { decade_pool30?: number[] } | undefined)?.decade_pool30,
     );
+    const looRaw = unified?.loo;
+    const precMeans = looRaw?.precision_means ?? {};
+    const selectedK = Number(looRaw?.precision_size || precisionSize || 0);
+    const looInfo = looRaw
+      ? {
+          ok: Boolean(looRaw.ok),
+          rounds: Number(looRaw.rounds ?? 0),
+          precisionSize: selectedK,
+          poolCatchableMean:
+            looRaw.pool_catchable_mean != null ? Number(looRaw.pool_catchable_mean) : null,
+          precisionMean:
+            selectedK && precMeans[String(selectedK)] != null
+              ? Number(precMeans[String(selectedK)])
+              : (selectedK && (precMeans as Record<number, number>)[selectedK] != null
+                ? Number((precMeans as Record<number, number>)[selectedK])
+                : null),
+          engineCatchableMeans: (looRaw.engine_catchable_means ?? {}) as Record<string, number>,
+        }
+      : null;
     const agreement = consensus?.agreement ?? {};
     const winsReady = Boolean(winningSet && winningSet.size > 0);
     const audit = compareWinning && rv?.ok ? rv.review_hit_audit as {
@@ -4010,11 +4063,14 @@ export default function SemiAutoComparePanel({
         ?? (winsReady && precision14.length
           ? precision14.filter((n) => winningSet!.has(n)).length
           : null),
-      decadePoolSize: decadePool.length,
+      decadePoolSize: decadePool.length || Number(unified?.pool_size ?? 0),
       decadePoolHitCount: audit?.decade_pool30_count
         ?? (winsReady && decadePool.length
           ? decadePool.filter((n) => winningSet!.has(n)).length
           : null),
+      focus6: (focus6.length >= 6 ? focus6 : precision14.slice(0, 6)).slice(0, 6),
+      provenance,
+      looInfo,
     };
   }, [
     compareWinning,
@@ -5769,48 +5825,24 @@ export default function SemiAutoComparePanel({
                   ? ` (이 추천 = ${heroRecommendation.serverRound ?? effectiveRound}회)`
                   : ''}
                 {!compareWinning && currentRound != null ? ` → 적용 대상 ${currentRound}회` : ''}
-                {' '}— 당첨을 가장 잘 잡은 신호는{' '}
-                <strong>{heroRecommendation.signalLabel}</strong>
-                {heroRecommendation.selectedBy === 'loo_held'
-                  ? '(LOO)'
-                  : heroRecommendation.selectedByMulti
-                    ? '(다회차 1위)'
-                    : ''}
-                {heroRecommendation.bestTop18 != null
-                  ? `, 신호 상위18 평균 ${heroRecommendation.bestTop18}/6 · 확장망 top${heroRecommendation.expandSize}`
-                  : ` · 확장망 top${heroRecommendation.expandSize}`}
+                {' '}— 신호 <strong>{heroRecommendation.signalLabel}</strong>
+                {heroRecommendation.selectedBy === 'loo_held' ? '(LOO)' : ''}
                 .{' '}→ {recommendHeroHint}
-                {heroRecommendation.goodSignalCount > 0
-                  ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다.`
-                  : ` 아래 핵심 6은 주신호(${heroRecommendation.signalLabel}) 상위6입니다.`}{' '}
-                <strong>확장은 복기 전회차 LOO 역산구조</strong>
-                (전엔진·구간기대·일치레벨·중간양쪽지지 스왑 구출, 필요 시 top30) — 용지 등장 당첨이 합의에 밀려 잘리지 않게 합니다.
-                {heroRecommendation.expandModeLabel
-                  ? ` (${heroRecommendation.expandModeLabel})`
-                  : ''}
-                {heroRecommendation.showWinning && heroRecommendation.winsReady
-                  ? ` 핵심6 ${heroRecommendation.core6HitCount ?? 0}/6 · 확장${heroRecommendation.expandSize} ${heroRecommendation.expandHitCount ?? 0}/6.`
-                  : ''}
-                {heroRecommendation.selectedBy === 'loo_held'
-                  ? ' 신호=이 회차 제외 LOO(다회차 multi가 이 용지와 어긋나 로컬 1:1보다 못 잡던 회귀 보정).'
-                  : ''}
-                {heroRecommendation.rescuePolicy
-                  ? ` LOO구조=${heroRecommendation.rescuePolicy}.`
-                  : ''}
-                {heroRecommendation.precisionSize > 0
-                  ? ` 본망=정밀${heroRecommendation.precisionSize}(강수기대${heroRecommendation.decadePoolSize || 30}→역산, 15미만). 확장24는 참고 그물.`
+                {' '}단일 본망=강수·기대{heroRecommendation.decadePoolSize || 30}→역산 정밀
+                {heroRecommendation.precisionSize || 14}(15미만). 번호별 엔진 출처 추적.
+                {heroRecommendation.looInfo?.ok && heroRecommendation.looInfo.rounds > 0
+                  ? ` LOO ${heroRecommendation.looInfo.rounds}회 백테스트 정밀 평균 ${
+                      heroRecommendation.looInfo.precisionMean != null
+                        ? `${heroRecommendation.looInfo.precisionMean}/6`
+                        : '—'
+                    } · pool ${
+                      heroRecommendation.looInfo.poolCatchableMean != null
+                        ? `${heroRecommendation.looInfo.poolCatchableMean}/6`
+                        : '—'
+                    }.`
                   : ''}
                 {heroRecommendation.winsReady && heroRecommendation.precisionHitCount != null
-                  ? ` 정밀 당첨 ${heroRecommendation.precisionHitCount}/6.`
-                  : ''}
-                {heroRecommendation.rescuedIn.length > 0
-                  ? ` 역산구출 편입: ${heroRecommendation.rescuedIn.join(', ')}.`
-                  : ''}
-                {heroRecommendation.crossAgreeGe3.length > 0
-                  ? ` 교차합의≥3: ${heroRecommendation.crossAgreeGe3.slice(0, 12).join(', ')}.`
-                  : ''}
-                {heroRecommendation.pairDiag
-                  ? ` 1:1곱 패리티 참고: 핵심6 ${heroRecommendation.pairDiag.core6Count}/6 · 확장24 ${heroRecommendation.pairDiag.expandCount}/6.`
+                  ? ` 이번 회차 정밀 당첨 ${heroRecommendation.precisionHitCount}/6.`
                   : ''}
                 {heroRecommendation.sheetMeta ? ` (${heroRecommendation.sheetMeta})` : ''}
               </Typography>
@@ -5820,153 +5852,200 @@ export default function SemiAutoComparePanel({
             <Stack spacing={0.35} sx={{ mb: 0.75 }}>
               <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
                 <Typography variant="caption" fontWeight={800} color="warning.main" sx={{ minWidth: 58 }}>
-                  확장망 밖
+                  본망 밖
                 </Typography>
                 {heroRecommendation.outsideExpand.map((n) => (
                   <LottoBall key={`hero-out-${n}`} number={n} size={ENGINE_BALL.list} />
                 ))}
                 <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                  용지에는 있으나 확장 {heroRecommendation.expandSize} 순위 밖 (엔진 순위 한계)
+                  용지 등장 당첨이나 정밀/확장 순위 밖 (엔진 한계)
                 </Typography>
               </Stack>
-              {heroRecommendation.missedDetail.length > 0 && (
-                <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, pl: 7.5 }}>
-                  {heroRecommendation.missedDetail.map((m) => {
-                    const ranks = [
-                      m.boe_rank != null ? `합산 ${m.boe_rank}위` : null,
-                      m.single_rank != null ? `단일 ${m.single_rank}위` : null,
-                    ].filter(Boolean).join(' · ');
-                    return `${m.number}${ranks ? `(${ranks})` : ''}`;
-                  }).join(' · ')}
+            </Stack>
+          )}
+          {/* 단일 통합 본망: 정밀 역산 + 엔진출처 */}
+          {(heroRecommendation.precision14.length >= 6 || heroRecommendation.core6.length >= 6) && (
+            <Stack spacing={0.6} sx={{ mb: 0.75 }}>
+              <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>
+                  통합정밀 {heroRecommendation.precisionSize || heroRecommendation.precision14.length || 6}
                 </Typography>
+                {heroRecommendation.winsReady && heroRecommendation.precisionHitCount != null && (
+                  <Chip
+                    size="small"
+                    color={heroRecommendation.precisionHitCount >= 3 ? 'success' : 'secondary'}
+                    label={`당첨 ${heroRecommendation.precisionHitCount}/6`}
+                    sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                  />
+                )}
+                {heroRecommendation.decadePoolSize > 0 && (
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`강수기대${heroRecommendation.decadePoolSize}→역산`}
+                    sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                  />
+                )}
+                {heroRecommendation.looInfo?.ok && heroRecommendation.looInfo.precisionMean != null && (
+                  <Chip
+                    size="small"
+                    color="info"
+                    variant="outlined"
+                    label={`LOO평균 ${heroRecommendation.looInfo.precisionMean}/6`}
+                    sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                  />
+                )}
+                <SharingBadge
+                  numbers={
+                    heroRecommendation.focus6.length >= 6
+                      ? heroRecommendation.focus6
+                      : heroRecommendation.precision14.slice(0, 6)
+                  }
+                />
+                <ComboActions
+                  numbers={
+                    heroRecommendation.focus6.length >= 6
+                      ? heroRecommendation.focus6
+                      : (heroRecommendation.precision14.slice(0, 6).length >= 6
+                        ? heroRecommendation.precision14.slice(0, 6)
+                        : heroRecommendation.core6)
+                  }
+                  source="unknown"
+                  label="통합정밀 집중6"
+                />
+              </Stack>
+              <Stack direction="row" spacing={0.45} alignItems="flex-start" flexWrap="wrap" useFlexGap>
+                {(heroRecommendation.precision14.length >= 6
+                  ? heroRecommendation.precision14
+                  : heroRecommendation.core6
+                ).map((n) => {
+                  const isWin = Boolean(heroRecommendation.winsReady && winningSet?.has(n));
+                  const dimmed = heroRecommendation.contrastPending
+                    || Boolean(heroRecommendation.winsReady && !isWin);
+                  const inFocus = heroRecommendation.focus6.includes(n);
+                  const tags = heroRecommendation.provenance[String(n)] ?? [];
+                  return (
+                    <Box
+                      key={`hero-u-${n}`}
+                      sx={{
+                        textAlign: 'center',
+                        minWidth: inFocus ? 36 : 30,
+                        px: 0.15,
+                        pb: 0.25,
+                        borderRadius: 1,
+                        outline: inFocus ? '1px solid' : 'none',
+                        outlineColor: 'primary.light',
+                        bgcolor: inFocus ? 'action.hover' : 'transparent',
+                      }}
+                    >
+                      <LottoBall
+                        number={n}
+                        size={inFocus ? ENGINE_BALL.hero : ENGINE_BALL.list}
+                        dimmed={dimmed}
+                      />
+                      {tags.length > 0 && (
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            display: 'block',
+                            fontSize: 7.5,
+                            lineHeight: 1.15,
+                            color: 'text.secondary',
+                            maxWidth: 44,
+                            mx: 'auto',
+                            wordBreak: 'keep-all',
+                          }}
+                        >
+                          {tags.slice(0, 3).join('·')}
+                        </Typography>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Stack>
+              {heroRecommendation.looInfo?.ok
+                && Object.keys(heroRecommendation.looInfo.engineCatchableMeans).length > 0 && (
+                <Stack direction="row" spacing={0.35} flexWrap="wrap" useFlexGap>
+                  {Object.entries(heroRecommendation.looInfo.engineCatchableMeans)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 7)
+                    .map(([axis, mean]) => (
+                      <Chip
+                        key={axis}
+                        size="small"
+                        variant="outlined"
+                        label={`${axis} ${mean}/6`}
+                        sx={{ height: 16, fontSize: 8 }}
+                      />
+                    ))}
+                </Stack>
               )}
             </Stack>
           )}
-          <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
-            <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>핵심 6</Typography>
-            {heroRecommendation.winsReady && heroRecommendation.core6HitCount != null && (
-              <Chip
-                size="small"
-                color={heroRecommendation.core6HitCount >= 2 ? 'success' : 'default'}
-                label={`당첨 ${heroRecommendation.core6HitCount}/6`}
-                sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-              />
-            )}
-            {heroRecommendation.core6.map((n) => {
-              const isWin = Boolean(heroRecommendation.winsReady && winningSet?.has(n));
-              const dimmed = heroRecommendation.contrastPending
-                || Boolean(heroRecommendation.winsReady && !isWin);
-              return (
-                <Box key={`hero-c-${n}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                  <LottoBall number={n} size={ENGINE_BALL.hero} dimmed={dimmed} />
-                  {heroRecommendation.agreement[String(n)] != null && (
-                    <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
-                      {heroRecommendation.agreement[String(n)]}신호
-                    </Typography>
+          {/* 참고: 확장24·분산최적 (접기) */}
+          <Box sx={{ mb: 0.5 }}>
+            <Button
+              size="small"
+              variant="text"
+              onClick={() => setShowHeroRefNets((v) => !v)}
+              sx={{ minWidth: 0, height: 24, px: 0.5, fontSize: 11, fontWeight: 700 }}
+            >
+              {showHeroRefNets ? '참고 그물 접기 ▲' : '참고 그물(확장·분산) ▼'}
+            </Button>
+            {showHeroRefNets && (
+              <Stack spacing={0.6} sx={{ mt: 0.5 }}>
+                {heroRecommendation.shareOpt.length === 6 && (
+                  <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Typography variant="caption" fontWeight={700} sx={{ minWidth: 58 }}>분산최적</Typography>
+                    {heroRecommendation.shareOpt.map((n) => (
+                      <LottoBall
+                        key={`hero-s-${n}`}
+                        number={n}
+                        size={ENGINE_BALL.table}
+                        dimmed={
+                          heroRecommendation.contrastPending
+                          || Boolean(heroRecommendation.winsReady && winningSet && !winningSet.has(n))
+                        }
+                      />
+                    ))}
+                  </Stack>
+                )}
+                <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Typography variant="caption" fontWeight={700} sx={{ minWidth: 58 }}>
+                    참고확장 {heroRecommendation.expandSize}
+                  </Typography>
+                  {heroRecommendation.winsReady && heroRecommendation.expandHitCount != null && (
+                    <Chip
+                      size="small"
+                      color="info"
+                      variant="outlined"
+                      label={`당첨 ${heroRecommendation.expandHitCount}/6`}
+                      sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                    />
                   )}
-                </Box>
-              );
-            })}
-            <SharingBadge numbers={heroRecommendation.core6} />
-            <ComboActions numbers={heroRecommendation.core6} source="unknown" label="핵심6 추천" />
-          </Stack>
-          {heroRecommendation.precision14.length >= 6 && (
-            <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
-              <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>
-                정밀 {heroRecommendation.precisionSize || heroRecommendation.precision14.length}
-              </Typography>
-              {heroRecommendation.winsReady && heroRecommendation.precisionHitCount != null && (
-                <Chip
-                  size="small"
-                  color={heroRecommendation.precisionHitCount >= 5 ? 'success' : 'secondary'}
-                  label={`당첨 ${heroRecommendation.precisionHitCount}/6`}
-                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-                />
-              )}
-              {heroRecommendation.decadePoolSize > 0 && (
-                <Chip
-                  size="small"
-                  variant="outlined"
-                  label={
-                    heroRecommendation.decadePoolHitCount != null
-                      ? `강수기대${heroRecommendation.decadePoolSize}→역산 · pool당첨 ${heroRecommendation.decadePoolHitCount}/6`
-                      : `강수기대${heroRecommendation.decadePoolSize}→역산`
-                  }
-                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-                />
-              )}
-              {heroRecommendation.precision14.map((n) => (
-                <LottoBall
-                  key={`hero-p-${n}`}
-                  number={n}
-                  size={ENGINE_BALL.list}
-                  dimmed={
-                    heroRecommendation.contrastPending
-                    || Boolean(heroRecommendation.winsReady && winningSet && !winningSet.has(n))
-                  }
-                />
-              ))}
-            </Stack>
-          )}
-          {heroRecommendation.shareOpt.length === 6 && (
-            <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
-              <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>분산 최적</Typography>
-              {heroRecommendation.winsReady && winningSet && (
-                <Chip
-                  size="small"
-                  color="secondary"
-                  variant="outlined"
-                  label={`당첨 ${heroRecommendation.shareOpt.filter((n) => winningSet.has(n)).length}/6`}
-                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-                />
-              )}
-              {heroRecommendation.shareOpt.map((n) => (
-                <LottoBall
-                  key={`hero-s-${n}`}
-                  number={n}
-                  size={ENGINE_BALL.list}
-                  dimmed={
-                    heroRecommendation.contrastPending
-                    || Boolean(heroRecommendation.winsReady && winningSet && !winningSet.has(n))
-                  }
-                />
-              ))}
-              <SharingBadge numbers={heroRecommendation.shareOpt} />
-              <ComboActions numbers={heroRecommendation.shareOpt} source="unknown" label="분산최적 추천" />
-            </Stack>
-          )}
-          <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>
-              참고확장 {heroRecommendation.expandSize}
-            </Typography>
-            {heroRecommendation.winsReady && heroRecommendation.expandHitCount != null && (
-              <Chip
-                size="small"
-                color={heroRecommendation.expandHitCount >= 5 ? 'success' : 'info'}
-                label={`당첨 ${heroRecommendation.expandHitCount}/6`}
-                sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-              />
+                  {heroRecommendation.expand18.map((n) => (
+                    <LottoBall
+                      key={`hero-e-${n}`}
+                      number={n}
+                      size={ENGINE_BALL.table}
+                      dimmed={
+                        heroRecommendation.contrastPending
+                        || Boolean(heroRecommendation.winsReady && winningSet && !winningSet.has(n))
+                      }
+                    />
+                  ))}
+                </Stack>
+              </Stack>
             )}
-            {heroRecommendation.expand18.map((n) => (
-              <LottoBall
-                key={`hero-e-${n}`}
-                number={n}
-                size={ENGINE_BALL.table}
-                dimmed={
-                  heroRecommendation.contrastPending
-                  || Boolean(heroRecommendation.winsReady && winningSet && !winningSet.has(n))
-                }
-              />
-            ))}
-          </Stack>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.5, fontStyle: 'italic' }}>
             {compareWinning && heroRecommendation.winsReady
               ? `밝은 공 = ${heroRecommendation.serverRound ?? effectiveRound ?? '?'}회 실제 당첨 · 회색 = 비당첨. `
               : compareWinning
                 ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다. '
                 : '이번회차 탭: 미추첨 · 당첨 대조 없음. '}
-            본망=정밀(강수기대30→15미만) · 핵심=LOO · 확장24=참고 · 분산최적=공동당첨 회피.
-            {' '}상세 검증은 <strong>④ 엔진</strong>.
+            테두리=집중6 · 번호 아래 태그=기여 엔진. LOO로 엔진가중·정밀크기 선택.
+            {' '}상세는 <strong>④ 엔진</strong>.
           </Typography>
 
           {/* ── 1:1 접목 비교 (구 접목 단독 섹션 통합) ── */}

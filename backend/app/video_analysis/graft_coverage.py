@@ -12,8 +12,8 @@ import math
 from itertools import combinations
 from typing import Any, Dict, List, Sequence, Tuple
 
-# v9: 확장24 고정 + 정밀14 본망(강수기대30은 출발풀만).
-GRAFT_BUILD_ID = "graft-v9-precision-primary"
+# v10: 통합 정밀망 + 엔진출처 추적(검증 커버리지와 동일).
+GRAFT_BUILD_ID = "graft-v10-unified-trace"
 
 DECADE_LABELS = ("단번대", "10번대", "20번대", "30번대", "40번대")
 
@@ -311,6 +311,7 @@ def _build_sets_for_lines(
         expand = present[:exp_n]
     precision14 = list(cov.get("precision14") or [])[:14]
     decade_pool30 = list(cov.get("decade_pool30") or [])
+    unified_net = cov.get("unified_net") or {}
     decade_core = pick_coverage_core6(expand, auto_f, semi_f, scores)
     if light:
         # 백테스트: EV 전수탐색 생략 — 순위 top6 / raw 바닥만 (적중 비교용)
@@ -351,6 +352,7 @@ def _build_sets_for_lines(
         "expand24": expand,
         "precision14": precision14,
         "decade_pool30": decade_pool30,
+        "unified_net": unified_net,
         "pure_ev6": (pure_ev or {}).get("numbers") or [],
         "recall_ev6": (recall_ev or {}).get("numbers") or [],
         "recall_ev": recall_ev,
@@ -574,7 +576,7 @@ def build_graft_coverage(*, intent: str = "review") -> Dict[str, Any]:
             "expand_mode": "loo_decade_precision",
             "coverage_build": built.get("coverage_build"),
             "note": (
-                "강수·기대(~30)→정밀14 역산 축소 + 확장망. "
+                "통합 정밀망(강수·기대~30→15미만) + 엔진출처 추적 + LOO 가중. "
                 "당첨은 순위 미사용(복기 사후 대조만)."
             ),
         },
@@ -585,6 +587,7 @@ def build_graft_coverage(*, intent: str = "review") -> Dict[str, Any]:
         "expand24": built["expand24"],
         "precision14": built.get("precision14") or [],
         "decade_pool30": built.get("decade_pool30") or [],
+        "unified_net": built.get("unified_net") or {},
         "share_opt": (share or {}).get("numbers") or built["recall_ev6"],
         "share_meta": share,
         "pure_ev6": built["pure_ev6"],

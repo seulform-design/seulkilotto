@@ -325,19 +325,30 @@ def _bootstrap_mean_ci(values: List[float], rng: random.Random, n: int = N_BOOTS
 
 
 def _permutation_pvalue(observed: float, samples: List[RoundSample], feature: str, rng: random.Random) -> float:
-    """당첨 라벨을 순열했을 때 관측 평균 이상인 비율."""
+    """당첨 라벨을 순열했을 때 관측 평균 이상인 비율.
+
+    최적화: 회차별 top-6 랭킹은 Feature(그 회차 용지)만으로 결정되고 fake_win 과 무관하다.
+    기존엔 순열 200회 × 회차마다 45개를 재정렬(동일 결과)해 이 함수가 feature-learning
+    타임아웃(60s)의 주범이었다. 랭킹을 회차당 1회만 계산해 두고 순열 루프에선 무작위
+    당첨과의 교집합만 센다 — rng.sample 호출 순서·횟수 동일 → 결과 bitwise 동일, ~200× 단축.
+    """
     if not samples:
         return 1.0
+    per_round_top6 = [
+        set(
+            sorted(
+                range(1, 46),
+                key=lambda n: (-_score_direction(feature, s.features[n].get(feature, 0.0)), n),
+            )[:6]
+        )
+        for s in samples
+    ]
     count = 0
     for _ in range(N_PERMUTATION):
         hits = []
-        for s in samples:
+        for top6 in per_round_top6:
             fake_win = rng.sample(range(1, 46), 6)
-            ranked = sorted(
-                range(1, 46),
-                key=lambda n: (-_score_direction(feature, s.features[n].get(feature, 0.0)), n),
-            )
-            hits.append(sum(1 for n in ranked[:6] if n in fake_win))
+            hits.append(sum(1 for n in fake_win if n in top6))
         if float(np.mean(hits)) >= observed - 1e-12:
             count += 1
     return (count + 1) / (N_PERMUTATION + 1)

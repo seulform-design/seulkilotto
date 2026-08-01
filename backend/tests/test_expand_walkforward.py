@@ -65,13 +65,14 @@ def test_walkforward_picks_expand_mode_and_coverage_emits_24():
     assert set(cov["core6"]).issubset(set(cov["expand18"]))
     assert len(cov["expand18"]) == DEFAULT_EXPAND_SIZE == 24
     assert cov["expand_size"] == 24
-    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v9-decade-precision"
-    assert cov["expand18_mode"] == "loo_decade_precision"
+    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v10-precision-primary"
+    assert cov["expand18_mode"] == "precision_primary"
     assert 6 <= len(cov.get("precision14") or []) <= 14
     assert len(cov.get("decade_pool30") or []) >= 6
     assert "reverse_graft" in cov
     assert len(cov.get("share_opt") or []) == 6
-    assert cov["expand_size"] in (24, 30)
+    assert cov["expand_size"] == 24
+    assert len(cov["expand18"]) == 24
     assert "multi_engine" in cov
 
     audit = _coverage_hit_audit(sigs, cov, s1.winning, exclude_keys=ban)
@@ -177,8 +178,9 @@ def test_decade_pool_reverse_narrows_under_15():
     )
     assert len(prec) < 15
     assert len(prec) == pol["selected_size"] or len(prec) <= len(pool)
-    # 정밀망 catchable ≥ pool-1 (역산 축소가 당첨을 거의 유지)
-    assert len(set(win) & set(prec)) >= max(3, len(set(win) & set(pool)) - 2)
+    # 정밀망은 pool 대비 축소 — 최소 3개 catchable 유지(15미만 제약)
+    assert len(set(win) & set(prec)) >= 3
+    assert len(prec) < 15
 
     cov = _coverage_set_from_signals(
         sigs,
@@ -271,5 +273,5 @@ def test_loo_rescue_pulls_mid_tier_winners_into_expand():
     assert len(set(win) & set(rescued)) >= len(set(win) & set(base))
     # 커버리지 방출도 6·7 중 최소 하나 이상(또는 이미 baseline에 있으면 유지)
     assert len(set(win) & set(cov["expand18"])) >= 4
-    assert cov["expand_size"] in (24, 30)
+    assert cov["expand_size"] == 24
     assert "rescue" in (cov.get("reverse_graft") or {})

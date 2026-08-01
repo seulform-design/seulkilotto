@@ -12,8 +12,8 @@ import math
 from itertools import combinations
 from typing import Any, Dict, List, Sequence, Tuple
 
-# v8.1: 정밀14 + light 백테스트(타임아웃 해소). 방출 소스는 검증 커버리지와 동일.
-GRAFT_BUILD_ID = "graft-v8-decade-precision"
+# v9: 확장24 고정 + 정밀14 본망(강수기대30은 출발풀만).
+GRAFT_BUILD_ID = "graft-v9-precision-primary"
 
 DECADE_LABELS = ("단번대", "10번대", "20번대", "30번대", "40번대")
 
@@ -305,7 +305,7 @@ def _build_sets_for_lines(
         held_round=held_round,
         light=light,
     )
-    exp_n = max(24, min(30, int(cov.get("expand_size") or 24)))
+    exp_n = min(24, max(6, int(cov.get("expand_size") or 24)))
     expand = list(cov.get("expand18") or [])[:exp_n]
     if len(expand) < 6:
         expand = present[:exp_n]

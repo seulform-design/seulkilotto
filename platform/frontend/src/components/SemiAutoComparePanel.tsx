@@ -1514,13 +1514,13 @@ export default function SemiAutoComparePanel({
   });
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand24-v9-decade-precision', 'perf-fix-v1', 'pair-product'],
+    queryKey: ['v1-photo-review-verification', 'expand24-v10-precision-primary', 'pair-product'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v8-decade-precision', 'perf-fix-v1', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v9-precision-primary', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,
@@ -3618,7 +3618,7 @@ export default function SemiAutoComparePanel({
         outsideCoreInExpand: audit?.outside_core_in_expand ?? [],
         dataUsed: api.data_used ?? null,
         backtest: api.backtest ?? null,
-        graftBuild: api.graft_build ?? 'graft-v8-decade-precision',
+        graftBuild: api.graft_build ?? 'graft-v9-precision-primary',
         honesty: api.honesty ?? null,
         rankSource: 'api_pair_product' as const,
         decadeDropped: audit?.decade_dropped_vs_raw ?? [],
@@ -3831,10 +3831,13 @@ export default function SemiAutoComparePanel({
     if (expand18.length < 6) {
       expand18 = clean(expandMode === 'consensus' ? cov?.expand18 : consensus?.expand18);
     }
-    const expandSizeHint = Math.max(
-      expand18.length,
-      Number(cov?.expand_size ?? policy?.expand_size ?? 24) || 24,
+    // 확장 방출은 항상 ≤24. 30은 강수기대 출발풀(decade_pool)일 뿐.
+    const expandSizeHint = Math.min(
       24,
+      Math.max(
+        Number(cov?.expand_size ?? policy?.expand_size ?? 24) || 24,
+        24,
+      ),
     );
     const serverReady = Boolean(rv?.ok && core6.length >= 6 && expand18.length >= 6);
 
@@ -3880,10 +3883,7 @@ export default function SemiAutoComparePanel({
     }
 
     const ready = core6.length >= 6 && expand18.length >= 6;
-    const wide = clean(expand18).slice(
-      0,
-      Math.min(30, Math.max(expand18.length, Number(cov?.expand_size) || 0)),
-    );
+    const wide = clean(expand18).slice(0, Math.min(24, expandSizeHint || 24));
     // 서버 recall-EV(역산접목 커버리지) 우선 — 로컬 분산최적은 폴백.
     const serverShare = clean(
       (cov as { share_opt?: number[] } | undefined)?.share_opt,
@@ -5798,7 +5798,7 @@ export default function SemiAutoComparePanel({
                   ? ` LOO구조=${heroRecommendation.rescuePolicy}.`
                   : ''}
                 {heroRecommendation.precisionSize > 0
-                  ? ` 강수·기대${heroRecommendation.decadePoolSize || 30}→정밀${heroRecommendation.precisionSize}(15미만 역산).`
+                  ? ` 본망=정밀${heroRecommendation.precisionSize}(강수기대${heroRecommendation.decadePoolSize || 30}→역산, 15미만). 확장24는 참고 그물.`
                   : ''}
                 {heroRecommendation.winsReady && heroRecommendation.precisionHitCount != null
                   ? ` 정밀 당첨 ${heroRecommendation.precisionHitCount}/6.`
@@ -5937,7 +5937,7 @@ export default function SemiAutoComparePanel({
           )}
           <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap>
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>
-              확장 {heroRecommendation.expandSize}
+              참고확장 {heroRecommendation.expandSize}
             </Typography>
             {heroRecommendation.winsReady && heroRecommendation.expandHitCount != null && (
               <Chip
@@ -5965,7 +5965,7 @@ export default function SemiAutoComparePanel({
               : compareWinning
                 ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다. '
                 : '이번회차 탭: 미추첨 · 당첨 대조 없음. '}
-            핵심=LOO · 정밀=강수기대30→역산(15미만) · 분산최적=공동당첨 회피 · 확장{heroRecommendation.expandSize}=넓은 그물.
+            본망=정밀(강수기대30→15미만) · 핵심=LOO · 확장24=참고 · 분산최적=공동당첨 회피.
             {' '}상세 검증은 <strong>④ 엔진</strong>.
           </Typography>
 

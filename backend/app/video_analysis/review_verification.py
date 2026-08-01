@@ -174,15 +174,16 @@ DEFAULT_EXPAND_SIZE = 24
 # 방출 고정 24. WF 후보는 진단만(30까지) — 방출에 selected_size 쓰지 않음.
 WF_MAX_EXPAND_SIZE = 30
 DEFAULT_EXPAND_MODE = "single_raw"
-# v9: 강수·기대(~30) 출발 → 전엔진 역산으로 15미만 정밀망(LOO 크기 선택)
-COVERAGE_BUILD_ID = "expand24-v9-decade-precision"
+# v10: 확장 방출 고정 24(rescue30 금지). 30=강수기대 출발풀, 본망=정밀(<15).
+COVERAGE_BUILD_ID = "expand24-v10-precision-primary"
 RESCUE_MAX_SWAPS = 6
+# 진단 비교용만 — 방출 expand_size 에 쓰지 않음('확장 30' 회귀 방지).
 RESCUE_GROW_SIZE = 30
-RESCUE_SIZE_LIFT_BAR = 0.25  # LOO mean hits: grow30이 +0.25 이상일 때만 30 방출
-# 강수3+기대3 × 5구간 ≈ 30. 역산 축소 후보(15 미만).
+RESCUE_SIZE_LIFT_BAR = 0.25
+# 강수3+기대3 × 5구간 ≈ 30. 역산 축소(15 미만) = 히어로 본망.
 PRECISION_SIZE_CANDIDATES = (10, 12, 14)
 PRECISION_MAX = 14
-PRECISION_RECALL_SLACK = 0.35  # pool30 catchable 대비 이 이상 잃지 않는 최소 K
+PRECISION_RECALL_SLACK = 0.5
 
 
 def _merge_expand_order(
@@ -573,14 +574,14 @@ def _loo_expand_rescue_policy(
 ) -> Dict[str, Any]:
     """보관 복기 회차 LOO로 확장 방출 정책 선택(누수 없음).
 
-    변형: baseline24 · rescue24 · rescue30.
-    목표: 용지 등장 당첨(catchable) 적중 평균 최대. 동점이면 작은 그물.
+    변형: baseline24 · rescue24 만. rescue30은 진단 비교용 — 방출 크기 고정 24.
+    (강수·기대 ~30 → 정밀<15 가 본망. 확장을 30으로 키우면 '확장 30' 회귀.)
     """
     train = [
         s for s in (samples or [])
         if held_round is None or int(s.round_no) != int(held_round)
     ]
-    variants = ("baseline24", "rescue24", "rescue30")
+    variants = ("baseline24", "rescue24")
     default = {
         "ok": False,
         "selected": "rescue24",
@@ -596,8 +597,9 @@ def _loo_expand_rescue_policy(
     ban = list(exclude_keys or [])
     hit_sums = {v: 0.0 for v in variants}
     catchable_sums = {v: 0.0 for v in variants}
+    # 진단: rescue30 대비 리프트만 보고(방출에는 미사용)
+    diag30_sum = 0.0
     per_round: List[Dict[str, Any]] = []
-    # 접기 안쪽에서는 기본 축가중만 — 회차마다 axis LOO 를 다시 돌리면 API 타임아웃.
     for s in train:
         sigs = _signals(s.auto_lines, s.semi_lines)
         sk = "pair_product" if "pair_product" not in set(ban) else "support"
@@ -626,35 +628,30 @@ def _loo_expand_rescue_policy(
             "hits": {
                 "baseline24": len(win & set(base24)),
                 "rescue24": len(win & set(r24)),
-                "rescue30": len(win & set(r30)),
+                "rescue30_diag": len(win & set(r30)),
             },
             "catchable_hits": {
                 "baseline24": len(catchable & set(base24)),
                 "rescue24": len(catchable & set(r24)),
-                "rescue30": len(catchable & set(r30)),
+                "rescue30_diag": len(catchable & set(r30)),
             },
         }
         for v in variants:
             hit_sums[v] += row["hits"][v]
             catchable_sums[v] += row["catchable_hits"][v]
+        diag30_sum += row["catchable_hits"]["rescue30_diag"]
         per_round.append(row)
 
     n = len(train)
     means = {v: round(hit_sums[v] / n, 3) for v in variants}
     catch_means = {v: round(catchable_sums[v] / n, 3) for v in variants}
-    # catchable 적중 우선, 그다음 전체 적중. 동점이면 작은 그물.
-    prefer = ("rescue24", "baseline24", "rescue30")
-    best = max(catch_means.values())
+    catch_means["rescue30_diag"] = round(diag30_sum / n, 3)
+    prefer = ("rescue24", "baseline24")
+    best = max(catch_means[v] for v in variants)
     tied = [v for v in prefer if catch_means[v] == best]
-    # rescue30 은 baseline/rescue24 대비 lift bar 이상일 때만
-    if "rescue30" in tied:
-        lift = catch_means["rescue30"] - max(catch_means["rescue24"], catch_means["baseline24"])
-        if lift < RESCUE_SIZE_LIFT_BAR:
-            tied = [v for v in tied if v != "rescue30"]
-            if not tied:
-                tied = ["rescue24"]
     selected = tied[0]
-    emit_size = RESCUE_GROW_SIZE if selected == "rescue30" else DEFAULT_EXPAND_SIZE
+    # 방출 크기 절대 고정 24 — rescue30 선택 경로 제거
+    emit_size = DEFAULT_EXPAND_SIZE
     use_rescue = selected != "baseline24"
     return {
         "ok": True,
@@ -666,8 +663,8 @@ def _loo_expand_rescue_policy(
         "rounds": n,
         "per_round": per_round,
         "reason": (
-            f"LOO {n}회 — {selected} "
-            f"(catchable 평균 {catch_means[selected]}/6)"
+            f"LOO {n}회 — {selected}@24 "
+            f"(catchable {catch_means[selected]}/6 · 30진단 {catch_means['rescue30_diag']}/6)"
         ),
     }
 
@@ -1479,9 +1476,9 @@ def _reverse_rank_decade_pool(
         elif n in agree2:
             s += 10.0
         if n in strong:
-            s += 14.0
+            s += 16.0
         if n in expected:
-            s += 16.0  # 기대수에 당첨이 자주 앉음(1235:7·11)
+            s += 22.0  # 기대수 우선 — 1235:7 이 정밀망에서 잘리던 회귀 보정
         if n in mid_both:
             s += 12.0
         s += (float(pair.get(n, 0)) / pair_max) * 10.0
@@ -1508,10 +1505,21 @@ def _build_precision_from_decade(
         auto_lines=auto_lines, semi_lines=semi_lines,
     )
     k = max(6, min(PRECISION_MAX, int(size)))
-    out = list(ranked[:k])
+    # 기대수·강수를 정밀망에 최소 확보(구간당 기대가 잘리던 1235:7 보정)
+    reserved: List[int] = []
+    for n in list(expected) + list(strong):
+        if n in set(pool) and n not in reserved:
+            reserved.append(n)
+        if len(reserved) >= min(8, k // 2 + 2):
+            break
+    out: List[int] = []
+    for n in reserved + ranked:
+        if n not in out:
+            out.append(n)
+        if len(out) >= k:
+            break
     if core:
         out = _ensure_core_subset(out, [n for n in core if n in set(pool)], k)
-        # pool 밖 core 는 정밀망에 억지 넣지 않음(출발=강수기대)
         out = [n for n in out if n in set(pool)][:k]
         if len(out) < k:
             for n in ranked:
@@ -1525,6 +1533,7 @@ def _build_precision_from_decade(
         "decade_strong": sorted(strong),
         "decade_expected": sorted(expected),
         "ranked": ranked,
+        "reserved_tier": reserved[:8],
         "emit_size": len(out),
     }
     return out, meta
@@ -1735,8 +1744,8 @@ def _coverage_set_from_signals(
         axis_weights = _loo_axis_weights(
             samples, exclude_keys=exclude_keys, held_round=held_round
         )
-    size = int(rescue_pol.get("emit_size") or DEFAULT_EXPAND_SIZE)
-    size = max(DEFAULT_EXPAND_SIZE, min(WF_MAX_EXPAND_SIZE, size))
+    # 방출 크기 강제 24 — LOO/WF 가 30을 골라도 히어로에 '확장 30' 안 냄.
+    size = DEFAULT_EXPAND_SIZE
     use_rescue = bool(rescue_pol.get("use_rescue", True))
     multi_order, multi_meta = _multi_engine_order(
         sigs,
@@ -1844,8 +1853,9 @@ def _coverage_set_from_signals(
         # 하위호환: 필드명 expand18 유지 — 실제 길이는 expand_size(24|30).
         "expand18": expand,
         "expand_size": size,
-        "expand18_mode": "loo_decade_precision",
+        "expand18_mode": "precision_primary",
         "expand18_mode_label": mode_label,
+        "primary_net": "precision14",
         "expand18_precision": precision18,
         "expand18_single": single_expand,
         "expand18_raw": mode_expand,

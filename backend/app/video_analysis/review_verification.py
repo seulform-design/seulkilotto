@@ -174,8 +174,8 @@ DEFAULT_EXPAND_SIZE = 24
 # 방출 고정 24. WF 후보는 진단만(30까지) — 방출에 selected_size 쓰지 않음.
 WF_MAX_EXPAND_SIZE = 30
 DEFAULT_EXPAND_MODE = "single_raw"
-# v11: 단일 통합망(정밀<15) + 번호별 엔진출처 + 복기 LOO 백테스트 가중
-COVERAGE_BUILD_ID = "expand24-v11-unified-trace"
+# v12: 풀=UI정렬 + 구간쿼터·정밀구출 + 학습/이월축 → catchable 보존
+COVERAGE_BUILD_ID = "expand24-v12-full-catch"
 RESCUE_MAX_SWAPS = 6
 # 진단 비교용만 — 방출 expand_size 에 쓰지 않음('확장 30' 회귀 방지).
 RESCUE_GROW_SIZE = 30
@@ -184,6 +184,11 @@ RESCUE_SIZE_LIFT_BAR = 0.25
 PRECISION_SIZE_CANDIDATES = (10, 12, 14)
 PRECISION_MAX = 14
 PRECISION_RECALL_SLACK = 0.5
+PRECISION_RESCUE_MAX_SWAPS = 4
+# pool catchable 평균이 이 이상이면 K=14 고정(10/12로 잘림 방지).
+PRECISION_POOL_MEAN_FORCE_K = 4.5
+DECADE_BANDS = ((1, 9), (10, 19), (20, 29), (30, 39), (40, 45))
+PRECISION_BAND_QUOTA = 2
 
 
 def _merge_expand_order(
@@ -206,21 +211,37 @@ def _merge_expand_order(
     return order
 
 
-def _decade_tier_sets(sigs: Dict[str, Dict[int, float]]) -> tuple[set, set]:
-    """프론트 ★1:1 강수·기대(구간별 상위3+다음3)와 동일 계층 — 당첨 미사용."""
+def _decade_tier_sets(
+    sigs: Dict[str, Dict[int, float]],
+    *,
+    auto_lines: List[List[int]] | None = None,
+    semi_lines: List[List[int]] | None = None,
+    match_scores: Dict[int, float] | None = None,
+) -> tuple[set, set]:
+    """프론트 ★1:1 강수·기대(구간별 상위3+다음3)와 동일 계층 — 당첨 미사용.
+
+    UI predictedNumbers 정렬에 맞춤: pair_product → match_level → total_freq.
+    """
     tb = sigs.get("total_freq") or {}
     pair = sigs.get("pair_product") or {}
+    if match_scores is None:
+        match_scores = (
+            _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+            if (auto_lines or semi_lines)
+            else {}
+        )
     strong: set = set()
     expected: set = set()
-    for lo, hi in ((1, 9), (10, 19), (20, 29), (30, 39), (40, 45)):
+    for lo, hi in DECADE_BANDS:
         in_band = [
             n for n in range(lo, hi + 1)
             if float(tb.get(n, 0)) > 0
         ]
         in_band.sort(
             key=lambda n: (
-                -float(tb.get(n, 0)),
                 -float(pair.get(n, 0)),
+                -float(match_scores.get(n, 0)),
+                -float(tb.get(n, 0)),
                 n,
             )
         )
@@ -370,8 +391,10 @@ def _multi_engine_order(
     boe = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
     combo = _rank_signal(sigs.get("combo_strength", {}), tb, af)
     bal = _rank_signal(sigs.get("balanced", {}), tb, af)
-    strong, expected = _decade_tier_sets(sigs)
     match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+    strong, expected = _decade_tier_sets(
+        sigs, auto_lines=auto_lines, semi_lines=semi_lines, match_scores=match_sc
+    )
     match_order = sorted(range(1, 46), key=lambda n: (-match_sc.get(n, 0.0), n))
     pri_pos = {n: i for i, n in enumerate(primary)}
     pair_pos = {n: i for i, n in enumerate(pair)}
@@ -921,10 +944,38 @@ def _coverage_hit_audit(
         }
         for n in outside
     ]
+    prov = ((cov.get("unified_net") or {}).get("provenance") or {})
+    win_path: List[Dict[str, Any]] = []
+    for n in win:
+        on_t = n in present
+        in_pool = n in decade_pool
+        in_prec = n in precision
+        in_exp = n in expand
+        if not on_t:
+            miss = "not_on_ticket"
+        elif not in_pool:
+            miss = "out_of_pool"
+        elif in_prec:
+            miss = None
+        elif in_exp:
+            miss = "expand_only"
+        else:
+            miss = "rank_cut"
+        win_path.append({
+            "number": n,
+            "on_ticket": on_t,
+            "in_pool": in_pool,
+            "in_precision": in_prec,
+            "in_expand": in_exp,
+            "engine_tags": list(prov.get(str(n)) or []),
+            "miss_reason": miss,
+        })
     random6 = round(6 * 6 / 45, 3)
     expand_n = max(1, len(expand))
     random_expand = round(expand_n * 6 / 45, 3)
     top18_hit = len(win_set & set(cov.get("expand18_precision") or cov.get("expand18_raw") or []))
+    pool_catch = len(decade_pool & win_set) if decade_pool else 0
+    prec_catch = len(precision & win_set) if precision else 0
     return {
         "winning": win,
         # 하위호환 필드명 유지(프론트 구버전). UI 라벨에는 쓰지 말 것.
@@ -949,6 +1000,12 @@ def _coverage_hit_audit(
         "outside_precision": outside_precision,
         "missed_catchable": outside,  # 하위호환
         "missed_detail": outside_detail,
+        "win_path": win_path,
+        "pool_precision_preserve": {
+            "pool_hits": pool_catch,
+            "precision_hits": prec_catch,
+            "slack": round(pool_catch - prec_catch, 3),
+        },
         "random_expect_core6": random6,
         "random_expect_expand18": random_expand,
         "vs_random_expand": round(len(expand & win_set) - random_expand, 3),
@@ -958,6 +1015,44 @@ def _coverage_hit_audit(
             else "당첨 6개 모두 용지에 존재(천장=엔진 순위)"
         ),
     }
+
+
+def _safe_aux_engine_numbers(
+    *,
+    intent: str,
+    present: set,
+) -> tuple[List[int], List[int]]:
+    """검증학습·이월 후보(당첨 미사용). 복기 intent면 이월 비활성. 실패 시 빈 목록."""
+    learning: List[int] = []
+    carry: List[int] = []
+    apply = "current_round" if intent == "current_round" else "review"
+    try:
+        from .feature_learning_engine import build_feature_learning
+
+        feat = build_feature_learning(apply_intent=apply)
+        rec = feat.get("recommendation") or {}
+        if feat.get("ok") and rec.get("ok") and not str(rec.get("source") or "").startswith(
+            "archived_demo"
+        ):
+            for row in (rec.get("numbers") or [])[:18]:
+                n = int(row.get("number", 0))
+                if n in present:
+                    learning.append(n)
+    except Exception:
+        pass
+    if intent == "current_round":
+        try:
+            from .carryover_learning import build_carryover_learning
+
+            co = build_carryover_learning()
+            if co.get("ok"):
+                for c in (co.get("current_candidates") or [])[:12]:
+                    n = int(c.get("number", 0) if isinstance(c, dict) else c)
+                    if n in present:
+                        carry.append(n)
+        except Exception:
+            pass
+    return learning, carry
 
 
 def _decade_catch(samples=None) -> Dict[str, Any]:
@@ -1428,14 +1523,27 @@ def _best_of_engines_order(
     return sorted(range(1, 46), key=lambda n: (min_rank[n], -tb.get(n, 0.0), -af.get(n, 0.0), n))
 
 
-def _decade_pool_list(sigs: Dict[str, Dict[int, float]]) -> tuple[List[int], set, set]:
-    """★1:1 강수∪기대 (~30) — 정밀 역산의 출발 우주."""
-    strong, expected = _decade_tier_sets(sigs)
+def _decade_pool_list(
+    sigs: Dict[str, Dict[int, float]],
+    *,
+    auto_lines: List[List[int]] | None = None,
+    semi_lines: List[List[int]] | None = None,
+) -> tuple[List[int], set, set]:
+    """★1:1 강수∪기대 (~30) — 정밀 역산의 출발 우주(UI와 동일 키)."""
+    match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+    strong, expected = _decade_tier_sets(
+        sigs, auto_lines=auto_lines, semi_lines=semi_lines, match_scores=match_sc
+    )
     tb = sigs.get("total_freq") or {}
     pair = sigs.get("pair_product") or {}
 
     def key(n: int) -> tuple:
-        return (-float(tb.get(n, 0)), -float(pair.get(n, 0)), n)
+        return (
+            -float(pair.get(n, 0)),
+            -float(match_sc.get(n, 0)),
+            -float(tb.get(n, 0)),
+            n,
+        )
 
     strong_l = sorted(strong, key=key)
     expected_l = sorted(expected - strong, key=key)
@@ -1452,6 +1560,8 @@ def _reverse_rank_decade_pool(
     auto_lines: List[List[int]] | None = None,
     semi_lines: List[List[int]] | None = None,
     engine_boosts: Dict[str, float] | None = None,
+    learning_numbers: List[int] | None = None,
+    carryover_numbers: List[int] | None = None,
 ) -> List[int]:
     """강수·기대 풀 안에서 전엔진·역산 점수로 재정렬(당첨 미사용)."""
     if not pool:
@@ -1465,9 +1575,13 @@ def _reverse_rank_decade_pool(
     mid_both = set(multi_meta.get("mid_both_side") or [])
     strong = set(multi_meta.get("decade_strong") or [])
     expected = set(multi_meta.get("decade_expected") or [])
+    learn = set(int(n) for n in (learning_numbers or []) if 1 <= int(n) <= 45)
+    carry = set(int(n) for n in (carryover_numbers or []) if 1 <= int(n) <= 45)
     pair = sigs.get("pair_product") or {}
     pair_max = max((float(pair.get(n, 0)) for n in pool), default=0.0) or 1.0
     tb = sigs.get("total_freq") or {}
+    af = sigs.get("auto_freq") or {}
+    sf = sigs.get("semi_freq") or {}
 
     def score(n: int) -> float:
         s = 0.0
@@ -1480,11 +1594,18 @@ def _reverse_rank_decade_pool(
         if n in strong:
             s += 16.0 * float(boost.get("decade_strong", 1.0))
         if n in expected:
-            s += 22.0 * float(boost.get("decade_expected", 1.2))
+            s += 26.0 * float(boost.get("decade_expected", 1.25))
         if n in mid_both:
-            s += 12.0 * float(boost.get("mid_both", 1.0))
-        s += (float(pair.get(n, 0)) / pair_max) * 10.0 * float(boost.get("pair_product", 1.0))
-        s += min(8.0, float(tb.get(n, 0)) * 0.15)
+            s += 16.0 * float(boost.get("mid_both", 1.15))
+        # 양쪽 등장 중하위도 보존(1235:6·7형)
+        if float(af.get(n, 0)) > 0 and float(sf.get(n, 0)) > 0:
+            s += 8.0
+        if n in learn:
+            s += 14.0
+        if n in carry:
+            s += 10.0
+        s += (float(pair.get(n, 0)) / pair_max) * 12.0 * float(boost.get("pair_product", 1.0))
+        s += min(6.0, float(tb.get(n, 0)) * 0.1)
         return s
 
     return sorted(pool, key=lambda n: (-score(n), n))
@@ -1498,6 +1619,8 @@ def _engine_provenance_for_numbers(
     *,
     auto_lines: List[List[int]] | None = None,
     semi_lines: List[List[int]] | None = None,
+    learning_numbers: List[int] | None = None,
+    carryover_numbers: List[int] | None = None,
 ) -> Dict[str, List[str]]:
     """번호 → 기여 엔진 태그(당첨 미사용). UI 추적·역산 근거."""
     strong = set(multi_meta.get("decade_strong") or [])
@@ -1505,6 +1628,8 @@ def _engine_provenance_for_numbers(
     agree2 = set(multi_meta.get("cross_agree_ge2") or [])
     agree3 = set(multi_meta.get("cross_agree_ge3") or [])
     mid_both = set(multi_meta.get("mid_both_side") or [])
+    learn = set(int(n) for n in (learning_numbers or []) if 1 <= int(n) <= 45)
+    carry = set(int(n) for n in (carryover_numbers or []) if 1 <= int(n) <= 45)
     match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
     match_top = {
         n for n, sc in match_sc.items() if sc > 0
@@ -1533,8 +1658,94 @@ def _engine_provenance_for_numbers(
             tags.append("중간양쪽")
         if n in multi24:
             tags.append("다중엔진")
+        if n in learn:
+            tags.append("학습")
+        if n in carry:
+            tags.append("이월")
         out[str(n)] = tags or ["풀후보"]
     return out
+
+
+def _apply_precision_rescue(
+    precision: List[int],
+    ranked: List[int],
+    pool: List[int],
+    multi_meta: Dict[str, Any],
+    *,
+    sigs: Dict[str, Dict[int, float]] | None = None,
+    size: int,
+    max_swaps: int = PRECISION_RESCUE_MAX_SWAPS,
+    quota_protected: set | None = None,
+) -> tuple[List[int], Dict[str, Any]]:
+    """정밀망 전용 구출 — pool 안·topK 밖 후보를 스왑(당첨 미사용).
+
+    강수·기대·쿼터석은 드롭 금지 — 구출이 중하위 당첨 후보를 다시 밀어내던 회귀 방지.
+    """
+    k = max(6, min(PRECISION_MAX, int(size)))
+    pool_set = set(pool)
+    out = [n for n in precision if n in pool_set][:k]
+    if len(out) < k:
+        for n in ranked:
+            if n in pool_set and n not in out:
+                out.append(n)
+            if len(out) >= k:
+                break
+    tier = (
+        set(multi_meta.get("decade_strong") or [])
+        | set(multi_meta.get("decade_expected") or [])
+    )
+    # 이미 편입된 강수·기대는 드롭 금지(구출이 다시 밀어내던 회귀). 미편입 티어는 후보.
+    protect = (
+        set(multi_meta.get("cross_agree_ge3") or [])
+        | set(quota_protected or [])
+        | (set(out) & tier)
+    )
+    rank_pos = {n: i for i, n in enumerate(ranked)}
+    candidates = [
+        n for n in _reverse_rescue_candidates(
+            multi_meta, pool_set, out, sigs=sigs
+        )
+        if n in pool_set
+    ]
+    swapped_in: List[int] = []
+    dropped: List[int] = []
+    for cand in candidates:
+        if len(swapped_in) >= max_swaps:
+            break
+        if cand in out:
+            continue
+        drop_cands = [n for n in out if n not in protect]
+        if not drop_cands:
+            if len(out) < k:
+                out.append(cand)
+                swapped_in.append(cand)
+            continue
+        # 역산순위 뒤쪽·보호 아닌 슬롯 제거
+        drop_cands.sort(key=lambda n: (rank_pos.get(n, 99), n), reverse=True)
+        drop = drop_cands[0]
+        out.remove(drop)
+        out.append(cand)
+        swapped_in.append(cand)
+        dropped.append(drop)
+    # 길이·순서 정리(역산순위 우선 유지 + 구출 편입)
+    ordered: List[int] = []
+    for n in ranked:
+        if n in out and n not in ordered:
+            ordered.append(n)
+        if len(ordered) >= k:
+            break
+    for n in out:
+        if n not in ordered:
+            ordered.append(n)
+        if len(ordered) >= k:
+            break
+    meta = {
+        "swapped_in": swapped_in,
+        "dropped": dropped,
+        "candidates_considered": candidates[:12],
+        "max_swaps": max_swaps,
+    }
+    return ordered[:k], meta
 
 
 def _loo_precision_engine_boosts(
@@ -1575,7 +1786,9 @@ def _loo_precision_engine_boosts(
             sigs, sk, exclude_keys=ban,
             auto_lines=s.auto_lines, semi_lines=s.semi_lines, axis_weights=None,
         )
-        pool, strong, expected = _decade_pool_list(sigs)
+        pool, strong, expected = _decade_pool_list(
+            sigs, auto_lines=s.auto_lines, semi_lines=s.semi_lines
+        )
         present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
         catchable = set(s.winning) & present & set(pool)
         if not catchable:
@@ -1635,44 +1848,100 @@ def _build_precision_from_decade(
     size: int = PRECISION_MAX,
     core: List[int] | None = None,
     engine_boosts: Dict[str, float] | None = None,
+    learning_numbers: List[int] | None = None,
+    carryover_numbers: List[int] | None = None,
+    use_rescue: bool = True,
+    max_rescue_swaps: int = PRECISION_RESCUE_MAX_SWAPS,
 ) -> tuple[List[int], Dict[str, Any]]:
-    """강수·기대 30 → 역산 순위 topK(<15). core 는 가능하면 포함."""
-    pool, strong, expected = _decade_pool_list(sigs)
+    """강수·기대 30 → 구간쿼터·역산예약·정밀구출 → topK(<15)."""
+    pool, strong, expected = _decade_pool_list(
+        sigs, auto_lines=auto_lines, semi_lines=semi_lines
+    )
     ranked = _reverse_rank_decade_pool(
         pool, sigs, multi_order, multi_meta,
         auto_lines=auto_lines, semi_lines=semi_lines,
         engine_boosts=engine_boosts,
+        learning_numbers=learning_numbers,
+        carryover_numbers=carryover_numbers,
     )
     k = max(6, min(PRECISION_MAX, int(size)))
-    # 기대수·강수를 정밀망에 최소 확보(구간당 기대가 잘리던 1235:7 보정)
+    pool_set = set(pool)
+    rank_pos = {n: i for i, n in enumerate(ranked)}
+
+    # 1) 구간 쿼터 — 밴드마다 강수1+기대1 우선(없으면 역산으로 채움).
+    #    역산상위만 쓰면 기대수(1235:7)가 노이즈에 밀려 쿼터에서 탈락함.
+    quota: List[int] = []
+    quota_protected: set = set()
+    for lo, hi in DECADE_BANDS:
+        band_mem = [n for n in ranked if lo <= n <= hi and n in pool_set]
+        if not band_mem:
+            continue
+        take: List[int] = []
+        for n in band_mem:
+            if n in strong and n not in take:
+                take.append(n)
+                break
+        for n in band_mem:
+            if n in expected and n not in take:
+                take.append(n)
+                break
+        for n in band_mem:
+            if len(take) >= PRECISION_BAND_QUOTA:
+                break
+            if n not in take:
+                take.append(n)
+        for n in take[:PRECISION_BAND_QUOTA]:
+            if n not in quota:
+                quota.append(n)
+                quota_protected.add(n)
+
+    # 2) 예약석 — expected→strong 을 역산순위 순으로
+    reserve_n = min(8, k // 2 + 2)
+    tier_ranked = sorted(
+        [n for n in ranked if n in expected or n in strong],
+        key=lambda n: (0 if n in expected else 1, rank_pos.get(n, 99), n),
+    )
     reserved: List[int] = []
-    for n in list(expected) + list(strong):
-        if n in set(pool) and n not in reserved:
+    for n in tier_ranked:
+        if n not in reserved:
             reserved.append(n)
-        if len(reserved) >= min(8, k // 2 + 2):
+        if len(reserved) >= reserve_n:
             break
+
     out: List[int] = []
-    for n in reserved + ranked:
-        if n not in out:
+    for n in quota + reserved + ranked:
+        if n in pool_set and n not in out:
             out.append(n)
         if len(out) >= k:
             break
     if core:
-        out = _ensure_core_subset(out, [n for n in core if n in set(pool)], k)
-        out = [n for n in out if n in set(pool)][:k]
+        out = _ensure_core_subset(out, [n for n in core if n in pool_set], k)
+        out = [n for n in out if n in pool_set][:k]
         if len(out) < k:
             for n in ranked:
                 if n not in out:
                     out.append(n)
                 if len(out) >= k:
                     break
+
+    rescue_meta: Dict[str, Any] = {"applied": False, "swapped_in": []}
+    if use_rescue and max_rescue_swaps > 0:
+        out, rescue_meta = _apply_precision_rescue(
+            out, ranked, pool, multi_meta,
+            sigs=sigs, size=k, max_swaps=max_rescue_swaps,
+            quota_protected=quota_protected,
+        )
+        rescue_meta["applied"] = True
+
     meta = {
         "pool_size": len(pool),
         "pool": pool,
         "decade_strong": sorted(strong),
         "decade_expected": sorted(expected),
         "ranked": ranked,
+        "quota": quota,
         "reserved_tier": reserved[:8],
+        "precision_rescue": rescue_meta,
         "emit_size": len(out),
     }
     return out, meta
@@ -1717,19 +1986,22 @@ def _loo_precision_from_decade_policy(
             sigs, sk, exclude_keys=ban,
             auto_lines=s.auto_lines, semi_lines=s.semi_lines, axis_weights=None,
         )
-        pool, _, _ = _decade_pool_list(sigs)
+        pool, _, _ = _decade_pool_list(
+            sigs, auto_lines=s.auto_lines, semi_lines=s.semi_lines
+        )
         present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
         win = set(s.winning)
         catchable = win & present
         pool_hits = len(catchable & set(pool))
         pool_sum += pool_hits
-        ranked = _reverse_rank_decade_pool(
-            pool, sigs, order, meta,
-            auto_lines=s.auto_lines, semi_lines=s.semi_lines,
-            engine_boosts=engine_boosts,
-        )
-        row_hits = {k: len(catchable & set(ranked[:k])) for k in sizes}
+        row_hits: Dict[int, int] = {}
         for k in sizes:
+            prec, _ = _build_precision_from_decade(
+                sigs, order, meta,
+                auto_lines=s.auto_lines, semi_lines=s.semi_lines,
+                size=k, engine_boosts=engine_boosts, use_rescue=True,
+            )
+            row_hits[k] = len(catchable & set(prec))
             hit_sums[k] += row_hits[k]
         per_round.append({
             "round_no": s.round_no,
@@ -1740,16 +2012,26 @@ def _loo_precision_from_decade_policy(
     n = len(train)
     means = {k: round(hit_sums[k] / n, 3) for k in sizes}
     pool_mean = round(pool_sum / n, 3)
-    # pool catchable 을 거의 유지하는 최소 K
-    eligible = [
-        k for k in sorted(sizes)
-        if means[k] + 1e-9 >= pool_mean - PRECISION_RECALL_SLACK
-    ]
-    if not eligible:
-        # 전부 손실 크면 catchable 최대 K, 동점이면 큰 K
-        best = max(means.values())
-        eligible = [k for k in sorted(sizes, reverse=True) if means[k] == best]
-    selected = eligible[0]
+    # pool catchable 이 높으면 14 고정 — 축소로 당첨 유실 방지
+    if pool_mean + 1e-9 >= PRECISION_POOL_MEAN_FORCE_K:
+        selected = PRECISION_MAX
+        reason = (
+            f"LOO {n}회 — pool catchable {pool_mean}/6≥{PRECISION_POOL_MEAN_FORCE_K} "
+            f"→ 정밀 top{selected} 고정 (catchable {means[selected]}/6)"
+        )
+    else:
+        eligible = [
+            k for k in sorted(sizes)
+            if means[k] + 1e-9 >= pool_mean - PRECISION_RECALL_SLACK
+        ]
+        if not eligible:
+            best = max(means.values())
+            eligible = [k for k in sorted(sizes, reverse=True) if means[k] == best]
+        selected = eligible[0]
+        reason = (
+            f"LOO {n}회 — 강수기대30→정밀 top{selected} "
+            f"(catchable {means[selected]}/6 · pool {pool_mean}/6)"
+        )
     return {
         "ok": True,
         "selected_size": selected,
@@ -1757,10 +2039,7 @@ def _loo_precision_from_decade_policy(
         "pool_catchable_mean": pool_mean,
         "rounds": n,
         "per_round": per_round,
-        "reason": (
-            f"LOO {n}회 — 강수기대30→정밀 top{selected} "
-            f"(catchable {means[selected]}/6 · pool {pool_mean}/6)"
-        ),
+        "reason": reason,
     }
 
 
@@ -1847,12 +2126,15 @@ def _coverage_set_from_signals(
     samples=None,
     held_round: int | None = None,
     light: bool = False,
+    learning_numbers: List[int] | None = None,
+    carryover_numbers: List[int] | None = None,
 ) -> Dict[str, Any]:
     """core6 + expand(24|30) + precision14 + recall-EV 커버리지.
 
     - core6: 주신호(집중) — 약신호 희석 방지.
     - expand: 전엔진+역산 순위 후 LOO가 고른 역산구조(스왑) · 필요 시 top30.
     - light=True: 접목 LOO 백테스트용 — 중첩 LOO 생략(타임아웃 방지).
+    - learning/carryover: 검증학습·이월 후보(당첨 미사용). None이면 용지 combo 프록시.
     """
     ranked = _rank_signal(
         sigs.get(signal_key, sigs["support"]),
@@ -1861,6 +2143,19 @@ def _coverage_set_from_signals(
     )
     core = ranked[:6]
     present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
+    # 학습축: 명시 주입 없으면 combo_strength 상위(용지·누수없음) 프록시
+    if learning_numbers is None and not light:
+        learning_numbers = _rank_signal(
+            sigs.get("combo_strength", {}),
+            sigs.get("total_freq"),
+            sigs.get("auto_freq"),
+        )[:12]
+    learning_numbers = [
+        int(n) for n in (learning_numbers or []) if int(n) in present
+    ]
+    carryover_numbers = [
+        int(n) for n in (carryover_numbers or []) if int(n) in present
+    ]
     precision18 = ranked[:18]
     single_expand = _balance_expand(ranked, core, present, 18)
     boe_order = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
@@ -1969,10 +2264,15 @@ def _coverage_set_from_signals(
         auto_lines=auto_lines, semi_lines=semi_lines,
         size=prec_size, core=core,
         engine_boosts=boost_map,
+        learning_numbers=learning_numbers,
+        carryover_numbers=carryover_numbers,
+        use_rescue=not light,
     )
     provenance = _engine_provenance_for_numbers(
         precision14, sigs, multi_order, multi_meta,
         auto_lines=auto_lines, semi_lines=semi_lines,
+        learning_numbers=learning_numbers,
+        carryover_numbers=carryover_numbers,
     )
     # 통합망 집중6 = 정밀망 안 역산순위 상위6(별도 핵심 행 제거용)
     focus6 = list(precision14)[:6]
@@ -2057,9 +2357,12 @@ def _coverage_set_from_signals(
                 "rounds": eng_boost.get("rounds") or prec_pol.get("rounds"),
                 "ok": bool(eng_boost.get("ok") or prec_pol.get("ok")),
             },
+            "learning_numbers": learning_numbers[:18],
+            "carryover_numbers": carryover_numbers[:12],
+            "precision_rescue": (prec_meta.get("precision_rescue") or {}),
             "note": (
-                "단일 섹션 본망: 강수·기대~30 → 전엔진 역산 → 15미만. "
-                "번호별 provenance=기여 엔진. LOO로 엔진 가중·크기 선택."
+                "단일 본망: UI정렬 강수기대~30 → 구간쿼터·정밀구출·학습/이월축 → ≤14. "
+                "번호별 provenance=기여 엔진. LOO로 엔진가중·K 선택."
             ),
         },
         "share_opt": share_opt,
@@ -2503,6 +2806,13 @@ def build_review_verification() -> Dict[str, Any]:
 
     # 복기 회차 커버리지 — LOO 주신호 core + 전엔진교차검증·역산 접목 expand.
     review_sigs = _signals(auto, semi)
+    review_present = {
+        n for n in range(1, 46) if review_sigs["total_freq"].get(n, 0) > 0
+    }
+    # 복기: 검증학습만(이월 OFF). 실패 시 coverage 내부 combo 프록시.
+    learn_review, _carry_off = _safe_aux_engine_numbers(
+        intent="review", present=review_present
+    )
     review_coverage_set = _coverage_set_from_signals(
         review_sigs,
         signal_key=review_bkey,
@@ -2514,6 +2824,8 @@ def build_review_verification() -> Dict[str, Any]:
         semi_lines=semi,
         samples=_samples,
         held_round=review_round,
+        learning_numbers=learn_review or None,
+        carryover_numbers=[],  # 복기 이월 비활성
     )
     pair_ranked = _rank_signal(
         review_sigs.get("pair_product", review_sigs["support"]),
@@ -2544,6 +2856,10 @@ def build_review_verification() -> Dict[str, Any]:
     csig: Dict[str, Dict[int, float]] = {}
     if cur_auto or cur_semi:
         csig = _signals(cur_auto, cur_semi)
+        cur_present = {n for n in range(1, 46) if csig["total_freq"].get(n, 0) > 0}
+        learn_cur, carry_cur = _safe_aux_engine_numbers(
+            intent="current_round", present=cur_present
+        )
         current_coverage_set = _coverage_set_from_signals(
             csig,
             signal_key=bkey,
@@ -2555,6 +2871,8 @@ def build_review_verification() -> Dict[str, Any]:
             semi_lines=cur_semi,
             samples=_samples,
             held_round=None,
+            learning_numbers=learn_cur or None,
+            carryover_numbers=carry_cur or None,
         )
         consensus_coverage = _consensus_coverage(csig, leaderboard)
 

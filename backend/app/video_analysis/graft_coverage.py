@@ -12,8 +12,8 @@ import math
 from itertools import combinations
 from typing import Any, Dict, List, Sequence, Tuple
 
-# v10: 통합 정밀망 + 엔진출처 추적(검증 커버리지와 동일).
-GRAFT_BUILD_ID = "graft-v10-unified-trace"
+# v11: 전엔진 역산·정밀구출·catchable 보존(검증 커버리지 v12와 동일).
+GRAFT_BUILD_ID = "graft-v11-full-catch"
 
 DECADE_LABELS = ("단번대", "10번대", "20번대", "30번대", "40번대")
 

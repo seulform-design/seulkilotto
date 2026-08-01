@@ -65,7 +65,7 @@ def test_walkforward_picks_expand_mode_and_coverage_emits_24():
     assert set(cov["core6"]).issubset(set(cov["expand18"]))
     assert len(cov["expand18"]) == DEFAULT_EXPAND_SIZE == 24
     assert cov["expand_size"] == 24
-    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v11-unified-trace"
+    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v12-full-catch"
     assert cov["expand18_mode"] == "precision_primary"
     assert 6 <= len(cov.get("precision14") or []) <= 14
     assert len(cov.get("decade_pool30") or []) >= 6
@@ -183,9 +183,10 @@ def test_decade_pool_reverse_narrows_under_15():
     )
     assert len(prec) < 15
     assert len(prec) == pol["selected_size"] or len(prec) <= len(pool)
-    # 정밀망은 pool 대비 축소 — 최소 3개 catchable 유지(15미만 제약)
-    assert len(set(win) & set(prec)) >= 3
+    # 정밀망은 pool 당첨을 보존(구간쿼터·구출)
+    assert len(set(win) & set(prec)) >= 5
     assert len(prec) < 15
+    assert (set(win) & set(pool)).issubset(set(prec))
 
     cov = _coverage_set_from_signals(
         sigs,
@@ -203,6 +204,17 @@ def test_decade_pool_reverse_narrows_under_15():
     assert uni.get("size") == len(cov["precision14"])
     assert uni.get("loo", {}).get("ok") is True
     assert uni.get("provenance")
+    # pool에 들어간 당첨은 정밀14에 전부 보존
+    pool_wins = set(win) & set(cov["decade_pool30"])
+    assert pool_wins.issubset(set(cov["precision14"]))
+    assert len(set(win) & set(cov["precision14"])) >= 5
+    audit = _coverage_hit_audit(sigs, cov, win, exclude_keys=ban)
+    assert "win_path" in audit
+    assert audit["pool_precision_preserve"]["slack"] <= 0.25 + 1e-9
+    for row in audit["win_path"]:
+        if row["in_pool"]:
+            assert row["in_precision"] is True
+            assert row["miss_reason"] is None
 
 
 def test_loo_rescue_pulls_mid_tier_winners_into_expand():

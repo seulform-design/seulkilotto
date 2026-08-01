@@ -135,7 +135,7 @@ def test_merge_raw_recovers_catchable_cut_by_wrong_single_signal():
         expand_size=24,
     )
     assert good["expand18_mode"] == "precision_primary"
-    assert COVERAGE_BUILD_ID == "expand24-v11-unified-trace"
+    assert COVERAGE_BUILD_ID == "expand24-v12-full-catch"
     audit_bad = _coverage_hit_audit(sigs, bad, winning, exclude_keys=ban)
     audit_good = _coverage_hit_audit(sigs, good, winning, exclude_keys=ban)
     # 다중엔진(pair+구간+min-rank) 경로가 단일 combo 경로보다 확장망 적중 ≥

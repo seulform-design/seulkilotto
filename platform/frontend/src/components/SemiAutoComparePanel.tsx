@@ -1515,13 +1515,13 @@ export default function SemiAutoComparePanel({
   });
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand24-v11-unified-trace', 'pair-product'],
+    queryKey: ['v1-photo-review-verification', 'expand24-v12-full-catch', 'pair-product'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v10-unified-trace', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v11-full-catch', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,
@@ -3619,7 +3619,7 @@ export default function SemiAutoComparePanel({
         outsideCoreInExpand: audit?.outside_core_in_expand ?? [],
         dataUsed: api.data_used ?? null,
         backtest: api.backtest ?? null,
-        graftBuild: api.graft_build ?? 'graft-v10-unified-trace',
+        graftBuild: api.graft_build ?? 'graft-v11-full-catch',
         honesty: api.honesty ?? null,
         rankSource: 'api_pair_product' as const,
         decadeDropped: audit?.decade_dropped_vs_raw ?? [],
@@ -3805,6 +3805,16 @@ export default function SemiAutoComparePanel({
         precisionMean: number | null;
         engineCatchableMeans: Record<string, number>;
       },
+      winPath: [] as {
+        number: number;
+        on_ticket: boolean;
+        in_pool: boolean;
+        in_precision: boolean;
+        in_expand: boolean;
+        miss_reason: string | null;
+        engine_tags: string[];
+      }[],
+      poolPreserve: null as null | { poolHits: number; precisionHits: number; slack: number },
     };
     const rv = reviewVerificationQuery.data;
     const clean = (arr: number[] | undefined) =>
@@ -3986,7 +3996,37 @@ export default function SemiAutoComparePanel({
       core6_count?: number;
       precision14_count?: number;
       decade_pool30_count?: number;
+      win_path?: {
+        number: number;
+        on_ticket?: boolean;
+        in_pool?: boolean;
+        in_precision?: boolean;
+        in_expand?: boolean;
+        miss_reason?: string | null;
+        engine_tags?: string[];
+      }[];
+      pool_precision_preserve?: {
+        pool_hits?: number;
+        precision_hits?: number;
+        slack?: number;
+      };
     } | undefined : undefined;
+    const winPath = (audit?.win_path ?? []).map((row) => ({
+      number: Number(row.number),
+      on_ticket: Boolean(row.on_ticket),
+      in_pool: Boolean(row.in_pool),
+      in_precision: Boolean(row.in_precision),
+      in_expand: Boolean(row.in_expand),
+      miss_reason: row.miss_reason ?? null,
+      engine_tags: Array.isArray(row.engine_tags) ? row.engine_tags.map(String) : [],
+    }));
+    const poolPreserve = audit?.pool_precision_preserve
+      ? {
+          poolHits: Number(audit.pool_precision_preserve.pool_hits ?? 0),
+          precisionHits: Number(audit.pool_precision_preserve.precision_hits ?? 0),
+          slack: Number(audit.pool_precision_preserve.slack ?? 0),
+        }
+      : null;
     // 서버 audit 만 사용 — 폴백 expand 에 당첨 차집합을 붙이면 레이스 중 수치가 흔들림.
     const outsideExpand = clean(audit?.outside_expand ?? audit?.missed_catchable).sort(
       (a, b) => a - b,
@@ -4071,6 +4111,8 @@ export default function SemiAutoComparePanel({
       focus6: (focus6.length >= 6 ? focus6 : precision14.slice(0, 6)).slice(0, 6),
       provenance,
       looInfo,
+      winPath,
+      poolPreserve,
     };
   }, [
     compareWinning,
@@ -5831,7 +5873,7 @@ export default function SemiAutoComparePanel({
                 {' '}단일 본망=강수·기대{heroRecommendation.decadePoolSize || 30}→역산 정밀
                 {heroRecommendation.precisionSize || 14}(15미만). 번호별 엔진 출처 추적.
                 {heroRecommendation.looInfo?.ok && heroRecommendation.looInfo.rounds > 0
-                  ? ` LOO ${heroRecommendation.looInfo.rounds}회 백테스트 정밀 평균 ${
+                  ? ` LOO ${heroRecommendation.looInfo.rounds}회: 정밀 ${
                       heroRecommendation.looInfo.precisionMean != null
                         ? `${heroRecommendation.looInfo.precisionMean}/6`
                         : '—'
@@ -5839,7 +5881,7 @@ export default function SemiAutoComparePanel({
                       heroRecommendation.looInfo.poolCatchableMean != null
                         ? `${heroRecommendation.looInfo.poolCatchableMean}/6`
                         : '—'
-                    }.`
+                    } (보존 목표 slack≤0.25).`
                   : ''}
                 {heroRecommendation.winsReady && heroRecommendation.precisionHitCount != null
                   ? ` 이번 회차 정밀 당첨 ${heroRecommendation.precisionHitCount}/6.`
@@ -5978,6 +6020,38 @@ export default function SemiAutoComparePanel({
                         sx={{ height: 16, fontSize: 8 }}
                       />
                     ))}
+                </Stack>
+              )}
+              {heroRecommendation.winsReady && heroRecommendation.poolPreserve && (
+                <Stack direction="row" spacing={0.35} flexWrap="wrap" useFlexGap alignItems="center">
+                  <Chip
+                    size="small"
+                    color={heroRecommendation.poolPreserve.slack <= 0.25 ? 'success' : 'warning'}
+                    variant="outlined"
+                    label={`보존 pool ${heroRecommendation.poolPreserve.poolHits}→정밀 ${heroRecommendation.poolPreserve.precisionHits} (slack ${heroRecommendation.poolPreserve.slack})`}
+                    sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                  />
+                  {heroRecommendation.winPath
+                    .filter((w) => w.miss_reason)
+                    .map((w) => {
+                      const label =
+                        w.miss_reason === 'not_on_ticket'
+                          ? '티켓밖'
+                          : w.miss_reason === 'out_of_pool'
+                            ? '풀밖'
+                            : w.miss_reason === 'expand_only'
+                              ? '확장만'
+                              : '순위컷';
+                      return (
+                        <Chip
+                          key={`miss-${w.number}`}
+                          size="small"
+                          color="warning"
+                          label={`${w.number} ${label}`}
+                          sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                        />
+                      );
+                    })}
                 </Stack>
               )}
             </Stack>

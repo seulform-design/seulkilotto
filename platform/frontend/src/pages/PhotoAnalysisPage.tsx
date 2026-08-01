@@ -28,6 +28,7 @@ import PhotoBacktestPanel from '../components/PhotoBacktestPanel';
 import OverlapPatternLearnPanel from '../components/OverlapPatternLearnPanel';
 import OverlapLearningServerPanel from '../components/OverlapLearningServerPanel';
 import RoundDataBreakdownPanel from '../components/RoundDataBreakdownPanel';
+import { EngineSection, EngineStatusChip, EngineSubBlock } from '../components/EngineSection';
 import NestedCvPanel from '../components/NestedCvPanel';
 import ShapDriftPanel from '../components/ShapDriftPanel';
 import StatisticsSnapshotPanel from '../components/StatisticsSnapshotPanel';
@@ -308,118 +309,133 @@ function IntentAccumulatedPanel({
   slice,
   intent,
   legacyCount,
-  onDeleteEntry,
 }: {
   slice?: PhotoAnalysisIntentSlice | null;
   intent: SheetIntent;
   legacyCount?: number;
-  onDeleteEntry: (id: string) => void;
 }) {
-  const [showAcc, setShowAcc] = useState(false);
-  if (!slice?.total_analyses) {
+  const hasData = Boolean(slice?.total_analyses);
+  const needsHygiene =
+    intent === 'review' &&
+    (slice?.round_sources?.primary === 'legacy_all' ||
+      (slice?.round_sources?.primary === 'archived' &&
+        (slice.round_sources.review_saved_entries ?? 0) > 0) ||
+      (legacyCount ?? 0) > 0);
+  const [open, setOpen] = useState(needsHygiene);
+  useEffect(() => {
+    if (needsHygiene) setOpen(true);
+  }, [needsHygiene]);
+
+  if (!hasData || !slice) {
     return (
-      <Alert severity="info">
-        {intent === 'review'
-          ? '복기 탭에 저장된 분석이 없습니다. 당첨번호 검증용 용지를 등록·분석하세요.'
-          : '이번회차 탭에 저장된 분석이 없습니다. A~E 줄을 등록한 뒤 분석·저장하세요.'}
-      </Alert>
+      <EngineSection
+        id="engine-intent-accum"
+        tone="neutral"
+        title="의도별 누적 패턴"
+        chips={<EngineStatusChip color="info" label="④ 엔진 · 데이터 층" />}
+        intent="용지 정화 다음으로, 현재 탭(복기/이번회차)이 엔진에 넘기는 누적 표본을 확인합니다."
+        collapsible
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        sx={{ mb: 0 }}
+      >
+        <Alert severity="info" sx={{ py: 0.5 }}>
+          {intent === 'review'
+            ? '복기 탭에 저장된 분석이 없습니다. 당첨번호 검증용 용지를 등록·분석하세요.'
+            : '이번회차 탭에 저장된 분석이 없습니다. A~E 줄을 등록한 뒤 분석·저장하세요.'}
+        </Alert>
+      </EngineSection>
     );
   }
 
   const comboTitle =
     intent === 'review' ? '누적 — 당첨번호 vs 게임 줄' : '누적 — 게임 줄 겹침';
   const winningSet = intent === 'review' ? toWinningSet(slice.draw_template) : null;
+  const hasCombo = Boolean(
+    slice.accumulated_combo_patterns &&
+      (slice.accumulated_combo_patterns.same_line_matches?.length ||
+        slice.accumulated_combo_patterns.pair_duplicates?.length ||
+        slice.accumulated_combo_patterns.triple_duplicates?.length ||
+        slice.accumulated_combo_patterns.quad_duplicates?.length),
+  );
 
   return (
-    <Stack spacing={2}>
-      <Paper sx={{ p: 2, border: intent === 'review' ? '1px solid #2e7d32' : '1px solid #1565c0' }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: showAcc ? 1 : 0 }}>
-          <Typography variant="h6" fontWeight={700}>
-            {slice.video_intent_label} 누적 ({slice.ticket_round}회)
-          </Typography>
-          <Button size="small" variant="outlined" onClick={() => setShowAcc((v) => !v)}>
-            {showAcc ? '접기 ▲' : '펼치기 ▼'}
-          </Button>
-        </Stack>
-        {showAcc && (
+    <EngineSection
+      id="engine-intent-accum"
+      tone={needsHygiene ? 'warning' : intent === 'review' ? 'success' : 'info'}
+      title={`${slice.video_intent_label} 누적 패턴 (${slice.ticket_round}회)`}
+      collapsible
+      open={open}
+      onToggle={() => setOpen((v) => !v)}
+      defaultOpen={needsHygiene}
+      chips={
         <>
-        <Typography variant="body2" color="text.secondary" gutterBottom>
-          {slice.app_ui_message}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          이 누적은 <strong>자동 등록분({slice.saved_auto_lines?.length ?? 0}줄)만</strong> 분석합니다.
-          반자동({slice.saved_semi_lines?.length ?? 0}줄)은 ① 번호 등록(반자동)·② 1:1에서 별도로 다룹니다.
-        </Typography>
-        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
-          <Chip label={`${slice.video_intent_label} ${slice.total_analyses}건`} size="small" color={intent === 'review' ? 'primary' : 'secondary'} />
-          {/* 어느 출처를 보고 있는지 명시 — 같은 회차에 두 출처가 있을 수 있다. */}
+          <EngineStatusChip color="info" label="④ 엔진 · 데이터 층" />
+          <EngineStatusChip
+            color={intent === 'review' ? 'primary' : 'secondary'}
+            label={`${slice.video_intent_label} ${slice.total_analyses}건`}
+          />
           {intent === 'review' && slice.round_sources && (
-            <Chip
-              size="small"
+            <EngineStatusChip
               color={slice.round_sources.primary === 'archived' ? 'success' : 'default'}
               variant={slice.round_sources.primary === 'archived' ? 'filled' : 'outlined'}
               label={
                 slice.round_sources.primary === 'archived'
-                  ? `출처: 롤오버 보관 정본 (자동 ${slice.round_sources.archived_auto_lines}·반자동 ${slice.round_sources.archived_semi_lines}줄)`
+                  ? `출처: 보관 정본 (자${slice.round_sources.archived_auto_lines}·반${slice.round_sources.archived_semi_lines})`
                   : slice.round_sources.primary === 'review_saved'
-                    ? `출처: 복기 저장분 (자동 ${slice.round_sources.review_saved_auto_lines}·반자동 ${slice.round_sources.review_saved_semi_lines}줄)`
-                    : '출처: 전체 복기 엔트리(회차 미분류)'
+                    ? `출처: 복기저장 (자${slice.round_sources.review_saved_auto_lines}·반${slice.round_sources.review_saved_semi_lines})`
+                    : '출처: 회차 미분류'
               }
-              sx={{ fontWeight: 700 }}
             />
           )}
-        </Stack>
+        </>
+      }
+      intent={
+        <>
+          회차별 용지 정화 다음 단계 — 엔진·검증이 읽는 <strong>의도별 누적 표본</strong>입니다.
+          자동 {slice.saved_auto_lines?.length ?? 0}줄만 이 누적에 쓰이고, 반자동 {slice.saved_semi_lines?.length ?? 0}줄은
+          ① 등록·② 1:1에서 다룹니다. {slice.app_ui_message}
+        </>
+      }
+      sx={{ mb: 0 }}
+    >
+      <Stack spacing={1.25}>
         {intent === 'review' && slice.round_sources?.primary === 'legacy_all' && (
-          <Alert severity="warning" sx={{ mt: 1 }}>
-            이 회차({slice.ticket_round}회)에 해당하는 용지가 없어 <strong>회차 구분 없이 전체 복기
-            엔트리</strong>를 표시합니다. 서로 다른 회차의 용지가 섞여 있을 수 있으며, 당첨 대조는{' '}
-            {slice.ticket_round}회 기준입니다. ④ 엔진 · 검증 탭 <strong>회차별 용지 데이터</strong>에서 [회차 재귀속]으로
-            정리하면 정확해집니다.
+          <Alert severity="warning" sx={{ py: 0.5 }}>
+            이 회차({slice.ticket_round}회) 용지가 없어 <strong>회차 구분 없이 전체 복기</strong>를 표시합니다.
+            위 <strong>회차별 용지 데이터</strong>에서 [회차 재귀속]으로 정리하세요.
           </Alert>
         )}
         {intent === 'review' &&
           slice.round_sources &&
           slice.round_sources.primary === 'archived' &&
           slice.round_sources.review_saved_entries > 0 && (
-            <Alert severity="info" sx={{ mt: 1 }}>
-              이 회차에는 <strong>복기 저장분</strong>(자동 {slice.round_sources.review_saved_auto_lines}·반자동{' '}
-              {slice.round_sources.review_saved_semi_lines}줄)도 함께 있지만, 소속 회차가 확실한{' '}
-              <strong>롤오버 보관 정본</strong>을 기준으로 분석합니다. 저장분은 삭제되지 않고 보존됩니다.
+            <Alert severity="info" sx={{ py: 0.5 }}>
+              복기 저장분도 있으나 <strong>롤오버 보관 정본</strong> 기준으로 분석합니다. 저장분은 보존됩니다.
             </Alert>
           )}
-        </>
+        {(legacyCount ?? 0) > 0 && intent === 'review' && (
+          <Alert severity="warning" sx={{ py: 0.5 }}>
+            구형 복기 데이터 {legacyCount}건 — 누적 삭제 후 다시 분석하세요.
+          </Alert>
         )}
-      </Paper>
-      {showAcc && (
-        <>
-          {(legacyCount ?? 0) > 0 && intent === 'review' && (
-            <Alert severity="warning">구형 복기 데이터 {legacyCount}건 — 누적 삭제 후 다시 분석하세요.</Alert>
-          )}
-          {intent === 'review' && slice.draw_template && (
-            <DrawWinningTemplatePanel data={slice.draw_template} intentLabel="복기" />
-          )}
-          {intent === 'review' && (
-            <SavedReviewTemplatePanel data={slice.saved_review_template} winningSet={winningSet} />
-          )}
-          {slice.accumulated_combo_patterns &&
-            (slice.accumulated_combo_patterns.same_line_matches?.length ||
-              slice.accumulated_combo_patterns.pair_duplicates?.length ||
-              slice.accumulated_combo_patterns.triple_duplicates?.length ||
-              slice.accumulated_combo_patterns.quad_duplicates?.length) ? (
-            <Paper sx={{ p: 2, border: '1px solid #5c4d00' }}>
-              <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-                {comboTitle}
-              </Typography>
-              <ComboDuplicatePanel
-                data={slice.accumulated_combo_patterns}
-                mode={intent}
-                winningSet={winningSet}
-              />
-            </Paper>
-          ) : null}
-        </>
-      )}
-    </Stack>
+        {intent === 'review' && slice.draw_template && (
+          <DrawWinningTemplatePanel data={slice.draw_template} intentLabel="복기" />
+        )}
+        {intent === 'review' && (
+          <SavedReviewTemplatePanel data={slice.saved_review_template} winningSet={winningSet} />
+        )}
+        {hasCombo && slice.accumulated_combo_patterns ? (
+          <EngineSubBlock title={comboTitle} tone="warning">
+            <ComboDuplicatePanel
+              data={slice.accumulated_combo_patterns}
+              mode={intent}
+              winningSet={winningSet}
+            />
+          </EngineSubBlock>
+        ) : null}
+      </Stack>
+    </EngineSection>
   );
 }
 
@@ -1655,7 +1671,7 @@ export default function PhotoAnalysisPage() {
                     {(() => {
                       // 자동 누적 평탄화 — 반자동 ① 추가 세팅과 동일 룩앤필.
                       // 데이터 소스: 입력 중 줄 + 저장 용지의 모든 줄 + 대량 입력 (bulkAutoTickets).
-                      // 백엔드 누적은 ② IntentAccumulatedPanel 에서만 관리하므로 여기서는 제외.
+                      // 백엔드 누적은 ④ 엔진 · 검증 탭 IntentAccumulatedPanel 에서만 관리.
                       const ticketLines = [
                         ...currentSlipLines.map((line, idx) => ({
                           key: `current-${idx}`,
@@ -1813,24 +1829,14 @@ export default function PhotoAnalysisPage() {
             )}
           </Stack>
         }
-        analysisEpilogue={
-          <Stack spacing={1.5} sx={{ mt: 2 }}>
-            <Divider textAlign="left">
-              <Typography variant="caption" fontWeight={800} color="text.secondary">
-                의도별 누적 패턴
-              </Typography>
-            </Divider>
+        verificationSlot={
+          <Stack spacing={1.5}>
+            <RoundDataBreakdownPanel accumulated={accumulated} onAccumulatedChange={setAccumulated} />
             <IntentAccumulatedPanel
               slice={activeSlice}
               intent={activeTab}
               legacyCount={accumulated?.legacy_entry_count}
-              onDeleteEntry={deleteHistoryEntry}
             />
-          </Stack>
-        }
-        verificationSlot={
-          <Stack spacing={1.5}>
-            <RoundDataBreakdownPanel accumulated={accumulated} onAccumulatedChange={setAccumulated} />
             <ReviewVerificationPanel />
             {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
             <WalkForwardPanel

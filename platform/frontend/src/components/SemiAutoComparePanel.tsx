@@ -560,9 +560,9 @@ interface SemiAutoComparePanelProps {
   registerPrelude?: ReactNode;
   /** ② 분석 상단 — 자동 빈도 등 */
   analysisPrelude?: ReactNode;
-  /** ② 분석 하단(1:1 뒤) — 의도별 누적 패턴 */
+  /** @deprecated 데이터 층은 verificationSlot(④ 검증)으로 이전 */
   analysisEpilogue?: ReactNode;
-  /** ④ 패턴 엔진 · 검증 탭 — 회차별 용지 데이터 · 복기검증·백테스트 */
+  /** ④ 패턴 엔진 · 검증 탭 — 용지 정화 · 의도별 누적 · 복기검증·백테스트 */
   verificationSlot?: ReactNode;
   /** 엔진② 평행회차 슬롯 */
   parallelEngineSlot?: ReactNode;
@@ -5476,7 +5476,7 @@ export default function SemiAutoComparePanel({
         </>
       )}
 
-      {/* 의도별 누적 패턴 — ② 끝(1:1 뒤). 회차별 용지 정화는 ④ 검증 탭. */}
+      {/* 레거시 슬롯 — 데이터 층은 verificationSlot(④ 검증)으로 이전됨 */}
       {analysisEpilogue}
         </>
         )}
@@ -6452,7 +6452,7 @@ export default function SemiAutoComparePanel({
           endIcon={<span>{showPredictionDetail ? '▲' : '▼'}</span>}
         >
           ④ 패턴 분석 엔진 {showPredictionDetail ? '접기' : '펼치기'}
-          （용지데이터 · 용지역산 · 평행 · 검증학습 · 호기·후속 · 검증）
+          （용지·누적 · 용지역산 · 평행 · 검증학습 · 호기·후속 · 검증）
         </Button>
       {showPredictionDetail && (
         <Paper variant="outlined" sx={{ p: 1.5 }}>
@@ -7970,7 +7970,7 @@ export default function SemiAutoComparePanel({
       {engineTab === 'verify' && (
       <>
       <EngineTabBanner
-        title="검증·백테스트 — 데이터 정화 · ③ 추천 사후 점검"
+        title="검증·백테스트 — 데이터 층 · ③ 추천 사후 점검"
         chips={
           <>
             <EngineStatusChip
@@ -7982,13 +7982,22 @@ export default function SemiAutoComparePanel({
               }
               sx={{ cursor: 'pointer' }}
             />
+            <EngineStatusChip
+              color="success"
+              variant="outlined"
+              label="의도별 누적"
+              onClick={() =>
+                document.getElementById('engine-intent-accum')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+              sx={{ cursor: 'pointer' }}
+            />
             <EngineStatusChip color="info" label="복기 역산 검증" />
             <EngineStatusChip variant="outlined" label="Walk-Forward · 티켓 대조" />
           </>
         }
         intent={
           <>
-            먼저 <strong>회차별 용지 데이터</strong>로 보관 정본·복기 저장분·고아를 정리한 뒤,
+            <strong>데이터 층</strong>(회차별 용지 정화 → 의도별 누적)을 먼저 확인한 뒤,
             신호 성적·다회차 백테스트·Walk-Forward·놓친 당첨·구간 커버리지로 상단{' '}
             <strong>③ 번호 추천</strong>을 점검합니다. 물리 Venus 추첨기는 ③ 종합 합의에만 1대 둡니다.
           </>

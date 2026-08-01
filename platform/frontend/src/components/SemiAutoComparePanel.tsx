@@ -3499,6 +3499,50 @@ export default function SemiAutoComparePanel({
     return { bands, consensus, winHit, carryFlat };
   }, [decadePattern, sheetLearningSignals, carryoverQuery.data, compareWinning, winningSet]);
 
+  // 🧪 강수·기대 엔진 접목 — 커버리지(recall) + EV.
+  // '강수/기대(구간별)' + '최종 강수·기대' 데이터를 하나의 후보 랭킹으로 접목하고,
+  //  ① walk-forward 커버리지(백엔드 expand_walkforward, 이전 회차로만 학습→다음 회차 채점,
+  //     누수 없음) — '그물이 6개 당첨 중 몇 개를 담는가(recall)'
+  //  ② EV(공동당첨 회피, optimizeForSharing) — '당첨 시 실수령 기대'
+  //  로 정직하게 평가한다. ⚠️ 당첨 확률(1/8,145,060) 자체는 어떤 접목으로도 불변 —
+  //  이 섹션은 recall·EV 만 개선하며 확률 향상을 단정하지 않는다.
+  const graftCoverageEV = useMemo(() => {
+    if (!finalStrongExpected) return null;
+    const consensus = finalStrongExpected.consensus ?? [];
+    // 접목 후보 = 강수/기대(반복도) + 최종(검증학습·이월) 겹침을 합의순으로 통합한 랭킹.
+    const graftRanked = consensus.map((c) => c.number);
+    if (graftRanked.length < 6) return null;
+    const core6 = graftRanked.slice(0, 6);
+    const expand = graftRanked.slice(0, Math.min(24, graftRanked.length));
+    const multiCount = consensus.filter((c) => c.agreement >= 2).length;
+    // EV — 공동당첨 회피(확률 불변). 넓은 접목 풀에서 분산 최소 6조합.
+    const shareResult = optimizeForSharing(expand, Math.min(24, expand.length));
+    const shareOpt = shareResult ? shareResult.numbers.slice(0, 6) : [];
+    // 커버리지 walk-forward (백엔드, 누수 없음) — 이 접목(구간균형 확장망)의 recall.
+    const rv = reviewVerificationQuery.data;
+    const wf = rv?.ok ? rv.expand_walkforward : undefined;
+    const wfInfo = wf
+      ? {
+          rounds: wf.rounds ?? null,
+          random: wf.random_baseline ?? 3.2,
+          top18: wf.means_by_size?.['18'] ?? null,
+          top24: wf.means_by_size?.['24'] ?? null,
+          sizeLift: wf.size_lift_24_vs_18 ?? null,
+        }
+      : null;
+    // 복기 탭이면 이번 회차 당첨과 직접 대조(사후 확인만).
+    const reviewHit =
+      compareWinning && winningSet && winningSet.size > 0
+        ? {
+            core6: core6.filter((n) => winningSet.has(n)).length,
+            expand: expand.filter((n) => winningSet.has(n)).length,
+            multi: finalStrongExpected.winHit?.multi ?? null,
+            multiTotal: finalStrongExpected.winHit?.multiTotal ?? null,
+          }
+        : null;
+    return { core6, expand, shareOpt, shareResult, multiCount, wf: wfInfo, reviewHit };
+  }, [finalStrongExpected, reviewVerificationQuery.data, compareWinning, winningSet]);
+
   // 🎯 핵심 추천 — 탭별 대상 회차가 다름.
   // 복기: 복기 회차 용지 커버리지(당첨 대조) / 이번회차: 미추첨 회차 커버리지.
   const heroRecommendation = useMemo(() => {
@@ -5653,6 +5697,90 @@ export default function SemiAutoComparePanel({
                 </Box>
               )}
         </>
+      )}
+
+      {/* 🧪 강수·기대 엔진 접목 — 커버리지(recall) + EV (확률 불변) */}
+      {graftCoverageEV && (
+        <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'info.main', borderWidth: 2 }}>
+          <Stack direction="row" alignItems="center" flexWrap="wrap" useFlexGap spacing={0.75} sx={{ mb: 0.5 }}>
+            <Typography variant="body2" fontWeight={800}>🧪 강수·기대 엔진 접목 — 커버리지 · EV</Typography>
+            <Chip size="small" color="warning" variant="outlined" label="확률 불변 · recall/EV만" sx={{ height: 18, fontSize: 9, fontWeight: 700 }} />
+            <Chip
+              size="small"
+              color={compareWinning ? 'primary' : 'secondary'}
+              label={compareWinning ? `복기 ${effectiveRound ?? '?'}회` : `이번회차 ${currentRound ?? '?'}회`}
+              sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+            />
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            ★ 1:1 강수/기대(구간별) + 🎯 최종 강수·기대(검증학습·이월)를 한 후보 랭킹으로 접목했습니다.
+            당첨 확률(1/8,145,060)은 어떤 접목으로도 못 올리지만, <strong>그물이 당첨을 더 많이 담고(recall)</strong>{' '}
+            <strong>당첨 시 실수령을 높이는(EV)</strong> 두 레버는 개선할 수 있습니다.
+          </Typography>
+
+          {graftCoverageEV.wf && (
+            <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover', mb: 1 }}>
+              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
+                📈 접목 커버리지 (walk-forward · 보관 {graftCoverageEV.wf.rounds ?? '?'}회차 · 누수 없음)
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                <Chip size="small" variant="outlined" label={`무작위 ${graftCoverageEV.wf.random}/6`} sx={{ height: 20, fontSize: 10 }} />
+                {graftCoverageEV.wf.top18 != null && (
+                  <Chip size="small" variant="outlined" color="info" label={`top18 ${graftCoverageEV.wf.top18}/6`} sx={{ height: 20, fontSize: 10 }} />
+                )}
+                {graftCoverageEV.wf.top24 != null && (
+                  <Chip size="small" color="success" label={`확장 top24 ${graftCoverageEV.wf.top24}/6`} sx={{ height: 20, fontSize: 10, fontWeight: 800 }} />
+                )}
+                {graftCoverageEV.wf.sizeLift != null && (
+                  <Chip size="small" variant="outlined" label={`18→24 +${graftCoverageEV.wf.sizeLift}`} sx={{ height: 20, fontSize: 10 }} />
+                )}
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5 }}>
+                구간균형으로 top24까지 넓히면 recall이 가장 높습니다(19–24위 근접 당첨 포착). 좁히기(top6)·평균은 오히려 희석.
+              </Typography>
+            </Box>
+          )}
+
+          <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+            접목 핵심 6 (합의 {graftCoverageEV.multiCount}개){graftCoverageEV.reviewHit ? ` · 당첨 ${graftCoverageEV.reviewHit.core6}/6` : ''}
+          </Typography>
+          <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mb: 0.75 }}>
+            {graftCoverageEV.core6.map((n) => (
+              <LottoBall key={`gce-c-${n}`} number={n} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
+            ))}
+            <SharingBadge numbers={graftCoverageEV.core6} />
+            <ComboActions numbers={graftCoverageEV.core6} source="unknown" label="강수·기대 접목 핵심6" />
+          </Stack>
+
+          <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
+            접목 확장망 {graftCoverageEV.expand.length}개 (넓은 그물){graftCoverageEV.reviewHit ? ` · 당첨 ${graftCoverageEV.reviewHit.expand}/6` : ''}
+          </Typography>
+          <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+            {graftCoverageEV.expand.map((n) => (
+              <LottoBall key={`gce-e-${n}`} number={n} size={ENGINE_BALL.table} dimmed={compareWinning && winningSet ? !winningSet.has(n) : false} />
+            ))}
+          </Stack>
+
+          {graftCoverageEV.shareOpt.length >= 6 && (
+            <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+              <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                <Typography variant="caption" fontWeight={700}>💰 EV 분산최적 6 (공동당첨 회피):</Typography>
+                {graftCoverageEV.shareOpt.map((n) => (
+                  <LottoBall key={`gce-s-${n}`} number={n} size={ENGINE_BALL.list} />
+                ))}
+                <SharingBadge numbers={graftCoverageEV.shareOpt} />
+                <ComboActions numbers={graftCoverageEV.shareOpt} source="unknown" label="강수·기대 접목 EV" />
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5 }}>
+                확률은 동일하되 생일·연속·인기번호 편향을 피해 당첨 시 공동당첨 확률을 낮춘 6조합입니다.
+              </Typography>
+            </Box>
+          )}
+
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.75, fontStyle: 'italic' }}>
+            ⚠️ 보관 회차 소표본(walk-forward 4회차)이라 통계적 유의는 아직 약합니다. 확률(1/8,145,060) 불변 — recall·EV 개선만 보고합니다.
+          </Typography>
+        </Paper>
       )}
 
 

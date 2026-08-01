@@ -134,6 +134,48 @@ def test_content_fingerprint_order_independent():
     assert compute_content_fingerprint(r1) == compute_content_fingerprint(r2)
 
 
+def _manual_pick_result(source_id: str, round_no: str, lines: list[list[int]], pick_type: str) -> dict:
+    """수기(자동/반자동) 등록 결과 — pick_type 을 meta 에 담는다(image_engine 과 동일)."""
+    r = _sample_result_with_lines(source_id, round_no, lines)
+    r["video_visual_analysis"]["video_intent"] = "current_round"
+    r["video_visual_analysis"]["video_intent_label"] = "이번회차"
+    r["meta"]["sheet_intent"] = "current_round"
+    r["meta"]["entry_mode"] = "manual"
+    r["meta"]["pick_type"] = pick_type
+    return r
+
+
+def test_auto_and_semi_same_lines_are_independent_sets(monkeypatch, tmp_path):
+    """같은 6번호 줄 묶음이라도 자동/반자동은 독립 세트 — 지문이 달라 둘 다 저장돼야 한다.
+
+    회귀: source_id 는 pick_type 을 포함하는데 지문이 빠뜨려, 자동 저장 뒤 같은 번호를
+    반자동으로 저장하면 same_ticket 으로 오검출·차단(반자동 번호 유실)되던 버그.
+    """
+    from app.video_analysis.dedup import (
+        compute_content_fingerprint,
+        compute_ticket_fingerprint,
+    )
+
+    monkeypatch.setattr("app.video_analysis.store.STORE_PATH", tmp_path / "store.json")
+    clear_store()
+    lines = [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]]
+    auto = _manual_pick_result("auto-set", "1235", lines, "자동")
+    semi = _manual_pick_result("semi-set", "1235", lines, "반자동")
+
+    # 픽 타입이 다르면 지문도 달라야 한다(둘 다).
+    assert compute_ticket_fingerprint(auto) != compute_ticket_fingerprint(semi)
+    assert compute_content_fingerprint(auto) != compute_content_fingerprint(semi)
+
+    # 자동 저장 후 같은 번호의 반자동 저장이 same_ticket 으로 막히면 안 된다.
+    append_analysis("auto-set", auto, source_label="auto")
+    assert check_stored_duplicate("semi-set", semi) is None
+    entry = append_analysis("semi-set", semi, source_label="semi")
+    assert entry["pick_type"] == "반자동"
+
+    # 같은 픽 타입 재등록은 여전히 중복으로 잡힌다(source_id 기준).
+    assert check_stored_duplicate("semi-set", semi) is not None
+
+
 def _manual_result(image_id: str, lines: list[list[int]]) -> dict:
     r = _sample_result_with_lines(image_id, "1231", lines)
     r["video_visual_analysis"]["video_intent"] = "current_round"

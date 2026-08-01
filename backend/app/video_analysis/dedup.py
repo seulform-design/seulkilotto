@@ -45,6 +45,11 @@ def compute_ticket_fingerprint(result: Dict[str, Any]) -> str:
     parts: List[str] = [
         str(vva.get("ticket_round") or vva.get("detected_round") or ""),
         str(vva.get("video_intent") or meta.get("sheet_intent") or ""),
+        # 자동/반자동은 서로 독립 세트다 — 같은 줄 묶음이라도 픽 타입이 다르면 다른 용지.
+        # source_id(compute_manual_source_id)는 이미 pick_type 을 포함하는데 이 지문이
+        # 빠뜨려, 같은 번호를 자동·반자동 양쪽에 등록하면 두 번째가 same_ticket 으로
+        # 오검출돼 차단되던 버그가 있었다(반자동 번호가 저장 안 됨). 픽 타입을 포함해 정합.
+        f"PT:{str(meta.get('pick_type') or '')}",
     ]
 
     sheet_details = meta.get("sheet_details") or []
@@ -117,7 +122,9 @@ def compute_content_fingerprint(result: Dict[str, Any]) -> str:
 
     if len(line_keys) < 1:
         return ""
-    raw = "CONTENT|" + intent + "|" + "|".join(sorted(line_keys))
+    # 픽 타입 포함 — 자동/반자동 독립 세트(ticket 지문과 동일 이유).
+    pick_type = str(meta.get("pick_type") or "")
+    raw = "CONTENT|" + intent + "|PT:" + pick_type + "|" + "|".join(sorted(line_keys))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 

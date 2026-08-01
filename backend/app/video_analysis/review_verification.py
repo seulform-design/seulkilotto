@@ -175,7 +175,7 @@ DEFAULT_EXPAND_SIZE = 24
 WF_MAX_EXPAND_SIZE = 30
 DEFAULT_EXPAND_MODE = "single_raw"
 # v13: 정밀우주=강수기대+와치+구출축, 정밀⊆확장, catchable 전량 보존 목표
-COVERAGE_BUILD_ID = "expand24-v13-catch-universe"
+COVERAGE_BUILD_ID = "expand24-v14-prefer-expand"
 RESCUE_MAX_SWAPS = 6
 # 진단 비교용만 — 방출 expand_size 에 쓰지 않음('확장 30' 회귀 방지).
 RESCUE_GROW_SIZE = 30
@@ -1986,8 +1986,14 @@ def _build_precision_from_decade(
     carryover_numbers: List[int] | None = None,
     use_rescue: bool = True,
     max_rescue_swaps: int = PRECISION_RESCUE_MAX_SWAPS,
+    prefer_numbers: List[int] | None = None,
 ) -> tuple[List[int], Dict[str, Any]]:
-    """정밀우주(강수기대+와치+구출) → 구간/매치/중간석 → 구출 → topK(<15)."""
+    """정밀우주(강수기대+와치+구출) → 구간/매치/중간석 → 구출 → topK(<15).
+
+    prefer_numbers(확장망): 방출 우선순위로 '확장만' 누락을 흡수.
+    후보풀은 우주 유지 — 확장 밖이어도 쿼터·역산으로 정밀에 들어온 번호는
+    이후 expand⊇precision 병합으로 확장에 합류한다.
+    """
     universe, strong, expected, watch = _precision_universe(
         sigs, multi_meta,
         auto_lines=auto_lines, semi_lines=semi_lines,
@@ -2029,42 +2035,40 @@ def _build_precision_from_decade(
         if float(af.get(n, 0)) > 0 and float(sf.get(n, 0)) > 0
     }
 
-    # 1) 구간 쿼터 — 밴드마다 저빈도 양쪽 최대 2 + 와치/기대 1.
-    #    역산순만 쓰면 match/pair 고빈도 노이즈가 중하위 당첨을 전부 밀어냄.
+    prefer_set = {
+        int(n) for n in (prefer_numbers or []) if int(n) in uni_set
+    }
+
+    # 1) 구간 쿼터 — 밴드마다 저빈도 양쪽 ≤2.
+    #    동빈도면 와치·기대·강수·중간양쪽을 우선(순수 최하위 노이즈 잠식 완화).
     tb = sigs.get("total_freq") or {}
     pair = sigs.get("pair_product") or {}
+    tier_boost = set(watch) | set(expected) | set(strong) | set(mid_both)
+    seats_per_band = 2
     quota: List[int] = []
     quota_protected: set = set()
     for lo, hi in DECADE_BANDS:
-        band_uni = [n for n in uni_set if lo <= n <= hi]
-        if not band_uni:
+        band_cands = [n for n in uni_set if lo <= n <= hi]
+        if not band_cands:
             continue
-        picks: List[int] = []
-        low_freq_both = sorted(
-            [n for n in band_uni if n in both],
-            key=lambda n: (float(tb.get(n, 0)), -float(pair.get(n, 0)), n),
-        )
-        for n in low_freq_both[:2]:
-            if n not in picks:
-                picks.append(n)
-        band_ranked = [n for n in ranked if lo <= n <= hi and n in uni_set]
-        for n in band_ranked:
-            if n in watch or n in expected or n in mid_both:
-                if n not in picks:
-                    picks.append(n)
-                if len(picks) >= 3:
-                    break
-        for n in band_ranked:
-            if len(picks) >= 3:
-                break
-            if n not in picks:
-                picks.append(n)
-        for n in picks[:3]:
+        band_both = [n for n in band_cands if n in both]
+        if not band_both:
+            continue
+        picks = sorted(
+            band_both,
+            key=lambda n: (
+                float(tb.get(n, 0)),
+                0 if n in tier_boost else 1,
+                -float(pair.get(n, 0)),
+                n,
+            ),
+        )[:seats_per_band]
+        for n in picks:
             if n not in quota:
                 quota.append(n)
                 quota_protected.add(n)
 
-    # 2) 일치레벨·중간양쪽 전용석 (확장만/순위컷 흡수)
+    # 2) 일치레벨·중간양쪽 전용석
     match_seats = [n for n in match_top if n in uni_set][:PRECISION_MATCH_SEATS]
     mid_seats = [
         n for n in ranked if n in mid_both or n in both
@@ -2088,8 +2092,11 @@ def _build_precision_from_decade(
         if len(reserved) >= reserve_n:
             break
 
+    # emit: 쿼터 → 확장선호(역산) → 매치/중간/예약 → 우주역산
+    # 확장선호는 하드 잠금이 아니라 우선순위 — 쿼터로 우주에서 구출한 희소 당첨을 막지 않음.
+    prefer = [n for n in ranked if n in prefer_set]
     out: List[int] = []
-    for n in quota + match_seats + mid_seats + reserved + ranked:
+    for n in list(quota) + prefer + match_seats + mid_seats + reserved + ranked:
         if n in uni_set and n not in out:
             out.append(n)
         if len(out) >= k:
@@ -2104,50 +2111,39 @@ def _build_precision_from_decade(
                 if len(out) >= k:
                     break
 
-    # 저빈도 양쪽은 쿼터에 이미 반영. 재보장 티어=쿼터∪강수∪기대∪와치
-    # (저빈도 both 전체를 protect하면 노이즈 both가 당첨 자리를 잠식)
-    protect_tier = set(quota_protected) | strong | expected | watch
-
-    # 4) 티어 우선 재구성 — 쿼터(저빈도양쪽 포함)를 맨 앞
-    tier_first = [n for n in ranked if n in protect_tier]
-    rebuilt: List[int] = []
-    for n in list(quota) + tier_first + match_seats + mid_seats + ranked:
-        if n in uni_set and n not in rebuilt:
-            rebuilt.append(n)
-        if len(rebuilt) >= k:
+    # 쿼터 + 확장선호 상위(여유분) 재보장 — 선호 전량 강제는 14칸 잠식
+    prefer_hard = prefer[: max(0, k - len(quota))]
+    hard = list(dict.fromkeys(list(quota) + prefer_hard))
+    for n in hard:
+        if n in out or n not in uni_set:
+            continue
+        drop_cands = [x for x in out if x not in set(hard)]
+        if not drop_cands:
             break
-    out = rebuilt[:k]
-
-    # 5) 쿼터·강수·기대·와치 강제 편입(LOO 가중·구출로 탈락 방지)
-    def _reforce_tier(cur: List[int]) -> List[int]:
-        cur = list(cur)
-        # 쿼터 우선 → 강수/기대/와치
-        must = list(quota) + [x for x in ranked if x in (strong | expected | watch) and x in uni_set]
-        for n in must:
-            if n in cur:
-                continue
-            drop_cands = [x for x in cur if x not in protect_tier]
-            if not drop_cands:
-                continue
-            drop_cands.sort(key=lambda x: (rank_pos.get(x, 99), x), reverse=True)
-            cur.remove(drop_cands[0])
-            cur.append(n)
-        return cur[:k]
-
-    out = _reforce_tier(out)
+        drop_cands.sort(key=lambda x: (rank_pos.get(x, 99), x), reverse=True)
+        out.remove(drop_cands[0])
+        out.append(n)
+    out = out[:k]
 
     rescue_meta: Dict[str, Any] = {"applied": False, "swapped_in": []}
     if use_rescue and max_rescue_swaps > 0:
-        protect_extra = set(quota_protected) | (set(out) & protect_tier)
         out, rescue_meta = _apply_precision_rescue(
             out, ranked, universe, meta_for_rank,
             sigs=sigs, size=k, max_swaps=max_rescue_swaps,
-            quota_protected=protect_extra,
+            quota_protected=set(quota_protected) | set(prefer_hard),
         )
         rescue_meta["applied"] = True
-        before = set(out)
-        out = _reforce_tier(out)
-        rescue_meta["tier_reforced"] = sorted(set(out) - before)
+        for n in hard:
+            if n in out or n not in uni_set:
+                continue
+            drop_cands = [x for x in out if x not in set(hard)]
+            if not drop_cands:
+                break
+            drop_cands.sort(key=lambda x: (rank_pos.get(x, 99), x), reverse=True)
+            out.remove(drop_cands[0])
+            out.append(n)
+            rescue_meta.setdefault("tier_reforced", []).append(n)
+        out = out[:k]
 
     meta = {
         "pool_size": len(display_pool),
@@ -2159,11 +2155,13 @@ def _build_precision_from_decade(
         "decade_watch": sorted(watch),
         "ranked": ranked,
         "quota": quota,
+        "prefer": prefer[:24],
         "match_seats": match_seats,
         "mid_seats": mid_seats,
         "reserved_tier": reserved[:8],
         "precision_rescue": rescue_meta,
         "emit_size": len(out),
+        "prefer_aligned": bool(prefer_set),
     }
     return out, meta
 
@@ -2489,6 +2487,7 @@ def _coverage_set_from_signals(
         learning_numbers=learning_numbers,
         carryover_numbers=carryover_numbers,
         use_rescue=not light,
+        prefer_numbers=expand,
     )
     # 본망=정밀 → 확장에 정밀 전량 포함(본망 밖·확장만 누락 제거)
     expand = _ensure_core_subset(expand, precision14, size)

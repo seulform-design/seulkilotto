@@ -6459,81 +6459,8 @@ export default function SemiAutoComparePanel({
       {/* 강수·기대수 · 최종합의 — ③ 추천 상세 (1:1 반복도 기반, activeComparison 불필요) */}
       {(decadePattern || finalStrongExpected) && (
         <>
-              {/* ★ 1:1 강수 & 기대수 (구간별) — 평행회차와 동일 레이아웃, 1:1 반복도 기반 */}
-              {decadePattern && (
-                <Box sx={{ mt: 0.5, p: 1.25, borderRadius: 1, bgcolor: 'action.hover' }}>
-                  <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
-                    <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      <Typography variant="caption" fontWeight={800}>
-                        ★ 1:1 강수 &amp; 기대수 (구간별)
-                      </Typography>
-                      <Chip size="small" variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회 · 전수비교 반복도`} sx={{ height: 18, fontSize: 9 }} />
-                    </Stack>
-                    {decadePattern.strongWinHit != null && (
-                      <Chip
-                        size="small"
-                        color={decadePattern.strongWinHit >= 4 ? 'success' : decadePattern.strongWinHit >= 2 ? 'warning' : 'default'}
-                        label={`강수 ${decadePattern.strongCount}개 중 당첨 ${decadePattern.strongWinHit}개 (무작위 기대≈${Math.round(decadePattern.strongCount * 6 / 45 * 10) / 10}개)`}
-                        sx={{ fontWeight: 700, height: 20, fontSize: 10 }}
-                      />
-                    )}
-                  </Stack>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-                    강수 = 구간별 1:1 반복도 상위 3 · 기대 = 다음 3. 숫자 아래 = 자동/반자동 등장 줄 수.
-                    {compareWinning
-                      ? ` 밝은 공 = ${effectiveRound ?? '?'}회 실제 당첨 · 회색 = 비당첨.`
-                      : ' 이번회차(미추첨) — 당첨 대조 없음. 반자동 고정수는 강수에서 분리됨.'}
-                  </Typography>
-                  <Stack spacing={0.5}>
-                    {decadePattern.byBand.map((b) => (
-                      <Stack key={b.label} direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
-                        <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>{b.label}</Typography>
-                        <Typography variant="caption" color="error.light" sx={{ fontSize: 10, fontWeight: 700 }}>강수</Typography>
-                        {b.strong.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
-                        {b.strong.map((s) => (
-                          <Box key={`st-${s.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
-                            <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : false} />
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
-                              {s.auto}/{s.semi}{s.maxMatch >= 3 ? `·${s.maxMatch}일치` : ''}
-                            </Typography>
-                          </Box>
-                        ))}
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5 }}>기대</Typography>
-                        {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
-                        {b.expected.map((s) => (
-                          <Box key={`ex-${s.number}`} sx={{ textAlign: 'center', minWidth: 26 }}>
-                            <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : false} />
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
-                              {s.auto}/{s.semi}
-                            </Typography>
-                          </Box>
-                        ))}
-                      </Stack>
-                    ))}
-                    <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>끝수</Typography>
-                      {decadePattern.endingTop.map((e) => (
-                        <Chip key={`ed-${e.digit}`} size="small" variant="outlined" label={`${e.digit} (${e.count})`} sx={{ height: 18, fontSize: 10 }} />
-                      ))}
-                    </Stack>
-                  </Stack>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5 }}>
-                    {compareWinning && decadePattern.distribution ? (
-                      <>
-                        <strong>당첨 분포</strong>: 강수 {decadePattern.distribution.strong}개 · 기대 {decadePattern.distribution.expected}개 ·
-                        그외 등장 {decadePattern.distribution.etc}개
-                        {decadePattern.distribution.missing > 0
-                          ? ` · 티켓 밖 ${decadePattern.distribution.missing}개(용지 분석 한계 — 학습 신호 제외)`
-                          : ' · 전부 티켓 안(추출 가능 회차)'}
-                      </>
-                    ) : (
-                      '강수·기대만 표시합니다. 용지 미출현은 학습 엔진 신호에서 제외합니다.'
-                    )}
-                  </Typography>
-                </Box>
-              )}
-
-              {/* 🎯 최종 강수·기대수 (구간별 신호 종합) — 반복도 × 검증학습 × 이월 겹침 재정렬 */}
+              {/* ★ 강수 & 기대수 (구간별 · 신호 종합) — 구 '1:1 강수&기대'(반복도) + '최종 강수·기대'
+                  (검증학습·이월 재정렬)를 하나로 통합. 반복도 줄수·끝수·당첨분포 + 배지·합의를 한 섹션에. */}
               {finalStrongExpected && (
                 <Box sx={{ mt: 1.25, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'warning.main' }}>
                   <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
@@ -6606,8 +6533,11 @@ export default function SemiAutoComparePanel({
                         <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, fontWeight: 700, ml: 0.5 }}>기대</Typography>
                         {b.expected.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
                         {b.expected.map((s) => (
-                          <Box key={`fse2-${s.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                          <Box key={`fse2-${s.number}`} sx={{ textAlign: 'center', minWidth: 34 }}>
                             <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : false} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
+                              {s.auto}/{s.semi}
+                            </Typography>
                             <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: 'text.disabled' }}>
                               {s.glyphs}
                             </Typography>
@@ -6616,6 +6546,23 @@ export default function SemiAutoComparePanel({
                       </Stack>
                     ))}
                   </Stack>
+                  {/* 끝수 · 당첨 분포 — 구 '★ 1:1 강수 & 기대수' 에서 통합(중복 섹션 합침) */}
+                  {decadePattern && (
+                    <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                      <Typography variant="caption" fontWeight={700} sx={{ minWidth: 44, fontSize: 10 }}>끝수</Typography>
+                      {decadePattern.endingTop.map((e) => (
+                        <Chip key={`fse-ed-${e.digit}`} size="small" variant="outlined" label={`${e.digit} (${e.count})`} sx={{ height: 18, fontSize: 10 }} />
+                      ))}
+                    </Stack>
+                  )}
+                  {compareWinning && decadePattern?.distribution && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5 }}>
+                      <strong>당첨 분포</strong>: 강수 {decadePattern.distribution.strong}개 · 기대 {decadePattern.distribution.expected}개 · 그외 등장 {decadePattern.distribution.etc}개
+                      {decadePattern.distribution.missing > 0
+                        ? ` · 티켓 밖 ${decadePattern.distribution.missing}개(용지 한계 — 학습 신호 제외)`
+                        : ' · 전부 티켓 안(추출 가능 회차)'}
+                    </Typography>
+                  )}
                   {(() => {
                     const multi = finalStrongExpected.consensus.filter((c) => c.agreement >= 2).slice(0, 8);
                     if (multi.length === 0) {

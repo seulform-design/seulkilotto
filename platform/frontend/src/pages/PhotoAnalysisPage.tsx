@@ -803,6 +803,10 @@ export default function PhotoAnalysisPage() {
   const [visionConfigured, setVisionConfigured] = useState(false);
   const [useVisionApi, setUseVisionApi] = useState(false);
   const [showHistorySection, setShowHistorySection] = useState(false);
+  // ⚙ 추가 세팅 자동 누적 목록 렌더 캡 — 수백 줄을 한 번에 마운트하면 모바일이 무겁다.
+  // 기본 50줄만 렌더하고 [더 보기]로 확장(삭제 onRemove 는 원본 인덱스에 바인딩돼 안전).
+  const AUTO_LIST_PAGE = 50;
+  const [autoListLimit, setAutoListLimit] = useState(AUTO_LIST_PAGE);
   const [showVisionAdvanced, setShowVisionAdvanced] = useState(false);
   const [visionKey, setVisionKey] = useState('');
   const [visionSaving, setVisionSaving] = useState(false);
@@ -1698,9 +1702,9 @@ export default function PhotoAnalysisPage() {
                               자동 누적 줄이 없습니다. 위 그리드에서 6개 선택 후 [줄 저장].
                             </Alert>
                           ) : (
-                            <Box sx={{ maxHeight: 320, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
+                            <Box sx={{ maxHeight: 320, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1 }}>
                               <Stack spacing={0.5}>
-                                {ticketLines.map((line, idx) => {
+                                {ticketLines.slice(0, autoListLimit).map((line, idx) => {
                                   const matchCount = winSet
                                     ? line.numbers.filter((n) => winSet.has(n) && n !== reviewBonus).length
                                     : 0;
@@ -1744,6 +1748,32 @@ export default function PhotoAnalysisPage() {
                                 })}
                               </Stack>
                             </Box>
+                          )}
+                          {ticketLines.length > AUTO_LIST_PAGE && (
+                            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+                              {autoListLimit < ticketLines.length && (
+                                <Button
+                                  size="small"
+                                  variant="text"
+                                  onClick={() =>
+                                    setAutoListLimit((v) =>
+                                      Math.min(v + AUTO_LIST_PAGE, ticketLines.length)
+                                    )
+                                  }
+                                >
+                                  더 보기 (+{Math.min(AUTO_LIST_PAGE, ticketLines.length - autoListLimit)}) · {autoListLimit}/{ticketLines.length}줄
+                                </Button>
+                              )}
+                              {autoListLimit >= ticketLines.length ? (
+                                <Button size="small" variant="text" onClick={() => setAutoListLimit(AUTO_LIST_PAGE)}>
+                                  접기 ▲ (전체 {ticketLines.length}줄)
+                                </Button>
+                              ) : (
+                                <Button size="small" variant="text" onClick={() => setAutoListLimit(ticketLines.length)}>
+                                  전체 보기 ({ticketLines.length}줄)
+                                </Button>
+                              )}
+                            </Stack>
                           )}
                           <Stack direction="row" justifyContent="flex-end">
                             <Button

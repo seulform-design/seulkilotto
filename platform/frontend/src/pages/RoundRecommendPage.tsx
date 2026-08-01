@@ -187,13 +187,20 @@ export default function RoundRecommendPage({
       </Paper>
 
       <Button
-        variant="contained"
+        variant={embedded ? 'outlined' : 'contained'}
         color="warning"
+        size={embedded ? 'small' : 'medium'}
         onClick={() => recommend.refetch()}
         disabled={recommend.isFetching}
         sx={{ mb: 2, fontWeight: 800 }}
       >
-        {recommend.isFetching ? <CircularProgress size={24} color="inherit" /> : '회차 추천 받기'}
+        {recommend.isFetching ? (
+          <CircularProgress size={20} color="inherit" />
+        ) : embedded ? (
+          '호기 신호 새로고침'
+        ) : (
+          '회차 추천 받기'
+        )}
       </Button>
 
       {recommend.isError && (

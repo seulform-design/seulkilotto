@@ -12,8 +12,8 @@ import math
 from itertools import combinations
 from typing import Any, Dict, List, Sequence, Tuple
 
-# v4: raw top6 + 확장 top36 (검증 expand36-v5 패리티). 구간커버는 비교용.
-GRAFT_BUILD_ID = "graft-v4-expand36"
+# v5: raw top6 + 다중엔진형 확장24(1:1×구간 강수/기대 가산). 크기↑ 금지.
+GRAFT_BUILD_ID = "graft-v5-multi24"
 
 DECADE_LABELS = ("단번대", "10번대", "20번대", "30번대", "40번대")
 
@@ -230,9 +230,7 @@ def optimize_sharing_from_raw(
     raw_top6: List[int],
 ) -> Dict[str, Any] | None:
     """EV이되 raw top6 중 최소 2개 + 상위12 중 4개 유지 — 희소만 쫓다 상위를 버리는 회귀 방지."""
-    base = optimize_sharing_recall(
-        ranked_pool, top_window=min(36, len(ranked_pool)), min_from_top12=4
-    )
+    base = optimize_sharing_recall(ranked_pool, top_window=24, min_from_top12=4)
     if not base:
         return None
     nums = list(base["numbers"])
@@ -274,14 +272,30 @@ def _build_sets_for_lines(
     if len(present) < 6:
         return None
     scores = {n: float(pair.get(n, 0)) for n in present}
-    # 기본 골격 = 1:1 raw (로딩 전·수정 전 잘 잡히던 추출식)
+    # 기본 골격 = 1:1 raw top6. 확장 = 순위 + 구간 강수/기대 가산 후 top24.
     raw_top6 = present[:6]
-    # 검증 엔진 expand36-v5 와 맞춤 — top24가 자르던 중하위 순위(1235: 7) 보존
-    raw_expand = present[: min(36, len(present))]
-    # 구간커버는 비교/백테스트용 — emit 기본값으로 쓰지 않음(1235 회귀)
-    decade_core = pick_coverage_core6(raw_expand[:24] if len(raw_expand) >= 24 else raw_expand, auto_f, semi_f, scores)
-    expand = list(raw_expand)
-    pure_ev = optimize_sharing_recall(expand, top_window=min(36, len(expand)), min_from_top12=0)
+    # 구간 강수/기대(프론트 ★1:1과 동일) — 확장망에 엔진 축을 끌어온다.
+    bands = ((1, 9), (10, 19), (20, 29), (30, 39), (40, 45))
+    strong: set = set()
+    expected: set = set()
+    for lo, hi in bands:
+        in_band = [n for n in present if lo <= n <= hi]
+        in_band.sort(key=lambda n: (-float(auto_f.get(n, 0) + semi_f.get(n, 0)), -scores.get(n, 0.0), n))
+        strong.update(in_band[:3])
+        expected.update(in_band[3:6])
+
+    def graft_key(n: int) -> float:
+        base = float(len(present) - present.index(n)) if n in present else 0.0
+        if n in strong:
+            base += 28.0
+        elif n in expected:
+            base += 20.0
+        return base
+
+    ranked_multi = sorted(present, key=lambda n: (-graft_key(n), n))
+    expand = ranked_multi[: min(24, len(ranked_multi))]
+    decade_core = pick_coverage_core6(expand, auto_f, semi_f, scores)
+    pure_ev = optimize_sharing_recall(expand, top_window=min(24, len(expand)), min_from_top12=0)
     recall_ev = optimize_sharing_from_raw(expand, raw_top6)
     both = sum(1 for n in raw_top6 if auto_f.get(n, 0) > 0 and semi_f.get(n, 0) > 0)
     return {
@@ -361,7 +375,7 @@ def _loo_backtest(samples) -> Dict[str, Any]:
         "— 기본은 recall-EV(희소만 쫓지 않음)"
     )
     advice.append(
-        f"확장(raw top36) 평균 {means['expand24']}/6 (무작위≈{random24}) — 넓은 그물이 본령"
+        f"확장(다중엔진형 top24) 평균 {means['expand24']}/6 (무작위≈{random24}) — 넓은 그물이 본령"
     )
     return {
         "ok": rounds >= 1,
@@ -494,7 +508,7 @@ def build_graft_coverage(*, intent: str = "review") -> Dict[str, Any]:
             ),
             "ev_mode": "recall_ev_top6floor",
             "ev_mode_label": "분산최적 + 상위12≥4 + raw top6≥2",
-            "expand_mode": "raw_top36",
+            "expand_mode": "multi_top24",
             "note": (
                 "당첨은 순위 미사용(복기 사후 대조만). 평행·이월 forward OFF. "
                 "구간커버는 비교용 — raw보다 명확히 나을 때만 핵심 교체."

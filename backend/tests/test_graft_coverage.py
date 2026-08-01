@@ -55,7 +55,7 @@ def test_build_and_backtest_smoke():
     # 기본 핵심 = raw top6 (구간커버가 더 못 잡던 회귀 방지)
     assert built["core6"] == built["raw_top6"]
     assert len(built["decade_core6"]) == 6
-    assert built["expand24"] == built["ranked"][: len(built["expand24"])]
+    assert len(built["expand24"]) == 24 or len(built["expand24"]) == len(built["ranked"])
     win = [6, 7, 11, 15, 39, 43]
     assert len(set(built["expand24"]) & set(win)) >= 4
 
@@ -69,7 +69,7 @@ def test_build_and_backtest_smoke():
     bt = _loo_backtest([s, s])  # 소표본 → 무조건 raw
     assert bt["ok"] is True
     assert bt["selected_core_mode"] == "raw_top6"
-    assert GRAFT_BUILD_ID == "graft-v4-expand36"
+    assert GRAFT_BUILD_ID == "graft-v5-multi24"
 
 
 def test_decade_worse_than_raw_is_not_emitted_as_default():

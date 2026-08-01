@@ -1514,13 +1514,13 @@ export default function SemiAutoComparePanel({
   });
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand36-v5', 'semi-freq-v1', 'pair-product'],
+    queryKey: ['v1-photo-review-verification', 'expand24-v6-multi', 'semi-freq-v1', 'pair-product'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v4-expand36', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v5-multi24', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,
@@ -3618,7 +3618,7 @@ export default function SemiAutoComparePanel({
         outsideCoreInExpand: audit?.outside_core_in_expand ?? [],
         dataUsed: api.data_used ?? null,
         backtest: api.backtest ?? null,
-        graftBuild: api.graft_build ?? 'graft-v4-expand36',
+        graftBuild: api.graft_build ?? 'graft-v5-multi24',
         honesty: api.honesty ?? null,
         rankSource: 'api_pair_product' as const,
         decadeDropped: audit?.decade_dropped_vs_raw ?? [],
@@ -3874,7 +3874,7 @@ export default function SemiAutoComparePanel({
       0,
       Math.min(30, Math.max(expand18.length, Number(cov?.expand_size) || 0)),
     );
-    const shareResult = ready ? optimizeForSharing(wide, Math.min(36, wide.length)) : null;
+    const shareResult = ready ? optimizeForSharing(wide, Math.min(24, wide.length)) : null;
     const shareOpt = shareResult ? shareResult.numbers.slice(0, 6) : [];
     const agreement = consensus?.agreement ?? {};
     const winsReady = Boolean(winningSet && winningSet.size > 0);
@@ -5701,14 +5701,11 @@ export default function SemiAutoComparePanel({
                   : ` · 확장망 top${heroRecommendation.expandSize}`}
                 .{' '}→ {recommendHeroHint}
                 {heroRecommendation.goodSignalCount > 0
-                  ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다(공에 '몇 신호').`
-                  : ` 아래 핵심 6은 다회차 1위 신호(${heroRecommendation.signalLabel}) 상위6입니다 — 여러 신호를 '합의'로 섞으면 약한 신호가 최고 신호를 희석해 오히려 덜 잡습니다(앙상블 백테스트로 실증).`}{' '}
-                <strong>top-6 집중보다 넓은 그물이 유효</strong>.
-                {heroRecommendation.coverageMode === 'expand18_first'
-                  ? ' 역산 정책: 확장망 우선 주입(집중 실패 보정).'
-                  : ''}
+                  ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다.`
+                  : ` 아래 핵심 6은 주신호(${heroRecommendation.signalLabel}) 상위6입니다.`}{' '}
+                <strong>확장24는 다중엔진</strong>(주신호·1:1곱·min-rank·구간 강수/기대) 합의 — 그물만 키우지 않습니다.
                 {heroRecommendation.expandModeLabel
-                  ? ` 확장망: ${heroRecommendation.expandModeLabel}.`
+                  ? ` (${heroRecommendation.expandModeLabel})`
                   : ''}
                 {heroRecommendation.showWinning && heroRecommendation.winsReady
                   ? ` 핵심6 ${heroRecommendation.core6HitCount ?? 0}/6 · 확장${heroRecommendation.expandSize} ${heroRecommendation.expandHitCount ?? 0}/6.`
@@ -5834,7 +5831,7 @@ export default function SemiAutoComparePanel({
               : compareWinning
                 ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다. '
                 : '이번회차 탭: 미추첨 · 당첨 대조 없음. '}
-            핵심=집중 · 분산최적=공동당첨 회피 · 확장{heroRecommendation.expandSize}=넓은 그물(중하위 순위 용지번호 포함).
+            핵심=주신호 집중 · 분산최적=공동당첨 회피 · 확장{heroRecommendation.expandSize}=다중엔진 합의 그물.
             {' '}상세 검증은 <strong>④ 엔진</strong>.
           </Typography>
 
@@ -5844,7 +5841,8 @@ export default function SemiAutoComparePanel({
               <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={0.75} sx={{ mb: 0.5 }}>
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
                   <Typography variant="caption" fontWeight={800}>🧪 1:1 접목 비교</Typography>
-                  <Chip size="small" color="warning" variant="outlined" label="확률 불변 · recall/EV" sx={{ height: 18, fontSize: 9, fontWeight: 700 }} />
+                  <Chip size="small" variant="outlined" label="확장24에 구간축 반영됨 · 여기선 EV 참고" sx={{ height: 18, fontSize: 9, fontWeight: 700 }} />
+                  <Chip size="small" color="warning" variant="outlined" label="확률 불변" sx={{ height: 18, fontSize: 9, fontWeight: 700 }} />
                   {graftCoverageEV?.reviewHit && (
                     <Chip
                       size="small"

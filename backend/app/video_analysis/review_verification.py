@@ -167,16 +167,16 @@ EXPAND_MODE_LABELS = {
     "merge_raw": "단일∪min-rank 병합 (넓은 recall)",
 }
 
-# WF 진단용 크기 후보. 1235 실측: 당첨 7 = 합산 36위 → top24 밖.
-# top36 으로 용지 등장·중하위 순위 당첨(가까운 미포착대)을 그물에 담는다.
-EXPAND_SIZE_CANDIDATES = (24, 30, 36)
-DEFAULT_EXPAND_SIZE = 36
-MIN_EXPAND_SIZE = 24
-MAX_EXPAND_SIZE = 36
+# WF 진단용 크기 후보(리프트 보고만). 실제 방출 그물은 항상 DEFAULT_EXPAND_SIZE(24).
+# v5가 WF selected_size(30/36)를 방출해 ③이 '확장 30'으로 흔들리던 회귀를 되돌린다.
+EXPAND_SIZE_CANDIDATES = (18, 24, 30)
+DEFAULT_EXPAND_SIZE = 24
+# 방출 고정 24. WF 후보는 진단만(30까지) — 방출에 selected_size 쓰지 않음.
+WF_MAX_EXPAND_SIZE = 30
 DEFAULT_EXPAND_MODE = "single_raw"
-# 배포 스모크·프론트 캐시 무효 확인용.
-# v5: 확장 top36 (순위 25–36 용지 당첨 절단 보정) + WF size 실제 반영(하한 24)
-COVERAGE_BUILD_ID = "expand36-v5"
+# v6: 방출 top24 고정 + 다중엔진 순위(LOO신호·1:1곱·min-rank·구간 강수/기대)
+# — 그물 키우지 않고 엔진 합의로 중하위 당첨(1235:7)을 top24에 올린다.
+COVERAGE_BUILD_ID = "expand24-v6-multi"
 
 
 def _merge_expand_order(
@@ -199,35 +199,75 @@ def _merge_expand_order(
     return order
 
 
-def _ticket_tail_rescue(
-    ranked: List[int],
-    present: set,
-    expand: List[int],
-    *,
-    size: int,
-) -> List[int]:
-    """용지 등장 번호가 그물 밖에 남아 있으면 테일부터 교체·채움(당첨 미사용).
+def _decade_tier_sets(sigs: Dict[str, Dict[int, float]]) -> tuple[set, set]:
+    """프론트 ★1:1 강수·기대(구간별 상위3+다음3)와 동일 계층 — 당첨 미사용."""
+    tb = sigs.get("total_freq") or {}
+    pair = sigs.get("pair_product") or {}
+    strong: set = set()
+    expected: set = set()
+    for lo, hi in ((1, 9), (10, 19), (20, 29), (30, 39), (40, 45)):
+        in_band = [
+            n for n in range(lo, hi + 1)
+            if float(tb.get(n, 0)) > 0
+        ]
+        in_band.sort(
+            key=lambda n: (
+                -float(tb.get(n, 0)),
+                -float(pair.get(n, 0)),
+                n,
+            )
+        )
+        strong.update(in_band[:3])
+        expected.update(in_band[3:6])
+    return strong, expected
 
-    topK 신호만 쓰면 용지에는 있으나 중하위 순위인 번호(1235: 7≈36위)가 잘린다.
-    비등장 번호를 밀어내고 용지 등장분을 우선 편입한다.
+
+def _multi_engine_order(
+    sigs: Dict[str, Dict[int, float]],
+    signal_key: str,
+    *,
+    exclude_keys: List[str] | None = None,
+) -> tuple[List[int], Dict[str, Any]]:
+    """번호추천 확장망용 다중엔진 순위 — 그물 크기↑ 대신 엔진 합의↑.
+
+    축: LOO/주신호 순위 · 1:1 pair_product · 전엔진 min-rank · 구간 강수/기대.
+    당첨번호 미사용(누수 없음).
     """
-    size = max(6, min(MAX_EXPAND_SIZE, int(size)))
-    out = [n for n in expand if n in present][:size]
-    seen = set(out)
-    for n in ranked:
-        if len(out) >= size:
-            break
-        if n in present and n not in seen:
-            out.append(n)
-            seen.add(n)
-    # present 가 size 미만이면 신호 순위로 채움
-    for n in ranked:
-        if len(out) >= size:
-            break
-        if n not in seen:
-            out.append(n)
-            seen.add(n)
-    return out[:size]
+    tb = sigs.get("total_freq") or {}
+    af = sigs.get("auto_freq") or {}
+    primary = _rank_signal(
+        sigs.get(signal_key, sigs.get("support", {})),
+        tb,
+        af,
+    )
+    pair = _rank_signal(sigs.get("pair_product", sigs.get("support", {})), tb, af)
+    boe = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
+    strong, expected = _decade_tier_sets(sigs)
+    pri_pos = {n: i for i, n in enumerate(primary)}
+    pair_pos = {n: i for i, n in enumerate(pair)}
+    boe_pos = {n: i for i, n in enumerate(boe)}
+
+    def score(n: int) -> float:
+        # 순위 앞쪽일수록 가산. 구간 강수/기대는 프론트에서 당첨을 잘 담던 축.
+        s = 0.0
+        s += max(0, 45 - pri_pos.get(n, 45)) * 3.0
+        s += max(0, 45 - pair_pos.get(n, 45)) * 2.5
+        s += max(0, 45 - boe_pos.get(n, 45)) * 2.0
+        if n in strong:
+            s += 28.0
+        elif n in expected:
+            s += 20.0
+        s += float(tb.get(n, 0)) * 0.05
+        return s
+
+    order = sorted(range(1, 46), key=lambda n: (-score(n), n))
+    meta = {
+        "engines": ["primary", "pair_product", "min_rank", "decade_strong", "decade_expected"],
+        "decade_strong": sorted(strong),
+        "decade_expected": sorted(expected),
+        "primary_signal": signal_key,
+    }
+    return order, meta
 
 
 def _expand_from_mode(
@@ -240,7 +280,7 @@ def _expand_from_mode(
     size: int = DEFAULT_EXPAND_SIZE,
 ) -> List[int]:
     """expand 넓은 그물 구성 모드 — walk-forward 가 고른 (mode, size) 를 그대로 재현."""
-    size = max(6, min(MAX_EXPAND_SIZE, int(size)))
+    size = max(6, min(WF_MAX_EXPAND_SIZE, int(size)))
     if mode == "single_raw":
         return ranked[:size]
     if mode == "single_balanced":
@@ -422,7 +462,8 @@ def _walkforward_expand_policy(
     legacy = means.get(legacy_key, means.get("boe_balanced@36", 0.0))
     selected_key = f"{selected_mode}@{selected_size}"
     random_base = round(selected_size * 6 / 45, 3)
-    lift_36 = means_by_size.get("36", 0) - means_by_size.get("24", 0)
+    lift_30 = means_by_size.get("30", 0) - means_by_size.get("24", 0)
+    lift_24_18 = means_by_size.get("24", 0) - means_by_size.get("18", 0)
     return {
         "ok": True,
         "selected_mode": selected_mode,
@@ -434,9 +475,8 @@ def _walkforward_expand_policy(
         "random_baseline": random_base,
         "means": means,
         "means_by_size": means_by_size,
-        "size_lift_36_vs_24": round(lift_36, 3),
-        # 하위호환 키(옛 UI)
-        "size_lift_24_vs_18": round(lift_36, 3),
+        "size_lift_30_vs_24": round(lift_30, 3),
+        "size_lift_24_vs_18": round(lift_24_18, 3),
         "per_round": per_round,
         "beats_random": best_mean > random_base,
         "beats_legacy_boe_balanced": means.get(selected_key, 0) > legacy + 1e-9,
@@ -987,11 +1027,11 @@ def _coverage_set_from_signals(
     expand_mode: str | None = None,
     expand_size: int | None = None,
 ) -> Dict[str, Any]:
-    """단일 신호 랭킹으로 core6 + expand 넓은 그물 커버리지 세트를 만든다.
+    """core6 + expand24 커버리지.
 
-    - core6: 최고 단일신호(집중 픽) — 합의/평균은 약신호가 희석하므로 단일 우선.
-    - expand: walk-forward (mode, size). 기본 top36 — top24가 자르던
-      중하위 순위 용지 당첨(예: 1235회 7 = 합산 36위)을 담는다. 하한 24.
+    - core6: 주신호(집중) — 약신호 희석 방지.
+    - expand24: 다중엔진 순위 top24 (주신호·1:1곱·min-rank·구간 강수/기대).
+      그물 크기를 30/36으로 키우지 않고, UI에 이미 있는 엔진 축을 추천에 끌어온다.
     """
     ranked = _rank_signal(
         sigs.get(signal_key, sigs["support"]),
@@ -1006,40 +1046,53 @@ def _coverage_set_from_signals(
     mode = expand_mode or DEFAULT_EXPAND_MODE
     if mode not in EXPAND_MODE_LABELS:
         mode = DEFAULT_EXPAND_MODE
-    # WF size 반영 · 하한 24(좁은 그물 회귀 금지) · 상한 36
-    req = int(expand_size) if expand_size is not None else DEFAULT_EXPAND_SIZE
-    size = max(MIN_EXPAND_SIZE, min(MAX_EXPAND_SIZE, req))
-    expand = _ensure_core_subset(
-        _expand_from_mode(ranked, boe_order, core, present, mode, size=size),
-        core,
-        size,
+    # 방출 크기 고정 24 — WF selected_size(30 등)는 진단 전용.
+    _ = expand_size
+    size = DEFAULT_EXPAND_SIZE
+    multi_order, multi_meta = _multi_engine_order(
+        sigs, signal_key, exclude_keys=exclude_keys
     )
-    # 용지 등장분이 topK 바로 밖에 있으면 테일 슬롯으로 편입(당첨 미사용·누수 없음).
-    expand = _ticket_tail_rescue(ranked, present, expand, size=size)
+    # 다중엔진 top24 를 본망으로. merge_raw 등 모드망은 진단·폴백.
+    mode_expand = _expand_from_mode(ranked, boe_order, core, present, mode, size=size)
+    expand = _ensure_core_subset(multi_order[:size], core, size)
+    # present 우선 — 미등장 번호가 합의 점수로 새어 들어오면 용지 등장분으로 교체
+    expand_present = [n for n in expand if n in present]
+    if len(expand_present) < size:
+        for n in multi_order:
+            if len(expand_present) >= size:
+                break
+            if n in present and n not in expand_present:
+                expand_present.append(n)
+        for n in expand:
+            if len(expand_present) >= size:
+                break
+            if n not in expand_present:
+                expand_present.append(n)
+    expand = expand_present[:size]
     boe_expand = _balance_expand(boe_order, core, present, size)
     return {
         "signal": signal_key,
         "signal_label": _SIGNAL_LABELS.get(signal_key, signal_key),
         "selected_by": selected_by,
         "core6": core,
-        # 하위호환: 필드명 expand18 유지 — 실제 길이는 expand_size.
+        # 하위호환: 필드명 expand18 유지 — 실제 길이는 expand_size(24).
         "expand18": expand,
         "expand_size": size,
-        "expand18_mode": mode,
+        "expand18_mode": "multi_engine",
         "expand18_mode_label": (
-            f"{EXPAND_MODE_LABELS.get(mode, mode)} · top{size}"
+            f"다중엔진(주신호+1:1곱+min-rank+구간강수/기대) · top{size}"
         ),
         "expand18_precision": precision18,
         "expand18_single": single_expand,
-        "expand18_raw": precision18,
+        "expand18_raw": mode_expand,
         "expand18_boe_balanced": boe_expand,
         "decade_balance": _decade_balance_info(expand, precision18, present),
         "excluded_signals": list(exclude_keys or []),
         "coverage_build": COVERAGE_BUILD_ID,
+        "multi_engine": multi_meta,
         "precision_gap_hint": {
             "top24": 24,
-            "top36": 36,
-            "note": "가까운 미포착대는 top24~top36(용지 중하위 순위)에 몰리는 경우가 많음",
+            "note": "확장24=다중엔진 합의. 크기를 키우지 않고 구간 강수/기대·1:1곱을 끌어온다.",
         },
     }
 
@@ -1440,18 +1493,14 @@ def build_review_verification() -> Dict[str, Any]:
     if "auto_freq" not in ban_keys:
         ban_keys.append("auto_freq")
 
-    # expand 구성 모드·크기 — 보관 회차 LOO walk-forward. 하한 24·상한 36.
+    # expand 모드 WF는 진단용. 방출 크기는 항상 24(다중엔진 순위).
     expand_wf = _walkforward_expand_policy(_samples, exclude_keys=ban_keys)
     expand_mode = str(expand_wf.get("selected_mode") or DEFAULT_EXPAND_MODE)
-    expand_size = max(
-        MIN_EXPAND_SIZE,
-        min(MAX_EXPAND_SIZE, int(expand_wf.get("selected_size") or DEFAULT_EXPAND_SIZE)),
-    )
-    # 복기 expand: 단일신호 절단 보정(merge_raw). forward 는 WF 모드 유지.
+    expand_size = DEFAULT_EXPAND_SIZE
+    # 복기 expand 모드 힌트(merge_raw) — 실제 방출은 multi_engine top24.
     review_expand_mode = _review_expand_mode(expand_mode)
 
-    # 복기 회차 커버리지 — 그 회차 용지 + LOO 신호 + merge 그물 (당첨 대조용).
-    # 이번회차 세트와 분리해야 탭별로 추천이 달라진다.
+    # 복기 회차 커버리지 — 그 회차 용지 + LOO 주신호 core + 다중엔진 expand.
     review_sigs = _signals(auto, semi)
     review_coverage_set = _coverage_set_from_signals(
         review_sigs,
@@ -1461,7 +1510,6 @@ def build_review_verification() -> Dict[str, Any]:
         expand_mode=review_expand_mode,
         expand_size=expand_size,
     )
-    # 진단: 같은 용지에서 로컬 1:1(pair_product) top24 가 몇 개 잡는지 — 히어로 역산용.
     pair_ranked = _rank_signal(
         review_sigs.get("pair_product", review_sigs["support"]),
         review_sigs.get("total_freq"),
@@ -1470,10 +1518,10 @@ def build_review_verification() -> Dict[str, Any]:
     win_set = set(winning)
     review_coverage_set["pair_product_diag"] = {
         "core6": pair_ranked[:6],
-        "expand24": pair_ranked[:expand_size],
+        "expand24": pair_ranked[:24],
         "core6_count": len(win_set & set(pair_ranked[:6])),
-        "expand24_count": len(win_set & set(pair_ranked[:expand_size])),
-        "expand_size": expand_size,
+        "expand24_count": len(win_set & set(pair_ranked[:24])),
+        "expand_size": 24,
         "note": "로컬 히어로 1:1 핵심식 패리티(매치보너스·세트·평행 제외)",
     }
     review_consensus_coverage = _consensus_coverage(review_sigs, leaderboard)

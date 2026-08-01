@@ -134,13 +134,13 @@ def test_merge_raw_recovers_catchable_cut_by_wrong_single_signal():
         expand_mode=_review_expand_mode("single_raw"),
         expand_size=24,
     )
-    assert good["expand18_mode"] == "merge_raw"
-    assert COVERAGE_BUILD_ID == "expand36-v5"
+    assert good["expand18_mode"] == "multi_engine"
+    assert COVERAGE_BUILD_ID == "expand24-v6-multi"
     audit_bad = _coverage_hit_audit(sigs, bad, winning, exclude_keys=ban)
     audit_good = _coverage_hit_audit(sigs, good, winning, exclude_keys=ban)
-    # merge+pair 경로가 단일 combo 경로보다 확장망 적중 ≥
+    # 다중엔진(pair+구간+min-rank) 경로가 단일 combo 경로보다 확장망 적중 ≥
     assert audit_good["expand18_count"] >= audit_bad["expand18_count"]
-    # 용지 등장 당첨이 전엔진 min-rank top24 이면 merge expand 에 포함
+    # 용지 등장 당첨이 전엔진 min-rank top24 이면 multi expand 에 포함
     boe = _best_of_engines_order(sigs, exclude_keys=ban)
     present = {n for n in winning if sigs["total_freq"].get(n, 0) > 0}
     for n in present:

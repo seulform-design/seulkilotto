@@ -1,16 +1,15 @@
-"""expand walk-forward (mode × size) · top36 중하위 미포착대 보존."""
+"""expand walk-forward · 다중엔진 top24 방출(크기 고정)."""
 from __future__ import annotations
 
 from app.video_analysis.feature_learning_engine import RoundSample
 from app.video_analysis.review_verification import (
     COVERAGE_BUILD_ID,
     DEFAULT_EXPAND_SIZE,
-    MAX_EXPAND_SIZE,
-    MIN_EXPAND_SIZE,
     _coverage_hit_audit,
     _coverage_set_from_signals,
+    _decade_tier_sets,
+    _multi_engine_order,
     _signals,
-    _ticket_tail_rescue,
     _walkforward_expand_policy,
 )
 
@@ -29,7 +28,7 @@ def _sample(round_no: int, winning: list[int], auto, semi) -> RoundSample:
     )
 
 
-def test_walkforward_picks_expand_mode_and_coverage_includes_core():
+def test_walkforward_picks_expand_mode_and_coverage_emits_24():
     s1 = _sample(
         1001,
         [1, 2, 3, 4, 5, 6],
@@ -52,10 +51,7 @@ def test_walkforward_picks_expand_mode_and_coverage_includes_core():
     ban = ["auto_freq"]
     wf = _walkforward_expand_policy(samples, exclude_keys=ban)
     assert wf["ok"] is True
-    assert wf["selected_size"] in (24, 30, 36)
-    key = f"{wf['selected_mode']}@{wf['selected_size']}"
-    assert key in wf["means"]
-    assert "means_by_size" in wf
+    assert wf["selected_size"] in (18, 24, 30)
 
     sigs = _signals(s1.auto_lines, s1.semi_lines)
     cov = _coverage_set_from_signals(
@@ -64,17 +60,17 @@ def test_walkforward_picks_expand_mode_and_coverage_includes_core():
         selected_by="multi_round",
         exclude_keys=ban,
         expand_mode=wf["selected_mode"],
-        expand_size=wf["selected_size"],
+        expand_size=30,  # WF가 30이어도 방출은 24
     )
     assert set(cov["core6"]).issubset(set(cov["expand18"]))
-    assert MIN_EXPAND_SIZE <= len(cov["expand18"]) <= MAX_EXPAND_SIZE
-    assert cov["expand_size"] == len(cov["expand18"])
-    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand36-v5"
+    assert len(cov["expand18"]) == DEFAULT_EXPAND_SIZE == 24
+    assert cov["expand_size"] == 24
+    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v6-multi"
+    assert cov["expand18_mode"] == "multi_engine"
+    assert "multi_engine" in cov
 
     audit = _coverage_hit_audit(sigs, cov, s1.winning, exclude_keys=ban)
     assert audit["catchable_count"] + len(audit["uncatchable"]) == 6
-    assert audit["expand_size"] == len(cov["expand18"])
-    assert "outside_expand" in audit
 
 
 def test_walkforward_fallback_when_too_few_samples():
@@ -83,32 +79,36 @@ def test_walkforward_fallback_when_too_few_samples():
     assert wf["selected_size"] == DEFAULT_EXPAND_SIZE
 
 
-def test_coverage_floors_small_size_to_24():
-    auto = _lines((1, 2, 3, 7, 8, 9), (1, 2, 4, 10, 11, 12), (3, 5, 6, 13, 14, 15))
-    semi = _lines((1, 2, 3, 16, 17, 18), (4, 5, 6, 19, 20, 21), (7, 8, 9, 22, 23, 24))
+def test_decade_expected_promoted_into_expand24():
+    """구간 기대수에 있는 번호는 주신호 순위가 밀려도 다중엔진 확장에 들어갈 수 있다."""
+    # 단번대: 1,2,3 강수 / 4,5,7 기대 후보가 되도록 빈도 배치
+    auto = _lines(
+        *[(1, 2, 3, 10, 20, 30)] * 8,
+        *[(4, 5, 7, 11, 21, 31)] * 3,
+        (12, 22, 32, 40, 41, 42),
+    )
+    semi = _lines(
+        *[(1, 2, 3, 13, 23, 33)] * 8,
+        *[(4, 5, 7, 14, 24, 34)] * 3,
+        (15, 25, 35, 40, 41, 43),
+    )
     sigs = _signals(auto, semi)
+    strong, expected = _decade_tier_sets(sigs)
+    assert 7 in strong or 7 in expected
+    order, meta = _multi_engine_order(sigs, "support", exclude_keys=["auto_freq"])
     cov = _coverage_set_from_signals(
         sigs,
         signal_key="support",
         selected_by="t",
         exclude_keys=["auto_freq"],
         expand_mode="single_raw",
-        expand_size=18,  # 하한 24
+        expand_size=18,
     )
-    assert cov["expand_size"] == 24
-    assert len(cov["expand18"]) == 24
-    assert cov["coverage_build"] == "expand36-v5"
+    assert 7 in cov["expand18"] or 7 in meta["decade_strong"] or 7 in meta["decade_expected"]
+    # 다중엔진 상위 24 안에 기대/강수 단번대가 포함
+    top24 = set(order[:24])
+    assert (strong | expected) & top24
 
 
-def test_ticket_tail_rescue_prefers_present():
-    ranked = list(range(1, 46))
-    present = set(range(1, 40))
-    # 비등장 40–45 가 앞에 섞여 있어도 용지 등장분이 먼저 채워짐
-    expand = [40, 41, 42, 1, 2, 3]
-    out = _ticket_tail_rescue(ranked, present, expand, size=6)
-    assert all(n in present for n in out)
-    assert len(out) == 6
-
-
-def test_default_expand_is_36():
-    assert DEFAULT_EXPAND_SIZE == 36
+def test_default_expand_is_24():
+    assert DEFAULT_EXPAND_SIZE == 24

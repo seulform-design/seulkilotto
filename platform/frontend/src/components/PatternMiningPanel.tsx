@@ -398,7 +398,10 @@ export default function PatternMiningPanel({
                       {(row.reasons ?? [])
                         .slice(0, 2)
                         .map((r) => r.pattern_label)
-                        .join(' · ') || '근거 없음'}
+                        .join(' · ')
+                        || ((row.score ?? 0) > 0
+                          ? '간접 점수(패턴 기여 미분해)'
+                          : '근거 없음')}
                     </Typography>
                     <Typography variant="caption" color="primary.main">
                       {open ? '접기' : '근거'}

@@ -37,6 +37,38 @@ def test_recall_ev_keeps_top12_members():
     assert sum(1 for n in out["numbers"] if n in top12) >= 4
 
 
+def test_light_backtest_is_fast_and_ok():
+    """접목 LOO light 경로 — 중첩 EV/LOO 없이 수 초 내 완료(API 타임아웃 회귀 방지)."""
+    import time
+
+    auto = _lines(
+        *[(5, 6, 9, 16, 15, 19)] * 8,
+        *[(21, 27, 25, 39, 36, 31)] * 6,
+        (6, 7, 11, 15, 39, 43),
+    )
+    semi = _lines(
+        *[(5, 6, 9, 16, 15, 19)] * 8,
+        *[(21, 27, 25, 39, 36, 31)] * 6,
+        (6, 7, 11, 15, 39, 43),
+    )
+    samples = [
+        RoundSample(
+            round_no=1200 + i,
+            auto_lines=auto,
+            semi_lines=semi,
+            winning=[6, 7, 11, 15, 39, 43],
+            features={n: {"support_rank": n} for n in range(1, 46)},
+        )
+        for i in range(5)
+    ]
+    t0 = time.time()
+    bt = _loo_backtest(samples)
+    elapsed = time.time() - t0
+    assert bt["ok"] is True
+    assert bt["rounds"] == 5
+    assert elapsed < 3.0, f"light backtest too slow: {elapsed:.2f}s"
+
+
 def test_build_and_backtest_smoke():
     auto = _lines(
         (5, 6, 9, 11, 15, 16),

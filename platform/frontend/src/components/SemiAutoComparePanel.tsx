@@ -1514,13 +1514,13 @@ export default function SemiAutoComparePanel({
   });
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand24-v9-decade-precision', 'semi-freq-v1', 'pair-product'],
+    queryKey: ['v1-photo-review-verification', 'expand24-v9-decade-precision', 'perf-fix-v1', 'pair-product'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v8-decade-precision', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v8-decade-precision', 'perf-fix-v1', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,

@@ -12,7 +12,7 @@ import math
 from itertools import combinations
 from typing import Any, Dict, List, Sequence, Tuple
 
-# v8: 확장+정밀14 = review_verification 강수기대→역산 축소와 동일 소스.
+# v8.1: 정밀14 + light 백테스트(타임아웃 해소). 방출 소스는 검증 커버리지와 동일.
 GRAFT_BUILD_ID = "graft-v8-decade-precision"
 
 DECADE_LABELS = ("단번대", "10번대", "20번대", "30번대", "40번대")
@@ -172,10 +172,13 @@ def optimize_sharing_recall(
     *,
     top_window: int = 24,
     min_from_top12: int = 4,
+    combo_cap: int = 14,
 ) -> Dict[str, Any] | None:
     """분산최적 + 상위 순위 바닥 — 순수 EV가 6·11 등 상위 적중을 버리던 회귀 보정.
 
     top12 에서 min_from_top12 개 이상 포함한 6조합만 후보로, risk↓ · rankSum↓.
+    combo_cap(기본 14): C(24,6)≈13만 전수는 엔진 API를 타임아웃시키므로
+    상위 14만 전수( C(14,6)=3003 ). 품질은 top12 바닥 제약으로 유지.
     """
     pool = []
     seen = set()
@@ -187,9 +190,11 @@ def optimize_sharing_recall(
         pool.append(n)
     if len(pool) < 6:
         return None
-    window = pool[: max(6, min(top_window, len(pool)))]
-    top12 = set(window[: min(12, len(window))])
-    rank_index = {n: i for i, n in enumerate(window)}
+    # top12 제약은 전체 순위 기준, 조합 탐색창만 축소
+    full_window = pool[: max(6, min(top_window, len(pool)))]
+    top12 = set(full_window[: min(12, len(full_window))])
+    window = full_window[: max(6, min(combo_cap, len(full_window)))]
+    rank_index = {n: i for i, n in enumerate(full_window)}
     best: Tuple[float, float, List[int]] | None = None  # risk, rankSum, nums
     for combo in combinations(window, 6):
         nums = list(combo)
@@ -272,8 +277,12 @@ def _build_sets_for_lines(
     samples=None,
     held_round: int | None = None,
     exclude_keys: List[str] | None = None,
+    light: bool = False,
 ) -> Dict[str, Any] | None:
-    """접목 세트 — 확장24/share 는 검증 커버리지(역산·교차검증)와 동일 빌더."""
+    """접목 세트 — 확장24/share 는 검증 커버리지(역산·교차검증)와 동일 빌더.
+
+    light=True: LOO 백테스트 루프용(중첩 정책 생략 → 타임아웃 방지).
+    """
     from .review_verification import _coverage_set_from_signals, _signals
 
     present, pair, auto_f, semi_f = _pair_product_rank(auto, semi)
@@ -292,8 +301,9 @@ def _build_sets_for_lines(
         expand_size=24,
         auto_lines=auto,
         semi_lines=semi,
-        samples=samples,
+        samples=None if light else samples,
         held_round=held_round,
+        light=light,
     )
     exp_n = max(24, min(30, int(cov.get("expand_size") or 24)))
     expand = list(cov.get("expand18") or [])[:exp_n]
@@ -302,19 +312,36 @@ def _build_sets_for_lines(
     precision14 = list(cov.get("precision14") or [])[:14]
     decade_pool30 = list(cov.get("decade_pool30") or [])
     decade_core = pick_coverage_core6(expand, auto_f, semi_f, scores)
-    pure_ev = optimize_sharing_recall(expand, top_window=min(24, len(expand)), min_from_top12=0)
-    # 접목 share = 커버리지 share_opt 우선(동일 소스), 없으면 expand+raw 재계산
-    cov_share = list(cov.get("share_opt") or [])
-    recall_ev = (
-        {
-            "numbers": cov_share,
-            "mode": (cov.get("share_opt_meta") or {}).get("mode") or "recall_ev_top6floor",
-            "risk": (cov.get("share_opt_meta") or {}).get("risk"),
-            "ev_score": (cov.get("share_opt_meta") or {}).get("ev_score"),
+    if light:
+        # 백테스트: EV 전수탐색 생략 — 순위 top6 / raw 바닥만 (적중 비교용)
+        pure_ev = {
+            "numbers": sorted(expand[:6]),
+            "risk": 0.0,
+            "ev_score": 0.0,
+            "mode": "light_top6",
         }
-        if len(cov_share) == 6
-        else optimize_sharing_from_raw(expand, raw_top6)
-    )
+        recall_ev = {
+            "numbers": sorted(raw_top6[:6]) if len(raw_top6) >= 6 else sorted(expand[:6]),
+            "mode": "light_raw_top6",
+            "risk": 0.0,
+            "ev_score": 0.0,
+        }
+    else:
+        pure_ev = optimize_sharing_recall(
+            expand, top_window=min(24, len(expand)), min_from_top12=0
+        )
+        # 접목 share = 커버리지 share_opt 우선(동일 소스), 없으면 expand+raw 재계산
+        cov_share = list(cov.get("share_opt") or [])
+        recall_ev = (
+            {
+                "numbers": cov_share,
+                "mode": (cov.get("share_opt_meta") or {}).get("mode") or "recall_ev_top6floor",
+                "risk": (cov.get("share_opt_meta") or {}).get("risk"),
+                "ev_score": (cov.get("share_opt_meta") or {}).get("ev_score"),
+            }
+            if len(cov_share) == 6
+            else optimize_sharing_from_raw(expand, raw_top6)
+        )
     both = sum(1 for n in raw_top6 if auto_f.get(n, 0) > 0 and semi_f.get(n, 0) > 0)
     return {
         "ranked": present,
@@ -341,12 +368,14 @@ def _loo_backtest(samples) -> Dict[str, Any]:
     sums = {m: 0 for m in modes}
     per_round: List[Dict[str, Any]] = []
     for s in samples:
+        # light=True: 회차마다 풀 LOO를 중첩하면 접목 API가 90s 타임아웃
         built = _build_sets_for_lines(
             s.auto_lines,
             s.semi_lines,
-            samples=samples,
+            samples=None,
             held_round=int(s.round_no),
             exclude_keys=["auto_freq"],
+            light=True,
         )
         if not built:
             continue

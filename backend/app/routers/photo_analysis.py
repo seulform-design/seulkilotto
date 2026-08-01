@@ -390,8 +390,10 @@ def get_review_verification():
     '집중 top-6' 이 왜 당첨을 놓치는지(넓은 그물은 담는데)를 데이터로 보여준다.
     """
     from ..video_analysis.review_verification import build_review_verification
+    from ..video_analysis.store import store_read_cache
 
-    return to_jsonable(build_review_verification())
+    with store_read_cache():
+        return to_jsonable(build_review_verification())
 
 
 @router.get("/graft-coverage")
@@ -403,8 +405,10 @@ def get_graft_coverage(
     1:1 곱 → 구간커버 핵심6 · 확장24 · recall-EV. 프론트 로컬 캐시 회귀 방지.
     """
     from ..video_analysis.graft_coverage import build_graft_coverage
+    from ..video_analysis.store import store_read_cache
 
-    return to_jsonable(build_graft_coverage(intent=intent))
+    with store_read_cache():
+        return to_jsonable(build_graft_coverage(intent=intent))
 
 
 @router.get("/overlap-learning")
@@ -424,8 +428,10 @@ def get_feature_learning(
 ):
     """Feature 학습 — 보관 회차로 검증 후 탭별 용지에 추천 적용."""
     from ..video_analysis.feature_learning_engine import build_feature_learning
+    from ..video_analysis.store import store_read_cache
 
-    return to_jsonable(build_feature_learning(seed=seed, apply_intent=apply_intent))
+    with store_read_cache():
+        return to_jsonable(build_feature_learning(seed=seed, apply_intent=apply_intent))
 
 
 @router.get("/nested-cv")

@@ -249,10 +249,11 @@ def _match_level_reverse_scores(
             semi_sets.append(s)
     if not auto_sets or not semi_sets:
         return scores
-    # 폭주 방지: 줄이 많으면 상한
-    if len(auto_sets) * len(semi_sets) > 80_000:
-        auto_sets = auto_sets[:200]
-        semi_sets = semi_sets[:200]
+    # 폭주 방지 — 엔진 API 타임아웃의 주원인(전수 교차는 O(A·S)).
+    # 70×70=4900 이면 순위 신호로 충분, 그 이상은 앞쪽 줄만.
+    if len(auto_sets) * len(semi_sets) > 4_900:
+        auto_sets = auto_sets[:70]
+        semi_sets = semi_sets[:70]
     for sa in auto_sets:
         for sb in semi_sets:
             inter = sa & sb
@@ -298,16 +299,18 @@ def _loo_axis_weights(
         sigs = _signals(s.auto_lines, s.semi_lines)
         # train 안에서의 주신호 = support (held 제외 표본에 multi를 다시 돌리면 무거움)
         sk = "support" if "support" not in ban else "pair_product"
-        primary = _rank_signal(sigs.get(sk, {}), sigs.get("total_freq"), sigs.get("auto_freq"))
-        pair = _rank_signal(sigs.get("pair_product", {}), sigs.get("total_freq"), sigs.get("auto_freq"))
+        tb = sigs.get("total_freq")
+        af = sigs.get("auto_freq")
+        primary = _rank_signal(sigs.get(sk, {}), tb, af)
+        pair = _rank_signal(sigs.get("pair_product", {}), tb, af)
         boe = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
         strong, expected = _decade_tier_sets(sigs)
         decade_order = list(strong) + [n for n in expected if n not in strong]
         decade_order += [n for n in primary if n not in set(decade_order)]
-        match_sc = _match_level_reverse_scores(s.auto_lines, s.semi_lines)
-        match_order = sorted(range(1, 46), key=lambda n: (-match_sc.get(n, 0.0), n))
-        combo = _rank_signal(sigs.get("combo_strength", {}), sigs.get("total_freq"), sigs.get("auto_freq"))
-        bal = _rank_signal(sigs.get("balanced", {}), sigs.get("total_freq"), sigs.get("auto_freq"))
+        # 축가중 LOO는 가벼운 pair/support 순위만 — match_level 전수교차는 별도 정책에서
+        match_order = pair  # pair_product 가 일치레벨과 동방향·훨씬 저렴
+        combo = _rank_signal(sigs.get("combo_strength", {}), tb, af)
+        bal = _rank_signal(sigs.get("balanced", {}), tb, af)
         win = set(s.winning)
         axis_sets = {
             "primary": primary[:24],
@@ -594,17 +597,16 @@ def _loo_expand_rescue_policy(
     hit_sums = {v: 0.0 for v in variants}
     catchable_sums = {v: 0.0 for v in variants}
     per_round: List[Dict[str, Any]] = []
+    # 접기 안쪽에서는 기본 축가중만 — 회차마다 axis LOO 를 다시 돌리면 API 타임아웃.
     for s in train:
         sigs = _signals(s.auto_lines, s.semi_lines)
-        # train 안 held 제외 축가중 — s 자신은 평가 대상이므로 weights에서 제외
-        aw = _loo_axis_weights(train, exclude_keys=ban, held_round=int(s.round_no))
         sk = "pair_product" if "pair_product" not in set(ban) else "support"
         ranked = _rank_signal(sigs.get(sk, sigs["support"]), sigs.get("total_freq"), sigs.get("auto_freq"))
         core = ranked[:6]
         present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
         order, meta = _multi_engine_order(
             sigs, sk, exclude_keys=ban,
-            auto_lines=s.auto_lines, semi_lines=s.semi_lines, axis_weights=aw,
+            auto_lines=s.auto_lines, semi_lines=s.semi_lines, axis_weights=None,
         )
         win = set(s.winning)
         catchable = win & present
@@ -1560,11 +1562,10 @@ def _loo_precision_from_decade_policy(
     per_round: List[Dict[str, Any]] = []
     for s in train:
         sigs = _signals(s.auto_lines, s.semi_lines)
-        aw = _loo_axis_weights(train, exclude_keys=ban, held_round=int(s.round_no))
         sk = "pair_product" if "pair_product" not in set(ban) else "support"
         order, meta = _multi_engine_order(
             sigs, sk, exclude_keys=ban,
-            auto_lines=s.auto_lines, semi_lines=s.semi_lines, axis_weights=aw,
+            auto_lines=s.auto_lines, semi_lines=s.semi_lines, axis_weights=None,
         )
         pool, _, _ = _decade_pool_list(sigs)
         present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
@@ -1650,22 +1651,18 @@ def _loo_select_core6(
     hits_d = 0.0
     for s in train:
         tsigs = _signals(s.auto_lines, s.semi_lines)
-        aw = _loo_axis_weights(train, exclude_keys=ban, held_round=int(s.round_no))
         sk = signal_key if signal_key in tsigs else "support"
         ranked = _rank_signal(
             tsigs.get(sk, tsigs["support"]), tsigs.get("total_freq"), tsigs.get("auto_freq")
         )
         pcore = ranked[:6]
-        order, mmeta = _multi_engine_order(
+        # 가벼운 기준망: multi top24 (구조·축 LOO 생략) 위 구간커버
+        order, _m = _multi_engine_order(
             tsigs, sk, exclude_keys=ban,
-            auto_lines=s.auto_lines, semi_lines=s.semi_lines, axis_weights=aw,
+            auto_lines=s.auto_lines, semi_lines=s.semi_lines, axis_weights=None,
         )
         present = {n for n in range(1, 46) if tsigs["total_freq"].get(n, 0) > 0}
-        base = _baseline_expand_from_order(order, pcore, present, DEFAULT_EXPAND_SIZE)
-        exp, _ = _apply_expand_rescue(
-            base, order, mmeta, present, pcore,
-            size=DEFAULT_EXPAND_SIZE, sigs=tsigs,
-        )
+        exp = _baseline_expand_from_order(order, pcore, present, DEFAULT_EXPAND_SIZE)
         dcore = pick_coverage_core6(
             exp,
             tsigs.get("auto_freq") or {},
@@ -1698,12 +1695,13 @@ def _coverage_set_from_signals(
     semi_lines: List[List[int]] | None = None,
     samples=None,
     held_round: int | None = None,
+    light: bool = False,
 ) -> Dict[str, Any]:
-    """core6 + expand(24|30) + recall-EV 커버리지.
+    """core6 + expand(24|30) + precision14 + recall-EV 커버리지.
 
     - core6: 주신호(집중) — 약신호 희석 방지.
     - expand: 전엔진+역산 순위 후 LOO가 고른 역산구조(스왑) · 필요 시 top30.
-    - share_opt: 확장망 위 recall-EV(상위 바닥) — 히어로·접목 단일 소스.
+    - light=True: 접목 LOO 백테스트용 — 중첩 LOO 생략(타임아웃 방지).
     """
     ranked = _rank_signal(
         sigs.get(signal_key, sigs["support"]),
@@ -1720,22 +1718,26 @@ def _coverage_set_from_signals(
         mode = DEFAULT_EXPAND_MODE
     # 진단용 expand_size 인자는 무시 — LOO 구조 정책이 방출 크기를 고른다.
     _ = expand_size
-    rescue_pol = _loo_expand_rescue_policy(
-        samples, exclude_keys=exclude_keys, held_round=held_round
-    ) if samples is not None else {
-        "ok": False,
-        "selected": "rescue24",
-        "emit_size": DEFAULT_EXPAND_SIZE,
-        "use_rescue": True,
-        "means": {},
-        "reason": "표본 없음 — 기본 역산구조@24",
-    }
+    if light or samples is None:
+        rescue_pol = {
+            "ok": False,
+            "selected": "rescue24",
+            "emit_size": DEFAULT_EXPAND_SIZE,
+            "use_rescue": True,
+            "means": {},
+            "reason": "light/표본없음 — 기본 역산구조@24",
+        }
+        axis_weights = None
+    else:
+        rescue_pol = _loo_expand_rescue_policy(
+            samples, exclude_keys=exclude_keys, held_round=held_round
+        )
+        axis_weights = _loo_axis_weights(
+            samples, exclude_keys=exclude_keys, held_round=held_round
+        )
     size = int(rescue_pol.get("emit_size") or DEFAULT_EXPAND_SIZE)
     size = max(DEFAULT_EXPAND_SIZE, min(WF_MAX_EXPAND_SIZE, size))
     use_rescue = bool(rescue_pol.get("use_rescue", True))
-    axis_weights = _loo_axis_weights(
-        samples, exclude_keys=exclude_keys, held_round=held_round
-    ) if samples is not None else None
     multi_order, multi_meta = _multi_engine_order(
         sigs,
         signal_key,
@@ -1763,15 +1765,18 @@ def _coverage_set_from_signals(
         "ok": rescue_pol.get("ok"),
     }
     # 핵심6 LOO: 주신호 top6 vs 확장망 안 양쪽지지 구간커버 — catchable 적중 큰 쪽
-    core, core_meta = _loo_select_core6(
-        samples,
-        held_round=held_round,
-        exclude_keys=exclude_keys,
-        signal_key=signal_key,
-        expand=expand,
-        primary_core=core,
-        sigs=sigs,
-    )
+    if light:
+        core_meta = {"selected": "primary", "rounds": 0, "reason": "light"}
+    else:
+        core, core_meta = _loo_select_core6(
+            samples,
+            held_round=held_round,
+            exclude_keys=exclude_keys,
+            signal_key=signal_key,
+            expand=expand,
+            primary_core=core,
+            sigs=sigs,
+        )
     expand = _ensure_core_subset(expand, core, size)
     expand = [n for n in expand if n in present][:size] if present else expand[:size]
     if len(expand) < size:
@@ -1783,18 +1788,19 @@ def _coverage_set_from_signals(
     boe_expand = _balance_expand(boe_order, core, present, size)
     from .graft_coverage import optimize_sharing_from_raw
 
-    share = optimize_sharing_from_raw(expand, core)
-    share_opt = list((share or {}).get("numbers") or [])[:6]
     # 강수·기대(~30) 출발 → LOO가 고른 K(<15)로 전엔진 역산 축소
-    prec_pol = _loo_precision_from_decade_policy(
-        samples, exclude_keys=exclude_keys, held_round=held_round
-    ) if samples is not None else {
-        "ok": False,
-        "selected_size": PRECISION_MAX,
-        "means": {},
-        "pool_catchable_mean": 0.0,
-        "reason": "표본 없음 — 기본 정밀 top14",
-    }
+    if light or samples is None:
+        prec_pol = {
+            "ok": False,
+            "selected_size": PRECISION_MAX,
+            "means": {},
+            "pool_catchable_mean": 0.0,
+            "reason": "light/표본없음 — 기본 정밀 top14",
+        }
+    else:
+        prec_pol = _loo_precision_from_decade_policy(
+            samples, exclude_keys=exclude_keys, held_round=held_round
+        )
     prec_size = int(prec_pol.get("selected_size") or PRECISION_MAX)
     precision14, prec_meta = _build_precision_from_decade(
         sigs, multi_order, multi_meta,
@@ -1808,11 +1814,21 @@ def _coverage_set_from_signals(
         "reason": prec_pol.get("reason"),
         "ok": prec_pol.get("ok"),
     }
-    # 정밀망 위 recall-EV (확장망 폴백)
-    prec_share = optimize_sharing_from_raw(precision14, core) if len(precision14) >= 6 else None
-    if prec_share and len(prec_share.get("numbers") or []) == 6:
-        share_opt = list(prec_share["numbers"])[:6]
-        share = prec_share
+    prec_share = None
+    if light:
+        # 백테스트/경량: EV 전수탐색 생략
+        share_opt = list(core)[:6]
+        share = {"numbers": share_opt, "mode": "light_core", "risk": 0.0, "ev_score": 0.0}
+    else:
+        share = optimize_sharing_from_raw(expand, core)
+        share_opt = list((share or {}).get("numbers") or [])[:6]
+        # 정밀망 위 recall-EV (확장망 폴백)
+        prec_share = (
+            optimize_sharing_from_raw(precision14, core) if len(precision14) >= 6 else None
+        )
+        if prec_share and len(prec_share.get("numbers") or []) == 6:
+            share_opt = list(prec_share["numbers"])[:6]
+            share = prec_share
     match_top = list(multi_meta.get("match_level_top12") or [])
     agree3 = list(multi_meta.get("cross_agree_ge3") or [])
     mode_label = (

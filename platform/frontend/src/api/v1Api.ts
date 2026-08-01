@@ -580,6 +580,13 @@ export const v1Api = {
   getReviewVerification: () =>
     fetchJson<ReviewVerificationResponse>('/api/v1/photo-analysis/review-verification', { timeoutMs: 90_000 }),
 
+  /** 강수·기대 접목 커버리지·EV (서버 권위 + LOO 백테스트). */
+  getGraftCoverage: (intent: 'review' | 'current_round' = 'review') =>
+    fetchJson<GraftCoverageResponse>(
+      `/api/v1/photo-analysis/graft-coverage?intent=${intent}`,
+      { timeoutMs: 90_000 },
+    ),
+
   /** 줄겹침(2·3·4번호) 패턴 역산 학습 — 보관 회차 겹침 조합 vs 실제 당첨. */
   getOverlapLearning: (opts?: { applyIntent?: 'review' | 'current_round' }) => {
     const q = new URLSearchParams();
@@ -1159,6 +1166,72 @@ export interface DecadeBalance {
   displaced?: number[];
   /** 구간균형이 새로 올린 번호 */
   promoted?: number[];
+}
+
+/** 강수·기대 접목 — 서버 권위 소스 + LOO 백테스트. */
+export interface GraftCoverageResponse {
+  ok: boolean;
+  reason?: string;
+  graft_build?: string;
+  intent?: 'review' | 'current_round';
+  round_no?: number;
+  current_round_no?: number;
+  review_round_no?: number;
+  data_used?: {
+    sheet_source?: string;
+    auto_line_count?: number;
+    semi_line_count?: number;
+    fixed_semi_excluded?: number[];
+    signal?: string;
+    signal_label?: string;
+    core_mode?: string;
+    core_mode_label?: string;
+    ev_mode?: string;
+    ev_mode_label?: string;
+    expand_mode?: string;
+    note?: string;
+  };
+  raw_top6?: number[];
+  core6?: number[];
+  decade_core6?: number[];
+  expand24?: number[];
+  share_opt?: number[];
+  share_meta?: {
+    numbers?: number[];
+    risk?: number;
+    ev_score?: number;
+    mode?: string;
+    min_from_top12?: number;
+  };
+  pure_ev6?: number[];
+  both_side_core?: number;
+  audit?: {
+    winning?: number[];
+    raw_top6_hits?: number;
+    decade_core6_hits?: number;
+    selected_core6_hits?: number;
+    expand24_hits?: number;
+    pure_ev6_hits?: number;
+    recall_ev6_hits?: number;
+    outside_core_in_expand?: number[];
+    outside_expand?: number[];
+  };
+  backtest?: {
+    ok?: boolean;
+    rounds?: number;
+    small_sample?: boolean;
+    means?: Record<string, number>;
+    random_baseline?: { top6?: number; top24?: number };
+    selected_core_mode?: string;
+    selected_ev_mode?: string;
+    advice?: string[];
+    per_round?: {
+      round_no: number;
+      hits: Record<string, number>;
+      outside_core_in_expand?: number[];
+    }[];
+  };
+  honesty?: string;
 }
 
 export interface ReviewVerificationResponse {

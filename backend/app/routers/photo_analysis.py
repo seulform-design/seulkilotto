@@ -394,6 +394,19 @@ def get_review_verification():
     return to_jsonable(build_review_verification())
 
 
+@router.get("/graft-coverage")
+def get_graft_coverage(
+    intent: str = Query("review", pattern="^(review|current_round)$"),
+):
+    """강수·기대 접목 커버리지·EV — 서버 권위 소스 + LOO 백테스트.
+
+    1:1 곱 → 구간커버 핵심6 · 확장24 · recall-EV. 프론트 로컬 캐시 회귀 방지.
+    """
+    from ..video_analysis.graft_coverage import build_graft_coverage
+
+    return to_jsonable(build_graft_coverage(intent=intent))
+
+
 @router.get("/overlap-learning")
 def get_overlap_learning(
     apply_intent: str = Query("current_round", pattern="^(review|current_round)$"),

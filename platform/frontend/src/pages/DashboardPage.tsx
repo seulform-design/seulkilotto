@@ -15,9 +15,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import LottoBall from '../components/LottoBall';
 import OddEvenBar from '../components/OddEvenBar';
-import FrequencyBarChart from '../components/FrequencyBarChart';
-import TemperatureMap from '../components/TemperatureMap';
-import CoOccurrencePanel from '../components/CoOccurrencePanel';
 import FavoritesPanel from '../components/FavoritesPanel';
 import WalkForwardPanel from '../components/WalkForwardPanel';
 import { v1Api } from '../api/v1Api';
@@ -136,92 +133,8 @@ export default function DashboardPage() {
             </Stack>
           </Paper>
 
-          {/* 홀짝 분석 */}
-          <Paper sx={{ p: 2, mb: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              홀짝 비율
-            </Typography>
-            {analysis.isLoading && <CircularProgress size={24} />}
-            {analysis.data && (
-              <Box sx={{ mt: 2 }}>
-                <OddEvenBar odd={analysis.data.odd_count} even={analysis.data.even_count} />
-                <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-                  <StatChip
-                    label="총합"
-                    value={`${analysis.data.sum_total} (${analysis.data.sum_band})`}
-                  />
-                  <StatChip
-                    label="연속 번호"
-                    value={analysis.data.has_consecutive ? '있음' : '없음'}
-                  />
-                </Stack>
-              </Box>
-            )}
-          </Paper>
-
-          {/* 번호 출현 빈도 */}
-          <Paper sx={{ p: 2, mb: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              번호 출현 빈도
-            </Typography>
-            <ToggleButtonGroup
-              exclusive
-              size="small"
-              value={recentN}
-              onChange={(_, v) => v && setRecentN(v)}
-              sx={{ mb: 2 }}
-            >
-              <ToggleButton value="all">전체</ToggleButton>
-              <ToggleButton value={50}>최근 50회</ToggleButton>
-              <ToggleButton value={100}>최근 100회</ToggleButton>
-            </ToggleButtonGroup>
-            {frequency.isLoading && <CircularProgress size={20} />}
-            {frequency.data && (
-              <>
-                {/* 바 차트 */}
-                <FrequencyBarChart
-                  items={frequency.data.items}
-                  totalRounds={frequency.data.total_rounds}
-                  highlight={latestNumSet}
-                />
-
-                {/* HOT / COLD 요약 */}
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mt: 2 }}>
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="caption" color="success.main">
-                      HOT TOP 5
-                    </Typography>
-                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-                      {hot.map((h) => (
-                        <Chip key={h.number} label={`${h.number} (${h.count}회)`} size="small" />
-                      ))}
-                    </Stack>
-                  </Box>
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="caption" color="info.main">
-                      COLD TOP 5
-                    </Typography>
-                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-                      {cold.map((c) => (
-                        <Chip
-                          key={c.number}
-                          label={`${c.number} (${c.count}회)`}
-                          size="small"
-                          variant="outlined"
-                        />
-                      ))}
-                    </Stack>
-                  </Box>
-                </Stack>
-              </>
-            )}
-          </Paper>
-
-          {/* 번호 온도 — Hot/Warm/Neutral/Cold/Frozen 5단계 */}
-          <TemperatureMap initialLookback={30} />
-
-          {/* 번호 동반 출현 — 각 번호의 짝꿍 통계 */}
-          <CoOccurrencePanel />
+          {/* 전역 통계(홀짝·빈도·온도·동반·후속)는 용지분석 ④ 학습 엔진의
+              'V4. 전역 통계 엔진'으로 이동했습니다 — 각 통계에 walk-forward 백테스트 판정 포함. */}
 
           {/* Walk-Forward 백테스트 — 시계열 적중 비교 */}
           <WalkForwardPanel />

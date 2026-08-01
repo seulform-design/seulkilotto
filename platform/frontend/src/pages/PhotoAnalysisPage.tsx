@@ -38,6 +38,7 @@ import FullHistoryBacktestPanel from '../components/FullHistoryBacktestPanel';
 import ReviewVerificationPanel from '../components/ReviewVerificationPanel';
 import FeatureLearningPanel from '../components/FeatureLearningPanel';
 import PatternMiningPanel from '../components/PatternMiningPanel';
+import EngineGlobalStatsPanel from '../components/EngineGlobalStatsPanel';
 import SavedLinesPanel, {
   GAME_LABELS,
   slipFromLines,
@@ -1930,6 +1931,7 @@ export default function PhotoAnalysisPage() {
         }
         validatedLearningSlot={
           <Stack spacing={1.5}>
+            <EngineGlobalStatsPanel />
             <FullHistoryBacktestPanel />
             <StatisticsSnapshotPanel />
             <FeatureLearningPanel sheetIntent={activeTab} />

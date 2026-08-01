@@ -24,7 +24,6 @@ import AppStatusBar from './components/AppStatusBar';
 import { setPhotoFocus } from './utils/photoFocus';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
-const PostOccurrencePage = lazy(() => import('./pages/PostOccurrencePage'));
 const RoundsPage = lazy(() => import('./pages/RoundsPage'));
 const PhotoAnalysisPage = lazy(() => import('./pages/PhotoAnalysisPage'));
 const FortunePickPage = lazy(() => import('./pages/FortunePickPage'));
@@ -49,7 +48,6 @@ const TABS = [
   { id: 'dashboard', label: '대시보드' },
   { id: 'rounds', label: '회차' },
   { id: 'photo', label: '용지 분석' },
-  { id: 'post', label: '후속 출현 통계' },
   { id: 'fortune', label: '👵 할매 예상' },
 ] as const;
 
@@ -71,6 +69,8 @@ function loadInitialTab(): TabId {
       window.localStorage.setItem(APP_TAB_STORAGE_KEY, 'photo');
       return 'photo';
     }
+    // 후속 출현 통계는 용지분석 ④ 학습 엔진(전역 통계 엔진)으로 이동 — 옛 딥링크는 용지분석으로.
+    if (raw === 'post') return 'photo';
     if (raw && TABS.some((t) => t.id === raw)) {
       return raw as TabId;
     }
@@ -118,7 +118,6 @@ export default function App() {
         <Suspense fallback={<PageFallback />}>
           {tab === 'dashboard' && <DashboardPage />}
           {tab === 'rounds' && <RoundsPage />}
-          {tab === 'post' && <PostOccurrencePage />}
           {tab === 'photo' && <PhotoAnalysisPage />}
           {tab === 'fortune' && <FortunePickPage />}
         </Suspense>

@@ -1514,13 +1514,13 @@ export default function SemiAutoComparePanel({
   });
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand24-v4', 'semi-freq-v1', 'pair-product'],
+    queryKey: ['v1-photo-review-verification', 'expand36-v5', 'semi-freq-v1', 'pair-product'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v3-raw-first', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v4-expand36', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,
@@ -3874,7 +3874,7 @@ export default function SemiAutoComparePanel({
       0,
       Math.min(30, Math.max(expand18.length, Number(cov?.expand_size) || 0)),
     );
-    const shareResult = ready ? optimizeForSharing(wide, Math.min(24, wide.length)) : null;
+    const shareResult = ready ? optimizeForSharing(wide, Math.min(36, wide.length)) : null;
     const shareOpt = shareResult ? shareResult.numbers.slice(0, 6) : [];
     const agreement = consensus?.agreement ?? {};
     const winsReady = Boolean(winningSet && winningSet.size > 0);
@@ -3971,52 +3971,6 @@ export default function SemiAutoComparePanel({
     winningSet,
     heroRecommendation.expand18,
   ]);
-
-  /** 복기 당첨번호별 포착 레이어 — 검증/접목/EV가 어디를 잡았는지 한눈에 */
-  const reviewCatchMap = useMemo(() => {
-    if (!compareWinning || !winningSet || winningSet.size === 0) return null;
-    const wins = [...winningSet].sort((a, b) => a - b);
-    const heroCore = new Set(heroRecommendation.core6);
-    const heroExp = new Set(heroRecommendation.expand18);
-    const heroEv = new Set(heroRecommendation.shareOpt);
-    const g = graftCoverageEV && !graftCoverageEV.pending ? graftCoverageEV : null;
-    const graftCore = new Set(g?.core6 ?? []);
-    const graftExp = new Set(g?.expand ?? []);
-    const graftEv = new Set(g?.shareOpt ?? []);
-    const rows = wins.map((n) => {
-      const layers: string[] = [];
-      if (heroCore.has(n)) layers.push('검증핵심');
-      if (heroEv.has(n)) layers.push('검증EV');
-      if (heroExp.has(n) && !heroCore.has(n)) layers.push('검증확장');
-      if (graftCore.has(n)) layers.push('접목핵심');
-      if (graftEv.has(n)) layers.push('접목EV');
-      if (graftExp.has(n) && !graftCore.has(n)) layers.push('접목확장');
-      return {
-        n,
-        layers,
-        inHeroExpand: heroExp.has(n),
-        inGraftExpand: graftExp.has(n),
-        missed: !heroExp.has(n),
-      };
-    });
-    const heroExpandHits = rows.filter((r) => r.inHeroExpand).length;
-    const graftExpandHits = rows.filter((r) => r.inGraftExpand).length;
-    const heroCoreHits = rows.filter((r) => heroCore.has(r.n)).length;
-    const graftCoreHits = rows.filter((r) => graftCore.has(r.n)).length;
-    const bestLayer =
-      heroExpandHits >= graftExpandHits
-        ? `검증 확장${heroRecommendation.expandSize}`
-        : '1:1 접목 확장24';
-    return {
-      rows,
-      heroExpandHits,
-      graftExpandHits,
-      heroCoreHits,
-      graftCoreHits,
-      bestLayer,
-      missed: rows.filter((r) => r.missed).map((r) => r.n),
-    };
-  }, [compareWinning, winningSet, heroRecommendation, graftCoverageEV]);
 
   // 종합분석 Venus/학습 추첨용 — intent별 스냅샷(복기·이번회차 분리 저장).
   useEffect(() => {
@@ -5769,86 +5723,6 @@ export default function SemiAutoComparePanel({
               </Typography>
             </Alert>
           )}
-          {reviewCatchMap && (
-            <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover', mb: 1, border: '1px solid', borderColor: 'success.dark' }}>
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mb: 0.75 }}>
-                <Typography variant="caption" fontWeight={800}>
-                  당첨번호 포착 맵
-                </Typography>
-                <Chip
-                  size="small"
-                  color="success"
-                  label={`검증확장 ${reviewCatchMap.heroExpandHits}/6`}
-                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-                />
-                <Chip
-                  size="small"
-                  color="primary"
-                  variant="outlined"
-                  label={`검증핵심 ${reviewCatchMap.heroCoreHits}/6`}
-                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-                />
-                {graftCoverageEV && !graftCoverageEV.pending && (
-                  <>
-                    <Chip
-                      size="small"
-                      color="info"
-                      variant="outlined"
-                      label={`접목확장 ${reviewCatchMap.graftExpandHits}/6`}
-                      sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-                    />
-                    <Chip
-                      size="small"
-                      variant="outlined"
-                      label={`접목핵심 ${reviewCatchMap.graftCoreHits}/6`}
-                      sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-                    />
-                  </>
-                )}
-                <Chip
-                  size="small"
-                  color="warning"
-                  variant="outlined"
-                  label={`넓은 그물 우세: ${reviewCatchMap.bestLayer}`}
-                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-                />
-              </Stack>
-              <Stack spacing={0.5}>
-                {reviewCatchMap.rows.map((r) => (
-                  <Stack
-                    key={`catch-${r.n}`}
-                    direction="row"
-                    spacing={0.5}
-                    alignItems="center"
-                    flexWrap="wrap"
-                    useFlexGap
-                  >
-                    <LottoBall number={r.n} size={ENGINE_BALL.list} />
-                    {r.layers.length > 0 ? (
-                      r.layers.map((L) => (
-                        <Chip
-                          key={`${r.n}-${L}`}
-                          size="small"
-                          color={L.includes('핵심') ? 'primary' : L.includes('EV') ? 'secondary' : 'success'}
-                          variant={L.startsWith('접목') ? 'outlined' : 'filled'}
-                          label={L}
-                          sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-                        />
-                      ))
-                    ) : (
-                      <Typography variant="caption" color="warning.main" sx={{ fontSize: 10, fontWeight: 700 }}>
-                        확장망 밖 — 엔진 순위 한계
-                      </Typography>
-                    )}
-                  </Stack>
-                ))}
-              </Stack>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, fontSize: 9.5 }}>
-                밝은 칩 = 서버 검증 레이어 · 외곽 칩 = 1:1 접목 레이어. 당첨을 더 잡으려면{' '}
-                <strong>핵심 집중보다 확장망</strong>을 우선하고, 접목이 검증보다 넓게 담으면 아래 비교를 펼치세요.
-              </Typography>
-            </Box>
-          )}
           {heroRecommendation.showWinning && heroRecommendation.winsReady && heroRecommendation.outsideExpand.length > 0 && (
             <Stack spacing={0.35} sx={{ mb: 0.75 }}>
               <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
@@ -5877,18 +5751,21 @@ export default function SemiAutoComparePanel({
           )}
           <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>핵심 6</Typography>
+            {heroRecommendation.winsReady && heroRecommendation.core6HitCount != null && (
+              <Chip
+                size="small"
+                color={heroRecommendation.core6HitCount >= 2 ? 'success' : 'default'}
+                label={`당첨 ${heroRecommendation.core6HitCount}/6`}
+                sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+              />
+            )}
             {heroRecommendation.core6.map((n) => {
               const isWin = Boolean(heroRecommendation.winsReady && winningSet?.has(n));
-              // 당첨 미로드: 전부 dim — 전부 밝음 = 당첨처럼 보이는 착시 방지
               const dimmed = heroRecommendation.contrastPending
                 || Boolean(heroRecommendation.winsReady && !isWin);
               return (
                 <Box key={`hero-c-${n}`} sx={{ textAlign: 'center', minWidth: 30 }}>
-                  <LottoBall
-                    number={n}
-                    size={ENGINE_BALL.hero}
-                    dimmed={dimmed}
-                  />
+                  <LottoBall number={n} size={ENGINE_BALL.hero} dimmed={dimmed} />
                   {heroRecommendation.agreement[String(n)] != null && (
                     <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
                       {heroRecommendation.agreement[String(n)]}신호
@@ -5903,6 +5780,15 @@ export default function SemiAutoComparePanel({
           {heroRecommendation.shareOpt.length === 6 && (
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
               <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>분산 최적</Typography>
+              {heroRecommendation.winsReady && winningSet && (
+                <Chip
+                  size="small"
+                  color="secondary"
+                  variant="outlined"
+                  label={`당첨 ${heroRecommendation.shareOpt.filter((n) => winningSet.has(n)).length}/6`}
+                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                />
+              )}
               {heroRecommendation.shareOpt.map((n) => (
                 <LottoBall
                   key={`hero-s-${n}`}
@@ -5922,11 +5808,19 @@ export default function SemiAutoComparePanel({
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>
               확장 {heroRecommendation.expandSize}
             </Typography>
+            {heroRecommendation.winsReady && heroRecommendation.expandHitCount != null && (
+              <Chip
+                size="small"
+                color={heroRecommendation.expandHitCount >= 5 ? 'success' : 'info'}
+                label={`당첨 ${heroRecommendation.expandHitCount}/6`}
+                sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+              />
+            )}
             {heroRecommendation.expand18.map((n) => (
               <LottoBall
                 key={`hero-e-${n}`}
                 number={n}
-                size={ENGINE_BALL.list}
+                size={ENGINE_BALL.table}
                 dimmed={
                   heroRecommendation.contrastPending
                   || Boolean(heroRecommendation.winsReady && winningSet && !winningSet.has(n))
@@ -5938,10 +5832,10 @@ export default function SemiAutoComparePanel({
             {compareWinning && heroRecommendation.winsReady
               ? `밝은 공 = ${heroRecommendation.serverRound ?? effectiveRound ?? '?'}회 실제 당첨 · 회색 = 비당첨. `
               : compareWinning
-                ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다(로딩 중 회색 = 미대조). '
-                : '이번회차 탭: 미추첨이라 당첨 대조 없음. '}
-            핵심 6 = 집중 픽 · 확장 {heroRecommendation.expandSize} = 넓은 그물 · 분산 최적 = 공동당첨 회피.
-            {' '}1:1 접목·Venus는 아래 비교/추첨. 역산·학습·상세 검증은 <strong>④ 엔진</strong>.
+                ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다. '
+                : '이번회차 탭: 미추첨 · 당첨 대조 없음. '}
+            핵심=집중 · 분산최적=공동당첨 회피 · 확장{heroRecommendation.expandSize}=넓은 그물(중하위 순위 용지번호 포함).
+            {' '}상세 검증은 <strong>④ 엔진</strong>.
           </Typography>
 
           {/* ── 1:1 접목 비교 (구 접목 단독 섹션 통합) ── */}
@@ -6066,9 +5960,6 @@ export default function SemiAutoComparePanel({
                 {showCompositeEmbed ? '접기 ▲' : '펼치기 ▼'}
               </Button>
             </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.35, fontSize: 9.5 }}>
-              합의 상위·상세예상 공 목록은 위 검증 확장과 중복이라 숨깁니다. 추첨 풀 = 검증 확장망.
-            </Typography>
             {showCompositeEmbed && (
               <Box sx={{ mt: 1 }}>
                 <Suspense

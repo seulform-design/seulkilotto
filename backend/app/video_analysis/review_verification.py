@@ -167,14 +167,16 @@ EXPAND_MODE_LABELS = {
     "merge_raw": "단일∪min-rank 병합 (넓은 recall)",
 }
 
-# WF 진단용 크기 후보(18 vs 24 리프트). 실제 방출 그물은 항상 DEFAULT_EXPAND_SIZE.
-# 1234 실측: support top18=3/6 · top24=5/6 (19·35 = 지지 23–24위) — top18 선택 시 절단.
-EXPAND_SIZE_CANDIDATES = (18, 24)
-DEFAULT_EXPAND_SIZE = 24
+# WF 진단용 크기 후보. 1235 실측: 당첨 7 = 합산 36위 → top24 밖.
+# top36 으로 용지 등장·중하위 순위 당첨(가까운 미포착대)을 그물에 담는다.
+EXPAND_SIZE_CANDIDATES = (24, 30, 36)
+DEFAULT_EXPAND_SIZE = 36
+MIN_EXPAND_SIZE = 24
+MAX_EXPAND_SIZE = 36
 DEFAULT_EXPAND_MODE = "single_raw"
-# 배포 스모크·프론트 캐시 무효 확인용(강제 top24 방출).
-# v4: pair_product(로컬 1:1 패리티) + 복기=LOO신호·merge_raw(단일신호 절단 보정)
-COVERAGE_BUILD_ID = "expand24-v4"
+# 배포 스모크·프론트 캐시 무효 확인용.
+# v5: 확장 top36 (순위 25–36 용지 당첨 절단 보정) + WF size 실제 반영(하한 24)
+COVERAGE_BUILD_ID = "expand36-v5"
 
 
 def _merge_expand_order(
@@ -197,6 +199,37 @@ def _merge_expand_order(
     return order
 
 
+def _ticket_tail_rescue(
+    ranked: List[int],
+    present: set,
+    expand: List[int],
+    *,
+    size: int,
+) -> List[int]:
+    """용지 등장 번호가 그물 밖에 남아 있으면 테일부터 교체·채움(당첨 미사용).
+
+    topK 신호만 쓰면 용지에는 있으나 중하위 순위인 번호(1235: 7≈36위)가 잘린다.
+    비등장 번호를 밀어내고 용지 등장분을 우선 편입한다.
+    """
+    size = max(6, min(MAX_EXPAND_SIZE, int(size)))
+    out = [n for n in expand if n in present][:size]
+    seen = set(out)
+    for n in ranked:
+        if len(out) >= size:
+            break
+        if n in present and n not in seen:
+            out.append(n)
+            seen.add(n)
+    # present 가 size 미만이면 신호 순위로 채움
+    for n in ranked:
+        if len(out) >= size:
+            break
+        if n not in seen:
+            out.append(n)
+            seen.add(n)
+    return out[:size]
+
+
 def _expand_from_mode(
     ranked: List[int],
     boe_order: List[int],
@@ -207,7 +240,7 @@ def _expand_from_mode(
     size: int = DEFAULT_EXPAND_SIZE,
 ) -> List[int]:
     """expand 넓은 그물 구성 모드 — walk-forward 가 고른 (mode, size) 를 그대로 재현."""
-    size = max(6, min(30, int(size)))
+    size = max(6, min(MAX_EXPAND_SIZE, int(size)))
     if mode == "single_raw":
         return ranked[:size]
     if mode == "single_balanced":
@@ -385,12 +418,11 @@ def _walkforward_expand_policy(
     best_mean = max(means.values()) if means else 0.0
     tied = [pair for pair in prefer_tie if means.get(f"{pair[0]}@{pair[1]}") == best_mean]
     selected_mode, selected_size = tied[0] if tied else (DEFAULT_EXPAND_MODE, DEFAULT_EXPAND_SIZE)
-    legacy_key = "boe_balanced@18"
-    legacy = means.get(legacy_key, means.get("boe_balanced@24", 0.0))
+    legacy_key = "boe_balanced@24"
+    legacy = means.get(legacy_key, means.get("boe_balanced@36", 0.0))
     selected_key = f"{selected_mode}@{selected_size}"
     random_base = round(selected_size * 6 / 45, 3)
-    # top24 가 top18 최고보다 유의하게 크면 크기 승격 근거로 고지
-    lift_24 = means_by_size.get("24", 0) - means_by_size.get("18", 0)
+    lift_36 = means_by_size.get("36", 0) - means_by_size.get("24", 0)
     return {
         "ok": True,
         "selected_mode": selected_mode,
@@ -402,7 +434,9 @@ def _walkforward_expand_policy(
         "random_baseline": random_base,
         "means": means,
         "means_by_size": means_by_size,
-        "size_lift_24_vs_18": round(lift_24, 3),
+        "size_lift_36_vs_24": round(lift_36, 3),
+        # 하위호환 키(옛 UI)
+        "size_lift_24_vs_18": round(lift_36, 3),
         "per_round": per_round,
         "beats_random": best_mean > random_base,
         "beats_legacy_boe_balanced": means.get(selected_key, 0) > legacy + 1e-9,
@@ -956,8 +990,8 @@ def _coverage_set_from_signals(
     """단일 신호 랭킹으로 core6 + expand 넓은 그물 커버리지 세트를 만든다.
 
     - core6: 최고 단일신호(집중 픽) — 합의/평균은 약신호가 희석하므로 단일 우선.
-    - expand: walk-forward 가 고른 (mode, size). size=24 기본 — top18이 자르던
-      가까운 미포착대(예: 1234회 19·35 = 지지 23–24위)를 담는다.
+    - expand: walk-forward (mode, size). 기본 top36 — top24가 자르던
+      중하위 순위 용지 당첨(예: 1235회 7 = 합산 36위)을 담는다. 하한 24.
     """
     ranked = _rank_signal(
         sigs.get(signal_key, sigs["support"]),
@@ -972,21 +1006,23 @@ def _coverage_set_from_signals(
     mode = expand_mode or DEFAULT_EXPAND_MODE
     if mode not in EXPAND_MODE_LABELS:
         mode = DEFAULT_EXPAND_MODE
-    # WF가 18을 골라도 방출 그물은 항상 24 — top18 절단 회귀 금지.
-    _ = expand_size  # 호출부 하위호환(무시)
-    size = DEFAULT_EXPAND_SIZE
+    # WF size 반영 · 하한 24(좁은 그물 회귀 금지) · 상한 36
+    req = int(expand_size) if expand_size is not None else DEFAULT_EXPAND_SIZE
+    size = max(MIN_EXPAND_SIZE, min(MAX_EXPAND_SIZE, req))
     expand = _ensure_core_subset(
         _expand_from_mode(ranked, boe_order, core, present, mode, size=size),
         core,
         size,
     )
+    # 용지 등장분이 topK 바로 밖에 있으면 테일 슬롯으로 편입(당첨 미사용·누수 없음).
+    expand = _ticket_tail_rescue(ranked, present, expand, size=size)
     boe_expand = _balance_expand(boe_order, core, present, size)
     return {
         "signal": signal_key,
         "signal_label": _SIGNAL_LABELS.get(signal_key, signal_key),
         "selected_by": selected_by,
         "core6": core,
-        # 하위호환: 필드명 expand18 유지 — 실제 길이는 expand_size(18|24).
+        # 하위호환: 필드명 expand18 유지 — 실제 길이는 expand_size.
         "expand18": expand,
         "expand_size": size,
         "expand18_mode": mode,
@@ -1000,11 +1036,10 @@ def _coverage_set_from_signals(
         "decade_balance": _decade_balance_info(expand, precision18, present),
         "excluded_signals": list(exclude_keys or []),
         "coverage_build": COVERAGE_BUILD_ID,
-        # 진단: 이 회차 신호 top18 vs top24 적중 차이(당첨 알 때 복기 전용).
         "precision_gap_hint": {
-            "top18": 18,
             "top24": 24,
-            "note": "가까운 미포착대는 top18~top24에 몰리는 경우가 많음",
+            "top36": 36,
+            "note": "가까운 미포착대는 top24~top36(용지 중하위 순위)에 몰리는 경우가 많음",
         },
     }
 
@@ -1405,11 +1440,13 @@ def build_review_verification() -> Dict[str, Any]:
     if "auto_freq" not in ban_keys:
         ban_keys.append("auto_freq")
 
-    # expand 구성 모드 — 보관 회차 LOO walk-forward 로 채택(구간균형이 recall 깎는지 검증).
-    # 크기는 진단만 하고 방출은 항상 DEFAULT_EXPAND_SIZE(24).
+    # expand 구성 모드·크기 — 보관 회차 LOO walk-forward. 하한 24·상한 36.
     expand_wf = _walkforward_expand_policy(_samples, exclude_keys=ban_keys)
     expand_mode = str(expand_wf.get("selected_mode") or DEFAULT_EXPAND_MODE)
-    expand_size = DEFAULT_EXPAND_SIZE
+    expand_size = max(
+        MIN_EXPAND_SIZE,
+        min(MAX_EXPAND_SIZE, int(expand_wf.get("selected_size") or DEFAULT_EXPAND_SIZE)),
+    )
     # 복기 expand: 단일신호 절단 보정(merge_raw). forward 는 WF 모드 유지.
     review_expand_mode = _review_expand_mode(expand_mode)
 
@@ -1433,9 +1470,10 @@ def build_review_verification() -> Dict[str, Any]:
     win_set = set(winning)
     review_coverage_set["pair_product_diag"] = {
         "core6": pair_ranked[:6],
-        "expand24": pair_ranked[:24],
+        "expand24": pair_ranked[:expand_size],
         "core6_count": len(win_set & set(pair_ranked[:6])),
-        "expand24_count": len(win_set & set(pair_ranked[:24])),
+        "expand24_count": len(win_set & set(pair_ranked[:expand_size])),
+        "expand_size": expand_size,
         "note": "로컬 히어로 1:1 핵심식 패리티(매치보너스·세트·평행 제외)",
     }
     review_consensus_coverage = _consensus_coverage(review_sigs, leaderboard)

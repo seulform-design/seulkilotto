@@ -12,8 +12,8 @@ import math
 from itertools import combinations
 from typing import Any, Dict, List, Sequence, Tuple
 
-# v6: 확장24 = review_verification 전엔진교차검증+역산 접목과 동일 소스. 크기↑ 금지.
-GRAFT_BUILD_ID = "graft-v6-reverse-graft"
+# v7: 확장 = review_verification LOO 역산구조(rescue24|30)와 동일 소스.
+GRAFT_BUILD_ID = "graft-v7-loo-rescue"
 
 DECADE_LABELS = ("단번대", "10번대", "20번대", "30번대", "40번대")
 

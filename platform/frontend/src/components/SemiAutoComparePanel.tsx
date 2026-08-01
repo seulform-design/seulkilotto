@@ -1514,13 +1514,13 @@ export default function SemiAutoComparePanel({
   });
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand24-v7-reverse-graft', 'semi-freq-v1', 'pair-product'],
+    queryKey: ['v1-photo-review-verification', 'expand24-v8-loo-rescue', 'semi-freq-v1', 'pair-product'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v6-reverse-graft', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v7-loo-rescue', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,
@@ -3618,7 +3618,7 @@ export default function SemiAutoComparePanel({
         outsideCoreInExpand: audit?.outside_core_in_expand ?? [],
         dataUsed: api.data_used ?? null,
         backtest: api.backtest ?? null,
-        graftBuild: api.graft_build ?? 'graft-v6-reverse-graft',
+        graftBuild: api.graft_build ?? 'graft-v7-loo-rescue',
         honesty: api.honesty ?? null,
         rankSource: 'api_pair_product' as const,
         decadeDropped: audit?.decade_dropped_vs_raw ?? [],
@@ -3787,6 +3787,8 @@ export default function SemiAutoComparePanel({
       coverageBuild: '' as string,
       reverseGraftNote: '' as string,
       crossAgreeGe3: [] as number[],
+      rescuedIn: [] as number[],
+      rescuePolicy: '' as string,
     };
     const rv = reviewVerificationQuery.data;
     const clean = (arr: number[] | undefined) =>
@@ -3891,11 +3893,21 @@ export default function SemiAutoComparePanel({
       reverse_graft?: {
         note?: string;
         cross_agree_ge3?: number[];
+        rescue?: {
+          swapped_in?: number[];
+          policy?: { selected?: string; reason?: string };
+        };
       };
       coverage_build?: string;
     } | undefined)?.reverse_graft;
     const coverageBuild = String(
       (cov as { coverage_build?: string } | undefined)?.coverage_build ?? '',
+    );
+    const rescuedIn = clean(reverseGraft?.rescue?.swapped_in).slice(0, 8);
+    const rescuePolicy = String(
+      reverseGraft?.rescue?.policy?.selected
+      ?? reverseGraft?.rescue?.policy?.reason
+      ?? '',
     );
     const agreement = consensus?.agreement ?? {};
     const winsReady = Boolean(winningSet && winningSet.size > 0);
@@ -3968,6 +3980,8 @@ export default function SemiAutoComparePanel({
       coverageBuild,
       reverseGraftNote: reverseGraft?.note ?? '',
       crossAgreeGe3: clean(reverseGraft?.cross_agree_ge3).slice(0, 18),
+      rescuedIn,
+      rescuePolicy,
     };
   }, [
     compareWinning,
@@ -5736,8 +5750,8 @@ export default function SemiAutoComparePanel({
                 {heroRecommendation.goodSignalCount > 0
                   ? ` 아래 핵심 6은 검증 통과 신호 ${heroRecommendation.goodSignalCount}개가 함께 가리킨 합의입니다.`
                   : ` 아래 핵심 6은 주신호(${heroRecommendation.signalLabel}) 상위6입니다.`}{' '}
-                <strong>확장24는 전엔진 교차검증 + 일치레벨 역산 접목</strong>
-                (주신호·1:1곱·min-rank·구간·조합·균형·일치레벨) — 그물만 키우지 않습니다.
+                <strong>확장은 복기 전회차 LOO 역산구조</strong>
+                (전엔진·구간기대·일치레벨·중간양쪽지지 스왑 구출, 필요 시 top30) — 용지 등장 당첨이 합의에 밀려 잘리지 않게 합니다.
                 {heroRecommendation.expandModeLabel
                   ? ` (${heroRecommendation.expandModeLabel})`
                   : ''}
@@ -5746,6 +5760,12 @@ export default function SemiAutoComparePanel({
                   : ''}
                 {heroRecommendation.selectedBy === 'loo_held'
                   ? ' 신호=이 회차 제외 LOO(다회차 multi가 이 용지와 어긋나 로컬 1:1보다 못 잡던 회귀 보정).'
+                  : ''}
+                {heroRecommendation.rescuePolicy
+                  ? ` LOO구조=${heroRecommendation.rescuePolicy}.`
+                  : ''}
+                {heroRecommendation.rescuedIn.length > 0
+                  ? ` 역산구출 편입: ${heroRecommendation.rescuedIn.join(', ')}.`
                   : ''}
                 {heroRecommendation.crossAgreeGe3.length > 0
                   ? ` 교차합의≥3: ${heroRecommendation.crossAgreeGe3.slice(0, 12).join(', ')}.`
@@ -5868,7 +5888,7 @@ export default function SemiAutoComparePanel({
               : compareWinning
                 ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다. '
                 : '이번회차 탭: 미추첨 · 당첨 대조 없음. '}
-            핵심=주신호 집중 · 분산최적=공동당첨 회피 · 확장{heroRecommendation.expandSize}=다중엔진 합의 그물.
+            핵심=LOO 주신호/구간커버 · 분산최적=공동당첨 회피 · 확장{heroRecommendation.expandSize}=LOO 역산구조 그물.
             {' '}상세 검증은 <strong>④ 엔진</strong>.
           </Typography>
 
@@ -6289,9 +6309,17 @@ export default function SemiAutoComparePanel({
                   <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.25 }}>
                     <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
                       <Typography variant="caption" fontWeight={800}>
-                        🎯 최종 강수·기대수 (구간별 신호 종합)
+                        ★ 강수 &amp; 기대수 (구간별 · 신호 종합)
                       </Typography>
-                      <Chip size="small" variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회`} sx={{ height: 18, fontSize: 9 }} />
+                      <Chip size="small" variant="outlined" label={`${intentSectionLabel} ${effectiveRound ?? '?'}회 · 1:1 반복도×학습×이월`} sx={{ height: 18, fontSize: 9 }} />
+                      {decadePattern?.strongWinHit != null && (
+                        <Chip
+                          size="small"
+                          color={decadePattern.strongWinHit >= 4 ? 'success' : decadePattern.strongWinHit >= 2 ? 'warning' : 'default'}
+                          label={`강수 ${decadePattern.strongCount}개 중 당첨 ${decadePattern.strongWinHit}개 (무작위≈${Math.round(decadePattern.strongCount * 6 / 45 * 10) / 10})`}
+                          sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                        />
+                      )}
                     </Stack>
                     {carryoverQuery.data?.ok && carryoverQuery.data.backtest?.by_k?.['6'] && (
                       <Chip
@@ -6321,9 +6349,10 @@ export default function SemiAutoComparePanel({
                     )}
                   </Stack>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10, mb: 0.5 }}>
-                    위 1:1 반복도를 시작점으로, <strong>검증 학습</strong>·<strong>이월</strong>이 겹치는 번호를 구간별로 위로 재정렬합니다.
+                    구간별 <strong>1:1 반복도</strong>(강수 상위3·기대 다음3)에 <strong>검증 학습</strong>·<strong>이월</strong> 겹침을 더해
+                    위로 재정렬합니다. 숫자 아래 = 자동/반자동 줄수 + 신호배지(🔁🧠↪).
                     {compareWinning
-                      ? ` 밝은 공 = ${effectiveRound ?? '?'}회 실제 당첨.`
+                      ? ` 밝은 공 = ${effectiveRound ?? '?'}회 실제 당첨 · 회색 = 비당첨.`
                       : ' 이번회차(미추첨) — 당첨 하이라이트 없음.'}{' '}
                     확률 불변(넓은 합의 표시).
                   </Typography>
@@ -6334,8 +6363,11 @@ export default function SemiAutoComparePanel({
                         <Typography variant="caption" color="error.light" sx={{ fontSize: 10, fontWeight: 700 }}>강수</Typography>
                         {b.strong.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>—</Typography>}
                         {b.strong.map((s) => (
-                          <Box key={`fss-${s.number}`} sx={{ textAlign: 'center', minWidth: 30 }}>
+                          <Box key={`fss-${s.number}`} sx={{ textAlign: 'center', minWidth: 34 }}>
                             <LottoBall number={s.number} size={ENGINE_BALL.list} dimmed={compareWinning && winningSet ? !s.winning : false} />
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
+                              {s.auto}/{s.semi}{s.maxMatch >= 3 ? `·${s.maxMatch}` : ''}
+                            </Typography>
                             <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1.1, color: s.agreement >= 2 ? 'warning.light' : 'text.disabled', fontWeight: s.agreement >= 2 ? 700 : 400 }}>
                               {s.glyphs}
                             </Typography>

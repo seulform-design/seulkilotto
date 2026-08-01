@@ -65,10 +65,11 @@ def test_walkforward_picks_expand_mode_and_coverage_emits_24():
     assert set(cov["core6"]).issubset(set(cov["expand18"]))
     assert len(cov["expand18"]) == DEFAULT_EXPAND_SIZE == 24
     assert cov["expand_size"] == 24
-    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v7-reverse-graft"
-    assert cov["expand18_mode"] == "multi_engine_reverse_graft"
+    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v8-loo-rescue"
+    assert cov["expand18_mode"] == "loo_reverse_rescue"
     assert "reverse_graft" in cov
     assert len(cov.get("share_opt") or []) == 6
+    assert cov["expand_size"] in (24, 30)
     assert "multi_engine" in cov
 
     audit = _coverage_hit_audit(sigs, cov, s1.winning, exclude_keys=ban)
@@ -114,3 +115,84 @@ def test_decade_expected_promoted_into_expand24():
 
 def test_default_expand_is_24():
     assert DEFAULT_EXPAND_SIZE == 24
+
+
+def test_loo_rescue_pulls_mid_tier_winners_into_expand():
+    """빽빽한 용지에서 중하위 당첨(6·7)이 합의에 밀려도 역산구조로 확장망에 들어온다."""
+    from app.video_analysis.review_verification import (
+        _apply_expand_rescue,
+        _baseline_expand_from_order,
+        _loo_expand_rescue_policy,
+    )
+
+    # 고빈도 노이즈로 present>24 · 당첨 6·7은 저빈도 양쪽 등장
+    noise_a = [
+        (10 + i % 5, 20 + i % 5, 30 + i % 5, 12, 22, 32)
+        for i in range(12)
+    ]
+    noise_s = [
+        (11 + i % 5, 21 + i % 5, 31 + i % 5, 14, 24, 34)
+        for i in range(12)
+    ]
+    auto = _lines(
+        *noise_a,
+        *[(5, 9, 13, 16, 23, 27)] * 4,
+        *[(16, 23, 27, 31, 32, 34)] * 3,
+        (6, 11, 15, 39, 16, 23),
+        (7, 11, 15, 43, 27, 31),
+        (6, 7, 11, 15, 39, 43),
+    )
+    semi = _lines(
+        *noise_s,
+        *[(5, 9, 13, 16, 23, 27)] * 4,
+        *[(16, 23, 27, 31, 32, 34)] * 3,
+        (6, 11, 15, 39, 16, 23),
+        (7, 11, 15, 43, 27, 31),
+        (6, 7, 11, 15, 39, 43),
+    )
+    win = [6, 7, 11, 15, 39, 43]
+    s1 = _sample(1201, win, auto, semi)
+    s2 = _sample(
+        1202,
+        [5, 9, 16, 23, 27, 31],
+        _lines(*[(5, 9, 16, 23, 27, 31)] * 5, (10, 11, 12, 20, 21, 22)),
+        _lines(*[(5, 9, 16, 23, 27, 31)] * 5, (13, 14, 15, 24, 25, 26)),
+    )
+    s3 = _sample(
+        1203,
+        [10, 14, 20, 24, 30, 34],
+        _lines(*[(10, 14, 20, 24, 30, 34)] * 5, (1, 2, 3, 4, 5, 6)),
+        _lines(*[(10, 14, 20, 24, 30, 34)] * 5, (7, 8, 9, 11, 12, 13)),
+    )
+    samples = [s1, s2, s3]
+    ban = ["auto_freq"]
+    pol = _loo_expand_rescue_policy(samples, exclude_keys=ban, held_round=1201)
+    assert pol["ok"] is True
+    assert pol["selected"] in ("baseline24", "rescue24", "rescue30")
+
+    sigs = _signals(auto, semi)
+    present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
+    assert len(present) >= 20
+    cov = _coverage_set_from_signals(
+        sigs,
+        signal_key="pair_product",
+        selected_by="loo_held",
+        exclude_keys=ban,
+        auto_lines=auto,
+        semi_lines=semi,
+        samples=samples,
+        held_round=1201,
+    )
+    order, meta = _multi_engine_order(
+        sigs, "pair_product", exclude_keys=ban, auto_lines=auto, semi_lines=semi
+    )
+    base = _baseline_expand_from_order(order, cov["core6"], present, 24)
+    rescued, rmeta = _apply_expand_rescue(
+        base, order, meta, present, cov["core6"], size=cov["expand_size"], sigs=sigs
+    )
+    # 구출 후 용지 등장 당첨은 baseline 이상
+    assert len(set(win) & set(rescued)) >= len(set(win) & set(base))
+    # 커버리지 방출도 6·7 중 최소 하나 이상(또는 이미 baseline에 있으면 유지)
+    assert len(set(win) & set(cov["expand18"])) >= 4
+    assert cov["expand_size"] in (24, 30)
+    assert "rescue" in (cov.get("reverse_graft") or {})

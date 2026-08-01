@@ -174,8 +174,11 @@ DEFAULT_EXPAND_SIZE = 24
 # 방출 고정 24. WF 후보는 진단만(30까지) — 방출에 selected_size 쓰지 않음.
 WF_MAX_EXPAND_SIZE = 30
 DEFAULT_EXPAND_MODE = "single_raw"
-# v7: 전엔진 교차검증 + 역산(일치레벨) 접목 → core6/expand24/recall-EV 단일 방출
-COVERAGE_BUILD_ID = "expand24-v7-reverse-graft"
+# v8: LOO 백테스트로 역산구조·크기(24/30) 선택 → 용지 등장 당첨을 확장망에 구출
+COVERAGE_BUILD_ID = "expand24-v8-loo-rescue"
+RESCUE_MAX_SWAPS = 6
+RESCUE_GROW_SIZE = 30
+RESCUE_SIZE_LIFT_BAR = 0.25  # LOO mean hits: grow30이 +0.25 이상일 때만 30 방출
 
 
 def _merge_expand_order(
@@ -369,6 +372,14 @@ def _multi_engine_order(
     bal_pos = {n: i for i, n in enumerate(bal)}
     match_pos = {n: i for i, n in enumerate(match_order)}
     match_max = max(match_sc.values()) if match_sc else 0.0
+    sf = sigs.get("semi_freq") or {}
+    # 중간 지지대(양쪽 등장·빈도 중위) — 모듈 실측: 당첨이 최상위가 아닌 중간에 몰림
+    both_side = [
+        n for n in range(1, 46)
+        if float(af.get(n, 0)) > 0 and float(sf.get(n, 0)) > 0
+    ]
+    both_side.sort(key=lambda n: (-float(tb.get(n, 0)), -float(sigs.get("pair_product", {}).get(n, 0)), n))
+    mid_both = set(both_side[6:24])  # top6 제외 중위 대역
 
     def score(n: int) -> float:
         s = 0.0
@@ -377,14 +388,16 @@ def _multi_engine_order(
         s += max(0, 45 - boe_pos.get(n, 45)) * float(w.get("min_rank", 2.0))
         s += max(0, 45 - combo_pos.get(n, 45)) * float(w.get("combo_strength", 1.0))
         s += max(0, 45 - bal_pos.get(n, 45)) * float(w.get("balanced", 0.8))
-        s += max(0, 45 - match_pos.get(n, 45)) * float(w.get("match_level", 1.2)) * 0.15
+        s += max(0, 45 - match_pos.get(n, 45)) * float(w.get("match_level", 1.2)) * 0.35
         if match_max > 0:
-            s += (float(match_sc.get(n, 0)) / match_max) * 22.0 * float(w.get("match_level", 1.2))
+            s += (float(match_sc.get(n, 0)) / match_max) * 28.0 * float(w.get("match_level", 1.2))
         decade_w = float(w.get("decade", 1.0))
         if n in strong:
-            s += 28.0 * decade_w
+            s += 32.0 * decade_w
         elif n in expected:
-            s += 20.0 * decade_w
+            s += 26.0 * decade_w  # 기대수(중위)를 더 세게 — 1235:6·7 구출
+        if n in mid_both:
+            s += 16.0
         s += float(tb.get(n, 0)) * 0.05
         return s
 
@@ -411,16 +424,246 @@ def _multi_engine_order(
             "match_level_reverse",
             "combo_strength",
             "balanced",
+            "mid_both_side",
         ],
         "axis_weights": w,
         "decade_strong": sorted(strong),
         "decade_expected": sorted(expected),
+        "mid_both_side": sorted(mid_both),
         "primary_signal": signal_key,
         "match_level_top12": [n for n in match_order if match_sc.get(n, 0) > 0][:12],
-        "cross_agree_ge2": sorted(n for n, c in agreement.items() if c >= 2)[:24],
-        "cross_agree_ge3": sorted(n for n, c in agreement.items() if c >= 3)[:18],
+        "match_level_top18": [n for n in match_order if match_sc.get(n, 0) > 0][:18],
+        "cross_agree_ge2": sorted(n for n, c in agreement.items() if c >= 2)[:30],
+        "cross_agree_ge3": sorted(n for n, c in agreement.items() if c >= 3)[:24],
     }
     return order, meta
+
+
+def _reverse_rescue_candidates(
+    multi_meta: Dict[str, Any],
+    present: set,
+    expand: List[int],
+    *,
+    sigs: Dict[str, Dict[int, float]] | None = None,
+) -> List[int]:
+    """확장망 밖·용지 등장 번호를 역산·엔진 축 우선순위로 구출 후보화(당첨 미사용)."""
+    exp_set = set(expand)
+    buckets: List[List[int]] = [
+        list(multi_meta.get("decade_expected") or []),
+        list(multi_meta.get("decade_strong") or []),
+        list(multi_meta.get("match_level_top18") or multi_meta.get("match_level_top12") or []),
+        list(multi_meta.get("mid_both_side") or []),
+        list(multi_meta.get("cross_agree_ge2") or []),
+    ]
+    # 양쪽 등장(자동·반자동) 전체 — 티켓에만 있는 중하위 당첨 후보
+    if sigs is not None:
+        af = sigs.get("auto_freq") or {}
+        sf = sigs.get("semi_freq") or {}
+        both = [
+            n for n in range(1, 46)
+            if n in present and float(af.get(n, 0)) > 0 and float(sf.get(n, 0)) > 0
+        ]
+        buckets.append(both)
+    out: List[int] = []
+    seen: set = set()
+    for bucket in buckets:
+        for n in bucket:
+            n = int(n)
+            if n in seen or n not in present or n in exp_set:
+                continue
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+def _apply_expand_rescue(
+    expand: List[int],
+    multi_order: List[int],
+    multi_meta: Dict[str, Any],
+    present: set,
+    core: List[int],
+    *,
+    size: int,
+    max_swaps: int = RESCUE_MAX_SWAPS,
+    sigs: Dict[str, Dict[int, float]] | None = None,
+) -> tuple[List[int], Dict[str, Any]]:
+    """역산·구간기대 후보를 확장망에 스왑 편입 — core·교차합의≥3 슬롯은 보호."""
+    size = max(6, min(WF_MAX_EXPAND_SIZE, int(size)))
+    out = list(expand[:size])
+    # size 확대 시 multi_order 로 먼저 채움
+    if len(out) < size:
+        for n in multi_order:
+            if len(out) >= size:
+                break
+            if n in present and n not in out:
+                out.append(n)
+    protect = set(core) | set(multi_meta.get("cross_agree_ge3") or [])
+    order_pos = {n: i for i, n in enumerate(multi_order)}
+    candidates = _reverse_rescue_candidates(multi_meta, present, out, sigs=sigs)
+    swapped_in: List[int] = []
+    dropped: List[int] = []
+    for cand in candidates:
+        if len(swapped_in) >= max_swaps:
+            break
+        if cand in out:
+            continue
+        # 보호되지 않은·순위 가장 낮은 슬롯 제거
+        drop_cands = [n for n in out if n not in protect and n not in set(core)]
+        if not drop_cands:
+            if len(out) < size:
+                out.append(cand)
+                swapped_in.append(cand)
+            continue
+        # multi_order 뒤쪽(큰 index)부터 제거 — 역산/기대 후보는 순위 뒤여도 구출
+        drop_cands.sort(key=lambda n: (order_pos.get(n, 99), n), reverse=True)
+        drop = drop_cands[0]
+        out.remove(drop)
+        out.append(cand)
+        swapped_in.append(cand)
+        dropped.append(drop)
+    # 최종 길이·core 보장
+    out = _ensure_core_subset(out, core, size)
+    present_first = [n for n in out if n in present]
+    if len(present_first) < size:
+        for n in multi_order:
+            if len(present_first) >= size:
+                break
+            if n in present and n not in present_first:
+                present_first.append(n)
+    out = present_first[:size]
+    meta = {
+        "swapped_in": swapped_in,
+        "dropped": dropped,
+        "candidates_considered": candidates[:12],
+        "max_swaps": max_swaps,
+        "emit_size": size,
+    }
+    return out, meta
+
+
+def _baseline_expand_from_order(
+    multi_order: List[int],
+    core: List[int],
+    present: set,
+    size: int,
+) -> List[int]:
+    expand = _ensure_core_subset(multi_order[:size], core, size)
+    expand_present = [n for n in expand if n in present]
+    if len(expand_present) < size:
+        for n in multi_order:
+            if len(expand_present) >= size:
+                break
+            if n in present and n not in expand_present:
+                expand_present.append(n)
+    return expand_present[:size]
+
+
+def _loo_expand_rescue_policy(
+    samples,
+    *,
+    exclude_keys: List[str] | None = None,
+    held_round: int | None = None,
+) -> Dict[str, Any]:
+    """보관 복기 회차 LOO로 확장 방출 정책 선택(누수 없음).
+
+    변형: baseline24 · rescue24 · rescue30.
+    목표: 용지 등장 당첨(catchable) 적중 평균 최대. 동점이면 작은 그물.
+    """
+    train = [
+        s for s in (samples or [])
+        if held_round is None or int(s.round_no) != int(held_round)
+    ]
+    variants = ("baseline24", "rescue24", "rescue30")
+    default = {
+        "ok": False,
+        "selected": "rescue24",
+        "emit_size": DEFAULT_EXPAND_SIZE,
+        "use_rescue": True,
+        "means": {},
+        "rounds": len(train),
+        "reason": "표본 부족 — 기본 역산구조@24",
+    }
+    if len(train) < 2:
+        return default
+
+    ban = list(exclude_keys or [])
+    hit_sums = {v: 0.0 for v in variants}
+    catchable_sums = {v: 0.0 for v in variants}
+    per_round: List[Dict[str, Any]] = []
+    for s in train:
+        sigs = _signals(s.auto_lines, s.semi_lines)
+        # train 안 held 제외 축가중 — s 자신은 평가 대상이므로 weights에서 제외
+        aw = _loo_axis_weights(train, exclude_keys=ban, held_round=int(s.round_no))
+        sk = "pair_product" if "pair_product" not in set(ban) else "support"
+        ranked = _rank_signal(sigs.get(sk, sigs["support"]), sigs.get("total_freq"), sigs.get("auto_freq"))
+        core = ranked[:6]
+        present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
+        order, meta = _multi_engine_order(
+            sigs, sk, exclude_keys=ban,
+            auto_lines=s.auto_lines, semi_lines=s.semi_lines, axis_weights=aw,
+        )
+        win = set(s.winning)
+        catchable = win & present
+        base24 = _baseline_expand_from_order(order, core, present, DEFAULT_EXPAND_SIZE)
+        r24, _ = _apply_expand_rescue(
+            base24, order, meta, present, core,
+            size=DEFAULT_EXPAND_SIZE, max_swaps=RESCUE_MAX_SWAPS, sigs=sigs,
+        )
+        base30 = _baseline_expand_from_order(order, core, present, RESCUE_GROW_SIZE)
+        r30, _ = _apply_expand_rescue(
+            base30, order, meta, present, core,
+            size=RESCUE_GROW_SIZE, max_swaps=RESCUE_MAX_SWAPS, sigs=sigs,
+        )
+        row = {
+            "round_no": s.round_no,
+            "catchable": len(catchable),
+            "hits": {
+                "baseline24": len(win & set(base24)),
+                "rescue24": len(win & set(r24)),
+                "rescue30": len(win & set(r30)),
+            },
+            "catchable_hits": {
+                "baseline24": len(catchable & set(base24)),
+                "rescue24": len(catchable & set(r24)),
+                "rescue30": len(catchable & set(r30)),
+            },
+        }
+        for v in variants:
+            hit_sums[v] += row["hits"][v]
+            catchable_sums[v] += row["catchable_hits"][v]
+        per_round.append(row)
+
+    n = len(train)
+    means = {v: round(hit_sums[v] / n, 3) for v in variants}
+    catch_means = {v: round(catchable_sums[v] / n, 3) for v in variants}
+    # catchable 적중 우선, 그다음 전체 적중. 동점이면 작은 그물.
+    prefer = ("rescue24", "baseline24", "rescue30")
+    best = max(catch_means.values())
+    tied = [v for v in prefer if catch_means[v] == best]
+    # rescue30 은 baseline/rescue24 대비 lift bar 이상일 때만
+    if "rescue30" in tied:
+        lift = catch_means["rescue30"] - max(catch_means["rescue24"], catch_means["baseline24"])
+        if lift < RESCUE_SIZE_LIFT_BAR:
+            tied = [v for v in tied if v != "rescue30"]
+            if not tied:
+                tied = ["rescue24"]
+    selected = tied[0]
+    emit_size = RESCUE_GROW_SIZE if selected == "rescue30" else DEFAULT_EXPAND_SIZE
+    use_rescue = selected != "baseline24"
+    return {
+        "ok": True,
+        "selected": selected,
+        "emit_size": emit_size,
+        "use_rescue": use_rescue,
+        "means": means,
+        "catchable_means": catch_means,
+        "rounds": n,
+        "per_round": per_round,
+        "reason": (
+            f"LOO {n}회 — {selected} "
+            f"(catchable 평균 {catch_means[selected]}/6)"
+        ),
+    }
 
 
 def _expand_from_mode(
@@ -1171,6 +1414,80 @@ def _best_of_engines_order(
     return sorted(range(1, 46), key=lambda n: (min_rank[n], -tb.get(n, 0.0), -af.get(n, 0.0), n))
 
 
+def _loo_select_core6(
+    samples,
+    *,
+    held_round: int | None,
+    exclude_keys: List[str] | None,
+    signal_key: str,
+    expand: List[int],
+    primary_core: List[int],
+    sigs: Dict[str, Dict[int, float]],
+) -> tuple[List[int], Dict[str, Any]]:
+    """핵심6 — train LOO에서 catchable 적중이 나은 쪽(주신호 vs 구간커버).
+
+    held 회차 당첨은 선택에 미사용. 표본 부족이면 주신호 유지.
+    """
+    from .graft_coverage import pick_coverage_core6
+
+    af = sigs.get("auto_freq") or {}
+    sf = sigs.get("semi_freq") or {}
+    pair = sigs.get("pair_product") or {}
+    decade_core = pick_coverage_core6(expand, af, sf, pair)
+    train = [
+        s for s in (samples or [])
+        if held_round is None or int(s.round_no) != int(held_round)
+    ]
+    meta = {
+        "selected": "primary",
+        "primary_core": list(primary_core)[:6],
+        "decade_core": list(decade_core)[:6],
+        "rounds": len(train),
+    }
+    if len(train) < 2 or len(decade_core) < 6:
+        return list(primary_core)[:6], meta
+
+    ban = list(exclude_keys or [])
+    hits_p = 0.0
+    hits_d = 0.0
+    for s in train:
+        tsigs = _signals(s.auto_lines, s.semi_lines)
+        aw = _loo_axis_weights(train, exclude_keys=ban, held_round=int(s.round_no))
+        sk = signal_key if signal_key in tsigs else "support"
+        ranked = _rank_signal(
+            tsigs.get(sk, tsigs["support"]), tsigs.get("total_freq"), tsigs.get("auto_freq")
+        )
+        pcore = ranked[:6]
+        order, mmeta = _multi_engine_order(
+            tsigs, sk, exclude_keys=ban,
+            auto_lines=s.auto_lines, semi_lines=s.semi_lines, axis_weights=aw,
+        )
+        present = {n for n in range(1, 46) if tsigs["total_freq"].get(n, 0) > 0}
+        base = _baseline_expand_from_order(order, pcore, present, DEFAULT_EXPAND_SIZE)
+        exp, _ = _apply_expand_rescue(
+            base, order, mmeta, present, pcore,
+            size=DEFAULT_EXPAND_SIZE, sigs=tsigs,
+        )
+        dcore = pick_coverage_core6(
+            exp,
+            tsigs.get("auto_freq") or {},
+            tsigs.get("semi_freq") or {},
+            tsigs.get("pair_product") or {},
+        )
+        win = set(s.winning) & present
+        hits_p += len(win & set(pcore))
+        hits_d += len(win & set(dcore))
+    n = len(train)
+    mean_p = hits_p / n
+    mean_d = hits_d / n
+    meta["means"] = {"primary": round(mean_p, 3), "decade": round(mean_d, 3)}
+    # 구간커버가 명확히 나을 때만(+0.25) 교체 — 1235 raw 회귀 방지와 동일 바
+    if mean_d >= mean_p + 0.25:
+        meta["selected"] = "decade_coverage"
+        return list(decade_core)[:6], meta
+    return list(primary_core)[:6], meta
+
+
 def _coverage_set_from_signals(
     sigs: Dict[str, Dict[int, float]],
     *,
@@ -1184,10 +1501,10 @@ def _coverage_set_from_signals(
     samples=None,
     held_round: int | None = None,
 ) -> Dict[str, Any]:
-    """core6 + expand24 + recall-EV 커버리지.
+    """core6 + expand(24|30) + recall-EV 커버리지.
 
     - core6: 주신호(집중) — 약신호 희석 방지.
-    - expand24: 전엔진 교차검증 가중 + 일치레벨 역산 접목 top24.
+    - expand: 전엔진+역산 순위 후 LOO가 고른 역산구조(스왑) · 필요 시 top30.
     - share_opt: 확장망 위 recall-EV(상위 바닥) — 히어로·접목 단일 소스.
     """
     ranked = _rank_signal(
@@ -1203,9 +1520,21 @@ def _coverage_set_from_signals(
     mode = expand_mode or DEFAULT_EXPAND_MODE
     if mode not in EXPAND_MODE_LABELS:
         mode = DEFAULT_EXPAND_MODE
-    # 방출 크기 고정 24 — WF selected_size(30 등)는 진단 전용.
+    # 진단용 expand_size 인자는 무시 — LOO 구조 정책이 방출 크기를 고른다.
     _ = expand_size
-    size = DEFAULT_EXPAND_SIZE
+    rescue_pol = _loo_expand_rescue_policy(
+        samples, exclude_keys=exclude_keys, held_round=held_round
+    ) if samples is not None else {
+        "ok": False,
+        "selected": "rescue24",
+        "emit_size": DEFAULT_EXPAND_SIZE,
+        "use_rescue": True,
+        "means": {},
+        "reason": "표본 없음 — 기본 역산구조@24",
+    }
+    size = int(rescue_pol.get("emit_size") or DEFAULT_EXPAND_SIZE)
+    size = max(DEFAULT_EXPAND_SIZE, min(WF_MAX_EXPAND_SIZE, size))
+    use_rescue = bool(rescue_pol.get("use_rescue", True))
     axis_weights = _loo_axis_weights(
         samples, exclude_keys=exclude_keys, held_round=held_round
     ) if samples is not None else None
@@ -1217,23 +1546,42 @@ def _coverage_set_from_signals(
         semi_lines=semi_lines,
         axis_weights=axis_weights,
     )
-    # 다중엔진 top24 를 본망으로. merge_raw 등 모드망은 진단·폴백.
+    # 다중엔진 순위를 본망으로. merge_raw 등 모드망은 진단·폴백.
     mode_expand = _expand_from_mode(ranked, boe_order, core, present, mode, size=size)
-    expand = _ensure_core_subset(multi_order[:size], core, size)
-    # present 우선 — 미등장 번호가 합의 점수로 새어 들어오면 용지 등장분으로 교체
-    expand_present = [n for n in expand if n in present]
-    if len(expand_present) < size:
+    expand = _baseline_expand_from_order(multi_order, core, present, size)
+    rescue_meta: Dict[str, Any] = {"applied": False}
+    if use_rescue:
+        expand, rescue_meta = _apply_expand_rescue(
+            expand, multi_order, multi_meta, present, core,
+            size=size, max_swaps=RESCUE_MAX_SWAPS, sigs=sigs,
+        )
+        rescue_meta["applied"] = True
+    rescue_meta["policy"] = {
+        "selected": rescue_pol.get("selected"),
+        "emit_size": size,
+        "means": rescue_pol.get("means"),
+        "catchable_means": rescue_pol.get("catchable_means"),
+        "reason": rescue_pol.get("reason"),
+        "ok": rescue_pol.get("ok"),
+    }
+    # 핵심6 LOO: 주신호 top6 vs 확장망 안 양쪽지지 구간커버 — catchable 적중 큰 쪽
+    core, core_meta = _loo_select_core6(
+        samples,
+        held_round=held_round,
+        exclude_keys=exclude_keys,
+        signal_key=signal_key,
+        expand=expand,
+        primary_core=core,
+        sigs=sigs,
+    )
+    expand = _ensure_core_subset(expand, core, size)
+    expand = [n for n in expand if n in present][:size] if present else expand[:size]
+    if len(expand) < size:
         for n in multi_order:
-            if len(expand_present) >= size:
+            if len(expand) >= size:
                 break
-            if n in present and n not in expand_present:
-                expand_present.append(n)
-        for n in expand:
-            if len(expand_present) >= size:
-                break
-            if n not in expand_present:
-                expand_present.append(n)
-    expand = expand_present[:size]
+            if n in present and n not in expand:
+                expand.append(n)
     boe_expand = _balance_expand(boe_order, core, present, size)
     from .graft_coverage import optimize_sharing_from_raw
 
@@ -1241,18 +1589,21 @@ def _coverage_set_from_signals(
     share_opt = list((share or {}).get("numbers") or [])[:6]
     match_top = list(multi_meta.get("match_level_top12") or [])
     agree3 = list(multi_meta.get("cross_agree_ge3") or [])
+    mode_label = (
+        f"LOO역산구조({rescue_pol.get('selected')}) · top{size}"
+        if rescue_pol.get("ok")
+        else f"전엔진+역산구조 · top{size}"
+    )
     return {
         "signal": signal_key,
         "signal_label": _SIGNAL_LABELS.get(signal_key, signal_key),
         "selected_by": selected_by,
         "core6": core,
-        # 하위호환: 필드명 expand18 유지 — 실제 길이는 expand_size(24).
+        # 하위호환: 필드명 expand18 유지 — 실제 길이는 expand_size(24|30).
         "expand18": expand,
         "expand_size": size,
-        "expand18_mode": "multi_engine_reverse_graft",
-        "expand18_mode_label": (
-            f"전엔진교차검증+일치레벨역산 · top{size}"
-        ),
+        "expand18_mode": "loo_reverse_rescue",
+        "expand18_mode_label": mode_label,
         "expand18_precision": precision18,
         "expand18_single": single_expand,
         "expand18_raw": mode_expand,
@@ -1272,16 +1623,20 @@ def _coverage_set_from_signals(
             "cross_agree_ge3": agree3,
             "cross_agree_ge2": list(multi_meta.get("cross_agree_ge2") or []),
             "axis_weights": multi_meta.get("axis_weights"),
+            "rescue": rescue_meta,
+            "core_policy": core_meta,
             "note": (
-                "LOO 축가중 × 일치레벨 역산 × 전엔진 min-rank/구간/조합 — "
-                "당첨 미사용(누수 없음)."
+                "복기 전회차 LOO로 역산구조·크기·핵심6 선택. "
+                "구간기대·일치레벨·중간양쪽지지 후보를 확장망에 스왑 구출(당첨 미사용)."
             ),
         },
         "precision_gap_hint": {
             "top24": 24,
+            "top30": 30,
             "note": (
-                "확장24=전엔진 교차검증+역산 접목. "
-                "그물 크기↑ 금지 — 엔진·역산을 추천 멤버십에 끌어온다."
+                "확장=LOO 역산구조. 용지 등장 당첨이 합의에 밀려 잘리던 "
+                "중하위(예: 1235의 6·7)를 구간기대·역산으로 구출. "
+                "크기 30은 LOO catchable 리프트가 분명할 때만."
             ),
         },
     }

@@ -1189,6 +1189,9 @@ export default function SemiAutoComparePanel({
   const [showRecommendSection, setShowRecommendSection] = useState(true);
   /** 구 상단탭 종합분석 → ③ Venus 임베드 (기본 접힘, 딥링크 시 자동 펼침) */
   const [showCompositeEmbed, setShowCompositeEmbed] = useState(false);
+  /** 통합 당첨포착 안 1:1 접목 비교 — 접목이 검증 확장보다 넓게 담으면 자동 펼침 */
+  const [showGraftCompare, setShowGraftCompare] = useState(false);
+  const [graftCompareTouched, setGraftCompareTouched] = useState(false);
   const [showPredictionDetail, setShowPredictionDetail] = useState(false);
   const [showTicketCompare, setShowTicketCompare] = useState(false);
   /** 1:1 전수비교 상세(매칭 카드) — 요약만 기본, 상세 보기로 펼침 */
@@ -3954,6 +3957,67 @@ export default function SemiAutoComparePanel({
     winningSet,
   ]);
 
+  useEffect(() => {
+    if (graftCompareTouched || !compareWinning) return;
+    const g = graftCoverageEV;
+    if (!g || g.pending || !winningSet || winningSet.size === 0) return;
+    const graftHits = g.expand.filter((n) => winningSet.has(n)).length;
+    const heroHits = heroRecommendation.expand18.filter((n) => winningSet.has(n)).length;
+    if (graftHits > heroHits) setShowGraftCompare(true);
+  }, [
+    compareWinning,
+    graftCompareTouched,
+    graftCoverageEV,
+    winningSet,
+    heroRecommendation.expand18,
+  ]);
+
+  /** 복기 당첨번호별 포착 레이어 — 검증/접목/EV가 어디를 잡았는지 한눈에 */
+  const reviewCatchMap = useMemo(() => {
+    if (!compareWinning || !winningSet || winningSet.size === 0) return null;
+    const wins = [...winningSet].sort((a, b) => a - b);
+    const heroCore = new Set(heroRecommendation.core6);
+    const heroExp = new Set(heroRecommendation.expand18);
+    const heroEv = new Set(heroRecommendation.shareOpt);
+    const g = graftCoverageEV && !graftCoverageEV.pending ? graftCoverageEV : null;
+    const graftCore = new Set(g?.core6 ?? []);
+    const graftExp = new Set(g?.expand ?? []);
+    const graftEv = new Set(g?.shareOpt ?? []);
+    const rows = wins.map((n) => {
+      const layers: string[] = [];
+      if (heroCore.has(n)) layers.push('검증핵심');
+      if (heroEv.has(n)) layers.push('검증EV');
+      if (heroExp.has(n) && !heroCore.has(n)) layers.push('검증확장');
+      if (graftCore.has(n)) layers.push('접목핵심');
+      if (graftEv.has(n)) layers.push('접목EV');
+      if (graftExp.has(n) && !graftCore.has(n)) layers.push('접목확장');
+      return {
+        n,
+        layers,
+        inHeroExpand: heroExp.has(n),
+        inGraftExpand: graftExp.has(n),
+        missed: !heroExp.has(n),
+      };
+    });
+    const heroExpandHits = rows.filter((r) => r.inHeroExpand).length;
+    const graftExpandHits = rows.filter((r) => r.inGraftExpand).length;
+    const heroCoreHits = rows.filter((r) => heroCore.has(r.n)).length;
+    const graftCoreHits = rows.filter((r) => graftCore.has(r.n)).length;
+    const bestLayer =
+      heroExpandHits >= graftExpandHits
+        ? `검증 확장${heroRecommendation.expandSize}`
+        : '1:1 접목 확장24';
+    return {
+      rows,
+      heroExpandHits,
+      graftExpandHits,
+      heroCoreHits,
+      graftCoreHits,
+      bestLayer,
+      missed: rows.filter((r) => r.missed).map((r) => r.n),
+    };
+  }, [compareWinning, winningSet, heroRecommendation, graftCoverageEV]);
+
   // 종합분석 Venus/학습 추첨용 — intent별 스냅샷(복기·이번회차 분리 저장).
   useEffect(() => {
     const snap = buildDetailForecastSnapshot({
@@ -5509,7 +5573,7 @@ export default function SemiAutoComparePanel({
         <Chip
           size="small"
           variant="outlined"
-          label="핵심"
+          label="당첨포착"
           onClick={() => {
             setShowRecommendSection(true);
             document.getElementById('photo-rec-hero')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -5544,10 +5608,13 @@ export default function SemiAutoComparePanel({
         <Chip
           size="small"
           variant="outlined"
-          label="종합분석"
+          label="Venus"
           onClick={() => {
+            setShowRecommendSection(true);
             setShowCompositeEmbed(true);
-            window.setTimeout(() => scrollToPhotoRecommend({ embed: 'composite' }), 60);
+            window.setTimeout(() => {
+              document.getElementById('photo-rec-venus')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 60);
           }}
           sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
         />
@@ -5584,7 +5651,7 @@ export default function SemiAutoComparePanel({
       </Stack>
       {!showRecommendSection && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          핵심 · 용지 5세트 · 강수/기대 · 종합예측 — 접힘. 합의/Venus는 아래 토글. 호기 패턴·현황·백테스트는 ④.
+          당첨포착(검증·접목·Venus) · 용지 5세트 — 접힘. 호기·검증 WF는 ④.
         </Typography>
       )}
       {showRecommendSection && (
@@ -5613,7 +5680,7 @@ export default function SemiAutoComparePanel({
             <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
               <Typography variant="body1" fontWeight={800}>
                 {compareWinning && heroRecommendation.serverRound != null
-                  ? `🎯 복기 ${heroRecommendation.serverRound}회 검증 추천`
+                  ? `🎯 복기 ${heroRecommendation.serverRound}회 당첨 포착`
                   : recommendHeroTitle}
               </Typography>
               <Chip
@@ -5635,12 +5702,21 @@ export default function SemiAutoComparePanel({
                   sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
                 />
               )}
+              {graftCoverageEV?.graftBuild && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color={graftCoverageEV.fromApi ? 'info' : 'default'}
+                  label={graftCoverageEV.graftBuild}
+                  sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+                />
+              )}
             </Stack>
             <Chip
               size="small"
               variant="outlined"
               color="success"
-              label={compareWinning ? '④ 엔진 · 복기 용지' : '④ 엔진 · 이번회차 용지'}
+              label={compareWinning ? '검증+접목+Venus 통합' : '추천+접목+Venus 통합'}
               sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
             />
           </Stack>
@@ -5692,6 +5768,86 @@ export default function SemiAutoComparePanel({
                 {heroRecommendation.sheetMeta ? ` (${heroRecommendation.sheetMeta})` : ''}
               </Typography>
             </Alert>
+          )}
+          {reviewCatchMap && (
+            <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover', mb: 1, border: '1px solid', borderColor: 'success.dark' }}>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mb: 0.75 }}>
+                <Typography variant="caption" fontWeight={800}>
+                  당첨번호 포착 맵
+                </Typography>
+                <Chip
+                  size="small"
+                  color="success"
+                  label={`검증확장 ${reviewCatchMap.heroExpandHits}/6`}
+                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                />
+                <Chip
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  label={`검증핵심 ${reviewCatchMap.heroCoreHits}/6`}
+                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                />
+                {graftCoverageEV && !graftCoverageEV.pending && (
+                  <>
+                    <Chip
+                      size="small"
+                      color="info"
+                      variant="outlined"
+                      label={`접목확장 ${reviewCatchMap.graftExpandHits}/6`}
+                      sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                    />
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={`접목핵심 ${reviewCatchMap.graftCoreHits}/6`}
+                      sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                    />
+                  </>
+                )}
+                <Chip
+                  size="small"
+                  color="warning"
+                  variant="outlined"
+                  label={`넓은 그물 우세: ${reviewCatchMap.bestLayer}`}
+                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                />
+              </Stack>
+              <Stack spacing={0.5}>
+                {reviewCatchMap.rows.map((r) => (
+                  <Stack
+                    key={`catch-${r.n}`}
+                    direction="row"
+                    spacing={0.5}
+                    alignItems="center"
+                    flexWrap="wrap"
+                    useFlexGap
+                  >
+                    <LottoBall number={r.n} size={ENGINE_BALL.list} />
+                    {r.layers.length > 0 ? (
+                      r.layers.map((L) => (
+                        <Chip
+                          key={`${r.n}-${L}`}
+                          size="small"
+                          color={L.includes('핵심') ? 'primary' : L.includes('EV') ? 'secondary' : 'success'}
+                          variant={L.startsWith('접목') ? 'outlined' : 'filled'}
+                          label={L}
+                          sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                        />
+                      ))
+                    ) : (
+                      <Typography variant="caption" color="warning.main" sx={{ fontSize: 10, fontWeight: 700 }}>
+                        확장망 밖 — 엔진 순위 한계
+                      </Typography>
+                    )}
+                  </Stack>
+                ))}
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, fontSize: 9.5 }}>
+                밝은 칩 = 서버 검증 레이어 · 외곽 칩 = 1:1 접목 레이어. 당첨을 더 잡으려면{' '}
+                <strong>핵심 집중보다 확장망</strong>을 우선하고, 접목이 검증보다 넓게 담으면 아래 비교를 펼치세요.
+              </Typography>
+            </Box>
           )}
           {heroRecommendation.showWinning && heroRecommendation.winsReady && heroRecommendation.outsideExpand.length > 0 && (
             <Stack spacing={0.35} sx={{ mb: 0.75 }}>
@@ -5785,8 +5941,149 @@ export default function SemiAutoComparePanel({
                 ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다(로딩 중 회색 = 미대조). '
                 : '이번회차 탭: 미추첨이라 당첨 대조 없음. '}
             핵심 6 = 집중 픽 · 확장 {heroRecommendation.expandSize} = 넓은 그물 · 분산 최적 = 공동당첨 회피.
-            {' '}아래: 용지 통계 5세트 → 강수·기대·종합 예측. 역산·학습·검증은 <strong>④ 엔진</strong>.
+            {' '}1:1 접목·Venus는 아래 비교/추첨. 역산·학습·상세 검증은 <strong>④ 엔진</strong>.
           </Typography>
+
+          {/* ── 1:1 접목 비교 (구 접목 단독 섹션 통합) ── */}
+          {(graftCoverageEV?.pending || (graftCoverageEV && graftCoverageEV.core6.length >= 6)) && (
+            <Box sx={{ mt: 1.25, pt: 1.25, borderTop: '1px dashed', borderColor: 'divider' }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={0.75} sx={{ mb: 0.5 }}>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
+                  <Typography variant="caption" fontWeight={800}>🧪 1:1 접목 비교</Typography>
+                  <Chip size="small" color="warning" variant="outlined" label="확률 불변 · recall/EV" sx={{ height: 18, fontSize: 9, fontWeight: 700 }} />
+                  {graftCoverageEV?.reviewHit && (
+                    <Chip
+                      size="small"
+                      color="info"
+                      label={`접목 확장 ${graftCoverageEV.reviewHit.expand}/6 · 핵심 ${graftCoverageEV.reviewHit.core6}/6`}
+                      sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                    />
+                  )}
+                </Stack>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => {
+                    setGraftCompareTouched(true);
+                    setShowGraftCompare((v) => !v);
+                  }}
+                  sx={{ minWidth: 72, height: 28 }}
+                >
+                  {showGraftCompare ? '접기 ▲' : '펼치기 ▼'}
+                </Button>
+              </Stack>
+              {graftCoverageEV?.pending && (
+                <>
+                  <LinearProgress sx={{ mb: 0.75 }} />
+                  <Typography variant="caption" color="text.secondary">접목 API 계산 중…</Typography>
+                </>
+              )}
+              {showGraftCompare && graftCoverageEV && !graftCoverageEV.pending && graftCoverageEV.core6.length >= 6 && (
+                <Stack spacing={0.75}>
+                  {graftCoverageEV.dataUsed && (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                      {graftCoverageEV.dataUsed.signal_label} · {graftCoverageEV.dataUsed.core_mode_label} · 용지{' '}
+                      {graftCoverageEV.dataUsed.sheet_source} · 자{graftCoverageEV.dataUsed.auto_line_count}/반
+                      {graftCoverageEV.dataUsed.semi_line_count}
+                      {graftCoverageEV.fromApi ? ' · 서버' : ' · 로컬'}
+                    </Typography>
+                  )}
+                  {graftCoverageEV.backtest?.ok && (
+                    <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap>
+                      {Object.entries(graftCoverageEV.backtest.means ?? {}).map(([k, v]) => (
+                        <Chip
+                          key={k}
+                          size="small"
+                          variant={k.includes('expand') ? 'filled' : 'outlined'}
+                          color={k.includes('expand') ? 'success' : 'default'}
+                          label={`${k} ${v}/6`}
+                          sx={{ height: 18, fontSize: 9 }}
+                        />
+                      ))}
+                    </Stack>
+                  )}
+                  {graftCoverageEV.outsideCoreInExpand.length > 0 && (
+                    <Stack direction="row" spacing={0.4} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Typography variant="caption" fontWeight={700} color="warning.main" sx={{ fontSize: 10 }}>
+                        접목·핵심밖·확장안
+                      </Typography>
+                      {graftCoverageEV.outsideCoreInExpand.map((n) => (
+                        <LottoBall key={`uni-gce-out-${n}`} number={n} size={ENGINE_BALL.table} />
+                      ))}
+                    </Stack>
+                  )}
+                  <Stack direction="row" spacing={0.4} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Typography variant="caption" fontWeight={700} sx={{ minWidth: 64, fontSize: 10 }}>접목핵심</Typography>
+                    {graftCoverageEV.core6.map((n) => (
+                      <LottoBall
+                        key={`uni-gce-c-${n}`}
+                        number={n}
+                        size={ENGINE_BALL.list}
+                        dimmed={Boolean(compareWinning && winningSet && winningSet.size > 0 && !winningSet.has(n))}
+                      />
+                    ))}
+                    <SharingBadge numbers={graftCoverageEV.core6} />
+                    <ComboActions numbers={graftCoverageEV.core6} source="unknown" label="접목 핵심6" />
+                  </Stack>
+                  <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Typography variant="caption" fontWeight={700} sx={{ minWidth: 64, fontSize: 10 }}>접목확장</Typography>
+                    {graftCoverageEV.expand.map((n) => (
+                      <LottoBall
+                        key={`uni-gce-e-${n}`}
+                        number={n}
+                        size={ENGINE_BALL.table}
+                        dimmed={Boolean(compareWinning && winningSet && winningSet.size > 0 && !winningSet.has(n))}
+                      />
+                    ))}
+                  </Stack>
+                  {graftCoverageEV.shareOpt.length >= 6 && (
+                    <Stack direction="row" spacing={0.4} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Typography variant="caption" fontWeight={700} sx={{ minWidth: 64, fontSize: 10 }}>접목EV</Typography>
+                      {graftCoverageEV.shareOpt.map((n) => (
+                        <LottoBall
+                          key={`uni-gce-s-${n}`}
+                          number={n}
+                          size={ENGINE_BALL.list}
+                          dimmed={Boolean(compareWinning && winningSet && winningSet.size > 0 && !winningSet.has(n))}
+                        />
+                      ))}
+                      <SharingBadge numbers={graftCoverageEV.shareOpt} />
+                      <ComboActions numbers={graftCoverageEV.shareOpt} source="unknown" label="접목 EV" />
+                    </Stack>
+                  )}
+                </Stack>
+              )}
+            </Box>
+          )}
+
+          {/* ── Venus (구 종합 합의 중복 풀 제거) ── */}
+          <Box id="photo-rec-venus" sx={{ mt: 1.25, pt: 1.25, borderTop: '1px dashed', borderColor: 'divider' }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={0.75}>
+              <Typography variant="caption" fontWeight={800}>
+                🎡 Venus 추첨 · 합의 ({intentSectionLabel})
+              </Typography>
+              <Button size="small" variant="outlined" onClick={() => setShowCompositeEmbed((v) => !v)} sx={{ minWidth: 72, height: 28 }}>
+                {showCompositeEmbed ? '접기 ▲' : '펼치기 ▼'}
+              </Button>
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.35, fontSize: 9.5 }}>
+              합의 상위·상세예상 공 목록은 위 검증 확장과 중복이라 숨깁니다. 추첨 풀 = 검증 확장망.
+            </Typography>
+            {showCompositeEmbed && (
+              <Box sx={{ mt: 1 }}>
+                <Suspense
+                  fallback={
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1 }}>
+                      <CircularProgress size={18} />
+                      <Typography variant="caption" color="text.secondary">Venus 로딩…</Typography>
+                    </Stack>
+                  }
+                >
+                  <ComposedAnalysisPage embedded sheetIntent={sheetIntent} omitDuplicatePools />
+                </Suspense>
+              </Box>
+            )}
+          </Box>
         </Paper>
       )}
 
@@ -6170,176 +6467,6 @@ export default function SemiAutoComparePanel({
         </>
       )}
 
-      {/* 🧪 강수·기대 엔진 접목 — 서버 API(graft-v2) + LOO 백테스트 */}
-      {graftCoverageEV?.pending && (
-        <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'info.main', borderWidth: 2 }}>
-          <Typography variant="body2" fontWeight={800} sx={{ mb: 1 }}>🧪 강수·기대 엔진 접목 — 커버리지 · EV</Typography>
-          <LinearProgress sx={{ mb: 1 }} />
-          <Typography variant="caption" color="text.secondary">
-            서버 접목 API 계산 중… (1:1 곱 · 구간커버 · recall-EV · LOO 백테스트)
-          </Typography>
-        </Paper>
-      )}
-      {graftCoverageEV && !graftCoverageEV.pending && graftCoverageEV.core6.length >= 6 && (
-        <Paper id="photo-rec-graft" variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'info.main', borderWidth: 2 }}>
-          <Stack direction="row" alignItems="center" flexWrap="wrap" useFlexGap spacing={0.75} sx={{ mb: 0.5 }}>
-            <Typography variant="body2" fontWeight={800}>🧪 강수·기대 엔진 접목 — 커버리지 · EV</Typography>
-            <Chip size="small" color="warning" variant="outlined" label="확률 불변 · recall/EV만" sx={{ height: 18, fontSize: 9, fontWeight: 700 }} />
-            <Chip
-              size="small"
-              color={compareWinning ? 'primary' : 'secondary'}
-              label={compareWinning ? `복기 ${effectiveRound ?? '?'}회` : `이번회차 ${currentRound ?? '?'}회`}
-              sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-            />
-            <Chip
-              size="small"
-              color={graftCoverageEV.fromApi ? 'success' : 'default'}
-              variant="outlined"
-              label={graftCoverageEV.graftBuild ?? 'local'}
-              sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
-            />
-          </Stack>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            {graftCoverageEV.dataUsed?.signal_label ?? '1:1 곱'} → {graftCoverageEV.dataUsed?.core_mode_label ?? '구간커버 핵심'}
-            {' · '}{graftCoverageEV.dataUsed?.ev_mode_label ?? 'recall-EV'}.
-            {' '}확률(1/8,145,060) 불변. {graftCoverageEV.dataUsed?.note ?? ''}
-          </Typography>
-
-          {graftCoverageEV.dataUsed && (
-            <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 1 }}>
-              <Typography variant="caption" component="div">
-                <strong>사용 데이터</strong>:{' '}
-                용지 {graftCoverageEV.dataUsed.sheet_source ?? '?'} · 자동 {graftCoverageEV.dataUsed.auto_line_count ?? '?'}줄 · 반자동{' '}
-                {graftCoverageEV.dataUsed.semi_line_count ?? '?'}줄
-                {(graftCoverageEV.dataUsed.fixed_semi_excluded?.length ?? 0) > 0
-                  ? ` · 고정수 제외 ${graftCoverageEV.dataUsed.fixed_semi_excluded!.join(',')}`
-                  : ''}
-                {' · '}신호 {graftCoverageEV.dataUsed.signal ?? 'pair_product'}
-                {' · '}출처 {graftCoverageEV.fromApi ? '서버 API' : '로컬 폴백'}
-              </Typography>
-            </Alert>
-          )}
-
-          {graftCoverageEV.backtest?.ok && (
-            <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover', mb: 1 }}>
-              <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.5 }}>
-                📊 LOO 백테스트 (보관 {graftCoverageEV.backtest.rounds ?? '?'}회 · 누수 없음
-                {graftCoverageEV.backtest.small_sample ? ' · 소표본' : ''})
-              </Typography>
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-                {Object.entries(graftCoverageEV.backtest.means ?? {}).map(([k, v]) => (
-                  <Chip
-                    key={k}
-                    size="small"
-                    color={k === 'expand24' || k === 'decade_core6' || k === 'recall_ev6' ? 'success' : 'default'}
-                    variant={k.startsWith('raw') || k.startsWith('pure') ? 'outlined' : 'filled'}
-                    label={`${k} ${v}/6`}
-                    sx={{ height: 20, fontSize: 10 }}
-                  />
-                ))}
-              </Stack>
-              {(graftCoverageEV.backtest.advice ?? []).map((a) => (
-                <Typography key={a.slice(0, 24)} variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5 }}>
-                  → {a}
-                </Typography>
-              ))}
-            </Box>
-          )}
-
-          {(graftCoverageEV.decadeDropped?.length ?? 0) > 0 && (
-            <Alert severity="warning" icon={false} sx={{ py: 0.5, mb: 0.75 }}>
-              <Typography variant="caption">
-                구간커버가 raw 핵심 당첨을 뺐던 번호:{' '}
-                {graftCoverageEV.decadeDropped!.join(', ')}
-                {graftCoverageEV.reviewHit
-                  ? ` (참고: raw ${graftCoverageEV.reviewHit.rawTop6}/6 · 구간커버는 비교용)`
-                  : ''}
-                {' — 기본 핵심은 raw 1:1 top6 유지'}
-              </Typography>
-            </Alert>
-          )}
-          {graftCoverageEV.outsideCoreInExpand.length > 0 && (
-            <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
-              <Typography variant="caption" fontWeight={800} color="warning.main" sx={{ minWidth: 72 }}>
-                핵심 밖·확장 안
-              </Typography>
-              {graftCoverageEV.outsideCoreInExpand.map((n) => (
-                <LottoBall key={`gce-out-c-${n}`} number={n} size={ENGINE_BALL.list} />
-              ))}
-              <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                1:1 top6 밖이지만 확장24 안 (넓은 그물 본령)
-              </Typography>
-            </Stack>
-          )}
-
-          <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-            접목 핵심 6 ({graftCoverageEV.dataUsed?.core_mode_label ?? 'raw 1:1 top6'} · 양쪽 {graftCoverageEV.bothSideCount}/6)
-            {graftCoverageEV.reviewHit ? ` · 당첨 ${graftCoverageEV.reviewHit.core6}/6` : ''}
-          </Typography>
-          <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mb: 0.75 }}>
-            {graftCoverageEV.core6.map((n) => (
-              <LottoBall
-                key={`gce-c-${n}`}
-                number={n}
-                size={ENGINE_BALL.list}
-                dimmed={Boolean(compareWinning && winningSet && winningSet.size > 0 && !winningSet.has(n))}
-              />
-            ))}
-            <SharingBadge numbers={graftCoverageEV.core6} />
-            <ComboActions numbers={graftCoverageEV.core6} source="unknown" label="강수·기대 접목 핵심6" />
-          </Stack>
-
-          <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-            접목 확장망 {graftCoverageEV.expand.length}개 (넓은 그물)
-            {graftCoverageEV.reviewHit ? ` · 당첨 ${graftCoverageEV.reviewHit.expand}/6` : ''}
-          </Typography>
-          <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
-            {graftCoverageEV.expand.map((n) => (
-              <LottoBall
-                key={`gce-e-${n}`}
-                number={n}
-                size={ENGINE_BALL.table}
-                dimmed={Boolean(compareWinning && winningSet && winningSet.size > 0 && !winningSet.has(n))}
-              />
-            ))}
-          </Stack>
-
-          {graftCoverageEV.shareOpt.length >= 6 && (
-            <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
-              <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
-                <Typography variant="caption" fontWeight={700}>
-                  💰 recall-EV 6 (상위12≥4 + 공동당첨 회피)
-                  {graftCoverageEV.reviewHit ? ` · 당첨 ${graftCoverageEV.reviewHit.share}/6` : ''}
-                  {graftCoverageEV.reviewHit?.pureEv != null
-                    ? ` · 순수EV ${graftCoverageEV.reviewHit.pureEv}/6`
-                    : ''}
-                  :
-                </Typography>
-                {graftCoverageEV.shareOpt.map((n) => (
-                  <LottoBall
-                    key={`gce-s-${n}`}
-                    number={n}
-                    size={ENGINE_BALL.list}
-                    dimmed={Boolean(compareWinning && winningSet && winningSet.size > 0 && !winningSet.has(n))}
-                  />
-                ))}
-                <SharingBadge numbers={graftCoverageEV.shareOpt} />
-                <ComboActions numbers={graftCoverageEV.shareOpt} source="unknown" label="강수·기대 접목 EV" />
-              </Stack>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.5 }}>
-                순수 EV는 희소 고번호만 골라 6·11 등 상위를 버림 → 상위12에서 4개 이상 유지. 회색=비당첨.
-              </Typography>
-            </Box>
-          )}
-
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, mt: 0.75, fontStyle: 'italic' }}>
-            {graftCoverageEV.honesty
-              ?? '⚠️ 소표본이면 통계 유의는 약합니다. 확률 불변 — recall·EV만 보고합니다.'}
-          </Typography>
-        </Paper>
-      )}
-
-
       {/* 이번회차 종합 예측 — ③ 추천 상세 (복기 탭에서는 currentRoundForecast=null) */}
       {currentRoundForecast && (
         <Paper variant="outlined" sx={{ p: 1.5, mt: 2, mb: 1.5, borderColor: 'primary.main', borderWidth: 2 }}>
@@ -6409,36 +6536,6 @@ export default function SemiAutoComparePanel({
       </>
       )}
 
-      {/* ── 종합 합의·Venus(intent별) — 호기 패턴/현황은 ④ 후속·gap ── */}
-      <Divider sx={{ my: 1.5 }} />
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: 10 }}>
-        Venus·합의 상위만(맵·합의5게임 숨김 — 용지 5세트와 중복). 조합은 용지{' '}
-        <strong>5세트</strong>. 호기·Walk-Forward는 <strong>④</strong>.
-      </Typography>
-      <Paper id="photo-embed-composite" variant="outlined" sx={{ p: 1.25 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
-          <Typography variant="subtitle2" fontWeight={800} sx={{ fontSize: 13 }}>
-            종합 합의 · Venus ({intentSectionLabel})
-          </Typography>
-          <Button size="small" variant="outlined" onClick={() => setShowCompositeEmbed((v) => !v)}>
-            {showCompositeEmbed ? '접기 ▲' : '펼치기 ▼'}
-          </Button>
-        </Stack>
-        {showCompositeEmbed && (
-          <Box sx={{ mt: 1 }}>
-            <Suspense
-              fallback={
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1.5 }}>
-                  <CircularProgress size={18} />
-                  <Typography variant="caption" color="text.secondary">종합 분석 로딩…</Typography>
-                </Stack>
-              }
-            >
-              <ComposedAnalysisPage embedded sheetIntent={sheetIntent} />
-            </Suspense>
-          </Box>
-        )}
-      </Paper>
       </Paper>
 
       {/* ════════ ④ 패턴 분석 엔진 (기본 접힘 · 복기검증/백테스트 포함) ════════ */}

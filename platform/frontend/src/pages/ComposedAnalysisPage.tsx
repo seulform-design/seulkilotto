@@ -69,9 +69,12 @@ const GRADE_ORDER: ConsensusGrade[] = ['S', 'A', 'B', 'C', 'X'];
 export default function ComposedAnalysisPage({
   embedded = false,
   sheetIntent = 'current_round',
+  /** ③ 통합 당첨포착 안에 둘 때 — 확장망·합의 공 중복을 숨기고 Venus만 */
+  omitDuplicatePools = false,
 }: {
   embedded?: boolean;
   sheetIntent?: 'review' | 'current_round';
+  omitDuplicatePools?: boolean;
 } = {}) {
   const queries = useQueries({
     queries: [
@@ -367,7 +370,8 @@ export default function ComposedAnalysisPage({
         <Typography variant="caption">{HONESTY_HEADER}</Typography>
       </Alert>
 
-      {/* 데이터 소스 상태 */}
+      {/* 데이터 소스 상태 — 통합 당첨포착에선 칩 한 줄로 축소 */}
+      {!omitDuplicatePools && (
       <Paper sx={paperSx}>
         <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
           📡 데이터 소스 상태 (합의 {composite.sourceCount}/3)
@@ -437,6 +441,16 @@ export default function ComposedAnalysisPage({
           </Typography>
         )}
       </Paper>
+      )}
+
+      {omitDuplicatePools && (
+        <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 1 }}>
+          <Typography variant="caption">
+            합의·확장망 공은 위 <strong>당첨 포착</strong>과 동일합니다. 여기선 Venus 추첨기만 둡니다
+            (풀 = 검증 확장망 · 가중 ON 시 체험용).
+          </Typography>
+        </Alert>
+      )}
 
       {isError && !isLoading && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -444,6 +458,8 @@ export default function ComposedAnalysisPage({
         </Alert>
       )}
 
+      {!omitDuplicatePools && (
+      <>
       {/* 합의 상위 번호 */}
       <Paper sx={paperSx}>
         <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
@@ -557,6 +573,8 @@ export default function ComposedAnalysisPage({
           </Alert>
         )}
       </Paper>
+      </>
+      )}
 
       {/* 🎡 물리 추첨기 — 1234회 예상 1호기 + 상세예상 favor */}
       {drawMachine && (
@@ -955,7 +973,7 @@ export default function ComposedAnalysisPage({
           />
         </>
       )}
-      {embedded && (
+      {embedded && !omitDuplicatePools && (
         <Alert severity="info" sx={{ mt: 1.25, mb: 1, py: 0.5 }} icon={false}>
           <Typography variant="caption">
             ③에서는 <strong>합의 상위·Venus</strong>만 둡니다. 합의 맵·합의 5게임은 용지 5세트·합의 상위와
@@ -964,10 +982,14 @@ export default function ComposedAnalysisPage({
         </Alert>
       )}
 
-      <Divider sx={{ my: embedded ? 1.25 : 2 }} />
-      <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block' }}>
-        {embedded ? HONESTY_FOOTER_EMBEDDED : HONESTY_FOOTER_SETS}
-      </Typography>
+      {!omitDuplicatePools && (
+        <>
+          <Divider sx={{ my: embedded ? 1.25 : 2 }} />
+          <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block' }}>
+            {embedded ? HONESTY_FOOTER_EMBEDDED : HONESTY_FOOTER_SETS}
+          </Typography>
+        </>
+      )}
     </Box>
   );
 }

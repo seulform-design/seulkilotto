@@ -35,7 +35,7 @@ export function scrollToPhotoRecommend(opts?: { embed?: 'composite' | 'machine' 
   if (typeof window === 'undefined') return;
   const id =
     opts?.embed === 'composite'
-      ? 'photo-embed-composite'
+      ? 'photo-rec-venus'
       : opts?.embed === 'machine'
         ? 'engine-machine-patterns'
         : 'photo-section-recommend';

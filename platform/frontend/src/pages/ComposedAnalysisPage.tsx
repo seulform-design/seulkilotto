@@ -56,9 +56,13 @@ const HONESTY_HEADER =
   '🟡 정직성 선언: 3축(용지 1:1 전수비교·평행회차·미출수) 합의도 당첨 확률(1/8,145,060)을 변경하지 않습니다. ' +
   '물리 추첨기의 용지 예상 가중은 체험용이며, 실제 당첨 확률(1/8,145,060)은 변하지 않습니다.';
 
-const HONESTY_FOOTER =
+const HONESTY_FOOTER_SETS =
   '※ 위 5게임은 EPO 필터(합/AC/홀짝/연속)를 통과한 조합이며, 합의 등급을 가중치로 사용합니다. ' +
   '본 추천의 1등 확률은 1/8,145,060 — 다른 어떤 추천과도 동일하며, 합의 신호는 분배 인원 회피 가능성에만 영향을 줍니다.';
+
+const HONESTY_FOOTER_EMBEDDED =
+  '※ ③ 임베드에서는 합의 상위 번호·Venus만 둡니다. 조합 추천은 용지 통계 5세트만 사용하세요. ' +
+  '1등 확률(1/8,145,060)은 불변이며, 합의 신호는 분배 인원 회피 가능성에만 영향을 줍니다.';
 
 const GRADE_ORDER: ConsensusGrade[] = ['S', 'A', 'B', 'C', 'X'];
 
@@ -751,188 +755,187 @@ export default function ComposedAnalysisPage({
         </Paper>
       )}
 
-      {/* 1~45 합의 맵 */}
-      <Paper sx={paperSx}>
-        <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
-          📊 1~45 번호 합의 맵
-        </Typography>
-
-        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
-          {GRADE_ORDER.map((g) => (
-            <Chip
-              key={g}
-              size="small"
-              label={`${GRADE_LABELS[g]} (${composite.byGrade[g].length}개)`}
-              sx={{
-                bgcolor: GRADE_COLORS[g],
-                color: '#fff',
-                fontWeight: 700,
-              }}
-            />
-          ))}
-        </Stack>
-
-        <Box
-          sx={{
-            display: 'grid',
-            // 모바일(~380px)에서 15열이면 셀이 ~20px 로 뭉개짐 → 9열로 완화.
-            gridTemplateColumns: { xs: 'repeat(9, minmax(0, 1fr))', sm: 'repeat(15, minmax(0, 1fr))' },
-            gap: 0.5,
-            p: 1,
-            borderRadius: 1.5,
-            bgcolor: 'action.hover',
-          }}
-        >
-          {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
-            const item = composite.perNumber[n];
-            const color = GRADE_COLORS[item.grade];
-            return (
-              <Tooltip
-                key={n}
-                arrow
-                title={
-                  <Box sx={{ whiteSpace: 'pre-line' }}>
-                    {`#${n} — ${GRADE_LABELS[item.grade]}\n` +
-                      (item.sources.length > 0
-                        ? `우호: ${item.sources.map((s) => SOURCE_LABELS[s] ?? s).join(', ')}`
-                        : '우호 신호 없음') +
-                      (item.excludedBy.length > 0
-                        ? `\n배제: ${item.excludedBy.map((s) => SOURCE_LABELS[s] ?? s).join(', ')}`
-                        : '')}
-                  </Box>
-                }
-              >
-                <Box sx={{ position: 'relative', display: 'inline-flex' }}>
-                  <Box
-                    role="img"
-                    aria-label={`${n}번 — ${GRADE_LABELS[item.grade]} 등급(${item.grade})`}
-                    sx={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: '50%',
-                      bgcolor: color,
-                      color: '#fff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: 'default',
-                      transition: 'transform 0.1s',
-                      '&:hover': { transform: 'scale(1.1)' },
-                    }}
-                  >
-                    {n}
-                  </Box>
-                  {/* 등급을 색상에만 의존하지 않도록 글자 배지(색맹/터치 보조). C(중립)는 생략 */}
-                  {item.grade !== 'C' && (
-                    <Box
-                      aria-hidden
-                      sx={{
-                        position: 'absolute',
-                        top: -3,
-                        right: -3,
-                        minWidth: 13,
-                        height: 13,
-                        px: '2px',
-                        borderRadius: '7px',
-                        bgcolor: '#000',
-                        color: '#fff',
-                        border: '1px solid rgba(255,255,255,0.7)',
-                        fontSize: 9,
-                        lineHeight: '11px',
-                        fontWeight: 800,
-                        textAlign: 'center',
-                      }}
-                    >
-                      {item.grade}
-                    </Box>
-                  )}
-                </Box>
-              </Tooltip>
-            );
-          })}
-        </Box>
-      </Paper>
-
-      {/* 합의 기반 5게임 */}
-      <Paper sx={paperSx}>
-        <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
-          ⚙ 합의 기반 5게임
-        </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-          S 등급 우선 → A → B → 부족 시 C 폴백 · EPO 필터(합 90~195, AC≥5, 홀짝 != 0:6/6:0, 4연속 차단) 통과 조합만 채택
-        </Typography>
-
-        {composite.recommendedSets.length === 0 && !isLoading && (
-          <Alert severity="info">
-            합의 데이터 부족 — 5게임 생성 실패. 모든 소스가 로드된 후 재시도하세요.
-          </Alert>
-        )}
-
-        {composite.recommendedSets.map((combo, idx) => (
-          <Paper key={idx} sx={{ p: 1.5, mb: 1, bgcolor: 'action.hover' }}>
-            <Stack
-              direction={{ xs: 'column', sm: 'row' }}
-              spacing={1}
-              alignItems={{ xs: 'flex-start', sm: 'center' }}
-            >
-              <Typography
-                sx={{
-                  width: 28,
-                  fontWeight: 800,
-                  color: 'text.secondary',
-                  flexShrink: 0,
-                  fontSize: 18,
-                }}
-              >
-                {idx + 1}
-              </Typography>
-              <Stack
-                direction="row"
-                spacing={0.75}
-                flexWrap="wrap"
-                useFlexGap
-                sx={{ flex: 1 }}
-              >
-                {combo.map((n) => (
-                  <LottoBall key={n} number={n} size={ENGINE_BALL.hero} />
-                ))}
-              </Stack>
-              <ComboActions
-                numbers={combo}
-                source="unknown"
-                label={`종합 분석 ${idx + 1}게임`}
-              />
-            </Stack>
-            <MetricChips numbers={combo} dense />
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-              {combo.map((n) => {
-                const item = composite.perNumber[n];
-                if (item.grade === 'C') return null;
-                return (
-                  <Chip
-                    key={`grade-${n}`}
-                    size="small"
-                    label={`#${n}: ${item.grade}`}
-                    sx={{
-                      bgcolor: GRADE_COLORS[item.grade],
-                      color: '#fff',
-                      height: 18,
-                      fontSize: 11,
-                      fontWeight: 700,
-                    }}
-                  />
-                );
-              })}
-            </Stack>
-          </Paper>
-        ))}
-      </Paper>
-
-      {/* 백테스트 검증 — 번호추천(③)이 아니라 ④ 검증·백테스트 탭으로 이동 */}
+      {/* 1~45 합의 맵 · 합의 5게임 — ③ 임베드에서는 숨김
+          (맵=합의 상위와 중복, 5게임=용지 5세트와 중복). 단독 종합분석에서만 표시. */}
       {!embedded && (
         <>
+          <Paper sx={paperSx}>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
+              📊 1~45 번호 합의 맵
+            </Typography>
+
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+              {GRADE_ORDER.map((g) => (
+                <Chip
+                  key={g}
+                  size="small"
+                  label={`${GRADE_LABELS[g]} (${composite.byGrade[g].length}개)`}
+                  sx={{
+                    bgcolor: GRADE_COLORS[g],
+                    color: '#fff',
+                    fontWeight: 700,
+                  }}
+                />
+              ))}
+            </Stack>
+
+            <Box
+              sx={{
+                display: 'grid',
+                // 모바일(~380px)에서 15열이면 셀이 ~20px 로 뭉개짐 → 9열로 완화.
+                gridTemplateColumns: { xs: 'repeat(9, minmax(0, 1fr))', sm: 'repeat(15, minmax(0, 1fr))' },
+                gap: 0.5,
+                p: 1,
+                borderRadius: 1.5,
+                bgcolor: 'action.hover',
+              }}
+            >
+              {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
+                const item = composite.perNumber[n];
+                const color = GRADE_COLORS[item.grade];
+                return (
+                  <Tooltip
+                    key={n}
+                    arrow
+                    title={
+                      <Box sx={{ whiteSpace: 'pre-line' }}>
+                        {`#${n} — ${GRADE_LABELS[item.grade]}\n` +
+                          (item.sources.length > 0
+                            ? `우호: ${item.sources.map((s) => SOURCE_LABELS[s] ?? s).join(', ')}`
+                            : '우호 신호 없음') +
+                          (item.excludedBy.length > 0
+                            ? `\n배제: ${item.excludedBy.map((s) => SOURCE_LABELS[s] ?? s).join(', ')}`
+                            : '')}
+                      </Box>
+                    }
+                  >
+                    <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+                      <Box
+                        role="img"
+                        aria-label={`${n}번 — ${GRADE_LABELS[item.grade]} 등급(${item.grade})`}
+                        sx={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: '50%',
+                          bgcolor: color,
+                          color: '#fff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: 'default',
+                          transition: 'transform 0.1s',
+                          '&:hover': { transform: 'scale(1.1)' },
+                        }}
+                      >
+                        {n}
+                      </Box>
+                      {/* 등급을 색상에만 의존하지 않도록 글자 배지(색맹/터치 보조). C(중립)는 생략 */}
+                      {item.grade !== 'C' && (
+                        <Box
+                          aria-hidden
+                          sx={{
+                            position: 'absolute',
+                            top: -3,
+                            right: -3,
+                            minWidth: 13,
+                            height: 13,
+                            px: '2px',
+                            borderRadius: '7px',
+                            bgcolor: '#000',
+                            color: '#fff',
+                            border: '1px solid rgba(255,255,255,0.7)',
+                            fontSize: 9,
+                            lineHeight: '11px',
+                            fontWeight: 800,
+                            textAlign: 'center',
+                          }}
+                        >
+                          {item.grade}
+                        </Box>
+                      )}
+                    </Box>
+                  </Tooltip>
+                );
+              })}
+            </Box>
+          </Paper>
+
+          <Paper sx={paperSx}>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
+              ⚙ 합의 기반 5게임
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+              S 등급 우선 → A → B → 부족 시 C 폴백 · EPO 필터(합 90~195, AC≥5, 홀짝 != 0:6/6:0, 4연속 차단) 통과 조합만 채택
+            </Typography>
+
+            {composite.recommendedSets.length === 0 && !isLoading && (
+              <Alert severity="info">
+                합의 데이터 부족 — 5게임 생성 실패. 모든 소스가 로드된 후 재시도하세요.
+              </Alert>
+            )}
+
+            {composite.recommendedSets.map((combo, idx) => (
+              <Paper key={idx} sx={{ p: 1.5, mb: 1, bgcolor: 'action.hover' }}>
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  spacing={1}
+                  alignItems={{ xs: 'flex-start', sm: 'center' }}
+                >
+                  <Typography
+                    sx={{
+                      width: 28,
+                      fontWeight: 800,
+                      color: 'text.secondary',
+                      flexShrink: 0,
+                      fontSize: 18,
+                    }}
+                  >
+                    {idx + 1}
+                  </Typography>
+                  <Stack
+                    direction="row"
+                    spacing={0.75}
+                    flexWrap="wrap"
+                    useFlexGap
+                    sx={{ flex: 1 }}
+                  >
+                    {combo.map((n) => (
+                      <LottoBall key={n} number={n} size={ENGINE_BALL.hero} />
+                    ))}
+                  </Stack>
+                  <ComboActions
+                    numbers={combo}
+                    source="unknown"
+                    label={`종합 분석 ${idx + 1}게임`}
+                  />
+                </Stack>
+                <MetricChips numbers={combo} dense />
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                  {combo.map((n) => {
+                    const item = composite.perNumber[n];
+                    if (item.grade === 'C') return null;
+                    return (
+                      <Chip
+                        key={`grade-${n}`}
+                        size="small"
+                        label={`#${n}: ${item.grade}`}
+                        sx={{
+                          bgcolor: GRADE_COLORS[item.grade],
+                          color: '#fff',
+                          height: 18,
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}
+                      />
+                    );
+                  })}
+                </Stack>
+              </Paper>
+            ))}
+          </Paper>
+
           <Divider sx={{ my: 2 }} />
           <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
             🧪 백테스트 검증
@@ -955,15 +958,15 @@ export default function ComposedAnalysisPage({
       {embedded && (
         <Alert severity="info" sx={{ mt: 1.25, mb: 1, py: 0.5 }} icon={false}>
           <Typography variant="caption">
-            Walk-Forward 백테스트는 <strong>④ 패턴 분석 엔진 → 검증·백테스트</strong> 탭에서 실행합니다.
-            번호 추천 탭에는 합의 번호·Venus 추첨기만 둡니다.
+            ③에서는 <strong>합의 상위·Venus</strong>만 둡니다. 합의 맵·합의 5게임은 용지 5세트·합의 상위와
+            중복이라 숨겼습니다. Walk-Forward는 <strong>④ 검증·백테스트</strong>.
           </Typography>
         </Alert>
       )}
 
       <Divider sx={{ my: embedded ? 1.25 : 2 }} />
       <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block' }}>
-        {HONESTY_FOOTER}
+        {embedded ? HONESTY_FOOTER_EMBEDDED : HONESTY_FOOTER_SETS}
       </Typography>
     </Box>
   );

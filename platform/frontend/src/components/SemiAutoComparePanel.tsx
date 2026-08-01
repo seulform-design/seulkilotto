@@ -5701,8 +5701,8 @@ export default function SemiAutoComparePanel({
       {/* ── 종합 합의·Venus(intent별) — 호기 패턴/현황은 ④ 후속·gap ── */}
       <Divider sx={{ my: 1.5 }} />
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: 10 }}>
-        Venus는 탭별로 분리됩니다(복기=확정 호기 · 이번회차=예상 호기). 조합 추천은 용지{' '}
-        <strong>5세트</strong>만. 호기 패턴·현황·Walk-Forward는 점수에 안 쓰이므로 <strong>④</strong>.
+        Venus·합의 상위만(맵·합의5게임 숨김 — 용지 5세트와 중복). 조합은 용지{' '}
+        <strong>5세트</strong>. 호기·Walk-Forward는 <strong>④</strong>.
       </Typography>
       <Paper id="photo-embed-composite" variant="outlined" sx={{ p: 1.25 }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>

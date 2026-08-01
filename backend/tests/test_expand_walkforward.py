@@ -65,7 +65,7 @@ def test_walkforward_picks_expand_mode_and_coverage_includes_core():
     assert set(cov["core6"]).issubset(set(cov["expand18"]))
     assert len(cov["expand18"]) == DEFAULT_EXPAND_SIZE
     assert cov["expand_size"] == DEFAULT_EXPAND_SIZE
-    assert cov["coverage_build"] == "expand24-v3"
+    assert cov["coverage_build"] == "expand24-v4"
 
     audit = _coverage_hit_audit(sigs, cov, s1.winning, exclude_keys=ban)
     assert audit["catchable_count"] + len(audit["uncatchable"]) == 6
@@ -93,4 +93,4 @@ def test_coverage_always_emits_24():
     )
     assert cov["expand_size"] == 24
     assert len(cov["expand18"]) == 24
-    assert cov["coverage_build"] == "expand24-v3"
+    assert cov["coverage_build"] == "expand24-v4"

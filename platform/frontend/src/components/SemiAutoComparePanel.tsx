@@ -1474,7 +1474,7 @@ export default function SemiAutoComparePanel({
   });
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand24-v3', 'semi-freq-v1'],
+    queryKey: ['v1-photo-review-verification', 'expand24-v4', 'semi-freq-v1', 'pair-product'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     retry: 1,
@@ -3575,6 +3575,9 @@ export default function SemiAutoComparePanel({
       expandHitCount: null as number | null,
       core6HitCount: null as number | null,
       serverRound: null as number | null,
+      selectedBy: null as string | null,
+      pairDiag: null as { core6Count: number; expandCount: number } | null,
+      sheetMeta: '' as string,
     };
     const rv = reviewVerificationQuery.data;
     const clean = (arr: number[] | undefined) =>
@@ -3677,14 +3680,24 @@ export default function SemiAutoComparePanel({
     const missedDetail = (audit?.missed_detail ?? []).filter((m) =>
       outsideExpand.includes(m.number),
     );
+    const selectedBy = cov?.selected_by ?? null;
     const sourceLabel =
       source === 'coverage'
-        ? '서버 검증 커버리지'
+        ? selectedBy === 'loo_held'
+          ? '서버 검증(LOO·이 회차 제외)'
+          : '서버 검증 커버리지'
         : source === 'consensus'
           ? '검증 통과 합의'
           : source === 'forecast'
             ? '이번회차 종합예측'
             : '로컬 1:1 임시';
+    const pairDiagRaw = compareWinning && cov && 'pair_product_diag' in cov
+      ? (cov as { pair_product_diag?: { core6_count?: number; expand24_count?: number } }).pair_product_diag
+      : undefined;
+    const policy = rv?.ok ? rv.review_policy : undefined;
+    const sheetMeta = policy
+      ? `용지 ${policy.sheet_source ?? '?'} · 자동 ${policy.auto_line_count ?? 0}줄 · 반자동 ${policy.semi_line_count ?? 0}줄`
+      : '';
     return {
       ready,
       pending: false,
@@ -3699,7 +3712,8 @@ export default function SemiAutoComparePanel({
       source,
       sourceLabel,
       signalLabel: cov?.signal_label ?? best?.label ?? '자동↔반자동 양쪽 지지',
-      selectedByMulti: cov?.selected_by === 'multi_round',
+      selectedByMulti: selectedBy === 'multi_round',
+      selectedBy,
       bestTop18: best?.mean_top18 ?? (rv?.ok ? rv.summary?.best_top18 : null) ?? null,
       reviewRounds: lb?.rounds ?? 0,
       goodSignalCount: source === 'consensus' ? (consensus?.good_signal_count ?? 0) : 0,
@@ -3717,6 +3731,13 @@ export default function SemiAutoComparePanel({
       core6HitCount: audit?.core6_count
         ?? (winsReady ? core6.filter((n) => winningSet!.has(n)).length : null),
       serverRound,
+      pairDiag: pairDiagRaw
+        ? {
+            core6Count: Number(pairDiagRaw.core6_count ?? 0),
+            expandCount: Number(pairDiagRaw.expand24_count ?? 0),
+          }
+        : null,
+      sheetMeta,
     };
   }, [
     compareWinning,
@@ -5436,7 +5457,12 @@ export default function SemiAutoComparePanel({
                   : ''}
                 {!compareWinning && currentRound != null ? ` → 적용 대상 ${currentRound}회` : ''}
                 {' '}— 당첨을 가장 잘 잡은 신호는{' '}
-                <strong>{heroRecommendation.signalLabel}</strong>{heroRecommendation.selectedByMulti ? '(다회차 1위)' : ''}
+                <strong>{heroRecommendation.signalLabel}</strong>
+                {heroRecommendation.selectedBy === 'loo_held'
+                  ? '(LOO)'
+                  : heroRecommendation.selectedByMulti
+                    ? '(다회차 1위)'
+                    : ''}
                 {heroRecommendation.bestTop18 != null
                   ? `, 신호 상위18 평균 ${heroRecommendation.bestTop18}/6 · 확장망 top${heroRecommendation.expandSize}`
                   : ` · 확장망 top${heroRecommendation.expandSize}`}
@@ -5454,6 +5480,13 @@ export default function SemiAutoComparePanel({
                 {heroRecommendation.showWinning && heroRecommendation.winsReady
                   ? ` 핵심6 ${heroRecommendation.core6HitCount ?? 0}/6 · 확장${heroRecommendation.expandSize} ${heroRecommendation.expandHitCount ?? 0}/6.`
                   : ''}
+                {heroRecommendation.selectedBy === 'loo_held'
+                  ? ' 신호=이 회차 제외 LOO(다회차 multi가 이 용지와 어긋나 로컬 1:1보다 못 잡던 회귀 보정).'
+                  : ''}
+                {heroRecommendation.pairDiag
+                  ? ` 1:1곱 패리티 참고: 핵심6 ${heroRecommendation.pairDiag.core6Count}/6 · 확장24 ${heroRecommendation.pairDiag.expandCount}/6.`
+                  : ''}
+                {heroRecommendation.sheetMeta ? ` (${heroRecommendation.sheetMeta})` : ''}
               </Typography>
             </Alert>
           )}

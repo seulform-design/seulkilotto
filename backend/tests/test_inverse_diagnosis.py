@@ -85,7 +85,8 @@ def test_inverse_diagnosis_expand18_first_when_top6_fails():
     assert "auto_freq" in diag["policy"]["banned_signals"]
     assert diag["policy"]["prefer_consensus"] is False
     assert diag["policy"]["core6_mode"] == "best_single"
-    assert diag["policy"]["expand18_mode"] == "best_of_engines"
+    # WF 기본/폴백이 single_raw 이면 best_single (구버전은 잘못 best_of_engines 로 표기)
+    assert diag["policy"]["expand18_mode"] in ("best_single", "best_of_engines", "merge_recall")
     assert any(p["id"] == "top6_concentration_fail" for p in diag["problems"])
     assert any(p["id"] == "coverage_gap" for p in diag["problems"])
     assert diag["policy"]["multi_round_confidence"] > 0

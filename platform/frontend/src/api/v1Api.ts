@@ -1183,7 +1183,7 @@ export interface ReviewVerificationResponse {
   review_coverage_set?: {
     signal: string;
     signal_label: string;
-    selected_by?: 'multi_round' | 'single_round';
+    selected_by?: 'multi_round' | 'single_round' | 'loo_held' | 'support_default';
     core6: number[];
     expand18: number[];
     expand_size?: number;
@@ -1195,6 +1195,25 @@ export interface ReviewVerificationResponse {
     expand18_boe_balanced?: number[];
     decade_balance?: DecadeBalance;
     excluded_signals?: string[];
+    /** 로컬 1:1 핵심식 패리티 진단 */
+    pair_product_diag?: {
+      core6: number[];
+      expand24: number[];
+      core6_count: number;
+      expand24_count: number;
+      note?: string;
+    };
+  };
+  /** 복기 히어로 vs 이번회차 forward 정책 분리 */
+  review_policy?: {
+    signal_key: string;
+    selected_by: string;
+    expand_mode: string;
+    forward_signal_key: string;
+    forward_expand_mode: string;
+    sheet_source?: string;
+    auto_line_count?: number;
+    semi_line_count?: number;
   };
   /** 복기 회차 다중신호 합의 커버리지. */
   review_consensus_coverage?: {
@@ -1260,7 +1279,7 @@ export interface ReviewVerificationResponse {
   current_coverage_set?: {
     signal: string;
     signal_label: string;
-    selected_by?: 'multi_round' | 'single_round';
+    selected_by?: 'multi_round' | 'single_round' | 'loo_held' | 'support_default';
     core6: number[];
     expand18: number[];
     expand_size?: number;

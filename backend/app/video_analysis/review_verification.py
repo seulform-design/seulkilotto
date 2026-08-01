@@ -173,7 +173,8 @@ EXPAND_SIZE_CANDIDATES = (18, 24)
 DEFAULT_EXPAND_SIZE = 24
 DEFAULT_EXPAND_MODE = "single_raw"
 # 배포 스모크·프론트 캐시 무효 확인용(강제 top24 방출).
-COVERAGE_BUILD_ID = "expand24-v3"
+# v4: pair_product(로컬 1:1 패리티) + 복기=LOO신호·merge_raw(단일신호 절단 보정)
+COVERAGE_BUILD_ID = "expand24-v4"
 
 
 def _merge_expand_order(
@@ -522,6 +523,8 @@ def _line_freq(lines: List[List[int]]) -> Counter:
 
 
 def _signals(auto: List[List[int]], semi: List[List[int]]) -> Dict[str, Dict[int, float]]:
+    import math
+
     from .feature_learning_engine import _detect_fixed_semi
 
     ac = _line_freq(auto)
@@ -533,6 +536,13 @@ def _signals(auto: List[List[int]], semi: List[List[int]]) -> Dict[str, Dict[int
     sc_sup = {n: (0.0 if n in fixed else float(sc.get(n, 0))) for n in range(1, 46)}
     support = {n: float(min(float(ac.get(n, 0)), sc_sup[n])) for n in range(1, 46)}
     total = {n: float(ac.get(n, 0) + sc_sup[n]) for n in range(1, 46)}
+    # 로컬 히어로(predictedNumbers) 1:1 핵심식과 패리티 —
+    # log2(auto+1)*log2(semi+1). 한쪽만 인기인 번호는 반대쪽 log≈0 으로 억제.
+    # (프론트 매치보너스·세트·평행은 보조항 — 서버는 핵심 곱만 엔진 신호로 편입)
+    pair_product = {
+        n: math.log2(float(ac.get(n, 0)) + 1.0) * math.log2(sc_sup[n] + 1.0) * 4.0
+        for n in range(1, 46)
+    }
     # 균형: 지지 점수에 구간(10단위) 상한을 둬 한 구간 쏠림을 억제한 커버리지 지향 신호.
     balanced_order = _rank_signal(support, total, {n: float(ac.get(n, 0)) for n in range(1, 46)})
     balanced_val: Dict[int, float] = {}
@@ -558,6 +568,7 @@ def _signals(auto: List[List[int]], semi: List[List[int]]) -> Dict[str, Dict[int
         "auto_freq": {n: float(ac.get(n, 0)) for n in range(1, 46)},
         "semi_freq": semi_freq,
         "total_freq": total,
+        "pair_product": pair_product,
         "balanced": balanced_val,
         "combo_strength": combo_strength,
     }
@@ -568,9 +579,40 @@ _SIGNAL_LABELS = {
     "auto_freq": "자동 빈도",
     "semi_freq": "반자동 빈도(고정수 제외)",
     "total_freq": "전체 빈도(자동+반자동)",
+    "pair_product": "1:1 곱(자동×반자동 log)",
     "balanced": "구간 균형 커버리지",
     "combo_strength": "조합 강도(반복줄×lift)",
 }
+
+
+def _review_signal_key_for_round(
+    samples,
+    review_round: int,
+    multi_key: str | None,
+) -> tuple[str, str]:
+    """복기 커버리지용 신호 — 이 회차를 뺀 LOO(누수 없음).
+
+    다회차 multi(전체 포함)는 이 용지 위상과 어긋나면 로컬 1:1보다 못하는 회귀를 만든다.
+    이번회차 forward 주입은 multi 를 그대로 쓴다.
+    """
+    if samples and len(samples) >= 2:
+        for i, s in enumerate(samples):
+            if int(s.round_no) == int(review_round):
+                return _loo_best_signal_key(samples, i), "loo_held"
+    return (multi_key or "support"), ("multi_round" if multi_key else "support_default")
+
+
+def _review_expand_mode(wf_mode: str | None) -> str:
+    """복기 넓은 그물: 단일신호 topK 는 신호키가 이 용지와 어긋나면 catchable 을 자름.
+
+    로컬 히어로(1:1 top24)가 더 잘 잡히던 관측(1234·1235) 보정 —
+    복기 expand 는 단일∪min-rank 병합(merge_raw)으로 포착 상한을 확보한다.
+    이번회차 forward 는 WF 선택 모드를 유지.
+    """
+    mode = wf_mode or DEFAULT_EXPAND_MODE
+    if mode.startswith("single_"):
+        return "merge_raw"
+    return mode if mode in EXPAND_MODE_LABELS else DEFAULT_EXPAND_MODE
 
 
 def _build_semi_signal_report(
@@ -1239,11 +1281,16 @@ def _inverse_diagnosis(
         e for e in lb_rows
         if e.get("beats_random18") and e.get("key") != "auto_freq"
     ])
-    # API 하위호환: expand18_mode 는 best_of_engines|consensus 계열 + WF 세부 모드.
+    # API: expand18_mode 는 best_single|best_of_engines|merge_recall (+ WF 세부 variant).
+    # 구버전은 single_* 를 best_of_engines 로 잘못 표기해 히어로 정책칩이 거짓이었다.
     expand18_mode_api = (
         "best_of_engines"
         if expand_mode.startswith("boe_")
-        else ("merge_recall" if expand_mode.startswith("merge_") else "best_of_engines")
+        else (
+            "merge_recall"
+            if expand_mode.startswith("merge_")
+            else "best_single"
+        )
     )
 
     actions = [
@@ -1345,8 +1392,14 @@ def build_review_verification() -> Dict[str, Any]:
     _samples = collect_round_samples()
     leaderboard = _signal_leaderboard(_samples)
     multi_key = leaderboard.get("best_signal_multi")
-    bkey = multi_key or analysis.get("best_signal_key") or "support"
-    selected_by = "multi_round" if multi_key else "single_round"
+    # 이번회차 forward: 다회차 best (누수 없음 — 이번회차 미포함 표본).
+    bkey = multi_key or "support"
+    selected_by = "multi_round" if multi_key else "support_default"
+    # 복기 히어로: LOO(이 회차 제외) — multi 가 이 용지와 어긋나 로컬 1:1보다
+    # 못하는 회귀(1234·1235)를 막는다. 당첨으로 best를 고르면(analysis.best) 누수.
+    review_bkey, review_selected_by = _review_signal_key_for_round(
+        _samples, review_round, multi_key
+    )
     # min-rank 에서도 저성과·auto_freq 제외 (단독 커버리지와 동일 정책).
     ban_keys = list(leaderboard.get("underperforming_keys") or [])
     if "auto_freq" not in ban_keys:
@@ -1357,18 +1410,34 @@ def build_review_verification() -> Dict[str, Any]:
     expand_wf = _walkforward_expand_policy(_samples, exclude_keys=ban_keys)
     expand_mode = str(expand_wf.get("selected_mode") or DEFAULT_EXPAND_MODE)
     expand_size = DEFAULT_EXPAND_SIZE
+    # 복기 expand: 단일신호 절단 보정(merge_raw). forward 는 WF 모드 유지.
+    review_expand_mode = _review_expand_mode(expand_mode)
 
-    # 복기 회차 커버리지 — 그 회차 용지 신호로 core6/expand (당첨 대조용).
+    # 복기 회차 커버리지 — 그 회차 용지 + LOO 신호 + merge 그물 (당첨 대조용).
     # 이번회차 세트와 분리해야 탭별로 추천이 달라진다.
     review_sigs = _signals(auto, semi)
     review_coverage_set = _coverage_set_from_signals(
         review_sigs,
-        signal_key=bkey,
-        selected_by=selected_by,
+        signal_key=review_bkey,
+        selected_by=review_selected_by,
         exclude_keys=ban_keys,
-        expand_mode=expand_mode,
+        expand_mode=review_expand_mode,
         expand_size=expand_size,
     )
+    # 진단: 같은 용지에서 로컬 1:1(pair_product) top24 가 몇 개 잡는지 — 히어로 역산용.
+    pair_ranked = _rank_signal(
+        review_sigs.get("pair_product", review_sigs["support"]),
+        review_sigs.get("total_freq"),
+        review_sigs.get("auto_freq"),
+    )
+    win_set = set(winning)
+    review_coverage_set["pair_product_diag"] = {
+        "core6": pair_ranked[:6],
+        "expand24": pair_ranked[:24],
+        "core6_count": len(win_set & set(pair_ranked[:6])),
+        "expand24_count": len(win_set & set(pair_ranked[:24])),
+        "note": "로컬 히어로 1:1 핵심식 패리티(매치보너스·세트·평행 제외)",
+    }
     review_consensus_coverage = _consensus_coverage(review_sigs, leaderboard)
     review_hit_audit = _coverage_hit_audit(
         review_sigs, review_coverage_set, winning, exclude_keys=ban_keys
@@ -1459,7 +1528,8 @@ def build_review_verification() -> Dict[str, Any]:
             {
                 "kind": "backtest",
                 "detail": (
-                    f"다회차 best={bkey} · WF expand={expand_mode}"
+                    f"복기 LOO={review_bkey}/{review_expand_mode} · "
+                    f"forward multi={bkey}/WF={expand_mode}"
                     f" mean={expand_wf.get('selected_mean')}"
                 ),
                 "weight": 0.8,
@@ -1514,6 +1584,16 @@ def build_review_verification() -> Dict[str, Any]:
         "review_coverage_set": review_coverage_set,
         "review_consensus_coverage": review_consensus_coverage,
         "review_hit_audit": review_hit_audit,
+        "review_policy": {
+            "signal_key": review_bkey,
+            "selected_by": review_selected_by,
+            "expand_mode": review_expand_mode,
+            "forward_signal_key": bkey,
+            "forward_expand_mode": expand_mode,
+            "sheet_source": "archived" if archived else "review_saved",
+            "auto_line_count": len(auto),
+            "semi_line_count": len(semi),
+        },
         "expand_walkforward": expand_wf,
         "current_coverage_set": current_coverage_set,
         "consensus_coverage": consensus_coverage,

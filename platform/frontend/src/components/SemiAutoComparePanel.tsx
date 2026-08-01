@@ -1514,13 +1514,13 @@ export default function SemiAutoComparePanel({
   });
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand24-v8-loo-rescue', 'semi-freq-v1', 'pair-product'],
+    queryKey: ['v1-photo-review-verification', 'expand24-v9-decade-precision', 'semi-freq-v1', 'pair-product'],
     queryFn: v1Api.getReviewVerification,
     staleTime: 60_000,
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v7-loo-rescue', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v8-decade-precision', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,
@@ -3618,7 +3618,7 @@ export default function SemiAutoComparePanel({
         outsideCoreInExpand: audit?.outside_core_in_expand ?? [],
         dataUsed: api.data_used ?? null,
         backtest: api.backtest ?? null,
-        graftBuild: api.graft_build ?? 'graft-v7-loo-rescue',
+        graftBuild: api.graft_build ?? 'graft-v8-decade-precision',
         honesty: api.honesty ?? null,
         rankSource: 'api_pair_product' as const,
         decadeDropped: audit?.decade_dropped_vs_raw ?? [],
@@ -3789,6 +3789,11 @@ export default function SemiAutoComparePanel({
       crossAgreeGe3: [] as number[],
       rescuedIn: [] as number[],
       rescuePolicy: '' as string,
+      precision14: [] as number[],
+      precisionSize: 0,
+      precisionHitCount: null as number | null,
+      decadePoolSize: 0,
+      decadePoolHitCount: null as number | null,
     };
     const rv = reviewVerificationQuery.data;
     const clean = (arr: number[] | undefined) =>
@@ -3909,9 +3914,26 @@ export default function SemiAutoComparePanel({
       ?? reverseGraft?.rescue?.policy?.reason
       ?? '',
     );
+    const precision14 = clean(
+      (cov as { precision14?: number[] } | undefined)?.precision14,
+    ).slice(0, 14);
+    const precisionSize = precision14.length
+      || Number((cov as { precision_size?: number } | undefined)?.precision_size)
+      || 0;
+    const decadePool = clean(
+      (cov as { decade_pool30?: number[] } | undefined)?.decade_pool30,
+    );
     const agreement = consensus?.agreement ?? {};
     const winsReady = Boolean(winningSet && winningSet.size > 0);
-    const audit = compareWinning && rv?.ok ? rv.review_hit_audit : undefined;
+    const audit = compareWinning && rv?.ok ? rv.review_hit_audit as {
+      outside_expand?: number[];
+      missed_catchable?: number[];
+      missed_detail?: { number: number; single_rank?: number; boe_rank?: number }[];
+      expand18_count?: number;
+      core6_count?: number;
+      precision14_count?: number;
+      decade_pool30_count?: number;
+    } | undefined : undefined;
     // 서버 audit 만 사용 — 폴백 expand 에 당첨 차집합을 붙이면 레이스 중 수치가 흔들림.
     const outsideExpand = clean(audit?.outside_expand ?? audit?.missed_catchable).sort(
       (a, b) => a - b,
@@ -3982,6 +4004,17 @@ export default function SemiAutoComparePanel({
       crossAgreeGe3: clean(reverseGraft?.cross_agree_ge3).slice(0, 18),
       rescuedIn,
       rescuePolicy,
+      precision14: [...precision14].sort((a, b) => a - b),
+      precisionSize,
+      precisionHitCount: audit?.precision14_count
+        ?? (winsReady && precision14.length
+          ? precision14.filter((n) => winningSet!.has(n)).length
+          : null),
+      decadePoolSize: decadePool.length,
+      decadePoolHitCount: audit?.decade_pool30_count
+        ?? (winsReady && decadePool.length
+          ? decadePool.filter((n) => winningSet!.has(n)).length
+          : null),
     };
   }, [
     compareWinning,
@@ -5764,6 +5797,12 @@ export default function SemiAutoComparePanel({
                 {heroRecommendation.rescuePolicy
                   ? ` LOO구조=${heroRecommendation.rescuePolicy}.`
                   : ''}
+                {heroRecommendation.precisionSize > 0
+                  ? ` 강수·기대${heroRecommendation.decadePoolSize || 30}→정밀${heroRecommendation.precisionSize}(15미만 역산).`
+                  : ''}
+                {heroRecommendation.winsReady && heroRecommendation.precisionHitCount != null
+                  ? ` 정밀 당첨 ${heroRecommendation.precisionHitCount}/6.`
+                  : ''}
                 {heroRecommendation.rescuedIn.length > 0
                   ? ` 역산구출 편입: ${heroRecommendation.rescuedIn.join(', ')}.`
                   : ''}
@@ -5831,6 +5870,44 @@ export default function SemiAutoComparePanel({
             <SharingBadge numbers={heroRecommendation.core6} />
             <ComboActions numbers={heroRecommendation.core6} source="unknown" label="핵심6 추천" />
           </Stack>
+          {heroRecommendation.precision14.length >= 6 && (
+            <Stack direction="row" spacing={0.3} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+              <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>
+                정밀 {heroRecommendation.precisionSize || heroRecommendation.precision14.length}
+              </Typography>
+              {heroRecommendation.winsReady && heroRecommendation.precisionHitCount != null && (
+                <Chip
+                  size="small"
+                  color={heroRecommendation.precisionHitCount >= 5 ? 'success' : 'secondary'}
+                  label={`당첨 ${heroRecommendation.precisionHitCount}/6`}
+                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                />
+              )}
+              {heroRecommendation.decadePoolSize > 0 && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={
+                    heroRecommendation.decadePoolHitCount != null
+                      ? `강수기대${heroRecommendation.decadePoolSize}→역산 · pool당첨 ${heroRecommendation.decadePoolHitCount}/6`
+                      : `강수기대${heroRecommendation.decadePoolSize}→역산`
+                  }
+                  sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                />
+              )}
+              {heroRecommendation.precision14.map((n) => (
+                <LottoBall
+                  key={`hero-p-${n}`}
+                  number={n}
+                  size={ENGINE_BALL.list}
+                  dimmed={
+                    heroRecommendation.contrastPending
+                    || Boolean(heroRecommendation.winsReady && winningSet && !winningSet.has(n))
+                  }
+                />
+              ))}
+            </Stack>
+          )}
           {heroRecommendation.shareOpt.length === 6 && (
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
               <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>분산 최적</Typography>
@@ -5888,7 +5965,7 @@ export default function SemiAutoComparePanel({
               : compareWinning
                 ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다. '
                 : '이번회차 탭: 미추첨 · 당첨 대조 없음. '}
-            핵심=LOO 주신호/구간커버 · 분산최적=공동당첨 회피 · 확장{heroRecommendation.expandSize}=LOO 역산구조 그물.
+            핵심=LOO · 정밀=강수기대30→역산(15미만) · 분산최적=공동당첨 회피 · 확장{heroRecommendation.expandSize}=넓은 그물.
             {' '}상세 검증은 <strong>④ 엔진</strong>.
           </Typography>
 

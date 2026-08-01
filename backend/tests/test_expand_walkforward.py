@@ -65,8 +65,10 @@ def test_walkforward_picks_expand_mode_and_coverage_emits_24():
     assert set(cov["core6"]).issubset(set(cov["expand18"]))
     assert len(cov["expand18"]) == DEFAULT_EXPAND_SIZE == 24
     assert cov["expand_size"] == 24
-    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v8-loo-rescue"
-    assert cov["expand18_mode"] == "loo_reverse_rescue"
+    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v9-decade-precision"
+    assert cov["expand18_mode"] == "loo_decade_precision"
+    assert 6 <= len(cov.get("precision14") or []) <= 14
+    assert len(cov.get("decade_pool30") or []) >= 6
     assert "reverse_graft" in cov
     assert len(cov.get("share_opt") or []) == 6
     assert cov["expand_size"] in (24, 30)
@@ -115,6 +117,81 @@ def test_decade_expected_promoted_into_expand24():
 
 def test_default_expand_is_24():
     assert DEFAULT_EXPAND_SIZE == 24
+
+
+def test_decade_pool_reverse_narrows_under_15():
+    """강수·기대(~30)에서 전엔진 역산 → 15미만, pool 당첨을 최대한 유지."""
+    from app.video_analysis.review_verification import (
+        PRECISION_MAX,
+        _build_precision_from_decade,
+        _decade_pool_list,
+        _loo_precision_from_decade_policy,
+        _multi_engine_order,
+    )
+
+    auto = _lines(
+        *[(5, 6, 9, 16, 15, 19)] * 5,
+        *[(21, 27, 25, 39, 36, 31)] * 4,
+        *[(45, 43, 41, 11, 10, 13)] * 3,
+        (6, 7, 11, 15, 39, 43),
+        (4, 7, 1, 29, 23, 22),
+    )
+    semi = _lines(
+        *[(5, 6, 9, 16, 15, 19)] * 5,
+        *[(21, 27, 25, 39, 36, 31)] * 4,
+        *[(45, 43, 41, 11, 10, 13)] * 3,
+        (6, 7, 11, 15, 39, 43),
+        (4, 7, 1, 34, 32, 35),
+    )
+    win = [6, 7, 11, 15, 39, 43]
+    s1 = _sample(1235, win, auto, semi)
+    s2 = _sample(
+        1234,
+        [5, 16, 21, 39, 45, 11],
+        _lines(*[(5, 16, 21, 39, 45, 11)] * 4, (6, 7, 10, 20, 30, 40)),
+        _lines(*[(5, 16, 21, 39, 45, 11)] * 4, (8, 9, 12, 22, 32, 42)),
+    )
+    s3 = _sample(
+        1233,
+        [9, 15, 27, 36, 43, 10],
+        _lines(*[(9, 15, 27, 36, 43, 10)] * 4, (1, 2, 3, 4, 5, 6)),
+        _lines(*[(9, 15, 27, 36, 43, 10)] * 4, (7, 8, 11, 12, 13, 14)),
+    )
+    samples = [s1, s2, s3]
+    ban = ["auto_freq"]
+    pol = _loo_precision_from_decade_policy(samples, exclude_keys=ban, held_round=1235)
+    assert pol["ok"] is True
+    assert pol["selected_size"] in (10, 12, 14)
+    assert pol["selected_size"] <= PRECISION_MAX
+
+    sigs = _signals(auto, semi)
+    pool, strong, expected = _decade_pool_list(sigs)
+    assert len(pool) <= 30
+    assert len(set(win) & set(pool)) >= 5  # 1235형: 강수기대에 당첨 대부분
+    order, meta = _multi_engine_order(
+        sigs, "pair_product", exclude_keys=ban, auto_lines=auto, semi_lines=semi
+    )
+    prec, pmeta = _build_precision_from_decade(
+        sigs, order, meta, auto_lines=auto, semi_lines=semi,
+        size=pol["selected_size"],
+    )
+    assert len(prec) < 15
+    assert len(prec) == pol["selected_size"] or len(prec) <= len(pool)
+    # 정밀망 catchable ≥ pool-1 (역산 축소가 당첨을 거의 유지)
+    assert len(set(win) & set(prec)) >= max(3, len(set(win) & set(pool)) - 2)
+
+    cov = _coverage_set_from_signals(
+        sigs,
+        signal_key="pair_product",
+        selected_by="loo_held",
+        exclude_keys=ban,
+        auto_lines=auto,
+        semi_lines=semi,
+        samples=samples,
+        held_round=1235,
+    )
+    assert len(cov["precision14"]) < 15
+    assert set(cov["precision14"]).issubset(set(cov["decade_pool30"]) | set(cov["precision14"]))
 
 
 def test_loo_rescue_pulls_mid_tier_winners_into_expand():

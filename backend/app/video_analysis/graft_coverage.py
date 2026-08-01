@@ -12,8 +12,8 @@ import math
 from itertools import combinations
 from typing import Any, Dict, List, Sequence, Tuple
 
-# v7: 확장 = review_verification LOO 역산구조(rescue24|30)와 동일 소스.
-GRAFT_BUILD_ID = "graft-v7-loo-rescue"
+# v8: 확장+정밀14 = review_verification 강수기대→역산 축소와 동일 소스.
+GRAFT_BUILD_ID = "graft-v8-decade-precision"
 
 DECADE_LABELS = ("단번대", "10번대", "20번대", "30번대", "40번대")
 
@@ -295,9 +295,12 @@ def _build_sets_for_lines(
         samples=samples,
         held_round=held_round,
     )
-    expand = list(cov.get("expand18") or [])[:24]
+    exp_n = max(24, min(30, int(cov.get("expand_size") or 24)))
+    expand = list(cov.get("expand18") or [])[:exp_n]
     if len(expand) < 6:
-        expand = present[:24]
+        expand = present[:exp_n]
+    precision14 = list(cov.get("precision14") or [])[:14]
+    decade_pool30 = list(cov.get("decade_pool30") or [])
     decade_core = pick_coverage_core6(expand, auto_f, semi_f, scores)
     pure_ev = optimize_sharing_recall(expand, top_window=min(24, len(expand)), min_from_top12=0)
     # 접목 share = 커버리지 share_opt 우선(동일 소스), 없으면 expand+raw 재계산
@@ -319,6 +322,8 @@ def _build_sets_for_lines(
         "decade_core6": decade_core,
         "core6": raw_top6,  # 하위호환: 기본 핵심 = raw
         "expand24": expand,
+        "precision14": precision14,
+        "decade_pool30": decade_pool30,
         "pure_ev6": (pure_ev or {}).get("numbers") or [],
         "recall_ev6": (recall_ev or {}).get("numbers") or [],
         "recall_ev": recall_ev,
@@ -537,11 +542,11 @@ def build_graft_coverage(*, intent: str = "review") -> Dict[str, Any]:
             ),
             "ev_mode": "recall_ev_top6floor",
             "ev_mode_label": "분산최적 + 상위12≥4 + raw top6≥2",
-            "expand_mode": "multi_engine_reverse_graft",
+            "expand_mode": "loo_decade_precision",
             "coverage_build": built.get("coverage_build"),
             "note": (
-                "확장24=검증 커버리지와 동일(전엔진교차검증+일치레벨역산). "
-                "당첨은 순위 미사용(복기 사후 대조만). 평행·이월 forward OFF."
+                "강수·기대(~30)→정밀14 역산 축소 + 확장망. "
+                "당첨은 순위 미사용(복기 사후 대조만)."
             ),
         },
         "reverse_graft": built.get("reverse_graft"),
@@ -549,6 +554,8 @@ def build_graft_coverage(*, intent: str = "review") -> Dict[str, Any]:
         "core6": core6,
         "decade_core6": built["decade_core6"],
         "expand24": built["expand24"],
+        "precision14": built.get("precision14") or [],
+        "decade_pool30": built.get("decade_pool30") or [],
         "share_opt": (share or {}).get("numbers") or built["recall_ev6"],
         "share_meta": share,
         "pure_ev6": built["pure_ev6"],

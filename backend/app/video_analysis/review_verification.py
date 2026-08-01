@@ -174,11 +174,15 @@ DEFAULT_EXPAND_SIZE = 24
 # 방출 고정 24. WF 후보는 진단만(30까지) — 방출에 selected_size 쓰지 않음.
 WF_MAX_EXPAND_SIZE = 30
 DEFAULT_EXPAND_MODE = "single_raw"
-# v8: LOO 백테스트로 역산구조·크기(24/30) 선택 → 용지 등장 당첨을 확장망에 구출
-COVERAGE_BUILD_ID = "expand24-v8-loo-rescue"
+# v9: 강수·기대(~30) 출발 → 전엔진 역산으로 15미만 정밀망(LOO 크기 선택)
+COVERAGE_BUILD_ID = "expand24-v9-decade-precision"
 RESCUE_MAX_SWAPS = 6
 RESCUE_GROW_SIZE = 30
 RESCUE_SIZE_LIFT_BAR = 0.25  # LOO mean hits: grow30이 +0.25 이상일 때만 30 방출
+# 강수3+기대3 × 5구간 ≈ 30. 역산 축소 후보(15 미만).
+PRECISION_SIZE_CANDIDATES = (10, 12, 14)
+PRECISION_MAX = 14
+PRECISION_RECALL_SLACK = 0.35  # pool30 catchable 대비 이 이상 잃지 않는 최소 K
 
 
 def _merge_expand_order(
@@ -896,6 +900,8 @@ def _coverage_hit_audit(
     missing_ticket = sorted(win_set - present)
     core = set(cov.get("core6") or [])
     expand = set(cov.get("expand18") or [])
+    precision = set(cov.get("precision14") or [])
+    decade_pool = set(cov.get("decade_pool30") or [])
     ban = list(exclude_keys or [])
     boe = _best_of_engines_order(sigs, exclude_keys=ban)
     boe_rank = {n: i + 1 for i, n in enumerate(boe)}
@@ -903,6 +909,7 @@ def _coverage_hit_audit(
     ranked = _rank_signal(sigs.get(sk, sigs["support"]), sigs.get("total_freq"), sigs.get("auto_freq"))
     single_rank = {n: i + 1 for i, n in enumerate(ranked)}
     outside = sorted(set(on_ticket) - expand)
+    outside_precision = sorted(set(on_ticket) - precision) if precision else []
     outside_detail = [
         {
             "number": n,
@@ -910,6 +917,8 @@ def _coverage_hit_audit(
             "boe_rank": boe_rank.get(n),
             "in_raw_expand": n in set(cov.get("expand18_raw") or []),
             "in_single_expand": n in set(cov.get("expand18_single") or []),
+            "in_precision": n in precision,
+            "in_decade_pool": n in decade_pool,
         }
         for n in outside
     ]
@@ -928,11 +937,17 @@ def _coverage_hit_audit(
         "on_ticket_count": len(on_ticket),
         "core6_hit": sorted(core & win_set),
         "expand18_hit": sorted(expand & win_set),
+        "precision14_hit": sorted(precision & win_set),
+        "decade_pool30_hit": sorted(decade_pool & win_set),
         "core6_count": len(core & win_set),
         "expand18_count": len(expand & win_set),
+        "precision14_count": len(precision & win_set) if precision else 0,
+        "decade_pool30_count": len(decade_pool & win_set) if decade_pool else 0,
+        "precision_size": len(precision),
         "expand_size": expand_n,
         "expand18_precision_count": top18_hit,
         "outside_expand": outside,
+        "outside_precision": outside_precision,
         "missed_catchable": outside,  # 하위호환
         "missed_detail": outside_detail,
         "random_expect_core6": random6,
@@ -1414,6 +1429,189 @@ def _best_of_engines_order(
     return sorted(range(1, 46), key=lambda n: (min_rank[n], -tb.get(n, 0.0), -af.get(n, 0.0), n))
 
 
+def _decade_pool_list(sigs: Dict[str, Dict[int, float]]) -> tuple[List[int], set, set]:
+    """★1:1 강수∪기대 (~30) — 정밀 역산의 출발 우주."""
+    strong, expected = _decade_tier_sets(sigs)
+    tb = sigs.get("total_freq") or {}
+    pair = sigs.get("pair_product") or {}
+
+    def key(n: int) -> tuple:
+        return (-float(tb.get(n, 0)), -float(pair.get(n, 0)), n)
+
+    strong_l = sorted(strong, key=key)
+    expected_l = sorted(expected - strong, key=key)
+    pool = strong_l + expected_l
+    return pool, strong, expected
+
+
+def _reverse_rank_decade_pool(
+    pool: List[int],
+    sigs: Dict[str, Dict[int, float]],
+    multi_order: List[int],
+    multi_meta: Dict[str, Any],
+    *,
+    auto_lines: List[List[int]] | None = None,
+    semi_lines: List[List[int]] | None = None,
+) -> List[int]:
+    """강수·기대 풀 안에서 전엔진·역산 점수로 재정렬(당첨 미사용)."""
+    if not pool:
+        return []
+    order_pos = {n: i for i, n in enumerate(multi_order)}
+    match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+    match_max = max((match_sc.get(n, 0.0) for n in pool), default=0.0) or 1.0
+    agree2 = set(multi_meta.get("cross_agree_ge2") or [])
+    agree3 = set(multi_meta.get("cross_agree_ge3") or [])
+    mid_both = set(multi_meta.get("mid_both_side") or [])
+    strong = set(multi_meta.get("decade_strong") or [])
+    expected = set(multi_meta.get("decade_expected") or [])
+    pair = sigs.get("pair_product") or {}
+    pair_max = max((float(pair.get(n, 0)) for n in pool), default=0.0) or 1.0
+    tb = sigs.get("total_freq") or {}
+
+    def score(n: int) -> float:
+        s = 0.0
+        s += max(0, 45 - order_pos.get(n, 45)) * 2.2
+        s += (float(match_sc.get(n, 0)) / match_max) * 30.0
+        if n in agree3:
+            s += 18.0
+        elif n in agree2:
+            s += 10.0
+        if n in strong:
+            s += 14.0
+        if n in expected:
+            s += 16.0  # 기대수에 당첨이 자주 앉음(1235:7·11)
+        if n in mid_both:
+            s += 12.0
+        s += (float(pair.get(n, 0)) / pair_max) * 10.0
+        s += min(8.0, float(tb.get(n, 0)) * 0.15)
+        return s
+
+    return sorted(pool, key=lambda n: (-score(n), n))
+
+
+def _build_precision_from_decade(
+    sigs: Dict[str, Dict[int, float]],
+    multi_order: List[int],
+    multi_meta: Dict[str, Any],
+    *,
+    auto_lines: List[List[int]] | None = None,
+    semi_lines: List[List[int]] | None = None,
+    size: int = PRECISION_MAX,
+    core: List[int] | None = None,
+) -> tuple[List[int], Dict[str, Any]]:
+    """강수·기대 30 → 역산 순위 topK(<15). core 는 가능하면 포함."""
+    pool, strong, expected = _decade_pool_list(sigs)
+    ranked = _reverse_rank_decade_pool(
+        pool, sigs, multi_order, multi_meta,
+        auto_lines=auto_lines, semi_lines=semi_lines,
+    )
+    k = max(6, min(PRECISION_MAX, int(size)))
+    out = list(ranked[:k])
+    if core:
+        out = _ensure_core_subset(out, [n for n in core if n in set(pool)], k)
+        # pool 밖 core 는 정밀망에 억지 넣지 않음(출발=강수기대)
+        out = [n for n in out if n in set(pool)][:k]
+        if len(out) < k:
+            for n in ranked:
+                if n not in out:
+                    out.append(n)
+                if len(out) >= k:
+                    break
+    meta = {
+        "pool_size": len(pool),
+        "pool": pool,
+        "decade_strong": sorted(strong),
+        "decade_expected": sorted(expected),
+        "ranked": ranked,
+        "emit_size": len(out),
+    }
+    return out, meta
+
+
+def _loo_precision_from_decade_policy(
+    samples,
+    *,
+    exclude_keys: List[str] | None = None,
+    held_round: int | None = None,
+) -> Dict[str, Any]:
+    """복기 LOO — 강수·기대30에서 역산해 15미만으로 줄이되 catchable 손실을 최소화.
+
+    후보 K∈{10,12,14}. pool 전체 catchable 평균 대비 slack 이내면 가장 작은 K.
+    """
+    train = [
+        s for s in (samples or [])
+        if held_round is None or int(s.round_no) != int(held_round)
+    ]
+    default = {
+        "ok": False,
+        "selected_size": PRECISION_MAX,
+        "means": {},
+        "pool_catchable_mean": 0.0,
+        "rounds": len(train),
+        "reason": "표본 부족 — 기본 정밀 top14",
+    }
+    if len(train) < 2:
+        return default
+
+    ban = list(exclude_keys or [])
+    sizes = list(PRECISION_SIZE_CANDIDATES)
+    hit_sums = {k: 0.0 for k in sizes}
+    pool_sum = 0.0
+    per_round: List[Dict[str, Any]] = []
+    for s in train:
+        sigs = _signals(s.auto_lines, s.semi_lines)
+        aw = _loo_axis_weights(train, exclude_keys=ban, held_round=int(s.round_no))
+        sk = "pair_product" if "pair_product" not in set(ban) else "support"
+        order, meta = _multi_engine_order(
+            sigs, sk, exclude_keys=ban,
+            auto_lines=s.auto_lines, semi_lines=s.semi_lines, axis_weights=aw,
+        )
+        pool, _, _ = _decade_pool_list(sigs)
+        present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
+        win = set(s.winning)
+        catchable = win & present
+        pool_hits = len(catchable & set(pool))
+        pool_sum += pool_hits
+        ranked = _reverse_rank_decade_pool(
+            pool, sigs, order, meta,
+            auto_lines=s.auto_lines, semi_lines=s.semi_lines,
+        )
+        row_hits = {k: len(catchable & set(ranked[:k])) for k in sizes}
+        for k in sizes:
+            hit_sums[k] += row_hits[k]
+        per_round.append({
+            "round_no": s.round_no,
+            "pool_catchable": pool_hits,
+            "hits": row_hits,
+        })
+
+    n = len(train)
+    means = {k: round(hit_sums[k] / n, 3) for k in sizes}
+    pool_mean = round(pool_sum / n, 3)
+    # pool catchable 을 거의 유지하는 최소 K
+    eligible = [
+        k for k in sorted(sizes)
+        if means[k] + 1e-9 >= pool_mean - PRECISION_RECALL_SLACK
+    ]
+    if not eligible:
+        # 전부 손실 크면 catchable 최대 K, 동점이면 큰 K
+        best = max(means.values())
+        eligible = [k for k in sorted(sizes, reverse=True) if means[k] == best]
+    selected = eligible[0]
+    return {
+        "ok": True,
+        "selected_size": selected,
+        "means": means,
+        "pool_catchable_mean": pool_mean,
+        "rounds": n,
+        "per_round": per_round,
+        "reason": (
+            f"LOO {n}회 — 강수기대30→정밀 top{selected} "
+            f"(catchable {means[selected]}/6 · pool {pool_mean}/6)"
+        ),
+    }
+
+
 def _loo_select_core6(
     samples,
     *,
@@ -1587,12 +1785,40 @@ def _coverage_set_from_signals(
 
     share = optimize_sharing_from_raw(expand, core)
     share_opt = list((share or {}).get("numbers") or [])[:6]
+    # 강수·기대(~30) 출발 → LOO가 고른 K(<15)로 전엔진 역산 축소
+    prec_pol = _loo_precision_from_decade_policy(
+        samples, exclude_keys=exclude_keys, held_round=held_round
+    ) if samples is not None else {
+        "ok": False,
+        "selected_size": PRECISION_MAX,
+        "means": {},
+        "pool_catchable_mean": 0.0,
+        "reason": "표본 없음 — 기본 정밀 top14",
+    }
+    prec_size = int(prec_pol.get("selected_size") or PRECISION_MAX)
+    precision14, prec_meta = _build_precision_from_decade(
+        sigs, multi_order, multi_meta,
+        auto_lines=auto_lines, semi_lines=semi_lines,
+        size=prec_size, core=core,
+    )
+    prec_meta["policy"] = {
+        "selected_size": prec_size,
+        "means": prec_pol.get("means"),
+        "pool_catchable_mean": prec_pol.get("pool_catchable_mean"),
+        "reason": prec_pol.get("reason"),
+        "ok": prec_pol.get("ok"),
+    }
+    # 정밀망 위 recall-EV (확장망 폴백)
+    prec_share = optimize_sharing_from_raw(precision14, core) if len(precision14) >= 6 else None
+    if prec_share and len(prec_share.get("numbers") or []) == 6:
+        share_opt = list(prec_share["numbers"])[:6]
+        share = prec_share
     match_top = list(multi_meta.get("match_level_top12") or [])
     agree3 = list(multi_meta.get("cross_agree_ge3") or [])
     mode_label = (
-        f"LOO역산구조({rescue_pol.get('selected')}) · top{size}"
-        if rescue_pol.get("ok")
-        else f"전엔진+역산구조 · top{size}"
+        f"LOO역산구조({rescue_pol.get('selected')}) · top{size} · 정밀{prec_size}"
+        if rescue_pol.get("ok") or prec_pol.get("ok")
+        else f"전엔진+역산구조 · top{size} · 정밀{prec_size}"
     )
     return {
         "signal": signal_key,
@@ -1602,17 +1828,22 @@ def _coverage_set_from_signals(
         # 하위호환: 필드명 expand18 유지 — 실제 길이는 expand_size(24|30).
         "expand18": expand,
         "expand_size": size,
-        "expand18_mode": "loo_reverse_rescue",
+        "expand18_mode": "loo_decade_precision",
         "expand18_mode_label": mode_label,
         "expand18_precision": precision18,
         "expand18_single": single_expand,
         "expand18_raw": mode_expand,
         "expand18_boe_balanced": boe_expand,
+        # 강수·기대30 → 역산 축소(<15). 히어로 정밀망.
+        "precision14": precision14,
+        "precision_size": len(precision14),
+        "decade_pool30": prec_meta.get("pool") or [],
         "share_opt": share_opt,
         "share_opt_meta": {
             "mode": (share or {}).get("mode"),
             "risk": (share or {}).get("risk"),
             "ev_score": (share or {}).get("ev_score"),
+            "from_precision": bool(prec_share),
         } if share else None,
         "decade_balance": _decade_balance_info(expand, precision18, present),
         "excluded_signals": list(exclude_keys or []),
@@ -1625,18 +1856,19 @@ def _coverage_set_from_signals(
             "axis_weights": multi_meta.get("axis_weights"),
             "rescue": rescue_meta,
             "core_policy": core_meta,
+            "decade_precision": prec_meta,
             "note": (
-                "복기 전회차 LOO로 역산구조·크기·핵심6 선택. "
-                "구간기대·일치레벨·중간양쪽지지 후보를 확장망에 스왑 구출(당첨 미사용)."
+                "강수·기대(~30)에서 전엔진 역산으로 15미만 정밀망. "
+                "복기 LOO가 K·구조 선택(당첨 미사용)."
             ),
         },
         "precision_gap_hint": {
             "top24": 24,
             "top30": 30,
+            "precision_max": PRECISION_MAX,
             "note": (
-                "확장=LOO 역산구조. 용지 등장 당첨이 합의에 밀려 잘리던 "
-                "중하위(예: 1235의 6·7)를 구간기대·역산으로 구출. "
-                "크기 30은 LOO catchable 리프트가 분명할 때만."
+                "출발=구간 강수+기대(~30, 1235처럼 당첨 대부분 포함). "
+                "전엔진·일치레벨 역산으로 top10/12/14 축소 — LOO catchable 유지."
             ),
         },
     }

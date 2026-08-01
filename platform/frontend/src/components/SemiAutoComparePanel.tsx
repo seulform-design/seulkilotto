@@ -1863,6 +1863,9 @@ export default function SemiAutoComparePanel({
 
   // UI 토글 상태
   const [showAllTickets, setShowAllTickets] = useState(false);
+  // ⚙ 반자동 추가 세팅 목록 렌더 캡 — 자동(§1)과 동일. 수백 줄 한 번에 마운트 방지(모바일).
+  const SEMI_LIST_PAGE = 50;
+  const [semiListLimit, setSemiListLimit] = useState(SEMI_LIST_PAGE);
   const [recommendations, setRecommendations] = useState<ScoredRecommendation[]>([]);
   // [추천 5세트 생성] 클릭마다 증가 — 같은 데이터에서도 매번 다른 5세트 생성.
   const regenNonceRef = useRef(0);
@@ -4232,9 +4235,9 @@ export default function SemiAutoComparePanel({
                 반자동 누적이 없습니다. 그리드에서 6개 선택 후 [줄 저장] 하거나 [⬆ 대량 입력] 으로 추가하세요.
               </Alert>
             ) : (
-              <Box sx={{ maxHeight: 320, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1.5 }}>
+              <Box sx={{ maxHeight: 320, overflowY: 'auto', bgcolor: 'action.hover', borderRadius: 1, p: 0.75, mb: 1 }}>
                 <Stack spacing={0.5}>
-                  {ticketLines.map((line, idx) => {
+                  {ticketLines.slice(0, semiListLimit).map((line, idx) => {
                     const matchCount = winningSet
                       ? line.numbers.filter((n) => winningSet.has(n)).length
                       : 0;
@@ -4277,6 +4280,30 @@ export default function SemiAutoComparePanel({
                   })}
                 </Stack>
               </Box>
+            )}
+            {ticketLines.length > SEMI_LIST_PAGE && (
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+                {semiListLimit < ticketLines.length && (
+                  <Button
+                    size="small"
+                    variant="text"
+                    onClick={() =>
+                      setSemiListLimit((v) => Math.min(v + SEMI_LIST_PAGE, ticketLines.length))
+                    }
+                  >
+                    더 보기 (+{Math.min(SEMI_LIST_PAGE, ticketLines.length - semiListLimit)}) · {semiListLimit}/{ticketLines.length}줄
+                  </Button>
+                )}
+                {semiListLimit >= ticketLines.length ? (
+                  <Button size="small" variant="text" onClick={() => setSemiListLimit(SEMI_LIST_PAGE)}>
+                    접기 ▲ (전체 {ticketLines.length}줄)
+                  </Button>
+                ) : (
+                  <Button size="small" variant="text" onClick={() => setSemiListLimit(ticketLines.length)}>
+                    전체 보기 ({ticketLines.length}줄)
+                  </Button>
+                )}
+              </Stack>
             )}
             <Stack direction="row" justifyContent="flex-end">
               <Button

@@ -26,6 +26,15 @@ def _support_ranked(sample: Any) -> List[int]:
 
 
 def build_carryover_learning(seed: int = 42) -> Dict[str, Any]:
+    # 요청 단위 읽기 캐시 — collect_round_samples 등의 24MB historical 로드를 스코프
+    # 1회로(아카이브 성장 시 60s 타임아웃 방지). 읽기 전용.
+    from .store import store_read_cache
+
+    with store_read_cache():
+        return _build_carryover_learning_impl(seed=seed)
+
+
+def _build_carryover_learning_impl(seed: int = 42) -> Dict[str, Any]:
     from .feature_learning_engine import collect_round_samples
 
     samples = collect_round_samples()

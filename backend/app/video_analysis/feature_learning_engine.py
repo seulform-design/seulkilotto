@@ -738,7 +738,20 @@ def recommend_with_contributions(
 # ---------------------------------------------------------------------------
 
 def build_feature_learning(seed: int = 42, apply_intent: str = "current_round") -> Dict[str, Any]:
-    """전체 파이프라인: 수집 → Feature → 검증 → 앙상블 → 탭별 추천."""
+    """전체 파이프라인: 수집 → Feature → 검증 → 앙상블 → 탭별 추천.
+
+    요청 단위 읽기 캐시로 24MB historical 반복 로드(collect_round_samples +
+    _load_apply_sheet = 2회)를 1회로 줄인다 — 아카이브가 커지면서 이 엔드포인트가
+    60s 게이트웨이 한도를 넘어 타임아웃(→ Feature 엔진 패널이 비활성처럼 보임)나던
+    문제 방지. (읽기 전용 파이프라인이라 캐시 무효화 걱정 없음.)
+    """
+    from .store import store_read_cache
+
+    with store_read_cache():
+        return _build_feature_learning_impl(seed=seed, apply_intent=apply_intent)
+
+
+def _build_feature_learning_impl(seed: int = 42, apply_intent: str = "current_round") -> Dict[str, Any]:
     from .store import _load_apply_sheet
     from .draw_template import get_current_round_no
 

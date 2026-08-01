@@ -79,7 +79,17 @@ def _number_support(auto_lines: List[List[int]], semi_lines: List[List[int]]) ->
 
 
 def build_round_learning(apply_intent: str = "current_round") -> Dict[str, Any]:
-    """보관된 모든 과거 회차로 지지-적중 캘리브레이션을 만들고 탭별 용지에 적용."""
+    """보관된 모든 과거 회차로 지지-적중 캘리브레이션을 만들고 탭별 용지에 적용.
+
+    요청 단위 읽기 캐시 — 24MB historical 반복 로드(_load_historical_raw +
+    _load_apply_sheet)를 1회로(아카이브 성장 시 60s 타임아웃 방지). 읽기 전용."""
+    from .store import store_read_cache
+
+    with store_read_cache():
+        return _build_round_learning_impl(apply_intent=apply_intent)
+
+
+def _build_round_learning_impl(apply_intent: str = "current_round") -> Dict[str, Any]:
     from .store import _load_historical_raw, _load_apply_sheet, _manual_saved_lines
     from .draw_template import get_current_round_no
 

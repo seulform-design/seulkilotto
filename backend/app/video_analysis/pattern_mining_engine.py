@@ -871,6 +871,15 @@ def recommend_from_patterns(
 # ---------------------------------------------------------------------------
 
 def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") -> Dict[str, Any]:
+    # 요청 단위 읽기 캐시 — collect_rounds + _load_apply_sheet 이 24MB historical 을
+    # 2회 로드하던 것을 1회로(아카이브 성장 시 60s 타임아웃 방지). 읽기 전용.
+    from .store import store_read_cache
+
+    with store_read_cache():
+        return _build_pattern_mining_impl(seed=seed, apply_intent=apply_intent)
+
+
+def _build_pattern_mining_impl(seed: int = 42, apply_intent: str = "current_round") -> Dict[str, Any]:
     from .store import _load_apply_sheet
     from .draw_template import get_current_round_no
 

@@ -20,6 +20,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  LinearProgress,
   Divider,
   Tab,
   Tabs,
@@ -3544,9 +3545,40 @@ export default function SemiAutoComparePanel({
   }, [finalStrongExpected, reviewVerificationQuery.data, compareWinning, winningSet]);
 
   // 🎯 핵심 추천 — 탭별 대상 회차가 다름.
-  // 복기: 복기 회차 용지 커버리지(당첨 대조) / 이번회차: 미추첨 회차 커버리지.
+  // 복기: 서버 review_coverage_set 확정 전에는 표시하지 않음(로컬 폴백이 '검증 추천'으로
+  // 보이며 당첨 로드 후 세트가 바뀌는 착시·레이스 방지). 이번회차만 로컬 폴백 허용.
   const heroRecommendation = useMemo(() => {
+    const empty = {
+      ready: false,
+      pending: false,
+      pendingReason: '' as string,
+      verified: false,
+      winsReady: false,
+      contrastPending: false,
+      core6: [] as number[],
+      expand18: [] as number[],
+      expandSize: 24,
+      shareOpt: [] as number[],
+      source: 'coverage' as 'consensus' | 'coverage' | 'forecast' | 'repeat',
+      sourceLabel: '',
+      signalLabel: '자동↔반자동 양쪽 지지',
+      selectedByMulti: false,
+      bestTop18: null as number | null,
+      reviewRounds: 0,
+      goodSignalCount: 0,
+      agreement: {} as Record<string, number>,
+      showWinning: compareWinning,
+      coverageMode: null as string | null,
+      expandModeLabel: null as string | null,
+      outsideExpand: [] as number[],
+      missedDetail: [] as { number: number; single_rank?: number; boe_rank?: number }[],
+      expandHitCount: null as number | null,
+      core6HitCount: null as number | null,
+      serverRound: null as number | null,
+    };
     const rv = reviewVerificationQuery.data;
+    const clean = (arr: number[] | undefined) =>
+      Array.from(new Set((arr ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= 45)));
     const consensus = rv?.ok
       ? compareWinning
         ? rv.review_consensus_coverage
@@ -3561,9 +3593,6 @@ export default function SemiAutoComparePanel({
     const policy = rv?.ok ? rv.inverse_diagnosis?.policy : undefined;
     const best =
       lb?.leaderboard?.find((e) => e.key === lb.best_signal_multi) ?? lb?.leaderboard?.[0];
-    const clean = (arr: number[] | undefined) =>
-      Array.from(new Set((arr ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= 45)));
-    // 정책 정렬: core6=best_single(cov), expand18=best_of_engines(cov.min-rank). 합의는 폴백만.
     const coreMode = policy?.core6_mode ?? (policy?.prefer_consensus ? 'consensus' : 'best_single');
     const expandMode = policy?.expand18_mode ?? 'best_of_engines';
     let core6 = clean(
@@ -3583,16 +3612,43 @@ export default function SemiAutoComparePanel({
     if (expand18.length < 6) {
       expand18 = clean(expandMode === 'consensus' ? cov?.expand18 : consensus?.expand18);
     }
-    const expandSize = Math.max(
+    const expandSizeHint = Math.max(
       expand18.length,
       Number(cov?.expand_size ?? policy?.expand_size ?? 24) || 24,
       24,
     );
-    if (core6.length < 6 || expand18.length < 6) {
-      // 폴백 — 서버 커버리지가 없으면 해당 탭 로컬 신호로 부족한 쪽만 채운다.
-      const rep = !compareWinning ? (currentRoundForecast?.representative ?? []) : [];
+    const serverReady = Boolean(rv?.ok && core6.length >= 6 && expand18.length >= 6);
+
+    // 복기 탭: 서버 검증 전엔 ready=false (로컬 predictedNumbers 폴백 금지).
+    // 회차 불일치(옛 캐시)도 검증 완료로 위장하지 않음.
+    const serverRound = rv?.ok ? rv.round_no : null;
+    const roundMismatch =
+      compareWinning
+      && serverReady
+      && effectiveRound != null
+      && serverRound != null
+      && serverRound !== effectiveRound;
+    if (compareWinning && (!serverReady || roundMismatch)) {
+      const loading = reviewVerificationQuery.isLoading || reviewVerificationQuery.isFetching;
+      return {
+        ...empty,
+        pending: true,
+        pendingReason: roundMismatch
+          ? `서버 검증은 ${serverRound}회 · 화면 복기는 ${effectiveRound}회 — 회차 맞춰 재계산 중…`
+          : loading
+            ? '복기 검증 API 계산 중… 임시 로컬 순위를 검증 추천으로 보여주지 않습니다.'
+            : (rv && !rv.ok
+              ? (rv.reason ?? '복기 검증 데이터가 없습니다.')
+              : '복기 용지 검증 커버리지 대기 중…'),
+        reviewRounds: lb?.rounds ?? 0,
+        serverRound,
+      };
+    }
+
+    // 이번회차만 — 서버 없으면 로컬 폴백.
+    if (!compareWinning && (core6.length < 6 || expand18.length < 6)) {
+      const rep = currentRoundForecast?.representative ?? [];
       const predTop = predictedNumbers.map((p) => p.number);
-      // 통합 예측 신호(탭별 target_round)도 폴백에 반영.
       const signalTop = (predictionSignals?.strong_candidates ?? []).filter(
         (n) => Number.isInteger(n) && n >= 1 && n <= 45
       );
@@ -3601,28 +3657,47 @@ export default function SemiAutoComparePanel({
         core6 = clean(rep.length >= 6 ? rep : pool.slice(0, 6));
         source = rep.length >= 6 ? 'forecast' : 'repeat';
       }
-      if (expand18.length < 6) expand18 = clean(pool.slice(0, expandSize));
+      if (expand18.length < 6) expand18 = clean(pool.slice(0, expandSizeHint));
     }
+
     const ready = core6.length >= 6 && expand18.length >= 6;
-    // 서버 expand 배열 길이를 그대로 표시(강제 top24). 옛 캐시(18)면 18로 보이며 빌드 키로 무효화.
-    const wide = clean(expand18).slice(0, Math.min(30, Math.max(expand18.length, Number(cov?.expand_size) || 0)));
+    const wide = clean(expand18).slice(
+      0,
+      Math.min(30, Math.max(expand18.length, Number(cov?.expand_size) || 0)),
+    );
     const shareResult = ready ? optimizeForSharing(wide, Math.min(24, wide.length)) : null;
     const shareOpt = shareResult ? shareResult.numbers.slice(0, 6) : [];
     const agreement = consensus?.agreement ?? {};
-    const expandSet = new Set(wide);
+    const winsReady = Boolean(winningSet && winningSet.size > 0);
     const audit = compareWinning && rv?.ok ? rv.review_hit_audit : undefined;
-    const outsideExpand = clean(
-      audit?.outside_expand
-        ?? audit?.missed_catchable
-        ?? (winningSet ? [...winningSet].filter((n) => !expandSet.has(n)) : [])
-    ).sort((a, b) => a - b);
+    // 서버 audit 만 사용 — 폴백 expand 에 당첨 차집합을 붙이면 레이스 중 수치가 흔들림.
+    const outsideExpand = clean(audit?.outside_expand ?? audit?.missed_catchable).sort(
+      (a, b) => a - b,
+    );
+    const missedDetail = (audit?.missed_detail ?? []).filter((m) =>
+      outsideExpand.includes(m.number),
+    );
+    const sourceLabel =
+      source === 'coverage'
+        ? '서버 검증 커버리지'
+        : source === 'consensus'
+          ? '검증 통과 합의'
+          : source === 'forecast'
+            ? '이번회차 종합예측'
+            : '로컬 1:1 임시';
     return {
       ready,
+      pending: false,
+      pendingReason: '',
+      verified: serverReady,
+      winsReady,
+      contrastPending: Boolean(compareWinning && !winsReady),
       core6: [...core6].slice(0, 6).sort((a, b) => a - b),
       expand18: [...wide].sort((a, b) => a - b),
-      expandSize: wide.length,
+      expandSize: wide.length || expandSizeHint,
       shareOpt: [...shareOpt].sort((a, b) => a - b),
       source,
+      sourceLabel,
       signalLabel: cov?.signal_label ?? best?.label ?? '자동↔반자동 양쪽 지지',
       selectedByMulti: cov?.selected_by === 'multi_round',
       bestTop18: best?.mean_top18 ?? (rv?.ok ? rv.summary?.best_top18 : null) ?? null,
@@ -3636,12 +3711,19 @@ export default function SemiAutoComparePanel({
         ?? rv?.inverse_diagnosis?.policy?.expand18_variant_label
         ?? null,
       outsideExpand,
+      missedDetail,
       expandHitCount: audit?.expand18_count
-        ?? (winningSet ? wide.filter((n) => winningSet.has(n)).length : null),
+        ?? (winsReady ? wide.filter((n) => winningSet!.has(n)).length : null),
+      core6HitCount: audit?.core6_count
+        ?? (winsReady ? core6.filter((n) => winningSet!.has(n)).length : null),
+      serverRound,
     };
   }, [
     compareWinning,
+    effectiveRound,
     reviewVerificationQuery.data,
+    reviewVerificationQuery.isLoading,
+    reviewVerificationQuery.isFetching,
     currentRoundForecast,
     predictedNumbers,
     predictionSignals?.strong_candidates,
@@ -5283,24 +5365,52 @@ export default function SemiAutoComparePanel({
       )}
       {showRecommendSection && (
       <>
-      {/* 🎯 핵심 추천 */}
+      {/* 🎯 핵심 추천 — 복기는 서버 검증 확정 전 로딩(임시 로컬을 검증으로 위장하지 않음) */}
+      {compareWinning && heroRecommendation.pending && (
+        <Paper id="photo-rec-hero" variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+            <Typography variant="body1" fontWeight={800}>
+              {recommendHeroTitle}
+            </Typography>
+            <Chip size="small" color="warning" label="검증 대기" sx={{ height: 20, fontSize: 10, fontWeight: 700 }} />
+          </Stack>
+          <LinearProgress sx={{ mb: 1 }} />
+          <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
+            <Typography variant="caption">
+              {heroRecommendation.pendingReason || '복기 검증 API 계산 중…'}
+              {' '}데이터 불러오기 전의 로컬 순위는 검증 추천이 아니며, 당첨 대조 전·후 세트가 바뀌어 보이는 착시를 막기 위해 숨깁니다.
+            </Typography>
+          </Alert>
+        </Paper>
+      )}
       {heroRecommendation.ready && (
         <Paper id="photo-rec-hero" variant="outlined" sx={{ p: 1.5, mb: 1.5, borderColor: 'warning.main', borderWidth: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
               <Typography variant="body1" fontWeight={800}>
-                {recommendHeroTitle}
+                {compareWinning && heroRecommendation.serverRound != null
+                  ? `🎯 복기 ${heroRecommendation.serverRound}회 검증 추천`
+                  : recommendHeroTitle}
               </Typography>
               <Chip
                 size="small"
                 color={compareWinning ? 'primary' : 'secondary'}
                 label={
                   compareWinning
-                    ? `복기 ${effectiveRound ?? '?'}회`
+                    ? `복기 ${heroRecommendation.serverRound ?? effectiveRound ?? '?'}회`
                     : `이번회차 ${currentRound ?? '?'}회`
                 }
                 sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
               />
+              {heroRecommendation.sourceLabel && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color={heroRecommendation.verified ? 'success' : 'default'}
+                  label={heroRecommendation.sourceLabel}
+                  sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+                />
+              )}
             </Stack>
             <Chip
               size="small"
@@ -5310,11 +5420,20 @@ export default function SemiAutoComparePanel({
               sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
             />
           </Stack>
+          {heroRecommendation.contrastPending && (
+            <Alert severity="warning" icon={false} sx={{ py: 0.5, mb: 1 }}>
+              <Typography variant="caption">
+                당첨번호 로딩 중 — 공 색은 아직 대조하지 않습니다(전부 밝게 보이는 상태는 당첨이 아닙니다).
+              </Typography>
+            </Alert>
+          )}
           {heroRecommendation.reviewRounds > 0 && (
             <Alert severity="success" icon={false} sx={{ py: 0.5, mb: 1 }}>
               <Typography variant="caption">
                 ✅ <strong>복기 {heroRecommendation.reviewRounds}회차 검증 완료</strong>
-                {compareWinning && effectiveRound != null ? ` (이 추천 = ${effectiveRound}회)` : ''}
+                {compareWinning && (heroRecommendation.serverRound ?? effectiveRound) != null
+                  ? ` (이 추천 = ${heroRecommendation.serverRound ?? effectiveRound}회)`
+                  : ''}
                 {!compareWinning && currentRound != null ? ` → 적용 대상 ${currentRound}회` : ''}
                 {' '}— 당첨을 가장 잘 잡은 신호는{' '}
                 <strong>{heroRecommendation.signalLabel}</strong>{heroRecommendation.selectedByMulti ? '(다회차 1위)' : ''}
@@ -5332,35 +5451,51 @@ export default function SemiAutoComparePanel({
                 {heroRecommendation.expandModeLabel
                   ? ` 확장망: ${heroRecommendation.expandModeLabel}.`
                   : ''}
-                {heroRecommendation.showWinning && winningSet && winningSet.size > 0
-                  ? ` 핵심6 ${heroRecommendation.core6.filter((n) => winningSet.has(n)).length}/6 · 확장${heroRecommendation.expandSize} ${heroRecommendation.expandHitCount ?? heroRecommendation.expand18.filter((n) => winningSet.has(n)).length}/6.`
+                {heroRecommendation.showWinning && heroRecommendation.winsReady
+                  ? ` 핵심6 ${heroRecommendation.core6HitCount ?? 0}/6 · 확장${heroRecommendation.expandSize} ${heroRecommendation.expandHitCount ?? 0}/6.`
                   : ''}
               </Typography>
             </Alert>
           )}
-          {heroRecommendation.showWinning && heroRecommendation.outsideExpand.length > 0 && (
-            <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
-              <Typography variant="caption" fontWeight={800} color="warning.main" sx={{ minWidth: 58 }}>
-                확장망 밖
-              </Typography>
-              {heroRecommendation.outsideExpand.map((n) => (
-                <LottoBall key={`hero-out-${n}`} number={n} size={ENGINE_BALL.list} />
-              ))}
-              <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                용지에는 있으나 확장 {heroRecommendation.expandSize} 순위 밖
-              </Typography>
+          {heroRecommendation.showWinning && heroRecommendation.winsReady && heroRecommendation.outsideExpand.length > 0 && (
+            <Stack spacing={0.35} sx={{ mb: 0.75 }}>
+              <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="caption" fontWeight={800} color="warning.main" sx={{ minWidth: 58 }}>
+                  확장망 밖
+                </Typography>
+                {heroRecommendation.outsideExpand.map((n) => (
+                  <LottoBall key={`hero-out-${n}`} number={n} size={ENGINE_BALL.list} />
+                ))}
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                  용지에는 있으나 확장 {heroRecommendation.expandSize} 순위 밖 (엔진 순위 한계)
+                </Typography>
+              </Stack>
+              {heroRecommendation.missedDetail.length > 0 && (
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, pl: 7.5 }}>
+                  {heroRecommendation.missedDetail.map((m) => {
+                    const ranks = [
+                      m.boe_rank != null ? `합산 ${m.boe_rank}위` : null,
+                      m.single_rank != null ? `단일 ${m.single_rank}위` : null,
+                    ].filter(Boolean).join(' · ');
+                    return `${m.number}${ranks ? `(${ranks})` : ''}`;
+                  }).join(' · ')}
+                </Typography>
+              )}
             </Stack>
           )}
           <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
             <Typography variant="caption" fontWeight={800} sx={{ minWidth: 58 }}>핵심 6</Typography>
             {heroRecommendation.core6.map((n) => {
-              const isWin = Boolean(heroRecommendation.showWinning && winningSet?.has(n));
+              const isWin = Boolean(heroRecommendation.winsReady && winningSet?.has(n));
+              // 당첨 미로드: 전부 dim — 전부 밝음 = 당첨처럼 보이는 착시 방지
+              const dimmed = heroRecommendation.contrastPending
+                || Boolean(heroRecommendation.winsReady && !isWin);
               return (
                 <Box key={`hero-c-${n}`} sx={{ textAlign: 'center', minWidth: 30 }}>
                   <LottoBall
                     number={n}
                     size={ENGINE_BALL.hero}
-                    dimmed={Boolean(heroRecommendation.showWinning && winningSet && !isWin)}
+                    dimmed={dimmed}
                   />
                   {heroRecommendation.agreement[String(n)] != null && (
                     <Typography variant="caption" sx={{ display: 'block', fontSize: 8, lineHeight: 1, color: 'text.disabled' }}>
@@ -5381,7 +5516,10 @@ export default function SemiAutoComparePanel({
                   key={`hero-s-${n}`}
                   number={n}
                   size={ENGINE_BALL.list}
-                  dimmed={Boolean(heroRecommendation.showWinning && winningSet && !winningSet.has(n))}
+                  dimmed={
+                    heroRecommendation.contrastPending
+                    || Boolean(heroRecommendation.winsReady && winningSet && !winningSet.has(n))
+                  }
                 />
               ))}
               <SharingBadge numbers={heroRecommendation.shareOpt} />
@@ -5397,15 +5535,18 @@ export default function SemiAutoComparePanel({
                 key={`hero-e-${n}`}
                 number={n}
                 size={ENGINE_BALL.list}
-                dimmed={Boolean(heroRecommendation.showWinning && winningSet && !winningSet.has(n))}
+                dimmed={
+                  heroRecommendation.contrastPending
+                  || Boolean(heroRecommendation.winsReady && winningSet && !winningSet.has(n))
+                }
               />
             ))}
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9.5, mt: 0.75, fontStyle: 'italic' }}>
-            {compareWinning && winningSet && winningSet.size > 0
-              ? `밝은 공 = ${effectiveRound ?? '?'}회 실제 당첨 · 회색 = 비당첨. `
+            {compareWinning && heroRecommendation.winsReady
+              ? `밝은 공 = ${heroRecommendation.serverRound ?? effectiveRound ?? '?'}회 실제 당첨 · 회색 = 비당첨. `
               : compareWinning
-                ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다. '
+                ? '복기 탭: 당첨번호 로딩 후 밝은 공/회색으로 대조합니다(로딩 중 회색 = 미대조). '
                 : '이번회차 탭: 미추첨이라 당첨 대조 없음. '}
             핵심 6 = 집중 픽 · 확장 {heroRecommendation.expandSize} = 넓은 그물 · 분산 최적 = 공동당첨 회피.
             {' '}아래: 용지 통계 5세트 → 강수·기대·종합 예측. 역산·학습·검증은 <strong>④ 엔진</strong>.

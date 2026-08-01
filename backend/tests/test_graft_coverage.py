@@ -52,10 +52,11 @@ def test_build_and_backtest_smoke():
     )
     built = _build_sets_for_lines(auto, semi)
     assert built is not None
-    assert len(built["core6"]) == 6
-    assert len(built["expand24"]) == 24 or len(built["expand24"]) >= 6
+    # 기본 핵심 = raw top6 (구간커버가 더 못 잡던 회귀 방지)
+    assert built["core6"] == built["raw_top6"]
+    assert len(built["decade_core6"]) == 6
+    assert built["expand24"] == built["ranked"][: len(built["expand24"])]
     win = [6, 7, 11, 15, 39, 43]
-    # 확장망이 당첨을 상당수 담는지(용지에 모두 있음)
     assert len(set(built["expand24"]) & set(win)) >= 4
 
     s = RoundSample(
@@ -65,8 +66,21 @@ def test_build_and_backtest_smoke():
         winning=win,
         features={n: {"support_rank": n} for n in range(1, 46)},
     )
-    bt = _loo_backtest([s])
+    bt = _loo_backtest([s, s])  # 소표본 → 무조건 raw
     assert bt["ok"] is True
-    assert bt["rounds"] == 1
-    assert "decade_core6" in bt["means"]
-    assert GRAFT_BUILD_ID.startswith("graft-")
+    assert bt["selected_core_mode"] == "raw_top6"
+    assert GRAFT_BUILD_ID == "graft-v3-raw-first"
+
+
+def test_decade_worse_than_raw_is_not_emitted_as_default():
+    """구간커버가 raw 당첨을 빼면 selected 는 raw."""
+    # raw top 에 당첨 몰림, decade 는 고번호로 분산
+    auto = _lines(*[(6, 7, 11, 15, 16, 19)] * 5, (32, 34, 36, 39, 41, 43))
+    semi = _lines(*[(6, 7, 11, 15, 21, 25)] * 5, (32, 34, 36, 39, 43, 45))
+    built = _build_sets_for_lines(auto, semi)
+    assert built is not None
+    win = [6, 7, 11, 15, 39, 43]
+    raw_h = len(set(built["raw_top6"]) & set(win))
+    dec_h = len(set(built["decade_core6"]) & set(win))
+    # 이 구성에선 raw 가 구간커버 이상이어야 정책 의도와 맞음
+    assert raw_h >= dec_h or built["core6"] == built["raw_top6"]

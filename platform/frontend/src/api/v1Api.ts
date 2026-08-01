@@ -1215,6 +1215,7 @@ export interface GraftCoverageResponse {
     recall_ev6_hits?: number;
     outside_core_in_expand?: number[];
     outside_expand?: number[];
+    decade_dropped_vs_raw?: number[];
   };
   backtest?: {
     ok?: boolean;

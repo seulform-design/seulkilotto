@@ -12,7 +12,9 @@ import math
 from itertools import combinations
 from typing import Any, Dict, List, Sequence, Tuple
 
-GRAFT_BUILD_ID = "graft-v2-api"
+# v3: 구간커버가 raw top6 보다 못한 회귀(1235: 3/6→2/6, 6·11·15 핵심 탈락) 보정
+# — 기본 emit = 1:1 raw top6/top24. 구간커버는 비교·백테스트용.
+GRAFT_BUILD_ID = "graft-v3-raw-first"
 
 DECADE_LABELS = ("단번대", "10번대", "20번대", "30번대", "40번대")
 
@@ -224,6 +226,46 @@ def _hits(nums: Sequence[int], winning: Sequence[int]) -> int:
     return len(set(nums) & set(winning))
 
 
+def optimize_sharing_from_raw(
+    ranked_pool: List[int],
+    raw_top6: List[int],
+) -> Dict[str, Any] | None:
+    """EV이되 raw top6 중 최소 2개 + 상위12 중 4개 유지 — 희소만 쫓다 상위를 버리는 회귀 방지."""
+    base = optimize_sharing_recall(ranked_pool, top_window=24, min_from_top12=4)
+    if not base:
+        return None
+    nums = list(base["numbers"])
+    top6 = [n for n in raw_top6 if n in set(ranked_pool)][:6]
+    have = sum(1 for n in nums if n in set(top6))
+    if have >= 2:
+        base["mode"] = "recall_ev_top6floor"
+        return base
+    # top6 에서 부족한 만큼 강제 편입(확장 안·순위 앞선 것부터), 희소 꼬리부터 제거
+    need = 2 - have
+    add = [n for n in top6 if n not in nums][:need]
+    if not add:
+        return base
+    out = list(nums)
+    for n in add:
+        # top6 아닌 번호 중 가장 순위 낮은 것 제거
+        drop_cands = [x for x in out if x not in set(top6) and x not in add]
+        if not drop_cands:
+            break
+        drop_cands.sort(key=lambda x: ranked_pool.index(x) if x in ranked_pool else 99, reverse=True)
+        out.remove(drop_cands[0])
+        out.append(n)
+    out = sorted(out[:6])
+    risk = _assess_sharing_risk(out)
+    return {
+        "numbers": out,
+        "risk": round(risk, 1),
+        "ev_score": round(100.0 - risk, 1),
+        "rank_sum": float(sum(ranked_pool.index(n) if n in ranked_pool else 99 for n in out)),
+        "min_from_top12": 4,
+        "mode": "recall_ev_top6floor",
+    }
+
+
 def _build_sets_for_lines(
     auto: List[List[int]], semi: List[List[int]]
 ) -> Dict[str, Any] | None:
@@ -231,18 +273,21 @@ def _build_sets_for_lines(
     if len(present) < 6:
         return None
     scores = {n: float(pair.get(n, 0)) for n in present}
-    # graftScore 순위 ≈ present 순서
+    # 기본 골격 = 1:1 raw (로딩 전·수정 전 잘 잡히던 추출식)
     raw_top6 = present[:6]
     raw_expand = present[: min(24, len(present))]
-    core6 = pick_coverage_core6(raw_expand, auto_f, semi_f, scores)
-    expand = balance_expand_net(raw_expand, core6, 24)
+    # 구간커버는 비교/백테스트용 — emit 기본값으로 쓰지 않음(1235 회귀)
+    decade_core = pick_coverage_core6(raw_expand, auto_f, semi_f, scores)
+    # 확장 = raw top24 고정. balance 는 상위 순위를 밀어내 7 등을 떨어뜨릴 수 있어 미적용.
+    expand = list(raw_expand)
     pure_ev = optimize_sharing_recall(expand, top_window=24, min_from_top12=0)
-    recall_ev = optimize_sharing_recall(expand, top_window=24, min_from_top12=4)
-    both = sum(1 for n in core6 if auto_f.get(n, 0) > 0 and semi_f.get(n, 0) > 0)
+    recall_ev = optimize_sharing_from_raw(expand, raw_top6)
+    both = sum(1 for n in raw_top6 if auto_f.get(n, 0) > 0 and semi_f.get(n, 0) > 0)
     return {
         "ranked": present,
         "raw_top6": raw_top6,
-        "core6": core6,
+        "decade_core6": decade_core,
+        "core6": raw_top6,  # 하위호환: 기본 핵심 = raw
         "expand24": expand,
         "pure_ev6": (pure_ev or {}).get("numbers") or [],
         "recall_ev6": (recall_ev or {}).get("numbers") or [],
@@ -271,7 +316,7 @@ def _loo_backtest(samples) -> Dict[str, Any]:
         }
         mapping = {
             "raw_top6": built["raw_top6"],
-            "decade_core6": built["core6"],
+            "decade_core6": built["decade_core6"],
             "expand24": built["expand24"],
             "pure_ev6": built["pure_ev6"],
             "recall_ev6": built["recall_ev6"],
@@ -280,57 +325,52 @@ def _loo_backtest(samples) -> Dict[str, Any]:
             h = _hits(nums, win)
             row["hits"][m] = h
             sums[m] += h
-        # 핵심 밖·확장 안 당첨
-        core_s = set(built["core6"])
+        # 비교용: 구간커버가 raw 대비 놓친 확장 안 당첨
+        raw_s = set(built["raw_top6"])
+        dec_s = set(built["decade_core6"])
         exp_s = set(built["expand24"])
-        row["outside_core_in_expand"] = sorted(set(win) & exp_s - core_s)
+        row["outside_raw_in_expand"] = sorted(set(win) & exp_s - raw_s)
+        row["decade_dropped_vs_raw"] = sorted((set(win) & raw_s) - dec_s)
         per_round.append(row)
     rounds = len(per_round)
     means = {m: round(sums[m] / rounds, 3) if rounds else 0.0 for m in modes}
     random6 = round(6 * 6 / 45, 3)
     random24 = round(24 * 6 / 45, 3)
-    # 권고: decade_core vs raw, recall_ev vs pure_ev
+    small = rounds < 5
+    # 구간커버는 raw 대비 **명확한** 이득(+0.25)이고 소표본이 아닐 때만 기본 교체.
+    # 1235 실측: 구간커버가 raw(3/6)→2/6 으로 회귀 — 기본은 항상 raw.
+    decade_lift = means["decade_core6"] - means["raw_top6"]
+    use_decade = (not small) and decade_lift >= 0.25
     advice: List[str] = []
-    if rounds and means["decade_core6"] + 1e-9 >= means["raw_top6"]:
+    if use_decade:
         advice.append(
-            f"구간커버 핵심6 평균 {means['decade_core6']}/6 ≥ raw top6 {means['raw_top6']}/6 "
-            "→ 핵심은 구간커버를 기본으로 유지"
-        )
-    elif rounds:
-        advice.append(
-            f"이 표본에선 raw top6({means['raw_top6']})이 구간커버({means['decade_core6']})보다 "
-            "높음 — 소표본·용지 위상 차이 가능, 둘 다 표시"
-        )
-    if rounds and means["recall_ev6"] + 1e-9 >= means["pure_ev6"]:
-        advice.append(
-            f"recall-EV 평균 {means['recall_ev6']}/6 ≥ 순수 EV {means['pure_ev6']}/6 "
-            "→ EV는 상위12 바닥(4개) 유지 모드 사용"
+            f"구간커버 평균 {means['decade_core6']}/6 이 raw {means['raw_top6']}/6 보다 "
+            f"+{round(decade_lift, 2)} — 예외적으로 구간커버를 핵심에 사용"
         )
     else:
         advice.append(
-            f"순수 EV({means.get('pure_ev6')})가 recall-EV보다 적중 우세할 수 있으나 "
-            "상위 번호를 버려 확장망 대비 손실이 큼 — 기본은 recall-EV"
+            f"기본 핵심 = raw 1:1 top6 (평균 {means['raw_top6']}/6). "
+            f"구간커버 {means['decade_core6']}/6 는 비교용"
+            + (f" · lift {round(decade_lift, 2)}" if rounds else "")
+            + (" · 소표본이라 raw 유지" if small else "")
+            + " — 1235처럼 구간커버가 6·11·15를 핵심에서 빼던 회귀 방지"
         )
     advice.append(
-        f"확장24 평균 {means['expand24']}/6 (무작위≈{random24}) — 집중보다 넓은 그물이 본령"
+        f"recall-EV(상위 바닥) 평균 {means['recall_ev6']}/6 · 순수 EV {means['pure_ev6']}/6 "
+        "— 기본은 recall-EV(희소만 쫓지 않음)"
+    )
+    advice.append(
+        f"확장24(raw top24) 평균 {means['expand24']}/6 (무작위≈{random24}) — 넓은 그물이 본령"
     )
     return {
         "ok": rounds >= 1,
         "rounds": rounds,
-        "small_sample": rounds < 5,
+        "small_sample": small,
         "means": means,
         "random_baseline": {"top6": random6, "top24": random24},
         "per_round": per_round,
-        "selected_core_mode": (
-            "decade_core6"
-            if means["decade_core6"] + 1e-9 >= means["raw_top6"]
-            else "raw_top6"
-        ),
-        "selected_ev_mode": (
-            "recall_ev6"
-            if means["recall_ev6"] + 1e-9 >= means["pure_ev6"]
-            else "recall_ev6"  # 정책: 적중이 비슷해도 recall-EV 유지
-        ),
+        "selected_core_mode": "decade_core6" if use_decade else "raw_top6",
+        "selected_ev_mode": "recall_ev6",
         "advice": advice,
     }
 
@@ -397,29 +437,36 @@ def build_graft_coverage(*, intent: str = "review") -> Dict[str, Any]:
                 r0 = row.sort_values("round").iloc[-1]
                 winning = [int(r0[f"num{i}"]) for i in range(1, 7)]
 
-    core_mode = backtest.get("selected_core_mode") or "decade_core6"
-    ev_mode = backtest.get("selected_ev_mode") or "recall_ev6"
-    core6 = built["core6"] if core_mode == "decade_core6" else built["raw_top6"]
-    # 백테스트가 raw 를 골라도 구간커버를 함께 노출(비교용)
-    share = built["recall_ev"] if ev_mode == "recall_ev6" else None
-    if share is None:
-        share = optimize_sharing_recall(built["expand24"], min_from_top12=4)
+    core_mode = backtest.get("selected_core_mode") or "raw_top6"
+    core6 = (
+        built["decade_core6"]
+        if core_mode == "decade_core6"
+        else built["raw_top6"]
+    )
+    share = built["recall_ev"] or optimize_sharing_from_raw(
+        built["expand24"], built["raw_top6"]
+    )
 
     win_set = set(winning)
     audit = None
     if winning:
         exp_s = set(built["expand24"])
         core_s = set(core6)
+        raw_s = set(built["raw_top6"])
+        dec_s = set(built["decade_core6"])
         audit = {
             "winning": winning,
             "raw_top6_hits": _hits(built["raw_top6"], winning),
-            "decade_core6_hits": _hits(built["core6"], winning),
+            "decade_core6_hits": _hits(built["decade_core6"], winning),
             "selected_core6_hits": _hits(core6, winning),
             "expand24_hits": _hits(built["expand24"], winning),
             "pure_ev6_hits": _hits(built["pure_ev6"], winning),
             "recall_ev6_hits": _hits(built["recall_ev6"], winning),
+            # 선택 핵심 기준 밖·확장 안
             "outside_core_in_expand": sorted(win_set & exp_s - core_s),
             "outside_expand": sorted(win_set - exp_s),
+            # 회귀 진단: 구간커버가 raw 당첨을 핵심에서 뺀 번호
+            "decade_dropped_vs_raw": sorted((win_set & raw_s) - dec_s),
         }
 
     from .feature_learning_engine import _detect_fixed_semi
@@ -440,21 +487,21 @@ def build_graft_coverage(*, intent: str = "review") -> Dict[str, Any]:
             "signal_label": "1:1 곱(자동×반자동 log)",
             "core_mode": core_mode,
             "core_mode_label": (
-                "구간커버 핵심6 (미커버 가산·양쪽 지지)"
+                "구간커버 핵심6"
                 if core_mode == "decade_core6"
-                else "raw 1:1 top6"
+                else "raw 1:1 top6 (기본)"
             ),
-            "ev_mode": "recall_ev",
-            "ev_mode_label": "분산최적 + 상위12 중 4개 이상 유지",
-            "expand_mode": "balance_expand24",
+            "ev_mode": "recall_ev_top6floor",
+            "ev_mode_label": "분산최적 + 상위12≥4 + raw top6≥2",
+            "expand_mode": "raw_top24",
             "note": (
-                "당첨번호는 순위 계산에 미사용(복기는 사후 대조만). "
-                "평행·이월 forward 미주입."
+                "당첨은 순위 미사용(복기 사후 대조만). 평행·이월 forward OFF. "
+                "구간커버는 비교용 — raw보다 명확히 나을 때만 핵심 교체."
             ),
         },
         "raw_top6": built["raw_top6"],
         "core6": core6,
-        "decade_core6": built["core6"],
+        "decade_core6": built["decade_core6"],
         "expand24": built["expand24"],
         "share_opt": (share or {}).get("numbers") or built["recall_ev6"],
         "share_meta": share,
@@ -463,7 +510,7 @@ def build_graft_coverage(*, intent: str = "review") -> Dict[str, Any]:
         "audit": audit,
         "backtest": backtest,
         "honesty": (
-            "1등 확률(1/8,145,060)은 불변. 접목은 recall(그물이 당첨을 담는 폭)과 "
-            "EV(당첨 시 공동당첨 회피)만 다룬다. LOO 백테스트로 핵심/EV 모드를 고른다."
+            "1등 확률(1/8,145,060)은 불변. 기본 핵심·확장은 1:1 raw(잘 잡히던 추출식). "
+            "구간커버가 raw 적중을 깎는 회귀(예: 1235 3/6→2/6)는 기본에서 배제한다."
         ),
     }

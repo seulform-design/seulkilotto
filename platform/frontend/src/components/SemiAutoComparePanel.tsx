@@ -46,7 +46,6 @@ import LottoBall from './LottoBall';
 import ComboActions from './ComboActions';
 import SharingBadge from './SharingBadge';
 import { optimizeForSharing } from '../utils/jackpotSharing';
-import { balanceExpandNet, pickCoverageCore6 } from '../utils/graftCoverage';
 import {
   buildDetailForecastSnapshot,
   saveDetailForecast,
@@ -1481,7 +1480,7 @@ export default function SemiAutoComparePanel({
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v2-api', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v3-raw-first', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,
@@ -3579,9 +3578,10 @@ export default function SemiAutoComparePanel({
         outsideCoreInExpand: audit?.outside_core_in_expand ?? [],
         dataUsed: api.data_used ?? null,
         backtest: api.backtest ?? null,
-        graftBuild: api.graft_build ?? 'graft-v2-api',
+        graftBuild: api.graft_build ?? 'graft-v3-raw-first',
         honesty: api.honesty ?? null,
         rankSource: 'api_pair_product' as const,
+        decadeDropped: audit?.decade_dropped_vs_raw ?? [],
       };
     }
 
@@ -3604,6 +3604,7 @@ export default function SemiAutoComparePanel({
         graftBuild: null,
         honesty: null,
         rankSource: 'pending' as const,
+        decadeDropped: [] as number[],
       };
     }
     if (predictedNumbers.length < 6) return null;
@@ -3623,34 +3624,36 @@ export default function SemiAutoComparePanel({
       .map(([number, m]) => ({ number, graftScore: m.score }))
       .sort((a, b) => b.graftScore - a.graftScore || a.number - b.number)
       .map((x) => x.number);
+    // 로컬 폴백도 서버 v3 와 동일: 핵심·확장 = raw 1:1 (구간커버 강제 금지)
     const rawTop6 = graftRanked.slice(0, 6);
-    const rawExpand = graftRanked.slice(0, Math.min(24, graftRanked.length));
-    const core6 = pickCoverageCore6(rawExpand, meta);
-    const expand = balanceExpandNet(rawExpand, core6, 24);
+    const expand = graftRanked.slice(0, Math.min(24, graftRanked.length));
+    const core6 = rawTop6;
     const bothSideCount = core6.filter((n) => {
       const m = meta.get(n);
       return Boolean(m && m.auto > 0 && m.semi > 0);
     }).length;
-    // recall-EV: top12 에서 최소 4개 — 순수 EV가 6·11을 버리던 회귀 방지
     const top12 = new Set(expand.slice(0, 12));
+    const top6set = new Set(rawTop6);
     const shareResult = optimizeForSharing(expand, Math.min(24, expand.length));
     let shareOpt = shareResult ? shareResult.numbers.slice(0, 6) : [];
-    if (shareOpt.length === 6 && shareOpt.filter((n) => top12.has(n)).length < 4) {
-      const keep = expand.filter((n) => top12.has(n)).slice(0, 4);
-      const rest = expand.filter((n) => !keep.includes(n));
-      const fill = optimizeForSharing([...keep, ...rest], Math.min(24, expand.length));
-      if (fill) {
-        const merged = [...keep];
-        for (const n of fill.numbers) {
-          if (merged.length >= 6) break;
-          if (!merged.includes(n)) merged.push(n);
-        }
-        for (const n of expand) {
-          if (merged.length >= 6) break;
-          if (!merged.includes(n)) merged.push(n);
-        }
-        shareOpt = merged.slice(0, 6).sort((a, b) => a - b);
+    const fromTop12 = shareOpt.filter((n) => top12.has(n)).length;
+    const fromTop6 = shareOpt.filter((n) => top6set.has(n)).length;
+    if (shareOpt.length === 6 && (fromTop12 < 4 || fromTop6 < 2)) {
+      const keep = [
+        ...rawTop6.filter((n) => expand.includes(n)).slice(0, 2),
+        ...expand.filter((n) => top12.has(n) && !rawTop6.slice(0, 2).includes(n)).slice(0, 2),
+      ];
+      const uniqKeep = Array.from(new Set(keep)).slice(0, 4);
+      const merged = [...uniqKeep];
+      for (const n of shareOpt) {
+        if (merged.length >= 6) break;
+        if (!merged.includes(n)) merged.push(n);
       }
+      for (const n of expand) {
+        if (merged.length >= 6) break;
+        if (!merged.includes(n)) merged.push(n);
+      }
+      shareOpt = merged.slice(0, 6).sort((a, b) => a - b);
     }
     const winsReady = Boolean(compareWinning && winningSet && winningSet.size > 0);
     const coreSet = new Set(core6);
@@ -3686,14 +3689,15 @@ export default function SemiAutoComparePanel({
         fixed_semi_excluded: [] as number[],
         signal: 'pair_product',
         signal_label: '1:1 곱(로컬 폴백)',
-        core_mode_label: '구간커버(로컬)',
-        ev_mode_label: 'recall-EV 폴백',
-        note: '서버 API 실패/대기 — 로컬 계산',
+        core_mode_label: 'raw 1:1 top6 (기본)',
+        ev_mode_label: 'recall-EV + top6 바닥',
+        note: '서버 API 실패/대기 — 로컬 raw 1:1',
       },
       backtest: null,
-      graftBuild: 'local-fallback',
+      graftBuild: 'local-fallback-v3',
       honesty: null,
       rankSource: 'local_fallback' as const,
+      decadeDropped: [] as number[],
     };
   }, [
     graftCoverageQuery.data,
@@ -6205,6 +6209,18 @@ export default function SemiAutoComparePanel({
             </Box>
           )}
 
+          {(graftCoverageEV.decadeDropped?.length ?? 0) > 0 && (
+            <Alert severity="warning" icon={false} sx={{ py: 0.5, mb: 0.75 }}>
+              <Typography variant="caption">
+                구간커버가 raw 핵심 당첨을 뺐던 번호:{' '}
+                {graftCoverageEV.decadeDropped!.join(', ')}
+                {graftCoverageEV.reviewHit
+                  ? ` (참고: raw ${graftCoverageEV.reviewHit.rawTop6}/6 · 구간커버는 비교용)`
+                  : ''}
+                {' — 기본 핵심은 raw 1:1 top6 유지'}
+              </Typography>
+            </Alert>
+          )}
           {graftCoverageEV.outsideCoreInExpand.length > 0 && (
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
               <Typography variant="caption" fontWeight={800} color="warning.main" sx={{ minWidth: 72 }}>
@@ -6214,15 +6230,13 @@ export default function SemiAutoComparePanel({
                 <LottoBall key={`gce-out-c-${n}`} number={n} size={ENGINE_BALL.list} />
               ))}
               <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                {graftCoverageEV.reviewHit
-                  ? `raw top6 ${graftCoverageEV.reviewHit.rawTop6}/6 → 구간커버 ${graftCoverageEV.reviewHit.core6}/6`
-                  : '확장엔 있으나 핵심6 밖'}
+                1:1 top6 밖이지만 확장24 안 (넓은 그물 본령)
               </Typography>
             </Stack>
           )}
 
           <Typography variant="caption" fontWeight={700} sx={{ display: 'block', mb: 0.25 }}>
-            접목 핵심 6 ({graftCoverageEV.dataUsed?.core_mode_label ?? '구간커버'} · 양쪽 {graftCoverageEV.bothSideCount}/6)
+            접목 핵심 6 ({graftCoverageEV.dataUsed?.core_mode_label ?? 'raw 1:1 top6'} · 양쪽 {graftCoverageEV.bothSideCount}/6)
             {graftCoverageEV.reviewHit ? ` · 당첨 ${graftCoverageEV.reviewHit.core6}/6` : ''}
           </Typography>
           <Stack direction="row" spacing={0.4} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mb: 0.75 }}>

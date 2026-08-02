@@ -65,7 +65,7 @@ def test_walkforward_picks_expand_mode_and_coverage_emits_24():
     assert set(cov["core6"]).issubset(set(cov["expand18"]))
     assert len(cov["expand18"]) == DEFAULT_EXPAND_SIZE == 24
     assert cov["expand_size"] == 24
-    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v14-prefer-expand"
+    assert cov["coverage_build"] == COVERAGE_BUILD_ID == "expand24-v15-pool-first"
     assert cov["expand18_mode"] == "precision_primary"
     assert 6 <= len(cov.get("precision14") or []) <= 14
     assert len(cov.get("decade_pool30") or []) >= 6

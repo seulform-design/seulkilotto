@@ -101,7 +101,7 @@ def test_build_and_backtest_smoke():
     bt = _loo_backtest([s, s])  # 소표본 → 무조건 raw
     assert bt["ok"] is True
     assert bt["selected_core_mode"] == "raw_top6"
-    assert GRAFT_BUILD_ID == "graft-v13-prefer-expand"
+    assert GRAFT_BUILD_ID == "graft-v14-pool-first"
 
 
 def test_decade_worse_than_raw_is_not_emitted_as_default():

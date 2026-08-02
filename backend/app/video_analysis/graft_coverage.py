@@ -13,7 +13,7 @@ from itertools import combinations
 from typing import Any, Dict, List, Sequence, Tuple
 
 # v12: 정밀우주(와치+구출)·정밀⊆확장 (검증 커버리지 v13과 동일).
-GRAFT_BUILD_ID = "graft-v13-prefer-expand"
+GRAFT_BUILD_ID = "graft-v14-pool-first"
 
 DECADE_LABELS = ("단번대", "10번대", "20번대", "30번대", "40번대")
 

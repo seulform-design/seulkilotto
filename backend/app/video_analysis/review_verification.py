@@ -175,7 +175,7 @@ DEFAULT_EXPAND_SIZE = 24
 WF_MAX_EXPAND_SIZE = 30
 DEFAULT_EXPAND_MODE = "single_raw"
 # v13: 정밀우주=강수기대+와치+구출축, 정밀⊆확장, catchable 전량 보존 목표
-COVERAGE_BUILD_ID = "expand24-v14-prefer-expand"
+COVERAGE_BUILD_ID = "expand24-v15-pool-first"
 RESCUE_MAX_SWAPS = 6
 # 진단 비교용만 — 방출 expand_size 에 쓰지 않음('확장 30' 회귀 방지).
 RESCUE_GROW_SIZE = 30
@@ -191,7 +191,7 @@ DECADE_BANDS = ((1, 9), (10, 19), (20, 29), (30, 39), (40, 45))
 PRECISION_BAND_QUOTA = 2
 # 구간 top6 다음 3 = 와치(UI에 보이지만 서버 top6 밖이던 1235:7형)
 PRECISION_WATCH_PER_BAND = 3
-PRECISION_UNIVERSE_CAP = 36
+PRECISION_UNIVERSE_CAP = 42
 PRECISION_MATCH_SEATS = 3
 PRECISION_MID_SEATS = 3
 
@@ -1631,6 +1631,7 @@ def _precision_universe(
     )
     af = sigs.get("auto_freq") or {}
     sf = sigs.get("semi_freq") or {}
+    tb = sigs.get("total_freq") or {}
     mid_both = set(multi_meta.get("mid_both_side") or [])
     agree2 = set(multi_meta.get("cross_agree_ge2") or [])
     match18 = set(multi_meta.get("match_level_top18") or multi_meta.get("match_level_top12") or [])
@@ -1646,28 +1647,29 @@ def _precision_universe(
         seen.add(n)
         uni.append(n)
 
-    # 1) 구간 top5 라운드로빈(~25) — 전 구간 균등
+    # 0) 양쪽 등장 저~중빈도 — 풀 밖 중하위(15·39·6·7형) 우선
+    both_low = sorted(
+        [n for n in present if float(af.get(n, 0)) > 0 and float(sf.get(n, 0)) > 0],
+        key=lambda n: (float(tb.get(n, 0)), n),
+    )
+    for n in both_low:
+        add(n)
+    # 1) ★1:1 강수·기대·와치(UI 풀) — cap 여유 내 전량
+    for n in list(pool) + sorted(watch):
+        add(n)
+
+    # 2) 구간 top5 라운드로빈(~25) — 전 구간 균등
     band_lists = [ordered[:9] for ordered in bands.values()]
     for i in range(5):
         for b in band_lists:
             if i < len(b):
                 add(b[i])
-    # 2) 저빈도 양쪽 등장 먼저 — top9 밖 중하위(15·39형) 우주 진입
-    both = [
-        n for n in present
-        if float(af.get(n, 0)) > 0 and float(sf.get(n, 0)) > 0
-    ]
-    both.sort(key=lambda n: (float(af.get(n, 0) + sf.get(n, 0)), n))
-    for n in both:
-        add(n)
-    # 3) 구간 나머지(와치) + 구출축
+    # 3) 구간 나머지(와치) + 구출축 + 학습
     for i in range(5, 9):
         for b in band_lists:
             if i < len(b):
                 add(b[i])
-    for n in list(match18) + sorted(mid_both) + sorted(agree2):
-        add(n)
-    for n in list(pool) + sorted(watch) + learn:
+    for n in list(match18) + sorted(mid_both) + sorted(agree2) + learn:
         add(n)
     return uni, strong, expected, watch
 
@@ -1713,12 +1715,12 @@ def _reverse_rank_decade_pool(
         elif n in agree2:
             s += 10.0 * float(boost.get("cross_agree", 1.0))
         if n in strong:
-            s += 16.0 * float(boost.get("decade_strong", 1.0))
+            s += 52.0 * float(boost.get("decade_strong", 1.0))
         if n in expected:
-            s += 26.0 * float(boost.get("decade_expected", 1.25))
+            s += 48.0 * float(boost.get("decade_expected", 1.25))
         watch = set(multi_meta.get("decade_watch") or [])
         if n in watch:
-            s += 20.0 * float(boost.get("decade_expected", 1.15))
+            s += 44.0 * float(boost.get("decade_expected", 1.15))
         if n in mid_both:
             s += 22.0 * float(boost.get("mid_both", 1.2))
         # 양쪽 등장: 고빈도보다 중빈도(저~중 total)에 가산 — 1235:6·7형
@@ -2012,6 +2014,8 @@ def _build_precision_from_decade(
 
     meta_for_rank = dict(multi_meta)
     meta_for_rank["decade_watch"] = sorted(watch)
+    meta_for_rank["decade_strong"] = sorted(strong)
+    meta_for_rank["decade_expected"] = sorted(expected)
     ranked = _reverse_rank_decade_pool(
         universe, sigs, multi_order, meta_for_rank,
         auto_lines=auto_lines, semi_lines=semi_lines,
@@ -2038,8 +2042,12 @@ def _build_precision_from_decade(
     prefer_set = {
         int(n) for n in (prefer_numbers or []) if int(n) in uni_set
     }
+    pool_set = set(display_pool)
 
-    # 1) 구간 쿼터 — 밴드마다 저빈도 양쪽 ≤2.
+    # ★1:1 풀(강수·기대·와치) 안 역산순 — UI '42→14' 축소의 본망
+    pool_ranked = [n for n in ranked if n in pool_set]
+
+    # 1) 구간 쿼터 — 밴드마다 저빈도 양쪽 ≤1 (풀 역산 슬롯 확보)
     #    동빈도면 와치·기대·강수·중간양쪽을 우선(순수 최하위 노이즈 잠식 완화).
     tb = sigs.get("total_freq") or {}
     pair = sigs.get("pair_product") or {}
@@ -2092,11 +2100,10 @@ def _build_precision_from_decade(
         if len(reserved) >= reserve_n:
             break
 
-    # emit: 쿼터 → 확장선호(역산) → 매치/중간/예약 → 우주역산
-    # 확장선호는 하드 잠금이 아니라 우선순위 — 쿼터로 우주에서 구출한 희소 당첨을 막지 않음.
+    # emit: ★1:1풀 역산 → 쿼터(희소) → 확장선호 → 매치/중간/예약 → 우주
     prefer = [n for n in ranked if n in prefer_set]
     out: List[int] = []
-    for n in list(quota) + prefer + match_seats + mid_seats + reserved + ranked:
+    for n in pool_ranked + list(quota) + prefer + match_seats + mid_seats + reserved + ranked:
         if n in uni_set and n not in out:
             out.append(n)
         if len(out) >= k:
@@ -2111,9 +2118,11 @@ def _build_precision_from_decade(
                 if len(out) >= k:
                     break
 
-    # 쿼터 + 확장선호 상위(여유분) 재보장 — 선호 전량 강제는 14칸 잠식
-    prefer_hard = prefer[: max(0, k - len(quota))]
-    hard = list(dict.fromkeys(list(quota) + prefer_hard))
+    # 쿼터 + 풀 역산 상위 + (여유) 확장선호 재보장
+    pool_hard_n = max(0, k - len(quota))
+    pool_hard = pool_ranked[:pool_hard_n]
+    prefer_hard = prefer[: max(0, k - len(pool_hard) - len(quota))]
+    hard = list(dict.fromkeys(pool_hard + list(quota) + prefer_hard))
     for n in hard:
         if n in out or n not in uni_set:
             continue
@@ -2155,6 +2164,7 @@ def _build_precision_from_decade(
         "decade_watch": sorted(watch),
         "ranked": ranked,
         "quota": quota,
+        "pool_ranked": pool_ranked[:24],
         "prefer": prefer[:24],
         "match_seats": match_seats,
         "mid_seats": mid_seats,

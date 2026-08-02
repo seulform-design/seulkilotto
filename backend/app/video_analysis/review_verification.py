@@ -1567,11 +1567,13 @@ def _decade_watch_set(
     *,
     auto_lines: List[List[int]] | None = None,
     semi_lines: List[List[int]] | None = None,
+    match_scores: Dict[int, float] | None = None,
 ) -> set:
     """강수·기대(top6) 다음 와치 계층 — 풀밖 중하위(1235:7) 흡수."""
-    match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+    if match_scores is None:
+        match_scores = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
     bands = _decade_band_ordered(
-        sigs, auto_lines=auto_lines, semi_lines=semi_lines, match_scores=match_sc
+        sigs, auto_lines=auto_lines, semi_lines=semi_lines, match_scores=match_scores
     )
     watch: set = set()
     for ordered in bands.values():
@@ -1584,11 +1586,13 @@ def _decade_pool_list(
     *,
     auto_lines: List[List[int]] | None = None,
     semi_lines: List[List[int]] | None = None,
+    match_scores: Dict[int, float] | None = None,
 ) -> tuple[List[int], set, set]:
     """★1:1 강수∪기대 (~30) — 표시·기본 풀(UI와 동일 키)."""
-    match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+    if match_scores is None:
+        match_scores = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
     strong, expected = _decade_tier_sets(
-        sigs, auto_lines=auto_lines, semi_lines=semi_lines, match_scores=match_sc
+        sigs, auto_lines=auto_lines, semi_lines=semi_lines, match_scores=match_scores
     )
     tb = sigs.get("total_freq") or {}
     pair = sigs.get("pair_product") or {}
@@ -1596,7 +1600,7 @@ def _decade_pool_list(
     def key(n: int) -> tuple:
         return (
             -float(pair.get(n, 0)),
-            -float(match_sc.get(n, 0)),
+            -float(match_scores.get(n, 0)),
             -float(tb.get(n, 0)),
             n,
         )
@@ -1614,6 +1618,7 @@ def _precision_universe(
     auto_lines: List[List[int]] | None = None,
     semi_lines: List[List[int]] | None = None,
     learning_numbers: List[int] | None = None,
+    match_scores: Dict[int, float] | None = None,
 ) -> tuple[List[int], set, set, set]:
     """정밀 출발 우주 = 구간 top9 + 구출축 + 학습 (≤PRECISION_UNIVERSE_CAP).
 
@@ -1621,13 +1626,17 @@ def _precision_universe(
     pool을 먼저 꽉 채우면 구출축(15·39형)이 cap에 잘리므로 구간·구출을 交错 편입.
     """
     present = {n for n in range(1, 46) if (sigs.get("total_freq") or {}).get(n, 0) > 0}
+    if match_scores is None:
+        match_scores = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+
     pool, strong, expected = _decade_pool_list(
-        sigs, auto_lines=auto_lines, semi_lines=semi_lines
+        sigs, auto_lines=auto_lines, semi_lines=semi_lines, match_scores=match_scores
     )
-    watch = _decade_watch_set(sigs, auto_lines=auto_lines, semi_lines=semi_lines)
-    match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+    watch = _decade_watch_set(
+        sigs, auto_lines=auto_lines, semi_lines=semi_lines, match_scores=match_scores
+    )
     bands = _decade_band_ordered(
-        sigs, auto_lines=auto_lines, semi_lines=semi_lines, match_scores=match_sc
+        sigs, auto_lines=auto_lines, semi_lines=semi_lines, match_scores=match_scores
     )
     af = sigs.get("auto_freq") or {}
     sf = sigs.get("semi_freq") or {}
@@ -1756,6 +1765,7 @@ def _engine_provenance_for_numbers(
     semi_lines: List[List[int]] | None = None,
     learning_numbers: List[int] | None = None,
     carryover_numbers: List[int] | None = None,
+    match_scores: Dict[int, float] | None = None,
 ) -> Dict[str, List[str]]:
     """번호 → 기여 엔진 태그(당첨 미사용). UI 추적·역산 근거."""
     strong = set(multi_meta.get("decade_strong") or [])
@@ -1765,11 +1775,12 @@ def _engine_provenance_for_numbers(
     mid_both = set(multi_meta.get("mid_both_side") or [])
     learn = set(int(n) for n in (learning_numbers or []) if 1 <= int(n) <= 45)
     carry = set(int(n) for n in (carryover_numbers or []) if 1 <= int(n) <= 45)
-    match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+    if match_scores is None:
+        match_scores = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
     match_top = {
-        n for n, sc in match_sc.items() if sc > 0
+        n for n, sc in match_scores.items() if sc > 0
     }
-    match_order = sorted(match_top, key=lambda n: (-match_sc.get(n, 0.0), n))[:18]
+    match_order = sorted(match_top, key=lambda n: (-match_scores.get(n, 0.0), n))[:18]
     match18 = set(match_order)
     pair = _rank_signal(sigs.get("pair_product", {}), sigs.get("total_freq"), sigs.get("auto_freq"))
     pair18 = set(pair[:18])
@@ -1916,6 +1927,7 @@ def _loo_precision_engine_boosts(
     ban = list(exclude_keys or [])
     for s in train:
         sigs = _signals(s.auto_lines, s.semi_lines)
+        match_sc = _match_level_reverse_scores(s.auto_lines or [], s.semi_lines or [])
         sk = "pair_product" if "pair_product" not in set(ban) else "support"
         order, meta = _multi_engine_order(
             sigs, sk, exclude_keys=ban,
@@ -1924,6 +1936,7 @@ def _loo_precision_engine_boosts(
         uni, strong, expected, watch = _precision_universe(
             sigs, meta,
             auto_lines=s.auto_lines, semi_lines=s.semi_lines,
+            match_scores=match_sc,
         )
         present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
         catchable = set(s.winning) & present & set(uni)
@@ -1989,6 +2002,7 @@ def _build_precision_from_decade(
     use_rescue: bool = True,
     max_rescue_swaps: int = PRECISION_RESCUE_MAX_SWAPS,
     prefer_numbers: List[int] | None = None,
+    match_scores: Dict[int, float] | None = None,
 ) -> tuple[List[int], Dict[str, Any]]:
     """정밀우주(강수기대+와치+구출) → 구간/매치/중간석 → 구출 → topK(<15).
 
@@ -2000,6 +2014,7 @@ def _build_precision_from_decade(
         sigs, multi_meta,
         auto_lines=auto_lines, semi_lines=semi_lines,
         learning_numbers=learning_numbers,
+        match_scores=match_scores,
     )
     # 표시용 decade_pool = 강수∪기대∪와치 (풀밖 오진 방지)
     decade_pool, _, _ = _decade_pool_list(
@@ -2210,6 +2225,7 @@ def _loo_precision_from_decade_policy(
     per_round: List[Dict[str, Any]] = []
     for s in train:
         sigs = _signals(s.auto_lines, s.semi_lines)
+        match_sc = _match_level_reverse_scores(s.auto_lines or [], s.semi_lines or [])
         sk = "pair_product" if "pair_product" not in set(ban) else "support"
         order, meta = _multi_engine_order(
             sigs, sk, exclude_keys=ban,
@@ -2218,6 +2234,7 @@ def _loo_precision_from_decade_policy(
         uni, _, _, _ = _precision_universe(
             sigs, meta,
             auto_lines=s.auto_lines, semi_lines=s.semi_lines,
+            match_scores=match_sc,
         )
         present = {n for n in range(1, 46) if sigs["total_freq"].get(n, 0) > 0}
         win = set(s.winning)
@@ -2230,6 +2247,7 @@ def _loo_precision_from_decade_policy(
                 sigs, order, meta,
                 auto_lines=s.auto_lines, semi_lines=s.semi_lines,
                 size=k, engine_boosts=engine_boosts, use_rescue=True,
+                match_scores=match_sc,
             )
             row_hits[k] = len(catchable & set(prec))
             hit_sums[k] += row_hits[k]
@@ -2389,6 +2407,7 @@ def _coverage_set_from_signals(
     precision18 = ranked[:18]
     single_expand = _balance_expand(ranked, core, present, 18)
     boe_order = _best_of_engines_order(sigs, exclude_keys=exclude_keys)
+    match_scores = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
     mode = expand_mode or DEFAULT_EXPAND_MODE
     if mode not in EXPAND_MODE_LABELS:
         mode = DEFAULT_EXPAND_MODE
@@ -2498,6 +2517,7 @@ def _coverage_set_from_signals(
         carryover_numbers=carryover_numbers,
         use_rescue=not light,
         prefer_numbers=expand,
+        match_scores=match_scores,
     )
     # 본망=정밀 → 확장에 정밀 전량 포함(본망 밖·확장만 누락 제거)
     expand = _ensure_core_subset(expand, precision14, size)
@@ -2513,6 +2533,7 @@ def _coverage_set_from_signals(
         auto_lines=auto_lines, semi_lines=semi_lines,
         learning_numbers=learning_numbers,
         carryover_numbers=carryover_numbers,
+        match_scores=match_scores,
     )
     # 와치 태그 보강
     watch_set = set(prec_meta.get("decade_watch") or [])

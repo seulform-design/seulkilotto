@@ -2184,6 +2184,7 @@ def _build_precision_from_decade(
         engine_boosts=engine_boosts,
         learning_numbers=learning_numbers,
         carryover_numbers=carryover_numbers,
+        match_scores=match_scores,
         size=k
     )
     out = strict_out

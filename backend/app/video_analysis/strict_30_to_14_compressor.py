@@ -13,6 +13,7 @@ def strict_30_to_14_compressor(
     engine_boosts: Dict[str, float] | None = None,
     learning_numbers: List[int] | None = None,
     carryover_numbers: List[int] | None = None,
+    match_scores: Dict[int, float] | None = None,
     size: int = 14
 ) -> Tuple[List[int], Dict[str, Any]]:
     """
@@ -31,9 +32,12 @@ def strict_30_to_14_compressor(
     multi_order = list(engine_outputs.get("multi_order") or [])
     order_pos = {n: i for i, n in enumerate(multi_order)}
     
-    # 일치레벨 스코어
-    from .review_verification import _match_level_reverse_scores
-    match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+    # 일치레벨 스코어 (중복 계산 방지 가드)
+    if match_scores is None:
+        from .review_verification import _match_level_reverse_scores
+        match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+    else:
+        match_sc = match_scores
     match_max = max((match_sc.get(n, 0.0) for n in PRIMARY_MASK), default=0.0) or 1.0
     
     # 각 엔진별 집합 구성

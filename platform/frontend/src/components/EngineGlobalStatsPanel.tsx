@@ -40,22 +40,28 @@ type Verdict = { lift: number; p: number; sig: boolean; mean: number; exp: numbe
 export default function EngineGlobalStatsPanel() {
   const [open, setOpen] = useState(false);
 
+  // ⚠️ 네트워크 요청 폭주 방지 — 이 패널의 모든 쿼리는 패널을 실제로 펼쳤을 때(open)만
+  // 발화한다. ④ 학습 엔진에는 이미 ~10개 패널이 동시에 무거운 백엔드를 치는데, 여기서
+  // 무겁고(full-history) 부수적인(빈도·후속·분석) 요청까지 마운트 즉시 얹으면 브라우저
+  // 동시 연결 한도를 넘겨 '네트워크 요청 초과'(ERR_INSUFFICIENT_RESOURCES)가 난다.
   const bt = useQuery({
     queryKey: ['v1-full-history-backtest'],
     queryFn: v1Api.getFullHistoryBacktest,
     staleTime: 900_000,
     retry: 1,
+    enabled: open,
   });
   const freq = useQuery({
     queryKey: ['v1-frequency-all'],
     queryFn: () => v1Api.getFrequency(undefined),
     staleTime: 300_000,
+    enabled: open,
   });
-  const latest = useQuery({ queryKey: ['v1-latest'], queryFn: v1Api.getLatestDraw });
+  const latest = useQuery({ queryKey: ['v1-latest'], queryFn: v1Api.getLatestDraw, enabled: open });
   const analysis = useQuery({
     queryKey: ['v1-analyze-latest', latest.data?.round],
     queryFn: () => v1Api.analyzeCombination(latest.data!.numbers),
-    enabled: !!latest.data?.numbers,
+    enabled: open && !!latest.data?.numbers,
     staleTime: 300_000,
   });
   const post = useQuery({
@@ -66,7 +72,7 @@ export default function EngineGlobalStatsPanel() {
         numbers: latest.data?.numbers,
         bonus: latest.data?.bonus,
       }),
-    enabled: !!latest.data?.numbers,
+    enabled: open && !!latest.data?.numbers,
     staleTime: 300_000,
   });
 

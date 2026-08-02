@@ -2169,23 +2169,42 @@ def _build_precision_from_decade(
             rescue_meta.setdefault("tier_reforced", []).append(n)
         out = out[:k]
 
+    # ── 엄격한 결정론적 30수 -> 14수 압축 및 스코어 복원 (PRIMARY_MASK 하드 가드) ──
+    from .strict_30_to_14_compressor import strict_30_to_14_compressor
+    engine_outputs = {
+        "multi_order": multi_order,
+        "multi_meta": multi_meta
+    }
+    strict_out, strict_meta = strict_30_to_14_compressor(
+        gangsu_gidaesu_30_pool=display_pool,
+        engine_outputs=engine_outputs,
+        sigs=sigs,
+        auto_lines=auto_lines,
+        semi_lines=semi_lines,
+        engine_boosts=engine_boosts,
+        learning_numbers=learning_numbers,
+        carryover_numbers=carryover_numbers,
+        size=k
+    )
+    out = strict_out
+
     meta = {
-        "pool_size": len(display_pool),
-        "pool": display_pool,
+        "pool_size": strict_meta["universe_size"],
+        "pool": strict_meta["pool"],
         "universe": universe,
         "universe_size": len(universe),
         "decade_strong": sorted(strong),
         "decade_expected": sorted(expected),
         "decade_watch": sorted(watch),
-        "ranked": ranked,
+        "ranked": strict_meta["ranked"],
         "quota": quota,
-        "pool_ranked": pool_ranked[:24],
+        "pool_ranked": [n for n in strict_meta["ranked"] if n in strict_meta["pool"]][:24],
         "prefer": prefer[:24],
         "match_seats": match_seats,
         "mid_seats": mid_seats,
         "reserved_tier": reserved[:8],
         "precision_rescue": rescue_meta,
-        "emit_size": len(out),
+        "emit_size": len(strict_out),
         "prefer_aligned": bool(prefer_set),
     }
     return out, meta

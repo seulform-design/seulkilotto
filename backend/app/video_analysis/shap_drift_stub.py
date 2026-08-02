@@ -18,15 +18,42 @@ HONESTY = (
 )
 
 
+_SHAP_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+_SHAP_CACHE_MAX = 8
+_SHAP_CACHE_TTL_SEC = 900  # 15분
+
+
 def build_shap_drift_report(
     samples: Sequence[RoundSample],
     *,
     seed: int = 42,
 ) -> dict[str, Any]:
-    """채택/거절 Feature의 검증 지표를 SHAP-like 감사 리포트로 정리.
+    import time
+    from .store import store_signature
+    from ..database import load_history
 
-    실제 SHAP 라이브러리 없이 lift·permutation_p 를 설명 값으로 노출한다.
-    """
+    df = load_history()
+    latest_round = int(df["round"].max()) if (df is not None and not df.empty) else 0
+
+    cache_key = (seed, latest_round, store_signature())
+    now = time.monotonic()
+    cached = _SHAP_CACHE.get(cache_key)
+    if cached is not None and now - cached[0] < _SHAP_CACHE_TTL_SEC:
+        return cached[1]
+
+    res = _build_shap_drift_report_impl(samples, seed=seed)
+    _SHAP_CACHE[cache_key] = (now, res)
+    if len(_SHAP_CACHE) > _SHAP_CACHE_MAX:
+        oldest = min(_SHAP_CACHE, key=lambda k: _SHAP_CACHE[k][0])
+        _SHAP_CACHE.pop(oldest, None)
+    return res
+
+
+def _build_shap_drift_report_impl(
+    samples: Sequence[RoundSample],
+    *,
+    seed: int = 42,
+) -> dict[str, Any]:
     if not samples:
         explain = build_explain_payload(
             subject_type="signal",

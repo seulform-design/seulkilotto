@@ -32,6 +32,11 @@ def _outer_top6_hits(test: RoundSample, adopted_reports: list[dict[str, Any]]) -
     return hits, top6
 
 
+_NCV_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+_NCV_CACHE_MAX = 8
+_NCV_CACHE_TTL_SEC = 900  # 15분
+
+
 def run_nested_feature_cv(
     samples: Sequence[RoundSample],
     *,
@@ -39,10 +44,34 @@ def run_nested_feature_cv(
     min_outer: int = 3,
     inner_hold: int = 1,
 ) -> dict[str, Any]:
-    """바깥 홀드아웃마다 안쪽 train으로만 Feature 채택 후 바깥 1회 top6 hit 평가.
+    import time
+    from .store import store_signature
+    from ..database import load_history
 
-    채택 결과를 추천 점수에 넣지 않는다 (scoring_allowed=false 고정).
-    """
+    df = load_history()
+    latest_round = int(df["round"].max()) if (df is not None and not df.empty) else 0
+
+    cache_key = (seed, min_outer, inner_hold, latest_round, store_signature())
+    now = time.monotonic()
+    cached = _NCV_CACHE.get(cache_key)
+    if cached is not None and now - cached[0] < _NCV_CACHE_TTL_SEC:
+        return cached[1]
+
+    res = _run_nested_feature_cv_impl(samples, seed=seed, min_outer=min_outer, inner_hold=inner_hold)
+    _NCV_CACHE[cache_key] = (now, res)
+    if len(_NCV_CACHE) > _NCV_CACHE_MAX:
+        oldest = min(_NCV_CACHE, key=lambda k: _NCV_CACHE[k][0])
+        _NCV_CACHE.pop(oldest, None)
+    return res
+
+
+def _run_nested_feature_cv_impl(
+    samples: Sequence[RoundSample],
+    *,
+    seed: int = 42,
+    min_outer: int = 3,
+    inner_hold: int = 1,
+) -> dict[str, Any]:
     n = len(samples)
     if n < min_outer + inner_hold + 1:
         return {

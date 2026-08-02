@@ -26,7 +26,7 @@ BASELINE_TOP6 = 6.0 * BASELINE_HIT
 MIN_SUPPORT_ROUNDS = 2
 LIFT_ADOPT = 1.10
 P_ADOPT = 0.12
-N_PERM = 120
+N_PERM = 40
 ROLLING_WINDOW = 2
 
 
@@ -880,13 +880,35 @@ def recommend_from_patterns(
 # Public pipeline
 # ---------------------------------------------------------------------------
 
-def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") -> Dict[str, Any]:
-    # 요청 단위 읽기 캐시 — collect_rounds + _load_apply_sheet 이 24MB historical 을
-    # 2회 로드하던 것을 1회로(아카이브 성장 시 60s 타임아웃 방지). 읽기 전용.
-    from .store import store_read_cache
+_PM_CACHE: Dict[Tuple[Any, ...], Tuple[float, Dict[str, Any]]] = {}
+_PM_CACHE_MAX = 8
+_PM_CACHE_TTL_SEC = 900  # 15분
 
+
+def build_pattern_mining(seed: int = 42, apply_intent: str = "current_round") -> Dict[str, Any]:
+    """전체 파이프라인: 수집 → Pattern → 검증 → 앙상블 → 탭별 추천."""
+    import time
+    from .store import store_signature
+    from ..database import load_history
+
+    df = load_history()
+    latest_round = int(df["round"].max()) if (df is not None and not df.empty) else 0
+
+    cache_key = (seed, apply_intent, latest_round, store_signature())
+    now = time.monotonic()
+    cached = _PM_CACHE.get(cache_key)
+    if cached is not None and now - cached[0] < _PM_CACHE_TTL_SEC:
+        return cached[1]
+
+    from .store import store_read_cache
     with store_read_cache():
-        return _build_pattern_mining_impl(seed=seed, apply_intent=apply_intent)
+        res = _build_pattern_mining_impl(seed=seed, apply_intent=apply_intent)
+
+    _PM_CACHE[cache_key] = (now, res)
+    if len(_PM_CACHE) > _PM_CACHE_MAX:
+        oldest = min(_PM_CACHE, key=lambda k: _PM_CACHE[k][0])
+        _PM_CACHE.pop(oldest, None)
+    return res
 
 
 def _build_pattern_mining_impl(seed: int = 42, apply_intent: str = "current_round") -> Dict[str, Any]:

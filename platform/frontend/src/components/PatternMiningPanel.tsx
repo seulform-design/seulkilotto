@@ -41,6 +41,7 @@ export default function PatternMiningPanel({
     queryFn: () => v1Api.getPatternMining(42, { applyIntent: sheetIntent }),
     staleTime: 300_000,
     retry: 1,
+    enabled: open, // ④ 펼침 시 동시요청 폭주 방지 — 이 패널 열 때만 발화(27s 무거움)
   });
 
   const adopted = useMemo(
@@ -74,7 +75,24 @@ export default function PatternMiningPanel({
   }
 
   const d = q.data as PatternMiningResponse | undefined;
-  if (!d) return null;
+  if (!d) {
+    // 접힘(미조회) 상태 — 펼치면 그때 발화(④ 동시요청 폭주 방지)
+    return (
+      <EngineSection
+        tone="secondary"
+        title="V2. Pattern Mining"
+        id="learn-v2"
+        collapsible
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        defaultOpen={false}
+        sx={{ mb: 2 }}
+        chips={<EngineStatusChip color="default" label="펼치면 분석" />}
+      >
+        <LinearProgress />
+      </EngineSection>
+    );
+  }
   if (!d.ok) {
     return (
       <EngineSection tone="secondary" title="V2. Pattern Mining" sx={{ mb: 2 }}>

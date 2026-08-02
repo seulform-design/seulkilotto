@@ -15,6 +15,7 @@ export default function FullHistoryBacktestPanel() {
     queryKey: ['v1-full-history-backtest'],
     queryFn: v1Api.getFullHistoryBacktest,
     staleTime: 3_600_000,
+    enabled: open, // ④ 펼침 시 동시요청 폭주(ERR_ABORTED) 방지 — 이 패널 열 때만 무거운 백테스트 발화
   });
   const d = q.data;
 

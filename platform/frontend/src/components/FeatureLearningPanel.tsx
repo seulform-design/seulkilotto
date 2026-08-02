@@ -41,6 +41,7 @@ export default function FeatureLearningPanel({
     queryFn: () => v1Api.getFeatureLearning(42, { applyIntent: sheetIntent }),
     staleTime: 300_000,
     retry: 1,
+    enabled: open, // ④ 펼침 시 동시요청 폭주 방지 — 이 패널 열 때만 발화
   });
 
   const adopted = useMemo(
@@ -79,7 +80,24 @@ export default function FeatureLearningPanel({
   }
 
   const d = q.data;
-  if (!d) return null;
+  if (!d) {
+    // 접힘(미조회) 상태 — 펼치면 그때 발화(④ 동시요청 폭주 방지)
+    return (
+      <EngineSection
+        tone="info"
+        title="V1. Feature 학습"
+        id="learn-v1"
+        collapsible
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        defaultOpen={false}
+        sx={{ mb: 2 }}
+        chips={<EngineStatusChip color="default" label="펼치면 분석" />}
+      >
+        <LinearProgress />
+      </EngineSection>
+    );
+  }
 
   if (!d.ok) {
     return (

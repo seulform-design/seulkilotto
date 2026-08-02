@@ -29,6 +29,7 @@ export default function NestedCvPanel() {
     queryFn: () => v1Api.getNestedCv(42),
     staleTime: 300_000,
     retry: 1,
+    enabled: open, // ④ 펼침 시 동시요청 폭주 방지 — 이 패널 열 때만 발화
   });
 
   /** Gate 교차 링크 — Feature 학습 요약(읽기 전용). Nested 자체는 Gate 미승격. */
@@ -63,7 +64,24 @@ export default function NestedCvPanel() {
   }
 
   const d = q.data;
-  if (!d) return null;
+  if (!d) {
+    // 접힘(미조회) 상태 — 펼치면 그때 발화(④ 동시요청 폭주 방지)
+    return (
+      <EngineSection
+        tone="info"
+        title="Validation · Nested CV"
+        id="learn-nested-cv"
+        collapsible
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        defaultOpen={false}
+        sx={{ mb: 2 }}
+        chips={<EngineStatusChip color="default" label="펼치면 분석" />}
+      >
+        <LinearProgress />
+      </EngineSection>
+    );
+  }
 
   if (!d.ok) {
     return (

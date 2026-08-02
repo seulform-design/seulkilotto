@@ -593,16 +593,54 @@ def build_prediction_signals(
     parallel_src = _apply_parallel_signals(scores, sources, df_signal, target)
     decade_src = _apply_decade_gap_signals(scores, sources, df_signal)
 
+    # ── [엔진④ 보강] 백테스트 기반 동적 가중치 스케일링 & 다차원 합의 시너지 부스팅 ──
+    accuracy = backtest_signal_accuracy(df, latest_round, rounds=8)
+    multipliers = {}
+    if accuracy.get("available"):
+        rand_base = accuracy.get("random_baseline", 1.333) or 1.333
+        for src, data in accuracy.get("by_source", {}).items():
+            avg_h = data.get("avg_hits", rand_base)
+            multipliers[src] = max(0.6, min(1.6, avg_h / rand_base))
+
     ranked: List[Dict[str, Any]] = []
     for n in range(1, 46):
         src_list = sources.get(n, [])
         exc = excluded.get(n, [])
         cat_count = _category_set(src_list)
+        
+        # 1) 백테스트 기반 동적 보정
+        boost = 0.0
+        for src_tag in src_list:
+            src_key = None
+            if src_tag.startswith("machine"):
+                src_key = "machine"
+            elif src_tag.startswith("classic"):
+                src_key = "classic"
+            elif src_tag.startswith("parallel"):
+                src_key = "parallel"
+            elif src_tag.startswith("decade"):
+                src_key = "decade"
+            
+            if src_key and src_key in multipliers:
+                base_w = SOURCE_WEIGHTS.get(src_tag, 5.0)
+                boost += base_w * (multipliers[src_key] - 1.0)
+        
+        # 2) 다차원 계열 합의 시너지 보너스
+        consensus_bonus = 0.0
+        if cat_count >= 4:
+            consensus_bonus = 15.0
+        elif cat_count == 3:
+            consensus_bonus = 8.0
+        elif cat_count == 2:
+            consensus_bonus = 3.0
+            
+        final_score = scores.get(n, 0.0) + boost + consensus_bonus
         grade = _consensus_grade(cat_count, bool(exc))
+        
         ranked.append(
             {
                 "number": n,
-                "score": round(scores.get(n, 0.0), 2),
+                "score": round(final_score, 2),
                 "source_count": cat_count,
                 "signal_count": len(src_list),
                 "sources": src_list,

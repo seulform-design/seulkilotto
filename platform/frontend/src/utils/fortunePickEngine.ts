@@ -8,7 +8,7 @@ import type {
 } from '../api/v1Api';
 import { acValue, maxConsecutiveRun, oddCount, sumTotal } from './comboMetrics';
 
-export type FortuneMethod = 'ensemble' | 'unified' | 'machine' | 'classic' | 'smart' | 'lucky';
+export type FortuneMethod = 'unified' | 'machine' | 'classic' | 'smart' | 'lucky';
 
 export const FORTUNE_METHODS: {
   id: FortuneMethod;
@@ -16,12 +16,6 @@ export const FORTUNE_METHODS: {
   label: string;
   desc: string;
 }[] = [
-  {
-    id: 'ensemble',
-    emoji: '🧠',
-    label: '앙상블 할매',
-    desc: '최근 실시간 적중 가중치 soft voting + 5대 필터 + 공간 압축',
-  },
   {
     id: 'unified',
     emoji: '🧓',
@@ -271,13 +265,5 @@ export function fromSmartGenerate(
   seed: number
 ): FortunePickResult {
   return mapApiCombos(data.combinations, 'smart', targetRound, undefined, seed);
-}
-
-export function fromEnsembleGenerate(
-  data: GenerateResponse,
-  targetRound: number,
-  seed: number
-): FortunePickResult {
-  return mapApiCombos(data.combinations, 'ensemble', targetRound, undefined, seed);
 }
 

@@ -107,7 +107,7 @@ export default function ParallelRoundPanel({
   const query = useQuery({
     queryKey: ['v1-parallel-round', targetRound ?? 'auto'],
     queryFn: () => v1Api.getParallelRoundAnalysis(targetRound ?? undefined),
-    enabled: true,
+    enabled: open, // ④ 펼침 시 동시요청 폭주 방지 — defaultOpen=false 인데도 마운트 즉시 치던 문제 해결
     staleTime: 300_000,
   });
 

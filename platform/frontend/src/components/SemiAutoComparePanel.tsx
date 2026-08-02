@@ -1916,6 +1916,7 @@ export default function SemiAutoComparePanel({
   const SEMI_LIST_PAGE = 50;
   const [semiListLimit, setSemiListLimit] = useState(SEMI_LIST_PAGE);
   const [recommendations, setRecommendations] = useState<ScoredRecommendation[]>([]);
+  const [recommendLoading, setRecommendLoading] = useState(false);
   // [추천 5세트 생성] 클릭마다 증가 — 같은 데이터에서도 매번 다른 5세트 생성.
   const regenNonceRef = useRef(0);
 
@@ -4196,109 +4197,50 @@ export default function SemiAutoComparePanel({
     visibleGroupMatch3.length +
     visibleGroupMatch2.length;
 
-  const generateRecommendations = useCallback(() => {
-    const semiFreq: Record<number, number> = {};
-    for (const n of [
-      ...bulkTickets.flat(),
-      ...semiSlipQueue.flatMap((sl) => sl.lines.flatMap((l) => l.numbers)),
-      ...semiCurrentLines.flatMap((l) => l.numbers),
-    ]) {
-      if (Number.isInteger(n) && n >= 1 && n <= 45) {
-        semiFreq[n] = (semiFreq[n] ?? 0) + 1;
-      }
+  const generateRecommendations = useCallback(async () => {
+    setRecommendLoading(true);
+    try {
+      const seed = Date.now() + regenNonceRef.current;
+      regenNonceRef.current += 1;
+      
+      const targetRoundVal = sheetIntent === 'current_round' ? (currentRound ?? undefined) : (latestRound ?? undefined);
+      
+      const data = await v1Api.generateEnsemble({
+        nSets: 5,
+        lookback: 10,
+        intent: sheetIntent,
+        targetRound: targetRoundVal,
+        seed: seed
+      });
+      
+      const results: ScoredRecommendation[] = data.combinations.map((c, idx) => {
+        const winMatch = compareWinning ? c.numbers.filter(n => winningNumbers.includes(n)).length : 0;
+        const strongMatch = c.numbers.filter(n => resolvedStrongCandidates.includes(n)).length;
+        
+        return {
+          combo: c.numbers,
+          totalScore: 100 - idx,
+          winMatch,
+          strongMatch,
+          comboScore: 0,
+          signals: ['앙상블최적화'],
+        };
+      });
+      
+      setRecommendations(results);
+    } catch (e) {
+      console.error("앙상블 추천 생성 실패:", e);
+      alert(e instanceof Error ? e.message : "추천 생성에 실패했습니다.");
+    } finally {
+      setRecommendLoading(false);
     }
-
-    const autoFreq: Record<number, number> = {};
-    for (const line of autoOnlyLines) {
-      for (const n of line) {
-        if (Number.isInteger(n) && n >= 1 && n <= 45) {
-          autoFreq[n] = (autoFreq[n] ?? 0) + 1;
-        }
-      }
-    }
-
-    const cmp = activeComparison;
-    const lineMatchGroups = [
-      ...groupLineMatching.groups6,
-      ...groupLineMatching.groups5,
-      ...groupLineMatching.groups4,
-      ...groupLineMatching.groups3,
-      ...groupLineMatching.groups2,
-    ].map((g) => ({
-      matchCount: g.matchCount,
-      matchedNumbers: g.matchedNumbers,
-      cardWeight: g.autoList.length + g.semiList.length,
-    }));
-
-    // seedTickets 는 reviewRecommendationEngine(3축: 1:1 전수비교·평행·프로파일)이
-    // 더 이상 소비하지 않는다(점수·후보생성에서 제거됨). 과거엔 복기 탭에서 당첨
-    // 일치수(vsLatestMatch)로 시드 가중을 매겨 '사후 편향(누수)' 처럼 보였지만, 실제로는
-    // 엔진이 이 값을 읽지 않았다. 혼선·헛계산을 없애기 위해 빈 배열로 전달한다.
-    const seedTickets: { ticket: number[]; weight: number; label: string }[] = [];
-
-    const nonce = regenNonceRef.current;
-    regenNonceRef.current = nonce + 1; // 다음 클릭은 다른 세트
-    const results = generateScoredRecommendations(
-      {
-        sheetIntent,
-        strongCandidates: resolvedStrongCandidates,
-        excludedCandidates: resolvedExcludedCandidates,
-        winningNumbers: compareWinning ? winningNumbers : [],
-        comboPatterns: getIntentComboPatterns(accumulated, sheetIntent),
-        semiFreq,
-        autoFreq,
-        intersection: cmp
-          ? {
-              two: cmp.twoIntersectionGroups,
-              three: cmp.threeIntersectionGroups,
-              fourPlus: cmp.fourPlusIntersectionGroups,
-            }
-          : { two: [], three: [], fourPlus: [] },
-        lineMatchGroups,
-        seedTickets,
-        unifiedSignals: predictionSignals?.ranked_numbers?.map((r) => ({
-          number: r.number,
-          grade: r.grade,
-          score: r.score,
-          sources: r.sources,
-        })),
-        parallelStrong,
-        parallelExpected,
-        machineStrong,
-        // 🧬 학습된 당첨 프로파일 매칭(복기 당첨 구조 → 현재 데이터 전이) — 핵심 축.
-        profileMatched: patternMatched?.list.map((m) => ({ number: m.number, sim: m.sim })),
-        // 🧬 학습된 당첨 조합 구조(합계·홀수·구간분산·연속) — 조합 형태 정합 가산.
-        learnedStructure: learnedPattern?.structure,
-        validatedLearning: sheetLearningSignals,
-        regenNonce: nonce,
-      },
-      5
-    );
-    setRecommendations(results);
   }, [
-    accumulated,
-    activeComparison,
-    autoOnlyLines,
-    bulkTickets,
-    compareWinning,
-    groupLineMatching.groups2,
-    groupLineMatching.groups3,
-    groupLineMatching.groups4,
-    groupLineMatching.groups5,
-    groupLineMatching.groups6,
-    resolvedStrongCandidates,
-    semiCurrentLines,
-    semiSlipQueue,
     sheetIntent,
+    currentRound,
+    latestRound,
+    compareWinning,
     winningNumbers,
-    predictionSignals,
-    resolvedExcludedCandidates,
-    parallelStrong,
-    parallelExpected,
-    machineStrong,
-    patternMatched,
-    learnedPattern,
-    sheetLearningSignals,
+    resolvedStrongCandidates
   ]);
 
   /**
@@ -6281,12 +6223,21 @@ export default function SemiAutoComparePanel({
               color="success"
               onClick={generateRecommendations}
               disabled={
-                combinedTickets.length === 0 &&
-                parallelStrong.length === 0 &&
-                machineStrong.length === 0
+                recommendLoading || (
+                  combinedTickets.length === 0 &&
+                  parallelStrong.length === 0 &&
+                  machineStrong.length === 0
+                )
               }
             >
-              추천 5세트 생성
+              {recommendLoading ? (
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <CircularProgress size={16} color="inherit" />
+                  <span>생성 중…</span>
+                </Stack>
+              ) : (
+                '추천 5세트 생성'
+              )}
             </Button>
           </Stack>
           {compareWinning && (

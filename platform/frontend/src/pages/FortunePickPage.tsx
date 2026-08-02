@@ -24,6 +24,7 @@ import {
   fromClassicRecommend,
   fromRoundRecommend,
   fromSmartGenerate,
+  fromEnsembleGenerate,
   type FortuneMethod,
   type FortunePickResult,
 } from '../utils/fortunePickEngine';
@@ -66,7 +67,10 @@ export default function FortunePickPage() {
     const seed = Date.now() + nonce;
     try {
       let next: FortunePickResult | null = null;
-      if (method === 'unified') {
+      if (method === 'ensemble') {
+        const data = await v1Api.generateEnsemble({ nSets: 5, lookback: 10, seed });
+        next = fromEnsembleGenerate(data, meta.data?.current_round ?? meta.data?.next_round ?? 0, seed);
+      } else if (method === 'unified') {
         const signals = await v1Api.getPredictionSignals('current_round', seed);
         next = buildUnifiedFortune(signals, seed);
       } else if (method === 'machine') {

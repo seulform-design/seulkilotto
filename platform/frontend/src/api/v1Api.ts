@@ -470,6 +470,28 @@ export const v1Api = {
     return fetchJson<GenerateResponse>(`/api/v1/generate/weights?${q.toString()}`);
   },
 
+  generateEnsemble: (params: {
+    nSets?: number;
+    lookback?: number;
+    intent?: 'review' | 'current_round';
+    targetRound?: number;
+    seed?: number;
+    decayFactor?: number;
+    lambdaReg?: number;
+    alphaSig?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.nSets) q.set('n_sets', String(params.nSets));
+    if (params.lookback) q.set('lookback', String(params.lookback));
+    if (params.intent) q.set('intent', params.intent);
+    if (params.targetRound) q.set('target_round', String(params.targetRound));
+    if (params.seed != null) q.set('seed', String(params.seed));
+    if (params.decayFactor != null) q.set('decay_factor', String(params.decayFactor));
+    if (params.lambdaReg != null) q.set('lambda_reg', String(params.lambdaReg));
+    if (params.alphaSig != null) q.set('alpha_sig', String(params.alphaSig));
+    return fetchJson<GenerateResponse>(`/api/v1/generate/ensemble?${q.toString()}`);
+  },
+
   getRoundRecommend: (machine?: 1 | 2 | 3) => {
     const q = new URLSearchParams();
     if (machine) q.set('machine', String(machine));

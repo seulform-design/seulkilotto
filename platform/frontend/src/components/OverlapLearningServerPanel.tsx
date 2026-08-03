@@ -22,7 +22,7 @@ export default function OverlapLearningServerPanel({
     queryFn: () => v1Api.getOverlapLearning({ applyIntent: sheetIntent }),
     staleTime: 300_000,
     retry: 1,
-    enabled: open, // ④ 펼침 시 동시요청 폭주 방지 — 이 패널 열 때만 발화
+    enabled: true, // ④ 자동 로드 · 동시요청은 fetchJson heavy 제한기가 흡수(폭주 방지)
   });
 
   if (q.isLoading) {

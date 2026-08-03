@@ -16,9 +16,55 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 interface FetchJsonOptions extends RequestInit {
   /** ms. 기본 30s. 0 이하 또는 미지정 시 디폴트 적용. */
   timeoutMs?: number;
+  /**
+   * 무거운 분석 엔드포인트 표시. true 면 클라이언트 동시요청 제한기를 거쳐
+   * 최대 MAX_HEAVY 개만 동시에 나간다. ④ 학습 엔진이 펼쳐지면 무거운
+   * photo-analysis 요청 십수 개가 한꺼번에 몰려 브라우저 동시연결 한도를
+   * 넘겨 ERR_ABORTED/ERR_INSUFFICIENT_RESOURCES(네트워크 요청 초과) + 백엔드
+   * 과부하 504 가 났다. 제한기로 몰림을 흡수하되 패널은 자동 로드된다(비활성 X).
+   */
+  heavy?: boolean;
+}
+
+// ── 무거운 요청 동시성 제한기 ──
+// heavy:true 요청은 최대 MAX_HEAVY 개만 in-flight. 나머지는 큐에서 대기하다
+// 슬롯이 나면 순서대로 실행된다. 경량/핵심 요청(accumulated·meta·history 등)은
+// 제한기를 거치지 않으므로 무거운 요청에 굶지 않는다.
+const MAX_HEAVY = 4;
+let heavyActive = 0;
+const heavyQueue: Array<() => void> = [];
+
+function acquireHeavySlot(): Promise<void> {
+  if (heavyActive < MAX_HEAVY) {
+    heavyActive += 1;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => heavyQueue.push(resolve));
+}
+
+function releaseHeavySlot(): void {
+  const next = heavyQueue.shift();
+  if (next) {
+    // 슬롯을 대기자에게 인계 — heavyActive 는 그대로(여전히 점유 중).
+    next();
+  } else if (heavyActive > 0) {
+    heavyActive -= 1;
+  }
 }
 
 export async function fetchJson<T>(path: string, init: FetchJsonOptions = {}): Promise<T> {
+  if (init.heavy) {
+    await acquireHeavySlot();
+    try {
+      return await fetchJsonInner<T>(path, init);
+    } finally {
+      releaseHeavySlot();
+    }
+  }
+  return fetchJsonInner<T>(path, init);
+}
+
+async function fetchJsonInner<T>(path: string, init: FetchJsonOptions = {}): Promise<T> {
   const url = resolveApiUrl(path);
   const { timeoutMs, signal: externalSignal, headers, ...rest } = init;
 

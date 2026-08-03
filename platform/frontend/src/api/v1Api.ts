@@ -544,7 +544,8 @@ export const v1Api = {
     if (params?.bonus != null) q.set('bonus', String(params.bonus));
     const qs = q.toString();
     return fetchJson<PostOccurrenceResponse>(
-      `/api/v1/post-occurrence/analysis${qs ? `?${qs}` : ''}`
+      `/api/v1/post-occurrence/analysis${qs ? `?${qs}` : ''}`,
+      { heavy: true },
     );
   },
 
@@ -601,19 +602,19 @@ export const v1Api = {
     const qs = q.toString();
     return fetchJson<RoundLearningResponse>(
       `/api/v1/photo-analysis/round-learning${qs ? `?${qs}` : ''}`,
-      { timeoutMs: 60_000 },
+      { timeoutMs: 60_000, heavy: true },
     );
   },
 
   /** 복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였나 + 커버리지 곡선. */
   getReviewVerification: () =>
-    fetchJson<ReviewVerificationResponse>('/api/v1/photo-analysis/review-verification', { timeoutMs: 90_000 }),
+    fetchJson<ReviewVerificationResponse>('/api/v1/photo-analysis/review-verification', { timeoutMs: 90_000, heavy: true }),
 
   /** 강수·기대 접목 커버리지·EV (서버 권위 + LOO 백테스트). */
   getGraftCoverage: (intent: 'review' | 'current_round' = 'review') =>
     fetchJson<GraftCoverageResponse>(
       `/api/v1/photo-analysis/graft-coverage?intent=${intent}`,
-      { timeoutMs: 90_000 },
+      { timeoutMs: 90_000, heavy: true },
     ),
 
   /** 줄겹침(2·3·4번호) 패턴 역산 학습 — 보관 회차 겹침 조합 vs 실제 당첨. */
@@ -623,7 +624,7 @@ export const v1Api = {
     const qs = q.toString();
     return fetchJson<OverlapLearningResponse>(
       `/api/v1/photo-analysis/overlap-learning${qs ? `?${qs}` : ''}`,
-      { timeoutMs: 90_000 },
+      { timeoutMs: 90_000, heavy: true },
     );
   },
 
@@ -633,7 +634,7 @@ export const v1Api = {
     if (opts?.applyIntent) q.set('apply_intent', opts.applyIntent);
     return fetchJson<FeatureLearningResponse>(
       `/api/v1/photo-analysis/feature-learning?${q.toString()}`,
-      { timeoutMs: 180_000 },
+      { timeoutMs: 180_000, heavy: true },
     );
   },
 
@@ -641,13 +642,14 @@ export const v1Api = {
   getNestedCv: (seed = 42) =>
     fetchJson<NestedCvResponse>(`/api/v1/photo-analysis/nested-cv?seed=${seed}`, {
       timeoutMs: 180_000,
+      heavy: true,
     }),
 
   /** Experimental SHAP/Drift proxy — 점수 주입 금지. */
   getShapDrift: (seed = 42) =>
     fetchJson<ShapDriftResponse>(
       `/api/v1/photo-analysis/experimental/shap-drift?seed=${seed}`,
-      { timeoutMs: 180_000 },
+      { timeoutMs: 180_000, heavy: true },
     ),
 
   /** Statistics Artifact 스냅샷 — 점수 미연결. */
@@ -659,7 +661,7 @@ export const v1Api = {
     const qs = q.toString();
     return fetchJson<StatisticsSnapshot>(
       `/api/v1/stats/snapshot${qs ? `?${qs}` : ''}`,
-      { timeoutMs: 60_000 },
+      { timeoutMs: 60_000, heavy: true },
     );
   },
 
@@ -713,7 +715,7 @@ export const v1Api = {
     if (opts?.applyIntent) q.set('apply_intent', opts.applyIntent);
     return fetchJson<PatternMiningResponse>(
       `/api/v1/photo-analysis/pattern-mining?${q.toString()}`,
-      { timeoutMs: 180_000 },
+      { timeoutMs: 180_000, heavy: true },
     );
   },
 
@@ -721,14 +723,14 @@ export const v1Api = {
   getCarryoverLearning: (seed = 42) =>
     fetchJson<CarryoverLearningResponse>(
       `/api/v1/photo-analysis/carryover-learning?seed=${seed}`,
-      { timeoutMs: 120_000 },
+      { timeoutMs: 120_000, heavy: true },
     ),
 
   /** 전체 당첨 이력 워크포워드 백테스트 — 흔한 전략이 무작위를 이기나(다중검정 보정). */
   getFullHistoryBacktest: () =>
     fetchJson<FullHistoryBacktestResponse>(
       '/api/v1/photo-analysis/full-history-backtest',
-      { timeoutMs: 60_000 },
+      { timeoutMs: 60_000, heavy: true },
     ),
 
   /** 복기 엔트리 회차 재귀속(관리자) — 라벨만 교정, 보관 정본 불변, 원본 회차 보존. */
@@ -759,6 +761,7 @@ export const v1Api = {
     }
     return fetchJson<PredictionSignalsResponse>(`/api/v1/prediction/signals?${q.toString()}`, {
       timeoutMs: 60_000,
+      heavy: true,
     });
   },
 
@@ -767,7 +770,8 @@ export const v1Api = {
     if (targetRound != null) q.set('target_round', String(targetRound));
     const qs = q.toString();
     return fetchJson<ParallelRoundAnalysisResponse>(
-      `/api/v1/analysis/parallel-round${qs ? `?${qs}` : ''}`
+      `/api/v1/analysis/parallel-round${qs ? `?${qs}` : ''}`,
+      { heavy: true },
     );
   },
 

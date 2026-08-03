@@ -49,19 +49,17 @@ export default function EngineGlobalStatsPanel() {
     queryFn: v1Api.getFullHistoryBacktest,
     staleTime: 900_000,
     retry: 1,
-    enabled: open,
   });
   const freq = useQuery({
     queryKey: ['v1-frequency-all'],
     queryFn: () => v1Api.getFrequency(undefined),
     staleTime: 300_000,
-    enabled: open,
   });
-  const latest = useQuery({ queryKey: ['v1-latest'], queryFn: v1Api.getLatestDraw, enabled: open });
+  const latest = useQuery({ queryKey: ['v1-latest'], queryFn: v1Api.getLatestDraw });
   const analysis = useQuery({
     queryKey: ['v1-analyze-latest', latest.data?.round],
     queryFn: () => v1Api.analyzeCombination(latest.data!.numbers),
-    enabled: open && !!latest.data?.numbers,
+    enabled: !!latest.data?.numbers,
     staleTime: 300_000,
   });
   const post = useQuery({
@@ -72,7 +70,7 @@ export default function EngineGlobalStatsPanel() {
         numbers: latest.data?.numbers,
         bonus: latest.data?.bonus,
       }),
-    enabled: open && !!latest.data?.numbers,
+    enabled: !!latest.data?.numbers,
     staleTime: 300_000,
   });
 

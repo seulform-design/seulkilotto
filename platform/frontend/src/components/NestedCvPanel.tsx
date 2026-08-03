@@ -29,7 +29,7 @@ export default function NestedCvPanel() {
     queryFn: () => v1Api.getNestedCv(42),
     staleTime: 300_000,
     retry: 1,
-    enabled: open, // ④ 펼침 시 동시요청 폭주 방지 — 이 패널 열 때만 발화
+    enabled: true, // ④ 자동 로드 · 동시요청은 fetchJson heavy 제한기가 흡수(폭주 방지)
   });
 
   /** Gate 교차 링크 — Feature 학습 요약(읽기 전용). Nested 자체는 Gate 미승격. */

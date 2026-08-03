@@ -25,13 +25,16 @@ def propose_retirements(
     - ensemble: stable=False 이고 selected 가 아닌 모델 → propose_disable
     - leaderboard: mean_top6 이 무작위 기대보다 낮고 표본 충분 → propose_review
     """
+    from .model_registry_store import list_disabled_ids
+
     candidates: list[dict[str, Any]] = []
     unchanged: list[str] = []
+    disabled = list_disabled_ids()
 
     gs = gate_summary or {}
     allowed = set(gs.get("scoring_allowed_ids") or [])
     for mid in gs.get("rejected") or []:
-        if mid in allowed:
+        if mid in allowed or mid in disabled:
             unchanged.append(mid)
             continue
         candidates.append(

@@ -953,6 +953,9 @@ def _build_pattern_mining_impl(seed: int = 42, apply_intent: str = "current_roun
                 s.exclude_reasons = list(s.exclude_reasons) + [
                     f"out-of-sample 미재현 (OOS fire {s.oos_appear}·lift {s.oos_lift})"
                 ]
+    from .model_registry_store import apply_human_disables_to_pattern_scores
+    scores = apply_human_disables_to_pattern_scores(scores)
+
     scores.sort(
         key=lambda s: (-int(s.adopted), -s.oos_lift, -s.lift_vs_baseline, s.permutation_p)
     )

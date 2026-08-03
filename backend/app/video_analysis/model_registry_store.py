@@ -195,3 +195,18 @@ def apply_human_disables_to_feature_reports(reports: list[dict[str, Any]]) -> li
             row["use_reason"] = []
         out.append(row)
     return out
+
+
+def apply_human_disables_to_pattern_scores(scores: list[PatternScore]) -> list[PatternScore]:
+    """disabled pattern:* / id 를 adopted=False 로 강제 (추천 경로 차단)."""
+    disabled = list_disabled_ids()
+    if not disabled or not scores:
+        return scores
+    for s in scores:
+        pid = s.pattern.id
+        mid = pid if pid.startswith("pattern:") else f"pattern:{pid}"
+        if mid in disabled or pid in disabled:
+            s.adopted = False
+            s.exclude_reasons = list(s.exclude_reasons) + [f"사람 승인 비활성({mid})"]
+            s.use_reasons = []
+    return scores

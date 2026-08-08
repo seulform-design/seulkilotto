@@ -18,8 +18,21 @@ server {
         proxy_pass http://127.0.0.1:8100;
     }
 
+    # 내용 해시된 정적 자산 — 파일명이 바뀌면 새로 받으므로 영구 캐시 안전(immutable).
+    location /assets/ {
+        root /app/frontend/dist;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
     location / {
         root /app/frontend/dist;
+        # index.html 은 절대 브라우저에 고정 캐시하지 않는다 — 매 로드마다 재검증(etag)해
+        # 항상 최신 번들 해시를 받게 한다. 이게 없으면 브라우저 휴리스틱 캐시가 오래된
+        # index.html(→오래된 JS 번들)을 물고 있어 새 배포·회차 업그레이드가 반영되지
+        # 않는 '업그레이드/수정 안됨'처럼 보이는 문제가 생긴다.
+        add_header Cache-Control "no-cache" always;
         try_files $uri $uri/ /index.html;
     }
 }

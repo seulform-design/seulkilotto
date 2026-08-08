@@ -13,7 +13,7 @@ top-6 집중 픽은 대부분 놓친다. 왜인지를 데이터로 보여준다.
 from __future__ import annotations
 
 import math
-from collections import Counter
+from collections import Counter, OrderedDict
 from typing import Any, Dict, List
 
 COVERAGE_KS = [6, 10, 15, 18, 24, 30]
@@ -1106,7 +1106,40 @@ def _line_freq(lines: List[List[int]]) -> Counter:
     return c
 
 
+_SIGNALS_MEMO: "OrderedDict[tuple, Dict[str, Dict[int, float]]]" = OrderedDict()
+_SIGNALS_MEMO_MAX = 64
+
+
+def _signals_memo_key(auto: List[List[int]], semi: List[List[int]]) -> tuple:
+    a = tuple(tuple(sorted(int(n) for n in ln)) for ln in auto)
+    s = tuple(tuple(sorted(int(n) for n in ln)) for ln in semi)
+    return (a, s)
+
+
 def _signals(auto: List[List[int]], semi: List[List[int]]) -> Dict[str, Dict[int, float]]:
+    """_signals_impl 의 순수함수 메모이즈 래퍼.
+
+    build_review_verification 은 복기/이번회차 두 커버리지 빌드 + 각 LOO 함수가
+    같은 보관 표본(및 용지)에 대해 _signals 를 ~50회 재계산했다. 이번회차 용지가
+    쌓이면(예: 445+173줄) 반복 combo 분석이 무거워져 게이트웨이 60s 를 넘겨 504 가
+    났다. _signals 는 (auto,semi) 만의 순수함수라 내용키로 메모이즈하면 재계산이
+    ~7회(표본 5 + 복기 + 이번회차)로 줄어 결과는 완전 동일하다. 변형 오염을
+    막으려 캐시본은 방어적 복사로 반환한다."""
+    key = _signals_memo_key(auto, semi)
+    hit = _SIGNALS_MEMO.get(key)
+    if hit is None:
+        hit = _signals_impl(auto, semi)
+        _SIGNALS_MEMO[key] = hit
+        _SIGNALS_MEMO.move_to_end(key)
+        if len(_SIGNALS_MEMO) > _SIGNALS_MEMO_MAX:
+            _SIGNALS_MEMO.popitem(last=False)
+    else:
+        _SIGNALS_MEMO.move_to_end(key)
+    # 방어적 복사 — 호출부가 반환 dict/내부 dict 를 변형해도 캐시가 오염되지 않음.
+    return {k: dict(v) for k, v in hit.items()}
+
+
+def _signals_impl(auto: List[List[int]], semi: List[List[int]]) -> Dict[str, Dict[int, float]]:
     import math
 
     from .feature_learning_engine import _detect_fixed_semi

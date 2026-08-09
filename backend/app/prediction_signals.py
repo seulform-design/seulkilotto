@@ -531,6 +531,12 @@ def build_prediction_signals(
     if intent not in ("review", "current_round"):
         intent = "current_round"
 
+    # 시드 미지정(None)이면 고정 시드로 결정론화 — 미지정 시 하위 추천기(round/classic)가
+    # 무시드 난수를 써 같은 회차 추천이 호출·워커마다 달라졌다(추천 불안정 = '확률이
+    # 떨어져 보이는' 착시의 한 원인). 고정 시드로 결과를 안정화하고 캐시 키도 일관화한다.
+    if seed is None:
+        seed = 42
+
     df = load_history()
     if df.empty:
         return {"error": "당첨 데이터가 없습니다."}

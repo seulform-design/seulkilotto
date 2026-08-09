@@ -83,10 +83,11 @@ def build_round_learning(apply_intent: str = "current_round") -> Dict[str, Any]:
 
     요청 단위 읽기 캐시 — 24MB historical 반복 로드(_load_historical_raw +
     _load_apply_sheet)를 1회로(아카이브 성장 시 60s 타임아웃 방지). 읽기 전용."""
-    from .store import store_read_cache
+    from .store import store_read_cache, engine_cached, store_signature
 
     with store_read_cache():
-        return _build_round_learning_impl(apply_intent=apply_intent)
+        key = ("round_learning", apply_intent, store_signature())
+        return engine_cached(key, 900, lambda: _build_round_learning_impl(apply_intent=apply_intent))
 
 
 def _build_round_learning_impl(apply_intent: str = "current_round") -> Dict[str, Any]:

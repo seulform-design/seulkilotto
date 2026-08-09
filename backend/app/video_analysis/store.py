@@ -76,6 +76,33 @@ def _read_cache_invalidate(scope: str) -> None:
         cache.pop(scope, None)
 
 
+# ── 엔진 출력 프로세스 캐시(15분 TTL) ──────────────────────────────────────
+# 무거운 엔진(review-verification·round/overlap/graft/carryover)은 콜드 계산이 60s
+# 게이트웨이를 넘겨 504 가 나고, 그러면 결과가 캐시에 담기지도 못해 매번 콜드로
+# 반복된다(추천이 부하마다 흔들려 '확률이 떨어져 보이는' 원인). store_signature()
+# 키로 프로세스 전역에 결과를 캐시하면 데이터 변경 시 키가 바뀌어 자동 무효화되고,
+# 백그라운드 프리워밍 잡이 미리 계산해 채워둔 값을 HTTP 요청이 그대로 재사용한다
+# → 항상 완전·안정된 결과, 504 없음. (순수 파생 결과 전용.)
+_ENGINE_CACHE: Dict[Any, tuple] = {}
+_ENGINE_CACHE_MAX = 48
+
+
+def engine_cached(key: Any, ttl_sec: int, builder):
+    """key 로 엔진 결과를 프로세스 캐시. 미스 시 builder() 계산 후 저장."""
+    import time
+
+    now = time.monotonic()
+    hit = _ENGINE_CACHE.get(key)
+    if hit is not None and now - hit[0] < ttl_sec:
+        return hit[1]
+    res = builder()
+    _ENGINE_CACHE[key] = (now, res)
+    if len(_ENGINE_CACHE) > _ENGINE_CACHE_MAX:
+        oldest = min(_ENGINE_CACHE, key=lambda k: _ENGINE_CACHE[k][0])
+        _ENGINE_CACHE.pop(oldest, None)
+    return res
+
+
 class DuplicateAnalysisError(Exception):
     """이미 저장된 동일 영상/용지."""
 

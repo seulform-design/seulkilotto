@@ -450,6 +450,15 @@ def _loo_backtest(samples) -> Dict[str, Any]:
 
 
 def build_graft_coverage(*, intent: str = "review") -> Dict[str, Any]:
+    from .store import store_read_cache, engine_cached, store_signature
+
+    intent = intent if intent in ("review", "current_round") else "review"
+    with store_read_cache():
+        key = ("graft_coverage", intent, store_signature())
+        return engine_cached(key, 900, lambda: _build_graft_coverage_impl(intent=intent))
+
+
+def _build_graft_coverage_impl(*, intent: str = "review") -> Dict[str, Any]:
     from .store import (
         _review_entries_for_round,
         _manual_saved_lines,

@@ -3069,6 +3069,14 @@ def _inverse_diagnosis(
 
 
 def build_review_verification() -> Dict[str, Any]:
+    from .store import store_read_cache, engine_cached, store_signature
+
+    with store_read_cache():
+        key = ("review_verification", store_signature())
+        return engine_cached(key, 900, _build_review_verification_impl)
+
+
+def _build_review_verification_impl() -> Dict[str, Any]:
     from .store import (
         _review_entries_for_round,
         _manual_saved_lines,

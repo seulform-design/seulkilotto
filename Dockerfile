@@ -28,7 +28,11 @@ RUN cd /app/platform/backend \
 COPY --from=frontend-build /build/dist /app/frontend/dist
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY deploy/start-docker.sh /start.sh
-RUN chmod +x /start.sh
+# CRLF 방어: `railway up` 은 (Windows) 워킹트리를 그대로 업로드해 start.sh 가 CRLF 면
+# shebang 이 `#!/bin/sh\r` 로 깨져 컨테이너가 `/start.sh` 를 exec 못 한다(No such file).
+# 소스 줄끝과 무관하게 CR 을 제거해 항상 실행 가능하게 한다(nginx 템플릿도 함께 정리).
+RUN sed -i 's/\r$//' /start.sh /etc/nginx/templates/default.conf.template \
+    && chmod +x /start.sh
 
 ENV PORT=10000
 ENV SCHEDULER_ENABLED=true

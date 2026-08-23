@@ -1,0 +1,7 @@
+# 리눅스 컨테이너에서 실행되는 셸 스크립트·설정 템플릿은 반드시 LF 를 쓴다.
+# (Windows 체크아웃에서 CRLF 가 섞이면 shebang/설정이 깨져 컨테이너가 안 뜬다 —
+#  실제 사고: start-docker.sh 가 CRLF 라 `/start.sh` exec 실패로 배포가 헬스체크 탈락.)
+*.sh          text eol=lf
+*.template    text eol=lf
+Dockerfile    text eol=lf
+deploy/start-docker.sh text eol=lf

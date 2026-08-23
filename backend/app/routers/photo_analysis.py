@@ -167,6 +167,8 @@ class ManualAnalyzeRequest(BaseModel):
     pick_type: str = Field("반자동", description="자동 | 반자동 — 이 세트의 픽 타입")
     persist: bool = True
     allow_duplicate: bool = False
+    # 미등록으로 지나간 특정 과거 회차 백필 등록 — 지정 시 그 회차(복기) 소속으로 저장.
+    target_round: int | None = Field(None, description="특정 과거 회차 백필(복기) 등록. 미지정 시 sheet_intent 기준.")
     slips: List[ManualSlip] = Field(..., min_length=1)
 
 
@@ -253,6 +255,15 @@ def analyze_manual(body: ManualAnalyzeRequest):
             status_code=400,
             detail="pick_type 은 자동 또는 반자동 이어야 합니다.",
         )
+    if body.target_round is not None:
+        from ..video_analysis.draw_template import get_review_round_no
+
+        _latest = int(get_review_round_no())
+        if not (1 <= int(body.target_round) <= _latest):
+            raise HTTPException(
+                status_code=400,
+                detail=f"target_round 은 1~{_latest}회(추첨 완료 회차) 사이여야 합니다.",
+            )
     try:
         slips = [
             {
@@ -262,7 +273,10 @@ def analyze_manual(body: ManualAnalyzeRequest):
             for slip in body.slips
         ]
         result = analyze_manual_slips(
-            slips, sheet_intent=body.sheet_intent, pick_type=body.pick_type
+            slips,
+            sheet_intent=body.sheet_intent,
+            pick_type=body.pick_type,
+            target_round=body.target_round,
         )
         source_id = result["video_visual_analysis"]["video_id"]
         stored_entry_id = None

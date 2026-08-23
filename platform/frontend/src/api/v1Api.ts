@@ -556,6 +556,8 @@ export const v1Api = {
       persist?: boolean;
       /** 이 세트의 픽 타입 — 자동/반자동을 서버에서 분리 저장 */
       pickType?: '자동' | '반자동';
+      /** 특정 과거 회차 백필(복기) 등록 — 미등록으로 지나간 회차 나중 등록용. */
+      targetRound?: number;
     } = {}
   ) =>
     fetchJson<PhotoAnalysisJobResult>('/api/v1/photo-analysis/manual', {
@@ -567,6 +569,7 @@ export const v1Api = {
         pick_type: opts.pickType ?? '반자동',
         persist: opts.persist ?? true,
         allow_duplicate: false,
+        target_round: opts.targetRound ?? null,
         slips: slips.map((slip) => ({
           name: slip.name ?? '',
           lines: slip.lines.map((line) => ({

@@ -804,6 +804,10 @@ export default function PhotoAnalysisPage() {
   }, [activeTab]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [manualLoading, setManualLoading] = useState(false);
+  // 미등록(누락) 회차 백필: 복기 탭에서 특정 지난 회차 용지를 따로 등록할 수 있게 한다.
+  // null 이면 평소대로(복기=최신 추첨회차) 저장. 값이 있으면 그 회차로 스탬프하고
+  // 회차-불일치 파괴 확인을 건너뛴다(사용자가 의도적으로 그 회차를 고른 것이므로).
+  const [backfillRound, setBackfillRound] = useState<number | null>(null);
   const [isReanalyzing, setIsReanalyzing] = useState(false);
   // 학습·패턴 엔진 상세는 기본 접어둔다(추천은 위 요약·복기 검증으로 충분, 클러터 감소).
   // 비동기 작업 중 unmount 가드 (메모리 안정성)
@@ -1350,8 +1354,16 @@ export default function PhotoAnalysisPage() {
     }
     // ⛔ 회차 오염 방지 — 로컬 누적이 지난 회차 기준이면 그대로 저장 시 현재 회차로
     // 재라벨링된다(1232 용지가 복기 1233 으로 저장된 실제 사고). 의도를 확인받는다.
-    const targetRound = activeTab === 'current_round' ? currentRound : reviewRound;
+    // 백필(미등록 회차 직접 등록) 중이면 사용자가 그 회차를 명시적으로 고른 것이므로
+    // 회차-불일치 확인을 건너뛰고 선택한 회차로 스탬프한다.
+    const isBackfill = activeTab === 'review' && backfillRound != null;
+    const targetRound = isBackfill
+      ? backfillRound
+      : activeTab === 'current_round'
+        ? currentRound
+        : reviewRound;
     if (
+      !isBackfill &&
       manualDraft.roundNo != null &&
       targetRound != null &&
       manualDraft.roundNo !== targetRound
@@ -1380,16 +1392,17 @@ export default function PhotoAnalysisPage() {
         sheetIntent: activeTab,
         persist: true,
         pickType: '자동',
+        targetRound: isBackfill ? (backfillRound ?? undefined) : undefined,
       });
       if (!mountedRef.current) return;
       // 수동 저장 POST 는 경량 응답이라 accumulated 를 담지 않는다(항상 null) — 실제 누적
       // 갱신은 아래 refreshAccumulated() GET 이 담당한다. 방어적으로만 확인.
       if (data.accumulated) setAccumulated(data.accumulated);
       const nowIso = new Date().toISOString();
-      // 저장 시점의 대상 회차를 스탬프 — 저장 가드(targetRound)와 **같은 변수**여야 한다
-      // (이번회차=currentRound, 복기=reviewRound). latestRound 로 스탬프하면 복기 회차가
-      // latest 와 어긋날 때 다음 저장마다 가짜 '회차 뒤섞임' 파괴 확인이 뜬다.
-      const savedRound = activeTab === 'current_round' ? currentRound : reviewRound;
+      // 저장 시점의 대상 회차를 스탬프 — 저장 가드(targetRound)와 **같은 값**이어야 한다
+      // (이번회차=currentRound, 복기=reviewRound, 백필=선택 회차). latestRound 로 스탬프하면
+      // 복기 회차가 latest 와 어긋날 때 다음 저장마다 가짜 '회차 뒤섞임' 확인이 뜬다.
+      const savedRound = targetRound;
       if (data.duplicate_skipped) {
         // 중복은 오류가 아니라 '이미 저장된 상태' — 시간도 갱신하고 완료된 입력을 정리.
         patchManual({
@@ -1593,6 +1606,7 @@ export default function PhotoAnalysisPage() {
           })
         }
         onRefreshAccumulated={refreshAccumulated}
+        backfillRound={activeTab === 'review' ? backfillRound : null}
         registerPrelude={
           <Box sx={{ mb: 0.5 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }} spacing={1}>
@@ -1614,6 +1628,34 @@ export default function PhotoAnalysisPage() {
                 </Button>
               </Stack>
             </Stack>
+            {activeTab === 'review' && (() => {
+              // 백필 후보: 최신 추첨 회차부터 아래로 8개(백엔드는 1..최신추첨회차만 허용).
+              const anchor = reviewRound ?? latestRound ?? 0;
+              const opts = anchor > 0
+                ? Array.from({ length: 8 }, (_, i) => anchor - i).filter((r) => r > 0)
+                : [];
+              return (
+                <TextField
+                  select
+                  size="small"
+                  label="미등록 회차 직접 등록(백필)"
+                  value={backfillRound ?? ''}
+                  onChange={(e) => setBackfillRound(e.target.value ? Number(e.target.value) : null)}
+                  SelectProps={{ native: true }}
+                  helperText={
+                    backfillRound != null
+                      ? `⚠ 이번 저장은 ${backfillRound}회 용지로 기록됩니다(회차 확인 생략)`
+                      : '누락된 지난 회차 용지를 그 회차로 등록하려면 선택하세요'
+                  }
+                  sx={{ mb: 1.5, minWidth: 260 }}
+                >
+                  <option value="">기본 (최신 복기 회차)</option>
+                  {opts.map((r) => (
+                    <option key={r} value={r}>{r}회로 등록</option>
+                  ))}
+                </TextField>
+              );
+            })()}
             <ManualNumberGrid
                       picked={picked}
                       onToggle={togglePicked}

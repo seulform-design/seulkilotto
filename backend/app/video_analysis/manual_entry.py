@@ -130,17 +130,27 @@ def analyze_manual_slips(
     *,
     sheet_intent: str = "current_round",
     pick_type: str = "반자동",
+    target_round: int | None = None,
 ) -> Dict[str, Any]:
     from .dedup import compute_manual_source_id
     from .image_engine import analyze_from_sheet_payloads
 
     pick_type = pick_type if pick_type in ("자동", "반자동") else "반자동"
     sheet_payloads = build_manual_sheet_payloads(slips, pick_type=pick_type)
-    intent = sheet_intent if sheet_intent in ("review", "current_round") else "current_round"
+    # target_round 지정 = 미등록으로 지나간 특정 과거 회차 백필(복기 소속 등록).
+    _backfill = target_round is not None and int(target_round) > 0
+    intent = "review" if _backfill else (
+        sheet_intent if sheet_intent in ("review", "current_round") else "current_round"
+    )
     intent_label = "복기" if intent == "review" else "이번회차"
-    title = f"{intent_label} {pick_type} 등록 {len(slips)}장"
+    title = (
+        f"복기 {int(target_round)}회 {pick_type} 백필 등록 {len(slips)}장"
+        if _backfill else f"{intent_label} {pick_type} 등록 {len(slips)}장"
+    )
     # 소스 ID 에 픽 타입 포함 — 자동/반자동을 서로 다른 세트로 저장(덮어쓰기 방지).
-    source_id = compute_manual_source_id(slips, intent, pick_type=pick_type)
+    # 백필은 회차별로 분리 — 같은 슬립이라도 회차가 다르면 다른 세트로 저장.
+    _sid_intent = f"review-r{int(target_round)}" if _backfill else intent
+    source_id = compute_manual_source_id(slips, _sid_intent, pick_type=pick_type)
     return analyze_from_sheet_payloads(
         sheet_payloads,
         sheet_intent=intent,
@@ -149,4 +159,5 @@ def analyze_manual_slips(
         entry_mode="manual",
         pick_type=pick_type,
         source_count=len(slips),
+        target_round=int(target_round) if _backfill else None,
     )

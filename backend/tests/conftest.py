@@ -26,3 +26,46 @@ def _clear_engine_caches():
     _clear()
     yield
     _clear()
+
+
+@pytest.fixture(autouse=True)
+def _protect_history_csv():
+    """커밋된 이력 CSV 를 테스트가 변형해도 매 테스트 후 원복 — 회차 관련 테스트
+    (round_upgrade 등)가 앞선 테스트의 CSV 변형에 오염돼 순서에 따라 실패하던 문제
+    (플래키) 방지. 원복 시 load_history 캐시도 무효화한다.
+    """
+    from pathlib import Path
+
+    csv = Path(__file__).resolve().parents[1] / "data" / "lotto_history.csv"
+    orig = csv.read_bytes() if csv.exists() else None
+    try:
+        yield
+    finally:
+        if orig is not None and csv.exists() and csv.read_bytes() != orig:
+            csv.write_bytes(orig)
+            try:
+                from app.database import invalidate_history_cache
+
+                invalidate_history_cache()
+            except Exception:
+                pass
+
+
+@pytest.fixture(autouse=True)
+def _no_real_round_sync(monkeypatch):
+    """테스트가 실제 네트워크 회차 캐치업 스레드를 못 띄우게 막는다.
+
+    round_status()/프론트 진입 경로는 ensure_rounds_synced_async 로 백그라운드
+    upgrade_rounds() 스레드를 시작한다. 그 스레드가 실제 크롤(네트워크)과
+    _UPGRADE_LOCK 을 붙잡은 채 다음 테스트로 새어들어가, 바로 뒤의
+    test_round_upgrade 가 락 보유(in_progress) 때문에 간헐 실패했다(전 세션 내내
+    '플래키'로 관측). 프로덕션 동작은 정상이므로 테스트에서만 no-op 로 대체한다.
+    """
+    def _stub(*_a, **_k):
+        return {"started": False, "syncing": False, "reason": "test-stub"}
+
+    try:
+        monkeypatch.setattr("app.round_upgrade.ensure_rounds_synced_async", _stub)
+    except Exception:
+        pass
+    yield

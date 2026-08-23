@@ -273,10 +273,27 @@ def analyze_sheets_with_draw_template(
     }
 
 
-def resolve_sheet_round(intent: str) -> Dict[str, Any]:
-    """이번회차/복기 회차 명확히 구분."""
+def resolve_sheet_round(intent: str, target_round: int | None = None) -> Dict[str, Any]:
+    """이번회차/복기 회차 명확히 구분.
+
+    target_round 지정 시(특정 과거 회차 백필 등록): 그 회차 소속(복기)으로 스탬프한다.
+    미등록으로 지나간 회차(예: 1237·1238)의 용지를 사용자가 나중에 따로 등록할 때 쓴다.
+    """
     review_rnd = get_review_round_no()
     current_rnd = get_current_round_no()
+    if target_round is not None and int(target_round) > 0:
+        tr = int(target_round)
+        return {
+            "video_intent": "review",
+            "video_intent_label": "복기",
+            "ticket_round": str(tr),
+            "detected_round": str(tr),
+            "ticket_round_confidence": "high",
+            "review_round_ref": tr,
+            "current_round_ref": current_rnd,
+            "referenced_rounds": [str(tr)],
+            "backfill": True,
+        }
     if intent == "review":
         return {
             "video_intent": "review",

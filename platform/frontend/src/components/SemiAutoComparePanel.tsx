@@ -544,6 +544,8 @@ interface SemiAutoComparePanelProps {
   currentRound?: number | null;
   latestRound?: number | null;
   roundDrawn?: boolean;
+  /** 미등록(누락) 회차 백필 — 값이 있으면 반자동 저장도 그 회차로 스탬프한다(복기 탭 전용). */
+  backfillRound?: number | null;
   /** 사용자 정정: '구입번호 직접입력' (slipQueue) = 자동. 그 줄 단위 삭제 콜백. */
   onRemoveSlipLine?: (slipIdx: number, lineIdx: number) => void;
   /** 자동 누적의 '입력 중' 줄 (currentSlipLines). 전체 티켓 목록 카운트·표시에 합산. */
@@ -1125,6 +1127,7 @@ export default function SemiAutoComparePanel({
   currentRound = null,
   latestRound: latestRoundProp = null,
   roundDrawn = false,
+  backfillRound = null,
   onRemoveSlipLine,
   currentSlipLines = [],
   bulkAutoTickets = [],
@@ -2086,10 +2089,14 @@ export default function SemiAutoComparePanel({
    * - accumulated 갱신 콜백으로 상위 컴포넌트에 결과 전달
    */
   const confirmAccumulate = useCallback(async () => {
+    // 백필(미등록 회차 직접 등록): 사용자가 복기 탭에서 그 회차를 명시적으로 골랐으면
+    // 회차-불일치 확인을 건너뛰고 선택한 회차로 스탬프·저장한다.
+    const isBackfill = sheetIntent === 'review' && backfillRound != null;
+    const saveRound = isBackfill ? backfillRound : (effectiveRound ?? null);
     // ⛔ 회차 오염 방지 — 로컬 누적이 지난 회차 기준인데 그대로 저장하면 서버에
     // 현재 회차로 재라벨링된다(1232 용지가 복기 1233 으로 저장된 실제 사고).
     // 사용자가 의도를 밝히도록 확인을 받고, 취소 시 저장하지 않는다.
-    if (staleLocalRound) {
+    if (!isBackfill && staleLocalRound) {
       const ok = await confirm({
         message:
           `이 로컬 누적은 ${localRoundNo}회 기준으로 저장된 데이터입니다. ` +
@@ -2134,6 +2141,7 @@ export default function SemiAutoComparePanel({
         sheetIntent,
         persist: true,
         pickType: '반자동',
+        targetRound: isBackfill ? (backfillRound ?? undefined) : undefined,
       });
       if (!mountedRef.current) return;
 
@@ -2147,7 +2155,8 @@ export default function SemiAutoComparePanel({
         const nowIso = new Date().toISOString();
         setLastSavedAt(nowIso);
         // 저장된 대상 회차를 stamp — 이후 회차가 넘어가면 재저장을 막는 기준.
-        setLocalRoundNo(effectiveRound ?? null);
+        // 백필이면 사용자가 고른 회차, 아니면 현재 탭의 회차.
+        setLocalRoundNo(saveRound);
         // 저장 성공 시 '줄 저장' 누적(완성/부분 용지)만 비운다.
         // 대량 입력(bulkTickets)은 유지 — §1 자동(bulkAutoTickets)과 동일하게,
         // 저장 후에도 추가 세팅 목록·비교에 계속 표시돼 누적번호를 확인할 수 있다.
@@ -2181,6 +2190,7 @@ export default function SemiAutoComparePanel({
     staleLocalRound,
     localRoundNo,
     effectiveRound,
+    backfillRound,
     confirm,
     onRefreshAccumulated,
   ]);

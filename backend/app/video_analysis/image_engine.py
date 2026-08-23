@@ -253,6 +253,7 @@ def analyze_from_sheet_payloads(
     entry_mode: str = "photo",
     pick_type: str = "",
     source_count: int = 0,
+    target_round: int | None = None,
     paths: List[Path] | None = None,
     analyses: List[Dict[str, Any]] | None = None,
     dup_removed: int = 0,
@@ -264,8 +265,11 @@ def analyze_from_sheet_payloads(
         raise ValueError("분석할 용지 데이터가 없습니다.")
 
     intent = sheet_intent if sheet_intent in ("review", "current_round") else "current_round"
+    # 특정 과거 회차 백필 등록 — 복기 소속으로 스탬프(미등록 회차 나중 등록).
+    if target_round is not None and int(target_round) > 0:
+        intent = "review"
     intent_label = "복기" if intent == "review" else "이번회차"
-    round_ctx = resolve_sheet_round(intent)
+    round_ctx = resolve_sheet_round(intent, target_round)
     analysis_mode = "manual" if entry_mode == "manual" else "local"
     # 픽 타입(자동/반자동) — 수기 등록은 기본 반자동, 그 외(사진)는 미지정.
     pick_type_eff = pick_type or ("반자동" if entry_mode == "manual" else "")

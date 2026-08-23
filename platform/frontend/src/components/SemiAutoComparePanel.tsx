@@ -4663,6 +4663,22 @@ export default function SemiAutoComparePanel({
               아래 목록의 [×] 로 개별 줄 삭제.
             </Typography>
 
+            {/* ℹ️ legacy 안내 — 최신 회차로 등록된 용지가 없어 지난 회차 용지를 그 회차
+                당첨번호로 대조 중임을 명확히 한다(1237 용지가 1238 로 잘못 보이던 문제의 후속 안내). */}
+            {compareWinning &&
+              (accumulated?.by_intent?.review as { round_sources?: { primary?: string } } | undefined)
+                ?.round_sources?.primary === 'legacy_all' &&
+              reviewDataRound != null &&
+              latestRound != null &&
+              reviewDataRound !== latestRound && (
+                <Alert severity="info" sx={{ mb: 1.5 }}>
+                  최신 추첨은 <strong>{latestRound}회</strong>지만 {latestRound}회로 등록된 용지가 없어,
+                  지난 <strong>{reviewDataRound}회</strong> 용지를 <strong>{reviewDataRound}회 당첨번호</strong>로
+                  대조해 보여줍니다(예전엔 {latestRound}회로 잘못 대조돼 거의 다 안 맞는 것처럼 보였습니다).
+                  {latestRound}회 용지를 등록하려면 위 <strong>[미등록 회차 직접 등록(백필)]</strong> 을 사용하세요.
+                </Alert>
+              )}
+
             {/* ⛔ 회차 불일치 경고 — 지난 회차 로컬을 현재 회차로 재저장하면 오염된다. */}
             {staleLocalRound && (
               <Alert severity="error" sx={{ mb: 1.5 }}>

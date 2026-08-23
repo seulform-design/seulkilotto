@@ -554,15 +554,7 @@ def _load_apply_sheet(apply_intent: str = "current_round") -> Dict[str, Any]:
                 if e.get("video_intent") == "review"
             ]
             source = "legacy_all" if group else "empty"
-        # legacy_all(대상 회차 귀속 용지 없음): 지난 용지의 실제(우세) 회차로 채점한다.
-        # 최신 회차로 강제하면 다른 회차 당첨번호로 잘못 채점된다(_build_intent_slice 와 동일 교정).
-        if source == "legacy_all":
-            from collections import Counter as _Counter
-            _rs = [str(_entry_round(e)) for e in group]
-            _rs = [r for r in _rs if r and r.isdigit() and int(r) > 0]
-            round_no = int(_Counter(_rs).most_common(1)[0][0]) if _rs else rnd
-        else:
-            round_no = rnd
+        round_no = rnd
         label = "복기"
     else:
         current = _load_current_raw()
@@ -2079,7 +2071,6 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     _archived_g: List[Dict[str, Any]] = []
     _review_saved_g: List[Dict[str, Any]] = []
     _primary_source = "review_saved"
-    _legacy_round: int | None = None
     if intent == "review":
         # 대상 회차의 용지만 엄격 수집(회차 혼입 차단). 보관 정본이 있으면 그것을
         # 우선 사용한다 — '추첨 전 등록' 이 보장돼 소속 회차가 확실하기 때문.
@@ -2104,14 +2095,6 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
             # 복기 데이터(예: 1226 stamp)가 화면에서 통째로 사라진다(회귀 실증).
             group = [e for e in entries if e.get("video_intent") == "review"]
             _primary_source = "legacy_all"
-            # 이 데이터는 최신 회차 소속이 아니다 — 자기 stamp 회차(예: 1237)의 용지다.
-            # 최신 회차로 강제 라벨하면 그 회차 당첨번호와 대조돼 '안 맞는 것처럼'
-            # 보인다(실증 버그: 1237 용지가 1238 로 표시·대조). 실제(우세) 회차로 라벨·대조.
-            from collections import Counter as _Counter
-            _rs = [str(_entry_round(e)) for e in group]
-            _rs = [r for r in _rs if r and r.isdigit() and int(r) > 0]
-            if _rs:
-                _legacy_round = int(_Counter(_rs).most_common(1)[0][0])
     else:
         group = [e for e in entries if e.get("video_intent") == intent]
     # 복기 회차 = '가장 최근 추첨 완료 회차'(get_review_round_no = CSV latest).
@@ -2121,10 +2104,7 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     #    엔트리에 묶여 다음 회차가 나와도 복기 당첨번호가 업그레이드되지 않는다
     #    (1231 stamp 엔트리 → 1232 추첨돼도 복기가 1231 에 고정되던 실증 버그).
     #    특정 과거 회차 대조는 프론트 '비교 회차' 수동 지정으로 가능.
-    # legacy_all(대상 회차에 귀속된 용지 없음): 데이터의 실제(우세) 회차로 라벨·대조한다.
-    # archived/review_saved(현 회차 정본)는 최신 회차로 유지 → 당첨번호 자동 최신화.
-    _review_round_eff = _legacy_round if (intent == "review" and _legacy_round) else get_review_round_no()
-    round_no = str(_review_round_eff) if intent == "review" else str(get_current_round_no())
+    round_no = str(get_review_round_no()) if intent == "review" else str(get_current_round_no())
     intent_acc = _accumulate_entries(group) if group else None
     # 누적 조합 분석은 '자동 누적'만 대상으로 한다 (자동 탭 표시 + 반자동 탭의
     # 자동↔반자동 비교 기준 + 백테스트 모두 '자동 누적'을 기대). 반자동 등록분은
@@ -2165,9 +2145,8 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         "app_ui_message": " · ".join(p for p in parts if p),
     }
     if intent == "review":
-        # 당첨 템플릿 = 이 슬라이스의 실효 회차(_review_round_eff) 당첨번호. round_no 와 동일.
-        # legacy_all 이면 데이터의 실제 회차, 아니면 최신 추첨 회차.
-        official = build_draw_review_template(_review_round_eff)
+        # 당첨 템플릿 = 최신 추첨 회차(get_review_round_no) 당첨번호. round_no 와 동일 회차.
+        official = build_draw_review_template()
         photo = get_photo_review_template()
         slice_out["draw_template"] = official
         slice_out["saved_review_template"] = photo if photo.get("marked_numbers") else None

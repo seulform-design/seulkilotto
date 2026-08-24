@@ -1642,6 +1642,9 @@ export default function PhotoAnalysisPage() {
                   value={backfillRound ?? ''}
                   onChange={(e) => setBackfillRound(e.target.value ? Number(e.target.value) : null)}
                   SelectProps={{ native: true }}
+                  // native select 는 항상 값이 있어 라벨이 위로 안 떠(shrink 안 됨) 값과
+                  // 겹친다 → 강제로 shrink 시켜 라벨을 상단 테두리로 띄운다.
+                  InputLabelProps={{ shrink: true }}
                   helperText={
                     backfillRound != null
                       ? `⚠ 이번 저장은 ${backfillRound}회 용지로 기록됩니다(회차 확인 생략)`

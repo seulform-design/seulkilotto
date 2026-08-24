@@ -1255,18 +1255,7 @@ export default function SemiAutoComparePanel({
   // 반자동 누적으로 복원. 로컬에 데이터가 있으면 덮어쓰지 않는다. intent별 1회만.
   const hydratedIntentRef = useRef<Record<string, boolean>>({});
   useEffect(() => {
-    const slice = accumulated?.by_intent?.[sheetIntent];
-    // legacy_all: 서버가 '최신 회차 미등록' 이라 지난 회차 용지를 최신 복기로 끌어온
-    // 상태. 이 지난 용지는 현재 복기 소속이 아니므로 하이드레이션하지 않는다(사용자
-    // 요구: 치워둠). 지난 용지는 저장소에 그대로 있고 [회차별 용지 데이터]로 다룬다.
-    const isLegacy =
-      sheetIntent === 'review' &&
-      (slice as { round_sources?: { primary?: string } } | undefined)?.round_sources?.primary === 'legacy_all';
-    if (isLegacy) {
-      hydratedIntentRef.current[sheetIntent] = true;
-      return;
-    }
-    const serverLines = slice?.saved_semi_lines ?? [];
+    const serverLines = accumulated?.by_intent?.[sheetIntent]?.saved_semi_lines ?? [];
     if (!serverLines.length || hydratedIntentRef.current[sheetIntent]) return;
     const localEmpty =
       bulkTickets.length === 0 &&
@@ -1288,33 +1277,6 @@ export default function SemiAutoComparePanel({
         `☁ 다른 기기에서 저장한 반자동 누적 ${serverLines.length}줄을 서버에서 불러왔습니다.`
       );
     }
-  }, [accumulated, sheetIntent, bulkTickets.length, semiSlipQueue.length, semiCurrentLines.length]);
-
-  // 최신 회차 미등록(legacy_all) 인데 이 기기 로컬에 지난 회차 반자동 누적이 남아
-  // 있으면(예전 하이드레이션 잔여) 현재 복기에서 1회 치운다 — 사용자 요구('치워줘').
-  // 지난 용지는 서버·[회차별 용지 데이터]에 보존되며, 새 회차는 [백필]로 등록한다.
-  const legacyClearedRef = useRef<Record<string, boolean>>({});
-  useEffect(() => {
-    if (sheetIntent !== 'review') return;
-    const isLegacy =
-      (accumulated?.by_intent?.review as { round_sources?: { primary?: string } } | undefined)
-        ?.round_sources?.primary === 'legacy_all';
-    const hasLocal =
-      bulkTickets.length > 0 || semiSlipQueue.length > 0 || semiCurrentLines.length > 0;
-    if (!isLegacy || !hasLocal || legacyClearedRef.current[sheetIntent]) return;
-    legacyClearedRef.current[sheetIntent] = true;
-    hydratedIntentRef.current[sheetIntent] = true;
-    const removed = accumulated?.by_intent?.review?.saved_semi_lines?.length ?? bulkTickets.length;
-    setBulkTickets([]);
-    setSemiSlipQueue([]);
-    setSemiCurrentLines([]);
-    setPicked([]);
-    setLastSavedAt(null);
-    setSaveNotice(
-      `♻ 최신 회차로 등록된 용지가 없어, 지난 회차 반자동 누적 ${removed}줄을 현재 복기에서 치웠습니다. ` +
-      `지난 용지는 [회차별 용지 데이터]에 보관돼 있고, 새 회차는 위 [미등록 회차 직접 등록(백필)]로 등록하세요.`
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accumulated, sheetIntent, bulkTickets.length, semiSlipQueue.length, semiCurrentLines.length]);
 
   /** 다음 저장 시 부여될 라벨 — currentSlipLines 의 크기로 결정. */
@@ -4701,19 +4663,19 @@ export default function SemiAutoComparePanel({
               아래 목록의 [×] 로 개별 줄 삭제.
             </Typography>
 
-            {/* ℹ️ legacy 안내 — 최신 회차로 등록된 용지가 없어 지난 회차 용지를 최신 복기로
-                끌어온 상태(legacy_all). 이 지난 용지는 현재 복기에서 치우고(보관은 유지) 안내만 한다. */}
+            {/* ℹ️ legacy 안내 — 최신 회차로 등록된 용지가 없어 지난 회차 용지를 그 회차
+                당첨번호로 대조 중임을 명확히 한다(1237 용지가 1238 로 잘못 보이던 문제의 후속 안내). */}
             {compareWinning &&
               (accumulated?.by_intent?.review as { round_sources?: { primary?: string } } | undefined)
-                ?.round_sources?.primary === 'legacy_all' && (
-                <Alert severity="warning" sx={{ mb: 1.5 }}>
-                  최신 <strong>{latestRound ?? reviewDataRound ?? '?'}회</strong>로 등록된 용지가 없습니다.
-                  예전에 등록한 지난 회차 용지{' '}
-                  <strong>{accumulated?.by_intent?.review?.saved_semi_lines?.length ?? 0}줄</strong>은{' '}
-                  <strong>보관</strong>돼 있으며, 현재 복기에는 표시하지 않습니다(치워둠 —
-                  최신 회차 당첨번호와 대조하면 안 맞는 게 정상이라 혼동을 막기 위함).
-                  새 회차 용지는 위 <strong>[미등록 회차 직접 등록(백필)]</strong>로 등록하고,
-                  보관된 지난 용지는 아래 <strong>[회차별 용지 데이터]</strong>에서 재귀속·정리할 수 있습니다.
+                ?.round_sources?.primary === 'legacy_all' &&
+              reviewDataRound != null &&
+              latestRound != null &&
+              reviewDataRound !== latestRound && (
+                <Alert severity="info" sx={{ mb: 1.5 }}>
+                  최신 추첨은 <strong>{latestRound}회</strong>지만 {latestRound}회로 등록된 용지가 없어,
+                  지난 <strong>{reviewDataRound}회</strong> 용지를 <strong>{reviewDataRound}회 당첨번호</strong>로
+                  대조해 보여줍니다(예전엔 {latestRound}회로 잘못 대조돼 거의 다 안 맞는 것처럼 보였습니다).
+                  {latestRound}회 용지를 등록하려면 위 <strong>[미등록 회차 직접 등록(백필)]</strong> 을 사용하세요.
                 </Alert>
               )}
 

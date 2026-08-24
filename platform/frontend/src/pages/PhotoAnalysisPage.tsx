@@ -1630,7 +1630,10 @@ export default function PhotoAnalysisPage() {
             </Stack>
             {activeTab === 'review' && (() => {
               // 백필 후보: 최신 추첨 회차부터 아래로 8개(백엔드는 1..최신추첨회차만 허용).
-              const anchor = reviewRound ?? latestRound ?? 0;
+              // 백필 후보는 '최신 추첨 회차'(latestRound=1238) 기준이어야 미등록 최근
+              // 회차(1237·1238)를 고를 수 있다. reviewRound 는 legacy 표시로 지난 회차
+              // (예: 1236)를 가리킬 수 있어 앵커로 쓰면 1237·1238 이 목록에서 빠진다.
+              const anchor = latestRound ?? reviewRound ?? 0;
               const opts = anchor > 0
                 ? Array.from({ length: 8 }, (_, i) => anchor - i).filter((r) => r > 0)
                 : [];

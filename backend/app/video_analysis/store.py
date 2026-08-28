@@ -2102,16 +2102,24 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
             # ⚠️ 대상 회차에 해당하는 용지가 하나도 없으면 회차 필터를 풀어 전체 복기
             # 엔트리를 쓴다. 엄격 필터만 적용하면 '최신 회차와 stamp 가 다른' 정상
             # 복기 데이터(예: 1226 stamp)가 화면에서 통째로 사라진다(회귀 실증).
-            group = [e for e in entries if e.get("video_intent") == "review"]
+            _live_review = [e for e in entries if e.get("video_intent") == "review"]
             _primary_source = "legacy_all"
             # 이 데이터는 최신 회차 소속이 아니다 — 자기 stamp 회차(예: 1237)의 용지다.
             # 최신 회차로 강제 라벨하면 그 회차 당첨번호와 대조돼 '안 맞는 것처럼'
             # 보인다(실증 버그: 1237 용지가 1238 로 표시·대조). 실제(우세) 회차로 라벨·대조.
             from collections import Counter as _Counter
-            _rs = [str(_entry_round(e)) for e in group]
+            _rs = [str(_entry_round(e)) for e in _live_review]
             _rs = [r for r in _rs if r and r.isdigit() and int(r) > 0]
             if _rs:
                 _legacy_round = int(_Counter(_rs).most_common(1)[0][0])
+            # 우세 회차의 '정본(아카이브: 추첨 전 등록분)'도 함께 보여준다 — 라이브 복기
+            # 엔트리엔 자동이 없어 '자동 용지 없음'으로 보이던 문제 해결(검증과도 정합).
+            if _legacy_round:
+                _leg_arch_raw, _ = _review_entries_for_round(_legacy_round)
+                _leg_arch = [{**_deep_copy(e), "video_intent": "review"} for e in _leg_arch_raw]
+                group = _dedupe_entries_by_content(_leg_arch + _live_review)
+            else:
+                group = _live_review
     else:
         group = [e for e in entries if e.get("video_intent") == intent]
     # 복기 회차 = '가장 최근 추첨 완료 회차'(get_review_round_no = CSV latest).

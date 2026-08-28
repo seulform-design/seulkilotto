@@ -1523,13 +1523,13 @@ export default function SemiAutoComparePanel({
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
     // verifyRound 를 키에 포함 → 회차별 캐시 분리 + 회차 이동 시 재조회.
-    queryKey: ['v1-photo-review-verification', 'expand24-v15-pool-first', 'pair-product', verifyRound],
+    queryKey: ['v1-photo-review-verification', 'expand24-v16-tier-first', 'pair-product', verifyRound],
     queryFn: () => v1Api.getReviewVerification(verifyRound ?? undefined),
     staleTime: 60_000,
     retry: 1,
   });
   const graftCoverageQuery = useQuery({
-    queryKey: ['v1-photo-graft-coverage', 'graft-v14-pool-first', sheetIntent],
+    queryKey: ['v1-photo-graft-coverage', 'graft-v15-tier-first', sheetIntent],
     queryFn: () =>
       v1Api.getGraftCoverage(sheetIntent === 'review' ? 'review' : 'current_round'),
     staleTime: 60_000,
@@ -3635,7 +3635,7 @@ export default function SemiAutoComparePanel({
         outsideCoreInExpand: audit?.outside_core_in_expand ?? [],
         dataUsed: api.data_used ?? null,
         backtest: api.backtest ?? null,
-        graftBuild: api.graft_build ?? 'graft-v14-pool-first',
+        graftBuild: api.graft_build ?? 'graft-v15-tier-first',
         honesty: api.honesty ?? null,
         rankSource: 'api_pair_product' as const,
         decadeDropped: audit?.decade_dropped_vs_raw ?? [],

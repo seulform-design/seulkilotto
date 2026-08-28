@@ -175,7 +175,7 @@ DEFAULT_EXPAND_SIZE = 24
 WF_MAX_EXPAND_SIZE = 30
 DEFAULT_EXPAND_MODE = "single_raw"
 # v13: 정밀우주=강수기대+와치+구출축, 정밀⊆확장, catchable 전량 보존 목표
-COVERAGE_BUILD_ID = "expand24-v15-pool-first"
+COVERAGE_BUILD_ID = "expand24-v16-tier-first"
 RESCUE_MAX_SWAPS = 6
 # 진단 비교용만 — 방출 expand_size 에 쓰지 않음('확장 30' 회귀 방지).
 RESCUE_GROW_SIZE = 30
@@ -191,9 +191,9 @@ DECADE_BANDS = ((1, 9), (10, 19), (20, 29), (30, 39), (40, 45))
 PRECISION_BAND_QUOTA = 2
 # 구간 top6 다음 3 = 와치(UI에 보이지만 서버 top6 밖이던 1235:7형)
 PRECISION_WATCH_PER_BAND = 3
-PRECISION_UNIVERSE_CAP = 42
-PRECISION_MATCH_SEATS = 3
-PRECISION_MID_SEATS = 3
+PRECISION_UNIVERSE_CAP = 45
+PRECISION_MATCH_SEATS = 4
+PRECISION_MID_SEATS = 4
 
 
 def _merge_expand_order(
@@ -1727,13 +1727,16 @@ def _reverse_rank_decade_pool(
     engine_boosts: Dict[str, float] | None = None,
     learning_numbers: List[int] | None = None,
     carryover_numbers: List[int] | None = None,
+    match_scores: Dict[int, float] | None = None,
 ) -> List[int]:
     """강수·기대 풀 안에서 전엔진·역산 점수로 재정렬(당첨 미사용)."""
     if not pool:
         return []
     boost = engine_boosts or {}
     order_pos = {n: i for i, n in enumerate(multi_order)}
-    match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
+    match_sc = match_scores
+    if match_sc is None:
+        match_sc = _match_level_reverse_scores(auto_lines or [], semi_lines or [])
     match_max = max((match_sc.get(n, 0.0) for n in pool), default=0.0) or 1.0
     agree2 = set(multi_meta.get("cross_agree_ge2") or [])
     agree3 = set(multi_meta.get("cross_agree_ge3") or [])
@@ -1750,21 +1753,21 @@ def _reverse_rank_decade_pool(
 
     def score(n: int) -> float:
         s = 0.0
-        s += max(0, 45 - order_pos.get(n, 45)) * 2.2 * float(boost.get("multi", 1.0))
-        s += (float(match_sc.get(n, 0)) / match_max) * 30.0 * float(boost.get("match_level", 1.0))
+        s += max(0, 45 - order_pos.get(n, 45)) * 1.5 * float(boost.get("multi", 1.0))
+        s += (float(match_sc.get(n, 0)) / match_max) * 50.0 * float(boost.get("match_level", 1.0))
         if n in agree3:
-            s += 18.0 * float(boost.get("cross_agree", 1.0))
+            s += 30.0 * float(boost.get("cross_agree", 1.0))
         elif n in agree2:
-            s += 10.0 * float(boost.get("cross_agree", 1.0))
+            s += 15.0 * float(boost.get("cross_agree", 1.0))
         if n in strong:
-            s += 52.0 * float(boost.get("decade_strong", 1.0))
+            s += 130.0 * float(boost.get("decade_strong", 1.0))
         if n in expected:
-            s += 48.0 * float(boost.get("decade_expected", 1.25))
+            s += 110.0 * float(boost.get("decade_expected", 1.25))
         watch = set(multi_meta.get("decade_watch") or [])
         if n in watch:
-            s += 44.0 * float(boost.get("decade_expected", 1.15))
+            s += 90.0 * float(boost.get("decade_expected", 1.15))
         if n in mid_both:
-            s += 22.0 * float(boost.get("mid_both", 1.2))
+            s += 60.0 * float(boost.get("mid_both", 1.2))
         # 양쪽 등장: 고빈도보다 중빈도(저~중 total)에 가산 — 1235:6·7형
         if float(af.get(n, 0)) > 0 and float(sf.get(n, 0)) > 0:
             tot = float(tb.get(n, 0))
@@ -2070,6 +2073,7 @@ def _build_precision_from_decade(
         engine_boosts=engine_boosts,
         learning_numbers=learning_numbers,
         carryover_numbers=carryover_numbers,
+        match_scores=match_scores,
     )
     k = max(6, min(PRECISION_MAX, int(size)))
     uni_set = set(universe)
@@ -2113,8 +2117,8 @@ def _build_precision_from_decade(
         picks = sorted(
             band_both,
             key=lambda n: (
-                float(tb.get(n, 0)),
                 0 if n in tier_boost else 1,
+                float(tb.get(n, 0)),
                 -float(pair.get(n, 0)),
                 n,
             ),

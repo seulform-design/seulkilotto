@@ -21,7 +21,7 @@ export default function ReviewVerificationPanel({ round }: { round?: number | nu
   const verifyRound = round != null && round > 0 ? round : undefined;
   const q = useQuery({
     // round_no 가 응답에 포함되므로 stale 시 회차 업그레이드 후 옛 검증이 남을 수 있음 → 재조회 주기 단축
-    queryKey: ['v1-photo-review-verification', 'expand24-v15-pool-first', 'pair-product', verifyRound ?? null],
+    queryKey: ['v1-photo-review-verification', 'expand24-v16-tier-first', 'pair-product', verifyRound ?? null],
     queryFn: () => v1Api.getReviewVerification(verifyRound),
     staleTime: 60_000,
     refetchOnMount: 'always',

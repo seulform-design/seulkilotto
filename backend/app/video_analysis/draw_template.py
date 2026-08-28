@@ -84,25 +84,16 @@ def round_status() -> dict:
         "csv_lagging": False,
         "syncing": False,
     }
-    # 배포 후 CSV가 한 회차 밀리면 복기/이번회차 라벨이 틀어진다 → 조회 시 캐치업.
+    # 배포 후 CSV가 한 회차 밀리면 복기/이번회차 라벨이 틀어진다 → 백그라운드 캐치업.
+    # ⚠️ 동기 크롤(get_upgrade_status)은 게이트웨이를 넘겨(실측 ~38s) round-status 를
+    # 지연시켜 프론트 회차 모델을 불안정하게 했다(0줄·1238 오표시의 원인). 캐치업은
+    # ensure_rounds_synced_async(크롤 포함 전부 백그라운드)에 맡기고, 응답은 CSV 기반
+    # (빠름)으로 즉시 돌려준다. api_latest/csv_lagging 은 캐치업 완료 후 다음 조회에 반영.
     try:
-        from app.round_upgrade import ensure_rounds_synced_async, get_upgrade_status
+        from app.round_upgrade import ensure_rounds_synced_async
 
-        st = get_upgrade_status()
-        api_latest = st.get("api_latest_round")
-        pending = int(st.get("pending_count") or 0)
-        out["api_latest_round"] = api_latest
-        out["pending_count"] = pending
-        out["csv_lagging"] = bool(st.get("csv_lagging"))
-        if pending > 0 and isinstance(api_latest, int) and api_latest > latest:
-            # UI 힌트: 동기화 전에도 공개 API 기준 회차를 보여 줌(당첨 데이터는 동기화 후).
-            out["review_round_target"] = api_latest
-            out["current_round_target"] = api_latest + 1
-            kicked = ensure_rounds_synced_async(reason="round-status")
-            out["syncing"] = bool(kicked.get("syncing") or kicked.get("started"))
-            # API가 이미 추첨을 반영했는데 CSV만 늦으면 'drawn' 으로 안내
-            if current <= api_latest:
-                out["drawn"] = True
+        kicked = ensure_rounds_synced_async(reason="round-status")
+        out["syncing"] = bool(kicked.get("syncing") or kicked.get("started"))
     except Exception:  # noqa: BLE001
         pass
     return out

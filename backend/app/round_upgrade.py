@@ -99,30 +99,23 @@ def ensure_rounds_synced_async(*, reason: str = "on-demand") -> Dict[str, Any]:
     배포 시 이미지 베이스라인 CSV로 되돌아가 복기/이번회차가 한 회차 밀리는
     회귀를, round-status·프론트 진입 시 자기치유한다. 이미 진행 중이면 중복 시작 안 함.
     """
+    # ⚠️ 공개 API 크롤(get_upgrade_status)은 느릴 수 있어(실측 ~38s) **동기 호출 금지**.
+    # 쿨다운 확인만 동기로 하고, 크롤·판정·업그레이드는 전부 백그라운드 스레드에서 한다.
+    # 그래야 이 함수를 호출하는 round-status 가 즉시 응답한다(프론트 회차 모델 안정).
     global _BG_CATCHUP_STARTED_AT
     now = time.time()
     with _BG_CATCHUP_LOCK:
         if now - _BG_CATCHUP_STARTED_AT < _BG_CATCHUP_COOLDOWN_SEC:
             return {"started": False, "reason": "cooldown", "syncing": True}
-        try:
-            st = get_upgrade_status()
-        except Exception as exc:  # noqa: BLE001
-            return {"started": False, "reason": f"status_error:{exc}", "syncing": False}
-        if not st.get("can_upgrade"):
-            return {
-                "started": False,
-                "reason": "up_to_date",
-                "syncing": False,
-                "latest_round": st.get("latest_round"),
-                "api_latest_round": st.get("api_latest_round"),
-            }
-        _BG_CATCHUP_STARTED_AT = now
-        pending = list(st.get("pending_rounds") or [])
+        _BG_CATCHUP_STARTED_AT = now  # 스레드 시작 전 슬롯 선점 — 중복 크롤 방지
 
     def _run() -> None:
+        logger = __import__("logging").getLogger(__name__)
         try:
+            st = get_upgrade_status()  # 느린 크롤 — 백그라운드에서만
+            if not st.get("can_upgrade"):
+                return
             result = upgrade_rounds()
-            logger = __import__("logging").getLogger(__name__)
             logger.info(
                 "[%s] 회차 캐치업: before=%s after=%s new=%s",
                 reason,
@@ -131,20 +124,10 @@ def ensure_rounds_synced_async(*, reason: str = "on-demand") -> Dict[str, Any]:
                 result.get("new_rounds"),
             )
         except Exception:  # noqa: BLE001
-            __import__("logging").getLogger(__name__).exception(
-                "[%s] 회차 캐치업 실패", reason
-            )
+            logger.exception("[%s] 회차 캐치업 실패", reason)
 
     threading.Thread(target=_run, name=f"round-catchup-{reason}", daemon=True).start()
-    return {
-        "started": True,
-        "reason": reason,
-        "syncing": True,
-        "pending_rounds": pending,
-        "pending_count": len(pending),
-        "api_latest_round": st.get("api_latest_round"),
-        "latest_round": st.get("latest_round"),
-    }
+    return {"started": True, "reason": reason, "syncing": True}
 
 
 def upgrade_rounds(force: bool = False) -> Dict[str, Any]:

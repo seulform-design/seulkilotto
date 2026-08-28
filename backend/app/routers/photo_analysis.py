@@ -398,16 +398,18 @@ def get_round_learning(
 
 
 @router.get("/review-verification")
-def get_review_verification():
+def get_review_verification(round: int | None = Query(default=None, ge=1)):
     """복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였는지 + 커버리지 곡선.
 
     '집중 top-6' 이 왜 당첨을 놓치는지(넓은 그물은 담는데)를 데이터로 보여준다.
+    round 지정 시 그 회차로 검증(비교 회차 이동·미등록 최신 회차의 지난 용지 정렬).
+    미지정이면 최신 추첨 회차.
     """
     from ..video_analysis.review_verification import build_review_verification
     from ..video_analysis.store import store_read_cache
 
     with store_read_cache():
-        return to_jsonable(build_review_verification())
+        return to_jsonable(build_review_verification(round))
 
 
 @router.get("/graft-coverage")

@@ -15,12 +15,14 @@ import { v1Api } from '../api/v1Api';
  * → '집중' 은 실패하고 '넓은 그물' 만 잡는다는 사실을 데이터로 보여준다.
  * ⚠️ 확률 불변. 이 리포트는 헛된 집중 예측 대신 커버리지 전략을 쓰게 하는 정직한 도구.
  */
-export default function ReviewVerificationPanel() {
+export default function ReviewVerificationPanel({ round }: { round?: number | null } = {}) {
   const [open, setOpen] = useState(false);
+  // 검증 대상 회차(복기 데이터 회차) — 미등록 최신 회차로 잠겨 '용지 없음'으로 멈추지 않게.
+  const verifyRound = round != null && round > 0 ? round : undefined;
   const q = useQuery({
     // round_no 가 응답에 포함되므로 stale 시 회차 업그레이드 후 옛 검증이 남을 수 있음 → 재조회 주기 단축
-    queryKey: ['v1-photo-review-verification', 'expand24-v15-pool-first', 'pair-product'],
-    queryFn: v1Api.getReviewVerification,
+    queryKey: ['v1-photo-review-verification', 'expand24-v15-pool-first', 'pair-product', verifyRound ?? null],
+    queryFn: () => v1Api.getReviewVerification(verifyRound),
     staleTime: 60_000,
     refetchOnMount: 'always',
     retry: 1,

@@ -3068,15 +3068,16 @@ def _inverse_diagnosis(
     }
 
 
-def build_review_verification() -> Dict[str, Any]:
+def build_review_verification(round_no: int | None = None) -> Dict[str, Any]:
     from .store import store_read_cache, engine_cached, store_signature
 
     with store_read_cache():
-        key = ("review_verification", store_signature())
-        return engine_cached(key, 900, _build_review_verification_impl)
+        # round_no 별로 캐시 분리 — 비교 회차 이동 시 각 회차 결과를 따로 캐싱.
+        key = ("review_verification", round_no, store_signature())
+        return engine_cached(key, 900, lambda: _build_review_verification_impl(round_no))
 
 
-def _build_review_verification_impl() -> Dict[str, Any]:
+def _build_review_verification_impl(round_no: int | None = None) -> Dict[str, Any]:
     from .store import (
         _review_entries_for_round,
         _manual_saved_lines,
@@ -3085,7 +3086,8 @@ def _build_review_verification_impl() -> Dict[str, Any]:
     from .draw_template import get_review_round_no, get_current_round_no
     from ..database import load_history
 
-    review_round = int(get_review_round_no())
+    # round_no 지정 시 그 회차로 검증(비교 회차 이동·legacy 회차 정렬). 미지정이면 최신 추첨.
+    review_round = int(round_no) if round_no else int(get_review_round_no())
     df = load_history()
     winning: List[int] = []
     if not df.empty:

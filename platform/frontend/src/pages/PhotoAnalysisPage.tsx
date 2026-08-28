@@ -1962,7 +1962,7 @@ export default function PhotoAnalysisPage() {
               intent={activeTab}
               legacyCount={accumulated?.legacy_entry_count}
             />
-            <ReviewVerificationPanel />
+            <ReviewVerificationPanel round={reviewRound} />
             {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
             <WalkForwardPanel
               title="종합 분석 vs 베이스라인 — Walk-Forward"

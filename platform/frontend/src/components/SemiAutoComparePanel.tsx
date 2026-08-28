@@ -1516,10 +1516,15 @@ export default function SemiAutoComparePanel({
     staleTime: 300_000,
     retry: 1,
   });
+  // 검증 대상 회차 — 비교 회차(사용자 지정) 또는 복기 데이터 회차(legacy 포함).
+  // 이게 있어야 미등록 최신 회차(용지 없음)로 검증이 잠겨 '용지 없음'으로 멈추지 않고,
+  // 실제 용지가 있는 회차(예: 지난 1236)로 검증·추천이 돌아간다. 회차 이동도 여기에 반영.
+  const verifyRound = compareWinning ? (effectiveCompareRound ?? null) : null;
   const reviewVerificationQuery = useQuery({
     // ReviewVerificationPanel 과 동일 키 — 패널/주입 캐시 분열(정책·expand18 불일치) 방지.
-    queryKey: ['v1-photo-review-verification', 'expand24-v15-pool-first', 'pair-product'],
-    queryFn: v1Api.getReviewVerification,
+    // verifyRound 를 키에 포함 → 회차별 캐시 분리 + 회차 이동 시 재조회.
+    queryKey: ['v1-photo-review-verification', 'expand24-v15-pool-first', 'pair-product', verifyRound],
+    queryFn: () => v1Api.getReviewVerification(verifyRound ?? undefined),
     staleTime: 60_000,
     retry: 1,
   });

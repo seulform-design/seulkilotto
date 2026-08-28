@@ -610,8 +610,10 @@ export const v1Api = {
   },
 
   /** 복기 역산 검증 — 당첨번호가 각 신호에서 몇 위였나 + 커버리지 곡선. */
-  getReviewVerification: () =>
-    fetchJson<ReviewVerificationResponse>('/api/v1/photo-analysis/review-verification', { timeoutMs: 90_000, heavy: true }),
+  getReviewVerification: (round?: number) => {
+    const q = round != null && Number.isFinite(round) && round > 0 ? `?round=${round}` : '';
+    return fetchJson<ReviewVerificationResponse>(`/api/v1/photo-analysis/review-verification${q}`, { timeoutMs: 90_000, heavy: true });
+  },
 
   /** 강수·기대 접목 커버리지·EV (서버 권위 + LOO 백테스트). */
   getGraftCoverage: (intent: 'review' | 'current_round' = 'review') =>

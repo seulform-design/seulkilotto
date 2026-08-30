@@ -2080,10 +2080,12 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     _review_saved_g: List[Dict[str, Any]] = []
     _primary_source = "review_saved"
     _legacy_round: int | None = None
+    _latest_registered_review: int | None = None
     if intent == "review":
+        _latest_review_no = int(get_review_round_no())
         # 대상 회차의 용지만 엄격 수집(회차 혼입 차단). 보관 정본이 있으면 그것을
         # 우선 사용한다 — '추첨 전 등록' 이 보장돼 소속 회차가 확실하기 때문.
-        _archived_raw, _review_saved_g = _review_entries_for_round(int(get_review_round_no()))
+        _archived_raw, _review_saved_g = _review_entries_for_round(_latest_review_no)
         # 보관 엔트리는 원래 video_intent='current_round' 로 저장돼 있다. 복기 뷰에서
         # 쓰려면 intent 필터(_recompute_intent_combo 등)를 통과해야 하므로 **사본**에
         # 한해 review 로 재태깅한다(저장소는 불변).
@@ -2099,27 +2101,37 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
             group = _dedupe_entries_by_content(list(_review_saved_g))
             _primary_source = "review_saved"
         else:
-            # ⚠️ 대상 회차에 해당하는 용지가 하나도 없으면 회차 필터를 풀어 전체 복기
-            # 엔트리를 쓴다. 엄격 필터만 적용하면 '최신 회차와 stamp 가 다른' 정상
-            # 복기 데이터(예: 1226 stamp)가 화면에서 통째로 사라진다(회귀 실증).
+            # 대상 회차(최신 추첨)에 귀속된 용지가 하나도 없다. 등록된 복기 용지의
+            # '우세(최다) 회차'를 파악해 두 경우로 나눈다.
             _live_review = [e for e in entries if e.get("video_intent") == "review"]
-            _primary_source = "legacy_all"
-            # 이 데이터는 최신 회차 소속이 아니다 — 자기 stamp 회차(예: 1237)의 용지다.
-            # 최신 회차로 강제 라벨하면 그 회차 당첨번호와 대조돼 '안 맞는 것처럼'
-            # 보인다(실증 버그: 1237 용지가 1238 로 표시·대조). 실제(우세) 회차로 라벨·대조.
             from collections import Counter as _Counter
             _rs = [str(_entry_round(e)) for e in _live_review]
             _rs = [r for r in _rs if r and r.isdigit() and int(r) > 0]
-            if _rs:
-                _legacy_round = int(_Counter(_rs).most_common(1)[0][0])
-            # 우세 회차의 '정본(아카이브: 추첨 전 등록분)'도 함께 보여준다 — 라이브 복기
-            # 엔트리엔 자동이 없어 '자동 용지 없음'으로 보이던 문제 해결(검증과도 정합).
-            if _legacy_round:
-                _leg_arch_raw, _ = _review_entries_for_round(_legacy_round)
-                _leg_arch = [{**_deep_copy(e), "video_intent": "review"} for e in _leg_arch_raw]
-                group = _dedupe_entries_by_content(_leg_arch + _live_review)
+            _dominant = int(_Counter(_rs).most_common(1)[0][0]) if _rs else None
+
+            if _dominant is not None and _dominant < _latest_review_no:
+                # ① 지난(이미 추첨된) 회차 용지만 있고 최신 추첨 회차는 미등록.
+                #    이미 복기가 끝난 stale 데이터이므로 옛 회차로 조용히 되돌리지 않고,
+                #    사용자가 최신 회차(및 그 사이 미등록 회차)를 직접 등록할 수 있도록
+                #    '미등록' 빈 상태로 진행한다. 지난 회차 용지는 [비교 회차]·[백필]
+                #    선택 시 자기 회차 당첨번호로 정확히 대조된다(잘못된 회차 대조 없음).
+                _primary_source = "unregistered_latest"
+                _latest_registered_review = _dominant
+                group = []
             else:
-                group = _live_review
+                # ② 최신 이상(미추첨·펜딩) 회차 용지 → 자기 stamp 회차로 대조한다.
+                #    최신 회차로 강제 라벨하면 그 회차 당첨번호와 대조돼 '안 맞는 것처럼'
+                #    보이던 실증 버그(1237 용지가 1238 로 표시·대조)를 막는다.
+                _primary_source = "legacy_all"
+                _legacy_round = _dominant
+                # 우세 회차의 '정본(아카이브: 추첨 전 등록분)'도 함께 보여준다 — 라이브
+                # 복기 엔트리엔 자동이 없어 '자동 용지 없음'으로 보이던 문제 해결.
+                if _legacy_round:
+                    _leg_arch_raw, _ = _review_entries_for_round(_legacy_round)
+                    _leg_arch = [{**_deep_copy(e), "video_intent": "review"} for e in _leg_arch_raw]
+                    group = _dedupe_entries_by_content(_leg_arch + _live_review)
+                else:
+                    group = _live_review
     else:
         group = [e for e in entries if e.get("video_intent") == intent]
     # 복기 회차 = '가장 최근 추첨 완료 회차'(get_review_round_no = CSV latest).
@@ -2187,6 +2199,10 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         # [회차 재귀속] 으로 올바른 회차에 귀속시켜 primary 로 만드는 것이 정답이다.
         slice_out["round_sources"] = {
             "primary": _primary_source,
+            # 미등록 상태: 최신 추첨 회차에 등록 용지가 없어 빈 상태로 진행 중.
+            # 프론트가 '1238 미등록 · 지난 등록 1236' 안내와 등록 유도를 띄우게 한다.
+            "unregistered_latest": _primary_source == "unregistered_latest",
+            "latest_registered_review_round": _latest_registered_review,
             "archived_entries": len(_archived_g),
             "archived_auto_lines": len(_manual_saved_lines(_archived_g, "자동", include_photo=True)),
             "archived_semi_lines": len(_manual_saved_lines(_archived_g, "반자동", include_photo=True)),

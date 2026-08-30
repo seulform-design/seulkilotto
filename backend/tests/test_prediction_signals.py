@@ -43,6 +43,10 @@ def test_prediction_signals_uses_intent_photo_slice(monkeypatch, tmp_path):
     monkeypatch.setattr("app.datasets.current.STATE_PATH", tmp_path / "current" / "state.json")
     monkeypatch.setattr("app.datasets.current.PHOTO_PATH", tmp_path / "current" / "photo.json")
     monkeypatch.setattr("app.datasets.current.DERIVED_PATH", tmp_path / "current" / "derived.json")
+    # 이 테스트의 목적은 intent별 용지 슬라이스 격리 검증이다. 등록 복기 용지(1226)가
+    # '지난(stale) 회차'로 취급돼 미등록 빈 상태로 넘어가지 않도록, 복기 기준 회차를
+    # 등록 데이터와 동일(1226)하게 고정한다(실 CSV latest 와 무관하게).
+    monkeypatch.setattr("app.video_analysis.draw_template.get_review_round_no", lambda: 1226)
     clear_store()
 
     review_nums = [7, 12, 19, 23, 31, 40]

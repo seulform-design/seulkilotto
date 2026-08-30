@@ -85,7 +85,7 @@ def test_review_slice_legacy_only_compares_against_its_own_round(monkeypatch):
 
 
 def test_review_slice_legacy_dominant_round_wins(monkeypatch):
-    """legacy_all 에 여러 회차가 섞이면 우세(최다) 회차를 쓴다."""
+    """legacy_all 에 여러 회차가 섞이면 우세(최다) 회차를 쓴다(펜딩/미추첨 회차)."""
     calls: list = []
     _patch_common(monkeypatch, calls)
     monkeypatch.setattr(store, "_review_entries_for_round", lambda r: ([], []))
@@ -95,3 +95,28 @@ def test_review_slice_legacy_dominant_round_wins(monkeypatch):
 
     assert slice_out["ticket_round"] == "1237", "우세 회차(1237)로 대조"
     assert calls == [1237]
+
+
+def test_review_slice_stale_legacy_advances_to_latest_unregistered(monkeypatch):
+    """지난(이미 추첨된) 회차 용지만 있고 최신 추첨 회차는 미등록이면,
+    옛 회차로 되돌리지 않고 최신 추첨 회차(1233)로 '미등록' 빈 상태로 진행한다.
+
+    사용자 실증: 1236 등록 후 1237·1238 이 추첨됐는데 1237/1238 미등록.
+    복기가 계속 1236 으로 되돌아가던 문제 → 최신 회차 미등록 상태 유지로 교정.
+    (지난 회차 용지는 [비교 회차]·[백필] 선택 시 자기 회차로 정확히 대조.)
+    """
+    calls: list = []
+    _patch_common(monkeypatch, calls)
+    # 최신 추첨 회차(1233)에 귀속된 용지 없음 → 폴백. 등록 용지는 지난 회차(1231)뿐.
+    monkeypatch.setattr(store, "_review_entries_for_round", lambda r: ([], []))
+
+    entries = [_mk_entry(1231), _mk_entry(1231)]
+    slice_out = store._build_intent_slice(entries, "review")
+
+    assert slice_out["ticket_round"] == "1233", "미등록 최신 회차로 진행(옛 회차로 되돌림 금지)"
+    assert slice_out["total_analyses"] == 0, "미등록 = 빈 상태"
+    rs = slice_out["round_sources"]
+    assert rs["primary"] == "unregistered_latest"
+    assert rs["unregistered_latest"] is True
+    assert rs["latest_registered_review_round"] == 1231, "지난 등록 회차를 안내용으로 노출"
+    assert calls == [1233], "당첨 템플릿은 최신 추첨 회차로 호출"

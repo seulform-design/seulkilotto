@@ -1114,7 +1114,11 @@ export interface PhotoAnalysisIntentSlice {
    * archived=롤오버 보관 정본(추첨 전 등록, 소속 확실) / review_saved=복기 탭 저장분.
    */
   round_sources?: {
-    primary: 'archived' | 'review_saved' | 'legacy_all';
+    primary: 'archived' | 'review_saved' | 'legacy_all' | 'unregistered_latest';
+    /** 최신 추첨 회차에 등록 용지가 없어 '미등록' 빈 상태로 진행 중. */
+    unregistered_latest?: boolean;
+    /** 미등록 상태일 때, 마지막으로 등록됐던 지난 복기 회차(안내·바로가기용). */
+    latest_registered_review_round?: number | null;
     archived_entries: number;
     archived_auto_lines: number;
     archived_semi_lines: number;

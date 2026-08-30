@@ -962,6 +962,12 @@ export default function PhotoAnalysisPage() {
     return latestRound;
   }, [accumulated, latestRound, csvLagging]);
 
+  // 실효 복기 회차 — 백필(미등록 회차 직접 등록)로 회차를 고르면 라벨·당첨번호·검증까지
+  // 그 회차로 '이동'해야 한다. 예전엔 백필이 저장 대상만 바꾸고 화면은 기본 회차에
+  // 그대로 멈춰 '회차를 눌러도 동일하게 뜨는' 문제가 있었다(실증).
+  const effReviewRound =
+    activeTab === 'review' && backfillRound != null ? backfillRound : reviewRound;
+
   const roundDrawn = roundStatusQuery.data?.drawn ?? false;
   const roundSyncing = Boolean(
     roundStatusQuery.data?.syncing || catchupUpgrade.isPending || csvLagging,
@@ -969,13 +975,16 @@ export default function PhotoAnalysisPage() {
 
   const reviewWinningSet = useMemo(() => {
     if (activeTab !== 'review') return null;
+    // 백필로 기본 회차와 다른 회차를 고르면 기본 슬라이스의 draw_template(기본 회차)이
+    // 아니라 선택 회차의 당첨번호를 쿼리로 받아야 정확히 대조된다.
+    if (backfillRound != null && backfillRound !== reviewRound) return null;
     return toWinningSet(activeSlice?.draw_template);
-  }, [activeTab, activeSlice?.draw_template]);
+  }, [activeTab, activeSlice?.draw_template, backfillRound, reviewRound]);
 
   const reviewDrawQuery = useQuery({
-    queryKey: ['v1-round-draw', reviewRound],
-    queryFn: () => v1Api.getRound(reviewRound as number),
-    enabled: activeTab === 'review' && reviewRound != null && !reviewWinningSet,
+    queryKey: ['v1-round-draw', effReviewRound],
+    queryFn: () => v1Api.getRound(effReviewRound as number),
+    enabled: activeTab === 'review' && effReviewRound != null && !reviewWinningSet,
     staleTime: 300_000,
   });
 
@@ -989,7 +998,7 @@ export default function PhotoAnalysisPage() {
     return set;
   }, [activeTab, reviewWinningSet, reviewDrawQuery.data]);
 
-  const displayReviewRound = reviewRound ?? '…';
+  const displayReviewRound = effReviewRound ?? '…';
   const displayCurrentRound = currentRound ?? '…';
   const manualDraft = manualByIntent[activeTab];
   const { picked, currentSlipLines, slipQueue, bulkAutoTickets, lastSavedAt } = manualDraft;
@@ -1547,7 +1556,16 @@ export default function PhotoAnalysisPage() {
           )}
         </Alert>
       )}
-      {activeTab === 'review' && activeSlice?.round_sources?.newer_round_unregistered && (
+      {activeTab === 'review' && backfillRound != null && (
+        <Alert severity="success" sx={{ mb: 1 }}>
+          <Typography variant="body2">
+            🎯 <strong>{backfillRound}회</strong>로 이동했습니다 — 라벨·당첨번호·검증이 모두 {backfillRound}회 기준입니다.
+            아래에서 {backfillRound}회 용지를 등록하면 그 회차로 저장됩니다.
+            {' '}기본 복기로 돌아가려면 백필 드롭다운에서 <strong>「기본 (최신 복기 회차)」</strong>를 선택하세요.
+          </Typography>
+        </Alert>
+      )}
+      {activeTab === 'review' && backfillRound == null && activeSlice?.round_sources?.newer_round_unregistered && (
         <Alert severity="info" sx={{ mb: 1 }}>
           <Typography variant="body2">
             📌 지금은 마지막으로 등록된{' '}
@@ -1986,7 +2004,7 @@ export default function PhotoAnalysisPage() {
               intent={activeTab}
               legacyCount={accumulated?.legacy_entry_count}
             />
-            <ReviewVerificationPanel round={reviewRound} />
+            <ReviewVerificationPanel round={effReviewRound} />
             {activeTab === 'review' && <PhotoBacktestPanel accumulated={accumulated} />}
             <WalkForwardPanel
               title="종합 분석 vs 베이스라인 — Walk-Forward"
@@ -1996,7 +2014,7 @@ export default function PhotoAnalysisPage() {
         }
         parallelEngineSlot={
           <ParallelRoundPanel
-            targetRound={activeTab === 'review' ? (reviewRound ?? currentRound) : (currentRound ?? latestRound)}
+            targetRound={activeTab === 'review' ? (effReviewRound ?? currentRound) : (currentRound ?? latestRound)}
             modeLabel={activeTab === 'review' ? '복기' : '이번회차'}
             defaultOpen={false}
           />

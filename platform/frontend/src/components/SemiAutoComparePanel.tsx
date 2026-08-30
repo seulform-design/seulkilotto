@@ -1311,8 +1311,11 @@ export default function SemiAutoComparePanel({
     return Number.isFinite(a) && a > 0 ? a : null;
   }, [accumulated]);
 
-  // 명시 지정(compareRound) > 복기 데이터 회차 > (폴백) 최신 추첨.
-  const effectiveCompareRound = compareRound ?? (compareWinning ? reviewDataRound : null);
+  // 명시 지정(compareRound) > 백필 선택 회차 > 복기 데이터 회차 > (폴백) 최신 추첨.
+  // 백필(미등록 회차 직접 등록)로 회차를 고르면 당첨 대조·추천·검증까지 그 회차로
+  // '이동'해야 한다 — 예전엔 저장 대상만 바뀌고 화면은 기본 회차에 멈춰 있었다(실증).
+  const effectiveCompareRound =
+    compareRound ?? (compareWinning ? (backfillRound ?? reviewDataRound) : null);
 
   const selectedRoundQuery = useQuery({
     queryKey: ['v1-round-for-semi-auto', effectiveCompareRound],

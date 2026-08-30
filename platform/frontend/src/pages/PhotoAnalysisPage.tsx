@@ -385,8 +385,8 @@ function IntentAccumulatedPanel({
                   ? `출처: 보관 정본 (자${slice.round_sources.archived_auto_lines}·반${slice.round_sources.archived_semi_lines})`
                   : slice.round_sources.primary === 'review_saved'
                     ? `출처: 복기저장 (자${slice.round_sources.review_saved_auto_lines}·반${slice.round_sources.review_saved_semi_lines})`
-                    : slice.round_sources.primary === 'unregistered_latest'
-                      ? `${slice.ticket_round}회 미등록`
+                    : slice.round_sources.newer_round_unregistered
+                      ? `표시: ${slice.round_sources.displayed_review_round ?? slice.ticket_round}회 · 최신 미등록`
                       : '출처: 회차 미분류'
               }
             />
@@ -403,12 +403,14 @@ function IntentAccumulatedPanel({
       sx={{ mb: 0 }}
     >
       <Stack spacing={1.25}>
-        {intent === 'review' && slice.round_sources?.primary === 'legacy_all' && (
-          <Alert severity="warning" sx={{ py: 0.5 }}>
-            이 회차({slice.ticket_round}회) 용지가 없어 <strong>회차 구분 없이 전체 복기</strong>를 표시합니다.
-            위 <strong>회차별 용지 데이터</strong>에서 [회차 재귀속]으로 정리하세요.
-          </Alert>
-        )}
+        {intent === 'review' &&
+          slice.round_sources?.primary === 'legacy_all' &&
+          !slice.round_sources?.newer_round_unregistered && (
+            <Alert severity="warning" sx={{ py: 0.5 }}>
+              이 회차({slice.ticket_round}회) 용지가 없어 <strong>회차 구분 없이 전체 복기</strong>를 표시합니다.
+              위 <strong>회차별 용지 데이터</strong>에서 [회차 재귀속]으로 정리하세요.
+            </Alert>
+          )}
         {intent === 'review' &&
           slice.round_sources &&
           slice.round_sources.primary === 'archived' &&
@@ -1545,15 +1547,23 @@ export default function PhotoAnalysisPage() {
           )}
         </Alert>
       )}
-      {activeTab === 'review' && activeSlice?.round_sources?.unregistered_latest && (
-        <Alert severity="warning" sx={{ mb: 1 }}>
+      {activeTab === 'review' && activeSlice?.round_sources?.newer_round_unregistered && (
+        <Alert severity="info" sx={{ mb: 1 }}>
           <Typography variant="body2">
-            🆕 <strong>{displayReviewRound}회 복기 용지가 아직 미등록</strong>입니다.
-            {activeSlice.round_sources.latest_registered_review_round != null && (
-              <> 마지막 등록 회차는 <strong>{activeSlice.round_sources.latest_registered_review_round}회</strong>였습니다.</>
+            📌 지금은 마지막으로 등록된{' '}
+            <strong>
+              {activeSlice.round_sources.displayed_review_round ??
+                activeSlice.round_sources.latest_registered_review_round}
+              회
+            </strong>{' '}
+            복기를 표시 중입니다 <em>(데이터는 그대로 보존됩니다)</em>.
+            {activeSlice.round_sources.latest_drawn_round != null && (
+              <>
+                {' '}최신 추첨 <strong>{activeSlice.round_sources.latest_drawn_round}회</strong>는 아직 미등록입니다.
+              </>
             )}
-            {' '}아래 <strong>① 번호 등록</strong>에서 {displayReviewRound}회 용지를 등록하거나,
-            <strong> 미등록 회차 직접 등록(백필)</strong>로 지난 회차를 선택해 복기할 수 있습니다.
+            {' '}새 회차를 복기하려면 아래 <strong>① 번호 등록</strong> 또는
+            <strong> 미등록 회차 직접 등록(백필)</strong>에서 해당 회차 용지를 등록하세요.
           </Typography>
         </Alert>
       )}

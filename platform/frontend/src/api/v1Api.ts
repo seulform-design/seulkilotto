@@ -1115,9 +1115,15 @@ export interface PhotoAnalysisIntentSlice {
    */
   round_sources?: {
     primary: 'archived' | 'review_saved' | 'legacy_all' | 'unregistered_latest';
-    /** 최신 추첨 회차에 등록 용지가 없어 '미등록' 빈 상태로 진행 중. */
+    /** 표시 중인(등록된) 회차보다 새 회차가 이미 추첨됐으나 미등록인 상태. */
+    newer_round_unregistered?: boolean;
+    /** 현재 화면에 표시 중인(대조 기준) 복기 회차. */
+    displayed_review_round?: number | null;
+    /** CSV 기준 최신 추첨 회차(미등록 안내용). */
+    latest_drawn_round?: number | null;
+    /** (하위호환) 항상 false — 더 이상 빈 상태로 진행하지 않는다. */
     unregistered_latest?: boolean;
-    /** 미등록 상태일 때, 마지막으로 등록됐던 지난 복기 회차(안내·바로가기용). */
+    /** 표시 중인 마지막 등록 복기 회차(더 새 회차가 미등록일 때만 채워짐). */
     latest_registered_review_round?: number | null;
     archived_entries: number;
     archived_auto_lines: number;

@@ -2102,36 +2102,32 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
             _primary_source = "review_saved"
         else:
             # 대상 회차(최신 추첨)에 귀속된 용지가 하나도 없다. 등록된 복기 용지의
-            # '우세(최다) 회차'를 파악해 두 경우로 나눈다.
+            # '우세(최다) 회차'로 라벨·대조하되, 데이터는 절대 숨기지 않는다.
+            # ⚠️ 과거 회귀: 빈 상태로 진행하면 정상 복기 데이터(예: 1236)가 화면에서
+            #    통째로 사라져 '싹 다 날아간 것처럼' 보인다(실증). 반드시 표시한다.
             _live_review = [e for e in entries if e.get("video_intent") == "review"]
             from collections import Counter as _Counter
             _rs = [str(_entry_round(e)) for e in _live_review]
             _rs = [r for r in _rs if r and r.isdigit() and int(r) > 0]
             _dominant = int(_Counter(_rs).most_common(1)[0][0]) if _rs else None
 
+            # 이 데이터는 자기 stamp 회차(예: 1236)의 용지다. 최신 회차로 강제 라벨하면
+            # 그 회차 당첨번호와 대조돼 '안 맞는 것처럼' 보이던 실증 버그(1237→1238)를
+            # 막기 위해 실제(우세) 회차로 라벨·대조한다.
+            _primary_source = "legacy_all"
+            _legacy_round = _dominant
+            # 표시 중인 회차보다 새 회차가 이미 추첨됐다면(미등록) 안내용으로 노출한다 —
+            # '왜 최신이 아닌 지난 회차가 보이나'를 사용자가 알고 백필로 등록할 수 있게.
             if _dominant is not None and _dominant < _latest_review_no:
-                # ① 지난(이미 추첨된) 회차 용지만 있고 최신 추첨 회차는 미등록.
-                #    이미 복기가 끝난 stale 데이터이므로 옛 회차로 조용히 되돌리지 않고,
-                #    사용자가 최신 회차(및 그 사이 미등록 회차)를 직접 등록할 수 있도록
-                #    '미등록' 빈 상태로 진행한다. 지난 회차 용지는 [비교 회차]·[백필]
-                #    선택 시 자기 회차 당첨번호로 정확히 대조된다(잘못된 회차 대조 없음).
-                _primary_source = "unregistered_latest"
                 _latest_registered_review = _dominant
-                group = []
+            # 우세 회차의 '정본(아카이브: 추첨 전 등록분)'도 함께 보여준다 — 라이브
+            # 복기 엔트리엔 자동이 없어 '자동 용지 없음'으로 보이던 문제 해결.
+            if _legacy_round:
+                _leg_arch_raw, _ = _review_entries_for_round(_legacy_round)
+                _leg_arch = [{**_deep_copy(e), "video_intent": "review"} for e in _leg_arch_raw]
+                group = _dedupe_entries_by_content(_leg_arch + _live_review)
             else:
-                # ② 최신 이상(미추첨·펜딩) 회차 용지 → 자기 stamp 회차로 대조한다.
-                #    최신 회차로 강제 라벨하면 그 회차 당첨번호와 대조돼 '안 맞는 것처럼'
-                #    보이던 실증 버그(1237 용지가 1238 로 표시·대조)를 막는다.
-                _primary_source = "legacy_all"
-                _legacy_round = _dominant
-                # 우세 회차의 '정본(아카이브: 추첨 전 등록분)'도 함께 보여준다 — 라이브
-                # 복기 엔트리엔 자동이 없어 '자동 용지 없음'으로 보이던 문제 해결.
-                if _legacy_round:
-                    _leg_arch_raw, _ = _review_entries_for_round(_legacy_round)
-                    _leg_arch = [{**_deep_copy(e), "video_intent": "review"} for e in _leg_arch_raw]
-                    group = _dedupe_entries_by_content(_leg_arch + _live_review)
-                else:
-                    group = _live_review
+                group = _live_review
     else:
         group = [e for e in entries if e.get("video_intent") == intent]
     # 복기 회차 = '가장 최근 추첨 완료 회차'(get_review_round_no = CSV latest).
@@ -2199,9 +2195,14 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         # [회차 재귀속] 으로 올바른 회차에 귀속시켜 primary 로 만드는 것이 정답이다.
         slice_out["round_sources"] = {
             "primary": _primary_source,
-            # 미등록 상태: 최신 추첨 회차에 등록 용지가 없어 빈 상태로 진행 중.
-            # 프론트가 '1238 미등록 · 지난 등록 1236' 안내와 등록 유도를 띄우게 한다.
-            "unregistered_latest": _primary_source == "unregistered_latest",
+            # 표시 중인(등록된) 데이터보다 새 회차가 이미 추첨됐으나 미등록인 상태.
+            # 데이터는 그대로 보여주되(소실 방지), 프론트가 '지난 1236 표시 중 ·
+            # 최신 1239 미등록' 안내와 백필 등록 유도를 띄우게 한다.
+            "newer_round_unregistered": _latest_registered_review is not None,
+            "displayed_review_round": _review_round_eff if intent == "review" else None,
+            "latest_drawn_round": _latest_review_no if intent == "review" else None,
+            # (하위호환) 예전 필드명 — 이제 '표시 중인 등록 회차'를 가리킨다.
+            "unregistered_latest": False,
             "latest_registered_review_round": _latest_registered_review,
             "archived_entries": len(_archived_g),
             "archived_auto_lines": len(_manual_saved_lines(_archived_g, "자동", include_photo=True)),

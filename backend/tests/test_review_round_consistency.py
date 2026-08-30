@@ -97,13 +97,14 @@ def test_review_slice_legacy_dominant_round_wins(monkeypatch):
     assert calls == [1237]
 
 
-def test_review_slice_stale_legacy_advances_to_latest_unregistered(monkeypatch):
+def test_review_slice_stale_legacy_keeps_data_and_flags_newer_unregistered(monkeypatch):
     """지난(이미 추첨된) 회차 용지만 있고 최신 추첨 회차는 미등록이면,
-    옛 회차로 되돌리지 않고 최신 추첨 회차(1233)로 '미등록' 빈 상태로 진행한다.
+    ⚠️ 등록된 지난 데이터를 절대 숨기지 않는다(빈 상태로 진행 금지).
+    데이터는 그 용지의 실제(우세) 회차로 그대로 표시·대조하고, 더 새 회차가
+    미등록임을 별도 플래그로만 안내한다.
 
-    사용자 실증: 1236 등록 후 1237·1238 이 추첨됐는데 1237/1238 미등록.
-    복기가 계속 1236 으로 되돌아가던 문제 → 최신 회차 미등록 상태 유지로 교정.
-    (지난 회차 용지는 [비교 회차]·[백필] 선택 시 자기 회차로 정확히 대조.)
+    사용자 실증(회귀): 최신 회차를 빈 '미등록' 상태로 강제하니 1236 데이터가
+    화면에서 '싹 다 날아간 것처럼' 사라졌다 → 데이터 보존 + 안내 플래그로 교정.
     """
     calls: list = []
     _patch_common(monkeypatch, calls)
@@ -113,10 +114,12 @@ def test_review_slice_stale_legacy_advances_to_latest_unregistered(monkeypatch):
     entries = [_mk_entry(1231), _mk_entry(1231)]
     slice_out = store._build_intent_slice(entries, "review")
 
-    assert slice_out["ticket_round"] == "1233", "미등록 최신 회차로 진행(옛 회차로 되돌림 금지)"
-    assert slice_out["total_analyses"] == 0, "미등록 = 빈 상태"
+    assert slice_out["ticket_round"] == "1231", "지난 데이터는 자기 회차(1231)로 표시·대조"
+    assert slice_out["total_analyses"] >= 1, "데이터 보존 — 숨기지 않는다(빈 상태 금지)"
     rs = slice_out["round_sources"]
-    assert rs["primary"] == "unregistered_latest"
-    assert rs["unregistered_latest"] is True
-    assert rs["latest_registered_review_round"] == 1231, "지난 등록 회차를 안내용으로 노출"
-    assert calls == [1233], "당첨 템플릿은 최신 추첨 회차로 호출"
+    assert rs["primary"] == "legacy_all"
+    assert rs["newer_round_unregistered"] is True, "더 새 회차(1233) 미등록 안내"
+    assert rs["displayed_review_round"] == 1231
+    assert rs["latest_drawn_round"] == 1233
+    assert rs["latest_registered_review_round"] == 1231
+    assert calls == [1231], "당첨 템플릿은 표시 중인 실제 회차(1231)로 호출"

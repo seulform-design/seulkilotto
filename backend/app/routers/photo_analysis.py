@@ -89,7 +89,7 @@ def _slim_for_client(obj):
     return obj
 
 
-def _slim_accumulated():
+def _slim_accumulated(review_round: int | None = None):
     """슬림화된 누적 응답 — 대용량 상세 배열을 캡해 게이트웨이 절단을 방지.
 
     최상위 accumulated_combo_patterns(레거시 전체집계, ~0.5MB)는 어떤 화면도
@@ -99,7 +99,7 @@ def _slim_accumulated():
     프론트가 "게이트웨이 연결이 일시적으로 끊겼습니다" + saved_auto_lines 미수신으로
     "자동 서버 저장 0줄" 을 표시했다. 클라이언트 응답에서만 제거해 절단을 막는다.
     """
-    full = build_accumulated()
+    full = build_accumulated(review_round)
     acc = full
     if isinstance(acc, dict):
         acc = dict(acc)  # 얕은 복사 — 캐시/원본 dict 를 훼손하지 않는다.
@@ -379,8 +379,9 @@ def get_storage_status():
 
 
 @router.get("/accumulated")
-def get_accumulated():
-    return to_jsonable(_slim_accumulated())
+def get_accumulated(review_round: int | None = Query(default=None, ge=1)):
+    """복기 누적. review_round 지정 시 그 회차 슬라이스로 이동(백필·회차 전환)."""
+    return to_jsonable(_slim_accumulated(review_round))
 
 
 @router.get("/round-learning")

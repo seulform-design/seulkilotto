@@ -385,7 +385,9 @@ function IntentAccumulatedPanel({
                   ? `출처: 보관 정본 (자${slice.round_sources.archived_auto_lines}·반${slice.round_sources.archived_semi_lines})`
                   : slice.round_sources.primary === 'review_saved'
                     ? `출처: 복기저장 (자${slice.round_sources.review_saved_auto_lines}·반${slice.round_sources.review_saved_semi_lines})`
-                    : slice.round_sources.newer_round_unregistered
+                    : slice.round_sources.primary === 'selected_empty'
+                      ? `${slice.round_sources.selected_view_round ?? slice.ticket_round}회 미등록`
+                      : slice.round_sources.newer_round_unregistered
                       ? `표시: ${slice.round_sources.displayed_review_round ?? slice.ticket_round}회 · 최신 미등록`
                       : '출처: 회차 미분류'
               }
@@ -812,6 +814,10 @@ export default function PhotoAnalysisPage() {
   // null 이면 평소대로(복기=최신 추첨회차) 저장. 값이 있으면 그 회차로 스탬프하고
   // 회차-불일치 파괴 확인을 건너뛴다(사용자가 의도적으로 그 회차를 고른 것이므로).
   const [backfillRound, setBackfillRound] = useState<number | null>(null);
+  const [viewSlice, setViewSlice] = useState<PhotoAnalysisIntentSlice | null>(null);
+  const [viewSliceRound, setViewSliceRound] = useState<number | null>(null);
+  const [isolatedDraft, setIsolatedDraft] = useState<ManualDraft | null>(null);
+  const isolatedDraftsRef = useRef<Record<number, ManualDraft>>({});
   const [isReanalyzing, setIsReanalyzing] = useState(false);
   // 학습·패턴 엔진 상세는 기본 접어둔다(추천은 위 요약·복기 검증으로 충분, 클러터 감소).
   // 비동기 작업 중 unmount 가드 (메모리 안정성)
@@ -839,9 +845,17 @@ export default function PhotoAnalysisPage() {
 
   const qc = useQueryClient();
   const catchupAttemptedRef = useRef(false);
+  const backfillRoundRef = useRef<number | null>(null);
+  backfillRoundRef.current = backfillRound;
   const refreshAccumulated = useCallback(async () => {
     try {
       setAccumulated(await v1Api.getPhotoAnalysisAccumulated());
+      const bf = backfillRoundRef.current;
+      if (bf != null) {
+        const view = await v1Api.getPhotoAnalysisAccumulated(bf);
+        setViewSlice(view.by_intent?.review ?? null);
+        setViewSliceRound(bf);
+      }
     } catch {
       /* ignore */
     }
@@ -905,7 +919,6 @@ export default function PhotoAnalysisPage() {
       });
   }, [refreshAccumulated]);
 
-  const activeSlice = accumulated?.by_intent?.[activeTab] ?? null;
   const archivedCurrentSnapshot =
     activeTab === 'current_round'
       ? (accumulated?.historical_dataset?.latest_archived_current_snapshot ?? null)
@@ -968,6 +981,98 @@ export default function PhotoAnalysisPage() {
   const effReviewRound =
     activeTab === 'review' && backfillRound != null ? backfillRound : reviewRound;
 
+  // 기본 등록 회차(예: 1236)와 다른 회차를 고르면, 그 회차 슬라이스·용지만 보여야 한다.
+  // 기본 accumulated 를 바꾸면 1236 데이터가 화면에서 사라지므로 별도 viewSlice 로 덮는다.
+  const isIsolatedReview =
+    activeTab === 'review' &&
+    backfillRound != null &&
+    reviewRound != null &&
+    backfillRound !== reviewRound;
+
+  const activeSlice: PhotoAnalysisIntentSlice | null = isIsolatedReview
+    ? viewSliceRound === backfillRound
+      ? viewSlice
+      : null
+    : (accumulated?.by_intent?.[activeTab] ?? null);
+
+  const displayAccumulated = useMemo(() => {
+    if (!isIsolatedReview || !accumulated?.by_intent?.review) return accumulated;
+    const review =
+      viewSliceRound === backfillRound && viewSlice
+        ? viewSlice
+        : {
+            ...accumulated.by_intent.review,
+            ticket_round: String(backfillRound),
+            total_analyses: 0,
+            saved_auto_lines: [],
+            saved_semi_lines: [],
+          };
+    return {
+      ...accumulated,
+      by_intent: { ...accumulated.by_intent, review },
+    };
+  }, [isIsolatedReview, accumulated, viewSlice, viewSliceRound, backfillRound]);
+
+  useEffect(() => {
+    if (backfillRound == null) {
+      setViewSlice(null);
+      setViewSliceRound(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const acc = await v1Api.getPhotoAnalysisAccumulated(backfillRound);
+        if (cancelled) return;
+        setViewSlice(acc.by_intent?.review ?? null);
+        setViewSliceRound(backfillRound);
+      } catch {
+        if (!cancelled) {
+          setViewSlice(null);
+          setViewSliceRound(backfillRound);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [backfillRound]);
+
+  useEffect(() => {
+    if (!isIsolatedReview || backfillRound == null) {
+      setIsolatedDraft(null);
+      return;
+    }
+    const cached = isolatedDraftsRef.current[backfillRound];
+    setIsolatedDraft(cached ?? { ...emptyManualDraft(), roundNo: backfillRound });
+  }, [isIsolatedReview, backfillRound]);
+
+  useEffect(() => {
+    if (isIsolatedReview && backfillRound != null && isolatedDraft) {
+      isolatedDraftsRef.current[backfillRound] = isolatedDraft;
+    }
+  }, [isIsolatedReview, backfillRound, isolatedDraft]);
+
+  useEffect(() => {
+    if (!isIsolatedReview || viewSliceRound !== backfillRound || !viewSlice) return;
+    setIsolatedDraft((prev) => {
+      const cur = prev ?? { ...emptyManualDraft(), roundNo: backfillRound };
+      const empty =
+        cur.bulkAutoTickets.length === 0 &&
+        cur.currentSlipLines.length === 0 &&
+        cur.slipQueue.length === 0;
+      if (!empty) return cur;
+      const lines = viewSlice.saved_auto_lines ?? [];
+      if (!lines.length) return { ...emptyManualDraft(), roundNo: backfillRound };
+      return {
+        ...emptyManualDraft(),
+        bulkAutoTickets: lines.map((a) => [...a]),
+        lastSavedAt: new Date().toISOString(),
+        roundNo: backfillRound,
+      };
+    });
+  }, [isIsolatedReview, viewSlice, viewSliceRound, backfillRound]);
+
   const roundDrawn = roundStatusQuery.data?.drawn ?? false;
   const roundSyncing = Boolean(
     roundStatusQuery.data?.syncing || catchupUpgrade.isPending || csvLagging,
@@ -1000,10 +1105,20 @@ export default function PhotoAnalysisPage() {
 
   const displayReviewRound = effReviewRound ?? '…';
   const displayCurrentRound = currentRound ?? '…';
-  const manualDraft = manualByIntent[activeTab];
+  const manualDraft = isIsolatedReview
+    ? (isolatedDraft ?? emptyManualDraft())
+    : manualByIntent[activeTab];
   const { picked, currentSlipLines, slipQueue, bulkAutoTickets, lastSavedAt } = manualDraft;
 
   const patchManual = (patch: Partial<ManualDraft>) => {
+    if (isIsolatedReview) {
+      setIsolatedDraft((prev) => ({
+        ...(prev ?? emptyManualDraft()),
+        ...patch,
+        roundNo: backfillRound,
+      }));
+      return;
+    }
     setManualByIntent((prev) => ({
       ...prev,
       [activeTab]: { ...prev[activeTab], ...patch },
@@ -1014,6 +1129,7 @@ export default function PhotoAnalysisPage() {
   // 자동 대량(bulkAutoTickets)으로 복원. intent별 1회, 로컬 데이터가 있으면 덮어쓰지 않음.
   const hydratedAutoRef = useRef<Record<string, boolean>>({});
   useEffect(() => {
+    if (isIsolatedReview) return;
     const serverAutoLines = accumulated?.by_intent?.[activeTab]?.saved_auto_lines ?? [];
     if (!serverAutoLines.length || hydratedAutoRef.current[activeTab]) return;
     const localAutoEmpty =
@@ -1557,10 +1673,12 @@ export default function PhotoAnalysisPage() {
         </Alert>
       )}
       {activeTab === 'review' && backfillRound != null && (
-        <Alert severity="success" sx={{ mb: 1 }}>
+        <Alert severity={isIsolatedReview && (activeSlice?.total_analyses ?? 0) === 0 ? 'warning' : 'success'} sx={{ mb: 1 }}>
           <Typography variant="body2">
-            🎯 <strong>{backfillRound}회</strong>로 이동했습니다 — 라벨·당첨번호·검증이 모두 {backfillRound}회 기준입니다.
-            아래에서 {backfillRound}회 용지를 등록하면 그 회차로 저장됩니다.
+            🎯 <strong>{backfillRound}회</strong>로 이동했습니다 — 라벨·당첨번호·용지·검증이 모두 {backfillRound}회 기준입니다.
+            {isIsolatedReview && (activeSlice?.total_analyses ?? 0) === 0
+              ? ` 이 회차는 아직 미등록입니다. 아래에서 ${backfillRound}회 용지를 등록하세요.`
+              : ` 아래에서 ${backfillRound}회 용지를 이어서 등록할 수 있습니다.`}
             {' '}기본 복기로 돌아가려면 백필 드롭다운에서 <strong>「기본 (최신 복기 회차)」</strong>를 선택하세요.
           </Typography>
         </Alert>
@@ -1636,7 +1754,7 @@ export default function PhotoAnalysisPage() {
         latestRound={latestRound}
         roundDrawn={roundDrawn}
         slipQueue={slipQueue}
-        accumulated={accumulated}
+        accumulated={displayAccumulated}
         onAccumulatedChange={setAccumulated}
         onRemoveSlipLine={removeSlipLine}
         currentSlipLines={currentSlipLines}
@@ -1649,6 +1767,7 @@ export default function PhotoAnalysisPage() {
         }
         onRefreshAccumulated={refreshAccumulated}
         backfillRound={activeTab === 'review' ? backfillRound : null}
+        homeReviewRound={reviewRound}
         registerPrelude={
           <Box sx={{ mb: 0.5 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }} spacing={1}>
@@ -1679,27 +1798,40 @@ export default function PhotoAnalysisPage() {
               const opts = anchor > 0
                 ? Array.from({ length: 8 }, (_, i) => anchor - i).filter((r) => r > 0)
                 : [];
+              const registered = new Set(
+                (accumulated?.historical_dataset?.rounds_breakdown ?? [])
+                  .filter((row) => {
+                    const a = (row.archived?.auto_lines ?? 0) + (row.archived?.semi_lines ?? 0);
+                    const r = (row.review?.auto_lines ?? 0) + (row.review?.semi_lines ?? 0);
+                    return a + r > 0;
+                  })
+                  .map((row) => Number(row.ticket_round))
+                  .filter((n) => Number.isInteger(n) && n > 0),
+              );
+              if (reviewRound != null) registered.add(reviewRound);
               return (
                 <TextField
                   select
                   size="small"
-                  label="미등록 회차 직접 등록(백필)"
+                  label="복기 회차 이동 / 백필 등록"
                   value={backfillRound ?? ''}
                   onChange={(e) => setBackfillRound(e.target.value ? Number(e.target.value) : null)}
                   SelectProps={{ native: true }}
-                  // native select 는 항상 값이 있어 라벨이 위로 안 떠(shrink 안 됨) 값과
-                  // 겹친다 → 강제로 shrink 시켜 라벨을 상단 테두리로 띄운다.
                   InputLabelProps={{ shrink: true }}
                   helperText={
                     backfillRound != null
-                      ? `⚠ 이번 저장은 ${backfillRound}회 용지로 기록됩니다(회차 확인 생략)`
-                      : '누락된 지난 회차 용지를 그 회차로 등록하려면 선택하세요'
+                      ? registered.has(backfillRound)
+                        ? `✅ ${backfillRound}회 등록 데이터로 이동 — 저장도 이 회차로 기록됩니다`
+                        : `⚠ ${backfillRound}회는 미등록입니다. 이번 저장이 ${backfillRound}회 용지로 기록됩니다`
+                      : '회차를 고르면 그 회차 용지·당첨번호로 이동합니다'
                   }
-                  sx={{ mb: 1.5, minWidth: 260 }}
+                  sx={{ mb: 1.5, minWidth: 280 }}
                 >
-                  <option value="">기본 (최신 복기 회차)</option>
+                  <option value="">기본 ({reviewRound ?? '최신'}회 복기)</option>
                   {opts.map((r) => (
-                    <option key={r} value={r}>{r}회로 등록</option>
+                    <option key={r} value={r}>
+                      {r}회{registered.has(r) ? ' · 등록됨' : ' · 미등록'}
+                    </option>
                   ))}
                 </TextField>
               );

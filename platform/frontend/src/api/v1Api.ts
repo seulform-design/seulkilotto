@@ -595,8 +595,10 @@ export const v1Api = {
     });
   },
 
-  getPhotoAnalysisAccumulated: () =>
-    fetchJson<PhotoAnalysisAccumulated>('/api/v1/photo-analysis/accumulated'),
+  getPhotoAnalysisAccumulated: (reviewRound?: number | null) => {
+    const q = reviewRound != null && reviewRound > 0 ? `?review_round=${reviewRound}` : '';
+    return fetchJson<PhotoAnalysisAccumulated>(`/api/v1/photo-analysis/accumulated${q}`);
+  },
 
   /** 다회차 학습 — 보관 회차 용지 + 실제 당첨으로 지지-적중 캘리브레이션. */
   getRoundLearning: (opts?: { applyIntent?: 'review' | 'current_round' }) => {
@@ -1114,13 +1116,17 @@ export interface PhotoAnalysisIntentSlice {
    * archived=롤오버 보관 정본(추첨 전 등록, 소속 확실) / review_saved=복기 탭 저장분.
    */
   round_sources?: {
-    primary: 'archived' | 'review_saved' | 'legacy_all' | 'unregistered_latest';
+    primary: 'archived' | 'review_saved' | 'legacy_all' | 'unregistered_latest' | 'selected_empty';
     /** 표시 중인(등록된) 회차보다 새 회차가 이미 추첨됐으나 미등록인 상태. */
     newer_round_unregistered?: boolean;
     /** 현재 화면에 표시 중인(대조 기준) 복기 회차. */
     displayed_review_round?: number | null;
     /** CSV 기준 최신 추첨 회차(미등록 안내용). */
     latest_drawn_round?: number | null;
+    /** 백필로 사용자가 직접 고른 회차. */
+    selected_view_round?: number | null;
+    /** 고른 회차에 등록 용지가 없어 빈 등록 화면. */
+    selected_empty?: boolean;
     /** (하위호환) 항상 false — 더 이상 빈 상태로 진행하지 않는다. */
     unregistered_latest?: boolean;
     /** 표시 중인 마지막 등록 복기 회차(더 새 회차가 미등록일 때만 채워짐). */

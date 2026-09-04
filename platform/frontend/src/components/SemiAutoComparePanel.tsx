@@ -93,7 +93,10 @@ const NUMBERS = Array.from({ length: 45 }, (_, i) => i + 1);
 // 탭별 격리: 복기 / 이번회차 각각 별도 저장 (데이터 오염 방지).
 const SEMI_AUTO_STORAGE_PREFIX = 'lotto:semiAuto:v1';
 
-function semiAutoStorageKey(intent: SheetIntent): string {
+function semiAutoStorageKey(intent: SheetIntent, viewRound?: number | null): string {
+  if (intent === 'review' && viewRound != null && viewRound > 0) {
+    return `${SEMI_AUTO_STORAGE_PREFIX}:${intent}:${viewRound}`;
+  }
   return `${SEMI_AUTO_STORAGE_PREFIX}:${intent}`;
 }
 
@@ -238,13 +241,13 @@ function sanitizeSlipInput(raw: unknown): ManualSlipInput | null {
   return { lines };
 }
 
-function loadSemiAutoState(intent: SheetIntent): PersistedSemiAutoState {
+function loadSemiAutoState(intent: SheetIntent, viewRound?: number | null): PersistedSemiAutoState {
   if (typeof window === 'undefined') return defaultPersistedState();
   try {
     const raw =
-      window.localStorage.getItem(semiAutoStorageKey(intent)) ??
-      // 레거시 단일 키 → 복기 탭으로 1회 이관
-      (intent === 'review' ? window.localStorage.getItem('lotto:semiAuto:v1') : null);
+      window.localStorage.getItem(semiAutoStorageKey(intent, viewRound)) ??
+      // 레거시 단일 키 → 복기 탭 기본 회차로 1회 이관 (회차 격리 키에는 적용하지 않음)
+      (intent === 'review' && viewRound == null ? window.localStorage.getItem('lotto:semiAuto:v1') : null);
     if (!raw) return defaultPersistedState();
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object') return defaultPersistedState();
@@ -334,10 +337,14 @@ function loadSemiAutoState(intent: SheetIntent): PersistedSemiAutoState {
   }
 }
 
-function saveSemiAutoState(intent: SheetIntent, state: PersistedSemiAutoState): void {
+function saveSemiAutoState(
+  intent: SheetIntent,
+  state: PersistedSemiAutoState,
+  viewRound?: number | null,
+): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(semiAutoStorageKey(intent), JSON.stringify(state));
+    window.localStorage.setItem(semiAutoStorageKey(intent, viewRound), JSON.stringify(state));
   } catch {
     /* quota / private mode — silent */
   }
@@ -546,6 +553,8 @@ interface SemiAutoComparePanelProps {
   roundDrawn?: boolean;
   /** 미등록(누락) 회차 백필 — 값이 있으면 반자동 저장도 그 회차로 스탬프한다(복기 탭 전용). */
   backfillRound?: number | null;
+  /** 기본 복기 데이터 회차(로컬 저장 키). 백필 회차와 다르면 반자동 누적을 격리한다. */
+  homeReviewRound?: number | null;
   /** 사용자 정정: '구입번호 직접입력' (slipQueue) = 자동. 그 줄 단위 삭제 콜백. */
   onRemoveSlipLine?: (slipIdx: number, lineIdx: number) => void;
   /** 자동 누적의 '입력 중' 줄 (currentSlipLines). 전체 티켓 목록 카운트·표시에 합산. */
@@ -1128,6 +1137,7 @@ export default function SemiAutoComparePanel({
   latestRound: latestRoundProp = null,
   roundDrawn = false,
   backfillRound = null,
+  homeReviewRound = null,
   onRemoveSlipLine,
   currentSlipLines = [],
   bulkAutoTickets = [],
@@ -1154,6 +1164,12 @@ export default function SemiAutoComparePanel({
   // 한 그룹 카드에서 렌더할 자동/반자동 줄 수 상한(모바일은 더 작게, [더 보기]로 확장).
   const lineRenderCap = IS_CONSTRAINED_DEVICE ? 6 : GROUP_LINE_RENDER_CAP;
   const compareWinning = sheetIntent === 'review';
+  const isolatedSemi =
+    sheetIntent === 'review' &&
+    backfillRound != null &&
+    homeReviewRound != null &&
+    backfillRound !== homeReviewRound;
+  const semiStoreRound = isolatedSemi ? backfillRound : null;
 
   // localStorage — 탭별 격리
   const initial = useMemo(() => loadSemiAutoState(sheetIntent), [sheetIntent]);
@@ -1202,10 +1218,12 @@ export default function SemiAutoComparePanel({
   const [showLineMatchDetail, setShowLineMatchDetail] = useState(false);
   /** 학습 엔진 | 호기·후속 | 검증 — 용지미출 탭/섹션 없음. 호기 패턴은 여기(aux)만. */
   const [engineTab, setEngineTab] = useState<'learn' | 'aux' | 'verify'>('learn');
+  const hydratedIntentRef = useRef<Record<string, boolean>>({});
 
-  // 탭 전환 시 해당 탭 전용 localStorage 로드
+  // 탭 전환 또는 백필 회차 이동 시 해당 저장 키의 반자동 누적을 로드.
+  // 다른 회차 용지가 그대로 보이던 문제(회차 눌러도 동일 데이터)를 막는다.
   useEffect(() => {
-    const st = loadSemiAutoState(sheetIntent);
+    const st = loadSemiAutoState(sheetIntent, semiStoreRound);
     setPicked(st.picked);
     setBulkTickets(st.bulkTickets);
     setSemiCurrentLines(st.semiCurrentLines);
@@ -1214,10 +1232,9 @@ export default function SemiAutoComparePanel({
     setLocalRoundNo(st.roundNo);
     setCompareRound(null);
     setForceDetailedComparison(false);
-    // 탭 전환 시 이전 탭의 추천 조합을 비운다 — 남겨두면 winningSet 의미가 바뀐 채
-    // (복기↔이번회차) 옛 조합의 '당첨 N/6'·dim 이 오해를 부른다.
     setRecommendations([]);
-  }, [sheetIntent]);
+    hydratedIntentRef.current[sheetIntent] = false;
+  }, [sheetIntent, semiStoreRound]);
 
   // 구 상단탭(종합분석/추첨기추천) → 용지분석 딥링크
   // composite → ③ Venus · machine → ④ 후속·gap 호기 · recommend → ③ 번호추천
@@ -1239,7 +1256,12 @@ export default function SemiAutoComparePanel({
   }, []);
 
   // 영속 — picked / bulkTickets / semiCurrentLines / semiSlipQueue / lastSavedAt / roundNo
+  const storeRoundRef = useRef(semiStoreRound);
   useEffect(() => {
+    if (storeRoundRef.current !== semiStoreRound) {
+      storeRoundRef.current = semiStoreRound;
+      return;
+    }
     saveSemiAutoState(sheetIntent, {
       picked,
       pickFlags: {},
@@ -1248,12 +1270,11 @@ export default function SemiAutoComparePanel({
       semiSlipQueue,
       lastSavedAt,
       roundNo: localRoundNo,
-    });
-  }, [sheetIntent, picked, bulkTickets, semiCurrentLines, semiSlipQueue, lastSavedAt, localRoundNo]);
+    }, semiStoreRound);
+  }, [sheetIntent, semiStoreRound, picked, bulkTickets, semiCurrentLines, semiSlipQueue, lastSavedAt, localRoundNo]);
 
   // 기기 간 동기화 — 로컬(이 기기)이 비어 있으면 서버 저장분(saved_semi_lines)을
   // 반자동 누적으로 복원. 로컬에 데이터가 있으면 덮어쓰지 않는다. intent별 1회만.
-  const hydratedIntentRef = useRef<Record<string, boolean>>({});
   useEffect(() => {
     const serverLines = accumulated?.by_intent?.[sheetIntent]?.saved_semi_lines ?? [];
     if (!serverLines.length || hydratedIntentRef.current[sheetIntent]) return;

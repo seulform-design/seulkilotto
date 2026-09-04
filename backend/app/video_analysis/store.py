@@ -2071,8 +2071,16 @@ def _review_entries_for_round(round_no: int) -> tuple[List[Dict[str, Any]], List
     return archived, review_saved
 
 
-def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str, Any]:
-    """복기 / 이번회차 탭별 누적 데이터."""
+def _build_intent_slice(
+    entries: List[Dict[str, Any]],
+    intent: str,
+    view_round: int | None = None,
+) -> Dict[str, Any]:
+    """복기 / 이번회차 탭별 누적 데이터.
+
+    view_round 가 있으면(백필·회차 이동) 그 회차 용지만 모아 슬라이스를 만든다.
+    없으면 기존 규칙: 최신 추첨 회차 → 없으면 우세 등록 회차(데이터 보존).
+    """
     from .draw_template import build_draw_review_template, get_review_round_no, get_current_round_no
 
     label = "복기" if intent == "review" else "이번회차"
@@ -2081,11 +2089,13 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     _primary_source = "review_saved"
     _legacy_round: int | None = None
     _latest_registered_review: int | None = None
+    _view_round = int(view_round) if view_round else None
     if intent == "review":
         _latest_review_no = int(get_review_round_no())
         # 대상 회차의 용지만 엄격 수집(회차 혼입 차단). 보관 정본이 있으면 그것을
         # 우선 사용한다 — '추첨 전 등록' 이 보장돼 소속 회차가 확실하기 때문.
-        _archived_raw, _review_saved_g = _review_entries_for_round(_latest_review_no)
+        _collect_round = _view_round if _view_round is not None else _latest_review_no
+        _archived_raw, _review_saved_g = _review_entries_for_round(_collect_round)
         # 보관 엔트리는 원래 video_intent='current_round' 로 저장돼 있다. 복기 뷰에서
         # 쓰려면 intent 필터(_recompute_intent_combo 등)를 통과해야 하므로 **사본**에
         # 한해 review 로 재태깅한다(저장소는 불변).
@@ -2100,6 +2110,12 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
         elif _review_saved_g:
             group = _dedupe_entries_by_content(list(_review_saved_g))
             _primary_source = "review_saved"
+        elif _view_round is not None:
+            # 사용자가 백필로 특정 회차를 골라 이동했다. 그 회차에 용지가 없으면
+            # 빈 상태로 보여 새로 등록하게 한다. 다른 회차(예: 1236) 데이터로
+            # 조용히 되돌리면 '회차를 눌러도 동일한 게 뜬다'(실증)가 된다.
+            _primary_source = "selected_empty"
+            group = []
         else:
             # 대상 회차(최신 추첨)에 귀속된 용지가 하나도 없다. 등록된 복기 용지의
             # '우세(최다) 회차'로 라벨·대조하되, 데이터는 절대 숨기지 않는다.
@@ -2139,7 +2155,11 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     #    특정 과거 회차 대조는 프론트 '비교 회차' 수동 지정으로 가능.
     # legacy_all(대상 회차에 귀속된 용지 없음): 데이터의 실제(우세) 회차로 라벨·대조한다.
     # archived/review_saved(현 회차 정본)는 최신 회차로 유지 → 당첨번호 자동 최신화.
-    _review_round_eff = _legacy_round if (intent == "review" and _legacy_round) else get_review_round_no()
+    _review_round_eff = (
+        _view_round
+        if (intent == "review" and _view_round is not None)
+        else (_legacy_round if (intent == "review" and _legacy_round) else get_review_round_no())
+    )
     round_no = str(_review_round_eff) if intent == "review" else str(get_current_round_no())
     intent_acc = _accumulate_entries(group) if group else None
     # 누적 조합 분석은 '자동 누적'만 대상으로 한다 (자동 탭 표시 + 반자동 탭의
@@ -2198,9 +2218,11 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
             # 표시 중인(등록된) 데이터보다 새 회차가 이미 추첨됐으나 미등록인 상태.
             # 데이터는 그대로 보여주되(소실 방지), 프론트가 '지난 1236 표시 중 ·
             # 최신 1239 미등록' 안내와 백필 등록 유도를 띄우게 한다.
-            "newer_round_unregistered": _latest_registered_review is not None,
+            "newer_round_unregistered": _latest_registered_review is not None and _view_round is None,
             "displayed_review_round": _review_round_eff if intent == "review" else None,
             "latest_drawn_round": _latest_review_no if intent == "review" else None,
+            "selected_view_round": _view_round,
+            "selected_empty": _primary_source == "selected_empty",
             # (하위호환) 예전 필드명 — 이제 '표시 중인 등록 회차'를 가리킨다.
             "unregistered_latest": False,
             "latest_registered_review_round": _latest_registered_review,
@@ -2218,15 +2240,15 @@ def _build_intent_slice(entries: List[Dict[str, Any]], intent: str) -> Dict[str,
     return slice_out
 
 
-def build_accumulated() -> Dict[str, Any]:
+def build_accumulated(review_round: int | None = None) -> Dict[str, Any]:
     # 요청 단위 읽기 캐시로 24MB historical 반복 로드(3~4회)를 1회로 줄인다 —
     # 큰 아카이브에서 accumulated 가 60s 게이트웨이 한도를 넘어 502/504 로 끊겨
     # 앱이 옛 회차에 멈추던 문제 방지. (align 등 쓰기가 나면 save 가 캐시 무효화.)
     with store_read_cache():
-        return _build_accumulated_impl()
+        return _build_accumulated_impl(review_round)
 
 
-def _build_accumulated_impl() -> Dict[str, Any]:
+def _build_accumulated_impl(review_round: int | None = None) -> Dict[str, Any]:
     # 읽기 경로 자기치유 — 외부 크론이 CSV 를 올려 이번회차 샌드박스 회차가 이미
     # 추첨 완료됐는데 아직 롤오버되지 않았으면(이번회차 라벨이 실제 회차와 어긋나고
     # 이미 추첨된 티켓이 '다음 회차'로 오표기되는 문제), 최신 이번회차까지 정렬해
@@ -2345,7 +2367,7 @@ def _build_accumulated_impl() -> Dict[str, Any]:
             for k, v in by_intent.items()
         },
         "by_intent": {
-            "review": _build_intent_slice(entries, "review"),
+            "review": _build_intent_slice(entries, "review", view_round=review_round),
             "current_round": _build_intent_slice(entries, "current_round"),
         },
         "app_ui_message": " · ".join(ui_parts) if ui_parts else "저장된 분석이 없습니다.",

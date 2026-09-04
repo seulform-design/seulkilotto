@@ -123,3 +123,44 @@ def test_review_slice_stale_legacy_keeps_data_and_flags_newer_unregistered(monke
     assert rs["latest_drawn_round"] == 1233
     assert rs["latest_registered_review_round"] == 1231
     assert calls == [1231], "당첨 템플릿은 표시 중인 실제 회차(1231)로 호출"
+
+
+def test_review_slice_explicit_view_round_empty_does_not_fallback(monkeypatch):
+    """백필로 특정 회차(1233)를 고르면, 그 회차에 용지가 없어도 지난 회차(1231)
+    데이터로 되돌리지 않는다 — 빈 상태로 그 회차에 머문다.
+    """
+    calls: list = []
+    _patch_common(monkeypatch, calls)
+    monkeypatch.setattr(store, "_review_entries_for_round", lambda r: ([], []))
+
+    entries = [_mk_entry(1231), _mk_entry(1231)]
+    slice_out = store._build_intent_slice(entries, "review", view_round=1233)
+
+    assert slice_out["ticket_round"] == "1233"
+    assert slice_out["total_analyses"] == 0
+    rs = slice_out["round_sources"]
+    assert rs["primary"] == "selected_empty"
+    assert rs["selected_empty"] is True
+    assert rs["selected_view_round"] == 1233
+    assert rs["newer_round_unregistered"] is False
+    assert calls == [1233]
+
+
+def test_review_slice_explicit_view_round_loads_that_round(monkeypatch):
+    """백필로 등록된 회차를 고르면 그 회차 용지만 로드한다."""
+    calls: list = []
+    _patch_common(monkeypatch, calls)
+
+    def fake_entries(r):
+        if int(r) == 1231:
+            return ([], [_mk_entry(1231)])
+        return ([], [])
+
+    monkeypatch.setattr(store, "_review_entries_for_round", fake_entries)
+    entries = [_mk_entry(1231)]
+    slice_out = store._build_intent_slice(entries, "review", view_round=1231)
+
+    assert slice_out["ticket_round"] == "1231"
+    assert slice_out["total_analyses"] >= 1
+    assert slice_out["round_sources"]["selected_view_round"] == 1231
+    assert calls == [1231]

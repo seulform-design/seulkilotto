@@ -192,6 +192,9 @@ def fetch_lottis_round(
 def parse_lottis_html(html: str, round_no: int) -> Optional[Dict[str, str]]:
     """lottis 페이지 본문/제목에서 번호 6+보너스 추출."""
     patterns = [
+        # 신 lottis.kr(Next.js) 메타/본문 포맷: "당첨번호 16, 18, 27, 36, 38, 42, 보너스 22"
+        # (페이지는 /lotto/{round} 로 회차별이므로, 아래 검증(6개·중복없음·1~45)이 오매칭을 거른다.)
+        re.compile(r"당첨번호\s*([\d\s,]+?)\s*,\s*보너스\s*(\d+)", re.I),
         re.compile(
             rf"로또\s*{round_no}\s*회\s*당첨번호는\s*([\d,\s]+)이고,\s*보너스\s*번호는\s*(\d+)",
             re.I,

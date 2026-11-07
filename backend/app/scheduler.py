@@ -30,14 +30,15 @@ def warm_engine_caches(context: str = "warm") -> None:
         from .video_analysis.overlap_learning import build_overlap_learning
         from .video_analysis.graft_coverage import build_graft_coverage
         from .video_analysis.carryover_learning import build_carryover_learning
-        from .video_analysis.review_verification import build_review_verification
         from .prediction_signals import build_prediction_signals
     except Exception as exc:  # noqa: BLE001
         logger.warning("[%s] 프리워밍 import 실패: %s", context, exc)
         return
 
+    # 용지(복기검증) UI 폐지로 build_review_verification 프리워밍 제거.
+    # review_verification 모듈 자체는 full_history_backtest 등 회차 통계 엔진이
+    # 공용 통계 헬퍼(_coverage_significance 등)로 쓰므로 유지한다.
     calls = [
-        ("review_verification", build_review_verification),
         ("carryover", build_carryover_learning),
         ("graft:review", lambda: build_graft_coverage(intent="review")),
         ("graft:current", lambda: build_graft_coverage(intent="current_round")),

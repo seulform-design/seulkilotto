@@ -740,7 +740,7 @@ export const v1Api = {
   /** 전체 당첨 이력 워크포워드 백테스트 — 흔한 전략이 무작위를 이기나(다중검정 보정). */
   getFullHistoryBacktest: () =>
     fetchJson<FullHistoryBacktestResponse>(
-      '/api/v1/photo-analysis/full-history-backtest',
+      '/api/v1/stats/full-history-backtest',
       { timeoutMs: 60_000, heavy: true },
     ),
 

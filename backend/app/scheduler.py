@@ -31,6 +31,7 @@ def warm_engine_caches(context: str = "warm") -> None:
         from .video_analysis.graft_coverage import build_graft_coverage
         from .video_analysis.carryover_learning import build_carryover_learning
         from .video_analysis.review_verification import build_review_verification
+        from .prediction_signals import build_prediction_signals
     except Exception as exc:  # noqa: BLE001
         logger.warning("[%s] 프리워밍 import 실패: %s", context, exc)
         return
@@ -46,6 +47,9 @@ def warm_engine_caches(context: str = "warm") -> None:
         calls.append((f"pattern:{intent}", lambda i=intent: build_pattern_mining(apply_intent=i)))
         calls.append((f"round:{intent}", lambda i=intent: build_round_learning(apply_intent=i)))
         calls.append((f"overlap:{intent}", lambda i=intent: build_overlap_learning(apply_intent=i)))
+        # 앙상블 추천의 콜드 병목(build_prediction_signals ~36s)을 프리워밍 — 고정 시드(42)로
+        # 계산해 /generate/ensemble(요청은 랜덤 시드지만 신호는 42 고정)이 캐시를 즉시 받게 한다.
+        calls.append((f"pred_signals:{intent}", lambda i=intent: build_prediction_signals(intent=i, seed=42)))
 
     ok = 0
     for name, fn in calls:

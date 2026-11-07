@@ -339,7 +339,12 @@ def generate_ensemble_sets(
     from .prediction_signals import build_prediction_signals, backtest_signal_accuracy
     
     # 1. 대상 회차의 통합 예측 신호 가져오기 (각 번호의 출처 획득용)
-    signals = build_prediction_signals(intent=intent, seed=seed, target_round=target_round)
+    # ⚡ 신호(엔진별 번호 점수)는 결정론적 계산이라 요청 시드와 무관해야 한다. 요청 시드를
+    # 그대로 넘기면 (UI 가 매번 랜덤 시드를 보내므로) build_prediction_signals 캐시가 매번
+    # 미스 → 콜드 재계산 ~36s → 게이트웨이 60s 초과로 앙상블이 504 로 죽는다. 신호는 고정
+    # 시드(42)로 호출해 캐시·프리워밍이 먹게 하고, '세트 다양성'은 아래 rng(요청 시드)로 낸다.
+    SIGNALS_SEED = 42
+    signals = build_prediction_signals(intent=intent, seed=SIGNALS_SEED, target_round=target_round)
     target = signals.get("target_round")
     
     # 전체 1~45번에 대해 엔진별 추천 여부 추출

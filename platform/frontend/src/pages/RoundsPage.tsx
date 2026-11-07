@@ -16,6 +16,8 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { useMemo, useState } from 'react';
 import LottoBall from '../components/LottoBall';
 import OddEvenBar from '../components/OddEvenBar';
+import EngineGlobalStatsPanel from '../components/EngineGlobalStatsPanel';
+import StatisticsSnapshotPanel from '../components/StatisticsSnapshotPanel';
 import { v1Api } from '../api/v1Api';
 
 const PAGE_SIZE = 100;
@@ -282,6 +284,21 @@ export default function RoundsPage() {
           </Box>
         </Stack>
       </Paper>
+
+      <Box sx={{ mt: 3 }}>
+        <Typography variant="h5" fontWeight={800} gutterBottom>
+          📊 회차 심층 통계
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          전체·최근 회차의 번호 빈도·온도(핫/콜드)·동반출현(페어)·합/홀짝/구간 분포와
+          walk-forward 백테스트를 종합합니다. ⚠️ 모든 지표는 과거 분포의 묘사일 뿐, 다음 회차
+          확률(6/45)에는 영향이 없습니다.
+        </Typography>
+        <Stack spacing={2}>
+          <StatisticsSnapshotPanel />
+          <EngineGlobalStatsPanel />
+        </Stack>
+      </Box>
     </Box>
   );
 }

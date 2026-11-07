@@ -489,7 +489,11 @@ export const v1Api = {
     if (params.decayFactor != null) q.set('decay_factor', String(params.decayFactor));
     if (params.lambdaReg != null) q.set('lambda_reg', String(params.lambdaReg));
     if (params.alphaSig != null) q.set('alpha_sig', String(params.alphaSig));
-    return fetchJson<GenerateResponse>(`/api/v1/generate/ensemble?${q.toString()}`);
+    // 앙상블은 백테스트 가중치까지 계산하는 무거운 호출(워밍 직후 ~30s 근접) —
+    // 기본 30s 타임아웃으로는 간헐적으로 abort 되므로 90s 로 늘린다.
+    return fetchJson<GenerateResponse>(`/api/v1/generate/ensemble?${q.toString()}`, {
+      timeoutMs: 90_000,
+    });
   },
 
   getRoundRecommend: (machine?: 1 | 2 | 3) => {

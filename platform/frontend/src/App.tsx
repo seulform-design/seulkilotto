@@ -21,11 +21,10 @@ import {
   Typography,
 } from '@mui/material';
 import AppStatusBar from './components/AppStatusBar';
-import { setPhotoFocus } from './utils/photoFocus';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const RoundsPage = lazy(() => import('./pages/RoundsPage'));
-const PhotoAnalysisPage = lazy(() => import('./pages/PhotoAnalysisPage'));
+const RecommendPage = lazy(() => import('./pages/RecommendPage'));
 const FortunePickPage = lazy(() => import('./pages/FortunePickPage'));
 
 function PageFallback() {
@@ -41,36 +40,36 @@ function PageFallback() {
 
 /**
  * 탭 분류:
- *  - 데이터: dashboard, rounds
- *  - 분석·추천: photo(용지=번호추천에 종합·추첨기 포함), post
+ *  - 데이터: dashboard, rounds(회차 심층분석)
+ *  - 추천: recommend(추첨데이터 기반 앙상블), fortune
+ *  용지(자동/반자동) 입력 시스템은 폐지됨.
  */
 const TABS = [
   { id: 'dashboard', label: '대시보드' },
   { id: 'rounds', label: '회차' },
-  { id: 'photo', label: '용지 분석' },
+  { id: 'recommend', label: '🎯 번호추천' },
   { id: 'fortune', label: '👵 할매 예상' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
 const APP_TAB_STORAGE_KEY = 'lotto:app:active-tab:v1';
 
-/** 구 상단탭 → 용지분석 + 포커스 */
-const LEGACY_TAB_FOCUS: Record<string, 'composite' | 'machine'> = {
-  composite: 'composite',
-  recommend: 'machine',
+/** 폐지된 구 탭(photo/composite/recommend-focus/post) → 번호추천으로 이동 */
+const LEGACY_TAB_REMAP: Record<string, TabId> = {
+  photo: 'recommend',
+  composite: 'recommend',
+  post: 'recommend',
 };
 
 function loadInitialTab(): TabId {
   if (typeof window === 'undefined') return 'dashboard';
   try {
     const raw = window.localStorage.getItem(APP_TAB_STORAGE_KEY);
-    if (raw && LEGACY_TAB_FOCUS[raw]) {
-      setPhotoFocus(LEGACY_TAB_FOCUS[raw]);
-      window.localStorage.setItem(APP_TAB_STORAGE_KEY, 'photo');
-      return 'photo';
+    if (raw && LEGACY_TAB_REMAP[raw]) {
+      const mapped = LEGACY_TAB_REMAP[raw];
+      window.localStorage.setItem(APP_TAB_STORAGE_KEY, mapped);
+      return mapped;
     }
-    // 후속 출현 통계는 용지분석 ④ 학습 엔진(전역 통계 엔진)으로 이동 — 옛 딥링크는 용지분석으로.
-    if (raw === 'post') return 'photo';
     if (raw && TABS.some((t) => t.id === raw)) {
       return raw as TabId;
     }
@@ -118,7 +117,7 @@ export default function App() {
         <Suspense fallback={<PageFallback />}>
           {tab === 'dashboard' && <DashboardPage />}
           {tab === 'rounds' && <RoundsPage />}
-          {tab === 'photo' && <PhotoAnalysisPage />}
+          {tab === 'recommend' && <RecommendPage />}
           {tab === 'fortune' && <FortunePickPage />}
         </Suspense>
       </Container>

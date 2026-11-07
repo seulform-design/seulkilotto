@@ -10,7 +10,7 @@ from .database import load_history
 from .machine_analytics import build_round_recommendation, predict_next_round
 from .post_occurrence_engine import run_post_occurrence_analysis
 from .parallel_round_analysis import analyze_parallel_rounds
-from .video_analysis.store import build_accumulated, store_signature
+from .video_analysis.store import store_signature
 
 RULES_VERSION = "1.1"
 STRONG_LIMIT = 18
@@ -202,50 +202,6 @@ def _apply_classic_signals(
         "available": bool(classic_payload.get("combinations")),
         "method": classic_payload.get("method"),
         "combo_count": len(classic_payload.get("combinations") or []),
-    }
-
-
-def _apply_photo_signals(
-    scores: Dict[int, float],
-    sources: Dict[int, List[str]],
-    excluded: Dict[int, List[str]],
-    intent: str,
-    accumulated: Dict[str, Any],
-) -> Dict[str, Any]:
-    slice_out = (accumulated.get("by_intent") or {}).get(intent) or {}
-    fp = slice_out.get("final_predictions") or {}
-    combo = slice_out.get("accumulated_combo_patterns") or {}
-
-    for rank, n in enumerate(combo.get("strong_candidates") or []):
-        _bump(
-            scores,
-            sources,
-            n,
-            _rank_decay(rank, SOURCE_WEIGHTS["photo-line-overlap"]),
-            "photo-line-overlap",
-        )
-    for rank, n in enumerate(fp.get("strong_candidates") or []):
-        _bump(scores, sources, n, _rank_decay(rank, SOURCE_WEIGHTS["photo-vote"]), "photo-vote")
-    for item in (combo.get("pair_duplicates") or [])[:12]:
-        w = SOURCE_WEIGHTS["photo-pair"] * min(int(item.get("repeat_count") or item.get("line_count") or 1), 5)
-        for n in item.get("numbers") or []:
-            _bump(scores, sources, n, w, "photo-pair")
-    for item in (combo.get("triple_duplicates") or [])[:8]:
-        w = SOURCE_WEIGHTS["photo-triple"] * min(int(item.get("repeat_count") or item.get("line_count") or 1), 4)
-        for n in item.get("numbers") or []:
-            _bump(scores, sources, n, w, "photo-triple")
-
-    for n in fp.get("excluded_candidates") or []:
-        if 1 <= int(n) <= 45:
-            excluded[int(n)].append("photo-excluded")
-
-    return {
-        "available": bool(slice_out.get("total_analyses")),
-        "intent": intent,
-        "total_analyses": slice_out.get("total_analyses", 0),
-        "ticket_round": slice_out.get("ticket_round"),
-        "line_strong_count": len(combo.get("strong_candidates") or []),
-        "vote_strong_count": len(fp.get("strong_candidates") or []),
     }
 
 
@@ -459,13 +415,12 @@ def _resolve_signal_target(
     next_round: int,
     next_date: str,
     next_machine: int,
-    accumulated: Dict[str, Any],
     target_round: Optional[int],
 ) -> Tuple[int, str, int, str]:
     """intent별 대상 회차·호기 결정.
 
     - current_round → 다음(미추첨) 회차 + 그 회차 호기 (예: 1235 · 2호기)
-    - review → 복기 슬라이스/최신 추첨 회차 + 그 회차 호기 (예: 1234 · 1호기)
+    - review → 최신 추첨 완료 회차 + 그 회차 호기 (예: 1234 · 1호기)
 
     Returns: (target_round, target_draw_date, machine_id, machine_source)
     """
@@ -478,18 +433,8 @@ def _resolve_signal_target(
     if target_round is not None:
         target = int(target_round)
     elif intent == "review":
-        slice_out = (accumulated.get("by_intent") or {}).get("review") or {}
-        raw = slice_out.get("ticket_round")
-        slice_round: Optional[int] = None
-        if raw is not None:
-            try:
-                slice_round = int(str(raw))
-            except (TypeError, ValueError):
-                slice_round = None
-        # 복기는 '이미 추첨된' 회차가 대상 — 슬라이스 회차, 없으면 latest
-        target = slice_round if slice_round and slice_round > 0 else latest_round
-        if target > latest_round:
-            target = latest_round
+        # 복기 = 이미 추첨된 최신 회차. (용지 슬라이스 의존 제거: 용지 입력 폐지)
+        target = latest_round
     else:
         target = next_round
 
@@ -543,7 +488,6 @@ def build_prediction_signals(
 
     latest_round = int(df["round"].max())
     next_round, next_date, auto_machine = predict_next_round(df)
-    accumulated = build_accumulated()
     target, target_date, machine_id, machine_source = _resolve_signal_target(
         intent=intent,
         df=df,
@@ -551,7 +495,6 @@ def build_prediction_signals(
         next_round=next_round,
         next_date=next_date,
         next_machine=auto_machine,
-        accumulated=accumulated,
         target_round=target_round,
     )
 
@@ -565,7 +508,6 @@ def build_prediction_signals(
     scores: Dict[int, float] = defaultdict(float)
     sources: Dict[int, List[str]] = defaultdict(list)
     excluded: Dict[int, List[str]] = defaultdict(list)
-    photo_src = _apply_photo_signals(scores, sources, excluded, intent, accumulated)
 
     # 복기(이미 추첨된 회차)는 누수 방지로 해당 회차 이전 데이터만 사용.
     # 이번회차(미추첨)는 최신 전체 이력 사용.
@@ -690,7 +632,6 @@ def build_prediction_signals(
             "machine": machine_src,
             "post_occurrence": post_src,
             "classic": classic_src,
-            "photo_sheet": photo_src,
             "parallel_round": parallel_src,
             "decade_gap": decade_src,
         },

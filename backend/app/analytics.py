@@ -373,14 +373,13 @@ def generate_ensemble_sets(
     # 전체 번호의 추천 여부는 build_prediction_signals 연산을 기반으로 scores/sources 역산 수행)
     
     # 신호 소스 맵 매핑 (약칭에서 백테스트 명칭으로 매핑)
-    # prediction_signals 에서 사용하는 소스: 
-    # 'machine-reversion', 'post-S', 'post-A', 'post-top20', 'classic-wilson', 'classic-huygens', 'classic-fermat', 'classic-blend',
-    # 'photo-line-overlap', 'photo-vote', 'photo-pair', 'photo-triple', 'parallel-strong', 'parallel-expected', 'parallel-fixed', 'decade-gap'
+    # prediction_signals 에서 사용하는 소스(추첨데이터 기반만 — 용지 신호 폐지):
+    # 'machine-reversion', 'post-S', 'post-A', 'post-top20', 'classic-wilson', 'classic-huygens',
+    # 'classic-fermat', 'classic-blend', 'parallel-strong', 'parallel-expected', 'parallel-fixed', 'decade-gap'
     engine_groups = {
         "machine": ["machine-reversion"],
         "post": ["post-S", "post-A", "post-top20"],
         "classic": ["classic-wilson", "classic-huygens", "classic-fermat", "classic-blend"],
-        "photo": ["photo-line-overlap", "photo-vote", "photo-pair", "photo-triple"],
         "parallel": ["parallel-strong", "parallel-expected", "parallel-fixed"],
         "decade": ["decade-gap"]
     }

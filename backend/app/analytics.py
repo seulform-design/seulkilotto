@@ -276,8 +276,9 @@ def generate_smart_sets(
 # 5) 가중 앙상블 (Weighted Soft Voting Matrix) 및 스마트 필터 조합 생성기
 # =============================================================================
 def _passes_ensemble_filters(
-    comb: Tuple[int, ...], 
-    extinct_sections: Set[int] = None
+    comb: Tuple[int, ...],
+    extinct_sections: Set[int] = None,
+    avoid_popular: bool = True,
 ) -> bool:
     """조합이 총합, 홀짝, 고저, 연번, 공간 압축 필터를 모두 충족하는지 검증합니다."""
     # 1. 총합 필터 (100 ~ 170)
@@ -317,7 +318,23 @@ def _passes_ensemble_filters(
                 section = 4
             if section in extinct_sections:
                 return False
-                
+
+    # 6. 공동당첨 회피 — 과다 선택되는 '인기 조합' 형태를 배제한다.
+    #    ⚠️ 적중 '확률'은 어떤 선택으로도 못 올린다(로또는 i.i.d.). 다만 당첨 시 같은
+    #    번호를 고른 사람이 많으면 상금을 나눠(공동당첨) 실수령액이 급감하므로, 인기
+    #    형태를 피하는 것은 '기대수령액'을 높이는 수학적으로 유일하게 의미 있는 레버다.
+    #    아래 형태들은 무작위 샘플에서 드물어 후보 풀 영향은 미미하다.
+    if avoid_popular:
+        # (a) 6개 전부 31 이하 = 생일/날짜 조합(가장 과다 선택되는 형태)
+        if all(x <= 31 for x in comb):
+            return False
+        # (b) 등차수열(간격 일정) = 수동 인기 패턴 (예: 2, 8, 14, 20, 26, 32)
+        if len({comb[i + 1] - comb[i] for i in range(len(comb) - 1)}) == 1:
+            return False
+        # (c) 끝자리가 전부 동일 (예: 3, 13, 23, 33, 43)
+        if len({x % 10 for x in comb}) == 1:
+            return False
+
     return True
 
 
@@ -392,6 +409,14 @@ def generate_ensemble_sets(
     
     # 백테스팅 결과를 지수 시간 감쇄 가중치로 가중합
     for eng in engine_groups.keys():
+        # ⚡ 추천 번호가 0개인 엔진은 기여가 전혀 없으므로 가중치 0.
+        # (용지 미입력 시 photo 가 기본 가중치만 받아 'photo 21.3%'처럼 표시돼 실제론
+        #  번호에 영향 없는데도 1236 용지가 학습되는 듯한 오해를 유발했다. 기여 없는
+        #  엔진에 기본 가중치를 주면 표시가 오도될 뿐 아니라 정규화 질량을 낭비해
+        #  실제 엔진들의 유효 가중치를 희석한다.)
+        if not engine_picks[eng]:
+            engine_weights[eng] = 0.0
+            continue
         # post 및 photo 는 속도/입력 의존성으로 인해 백테스트가 누락되거나 제한적일 수 있으므로
         # 기본 가중치를 주되 다른 엔진들의 평균값에 동조시킴
         src_data = accuracy_data.get("by_source", {}).get(eng)
@@ -492,7 +517,9 @@ def generate_ensemble_sets(
             attempts += 1
             picked = rng.choice(balls, size=6, replace=False, p=probabilities)
             selected_comb = tuple(sorted(picked.tolist()))
-            if _passes_ensemble_filters(selected_comb, extinct_sections=None):
+            # 최후 수단: 멸 구간·인기회피까지 완화해 요청 세트 수를 반드시 채운다
+            # (인기 형태는 드물어 여기까지 오는 경우는 거의 없다).
+            if _passes_ensemble_filters(selected_comb, extinct_sections=None, avoid_popular=False):
                 final_combinations.add(selected_comb)
 
     combinations_list = []
@@ -513,10 +540,12 @@ def generate_ensemble_sets(
         "engine_weights": engine_weights_pct,
         "extinct_sections": [worst_section],
         "combinations": combinations_list,
-        "strategy": "가중 투표 앙상블 + 5대 스마트 필터 + 공간 압축",
+        "strategy": "가중 투표 앙상블 + 5대 스마트 필터 + 공간 압축 + 공동당첨 회피",
         "disclaimer": (
             f"대상: {target}회차 추천. 각 분석 엔진의 최근 {lookback}회차 실시간 적중 정밀도를 "
-            "기반으로 가중합산(Soft Voting)하여 통계적 다수 분포 영역 및 공간 압축 시뮬레이션을 거친 고밀도 조합입니다."
+            "기반으로 가중합산(Soft Voting)하여 통계적 다수 분포 영역 및 공간 압축 시뮬레이션을 거친 고밀도 조합입니다. "
+            "⚠️ 로또는 i.i.d.라 적중 '확률'은 어떤 선택으로도 올릴 수 없습니다. 본 추천은 인기 조합(생일대역·"
+            "등차·끝자리 동일)을 배제해 당첨 시 공동당첨으로 인한 상금 분할을 줄이는 '기대수령액' 최적화만 수행합니다."
         )
     }
 

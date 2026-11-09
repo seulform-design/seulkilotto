@@ -25,6 +25,7 @@ import AppStatusBar from './components/AppStatusBar';
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const RoundsPage = lazy(() => import('./pages/RoundsPage'));
 const RecommendPage = lazy(() => import('./pages/RecommendPage'));
+const AnalysisEnginePage = lazy(() => import('./pages/AnalysisEnginePage'));
 const FortunePickPage = lazy(() => import('./pages/FortunePickPage'));
 
 function PageFallback() {
@@ -40,13 +41,14 @@ function PageFallback() {
 
 /**
  * 탭 분류:
- *  - 데이터: dashboard, rounds(회차 심층분석)
+ *  - 데이터: dashboard, rounds(회차 심층분석), analysis(기존 분석·검증 엔진 복구 탭)
  *  - 추천: recommend(추첨데이터 기반 앙상블), fortune
  *  용지(자동/반자동) 입력 시스템은 폐지됨.
  */
 const TABS = [
   { id: 'dashboard', label: '대시보드' },
   { id: 'rounds', label: '회차' },
+  { id: 'analysis', label: '🔬 분석 엔진' },
   { id: 'recommend', label: '🎯 번호추천' },
   { id: 'fortune', label: '👵 할매 예상' },
 ] as const;
@@ -58,7 +60,7 @@ const APP_TAB_STORAGE_KEY = 'lotto:app:active-tab:v1';
 const LEGACY_TAB_REMAP: Record<string, TabId> = {
   photo: 'recommend',
   composite: 'recommend',
-  post: 'recommend',
+  post: 'analysis',
 };
 
 function loadInitialTab(): TabId {
@@ -117,6 +119,7 @@ export default function App() {
         <Suspense fallback={<PageFallback />}>
           {tab === 'dashboard' && <DashboardPage />}
           {tab === 'rounds' && <RoundsPage />}
+          {tab === 'analysis' && <AnalysisEnginePage />}
           {tab === 'recommend' && <RecommendPage />}
           {tab === 'fortune' && <FortunePickPage />}
         </Suspense>

@@ -338,6 +338,9 @@ def _passes_ensemble_filters(
     return True
 
 
+ENSEMBLE_ALGORITHM_VERSION = "ensemble-2.0-sig-gated-coselection"
+
+
 def generate_ensemble_sets(
     df: pd.DataFrame,
     n_sets: int = 15,
@@ -365,7 +368,7 @@ def generate_ensemble_sets(
     target = signals.get("target_round")
     
     # 전체 1~45번에 대해 엔진별 추천 여부 추출
-    # 엔진 목록: machine, post_occurrence, classic, photo_sheet, parallel_round, decade_gap
+    # 엔진 목록: machine, post_occurrence, classic, parallel_round, decade_gap (용지 신호 폐지)
     # ranked_numbers 혹은 strong_details 에서 번호별 출처 목록을 확보
     ranked_list = signals.get("ranked_numbers") or []
     # 25위 이후의 번호들도 포함하여 전체 번호 매핑 확보를 위해 ranked_list 보완 처리
@@ -402,72 +405,68 @@ def generate_ensemble_sets(
             if any(k in srcs for k in keywords):
                 engine_picks[eng].add(num)
 
-    # 2. 최근 N회차 백테스트 적중률 스코어링을 통한 동적 가중치 부여
-    accuracy_data = backtest_signal_accuracy(df, target, rounds=lookback)
-    engine_weights = {}
-    
-    # 백테스팅 결과를 지수 시간 감쇄 가중치로 가중합
+    # 2. 엔진 가중치 — 통계적 유의성 게이트.
+    #    최근 lookback 회차 적중을 초기하 기준(무작위)과 비교해, 다중검정(Bonferroni,
+    #    엔진 수) 보정 후에도 무작위를 유의하게 넘는 엔진만 성능 가중을 받는다. 유의하지
+    #    않은 적중률(소표본 노이즈)은 신호로 쓰지 않고 기여 엔진 간 동일 가중으로 둔다.
+    #    (이전 구현은 10회차 정밀도를 그대로 가중치로 써 우연 변동을 신호로 사용했다.)
+    import math as _math
+
+    # 대상 회차 이전 회차만 평가(누수 차단) — 과거 target_round/복기에서 미래 당첨 참조 금지
+    accuracy_data = backtest_signal_accuracy(df, target, rounds=lookback, before_round=int(target))
+    n_engines = sum(1 for e in engine_groups if engine_picks[e])
+    bonf_alpha = alpha_sig / max(1, n_engines)
+    engine_weights: Dict[str, float] = {}
+    engine_evidence: Dict[str, Dict] = {}
     for eng in engine_groups.keys():
-        # ⚡ 추천 번호가 0개인 엔진은 기여가 전혀 없으므로 가중치 0.
-        # (용지 미입력 시 photo 가 기본 가중치만 받아 'photo 21.3%'처럼 표시돼 실제론
-        #  번호에 영향 없는데도 1236 용지가 학습되는 듯한 오해를 유발했다. 기여 없는
-        #  엔진에 기본 가중치를 주면 표시가 오도될 뿐 아니라 정규화 질량을 낭비해
-        #  실제 엔진들의 유효 가중치를 희석한다.)
+        # 추천 번호가 0개인 엔진은 기여가 없으므로 가중치 0(표시 오도·질량 희석 방지).
         if not engine_picks[eng]:
             engine_weights[eng] = 0.0
+            engine_evidence[eng] = {"available": False, "reason": "추천 번호 없음"}
             continue
-        # post 및 photo 는 속도/입력 의존성으로 인해 백테스트가 누락되거나 제한적일 수 있으므로
-        # 기본 가중치를 주되 다른 엔진들의 평균값에 동조시킴
-        src_data = accuracy_data.get("by_source", {}).get(eng)
-        
-        if src_data and src_data.get("available"):
-            per_round = src_data.get("per_round", [])
-            n_rounds = len(per_round)
-            
-            # 지수 감쇄 가중치 생성
-            weights = np.array([decay_factor ** (n_rounds - 1 - i) for i in range(n_rounds)])
-            weights /= weights.sum()
-            
-            precisions = []
-            p_values = []
-            for i, r_info in enumerate(per_round):
-                hits = r_info.get("hits", 0)
-                pred_cnt = len(r_info.get("predicted", []))
-                precision = hits / pred_cnt if pred_cnt > 0 else 0
-                precisions.append(precision)
-                
-                # p-value 계산 (45개 중 6개 당첨, pred_cnt 개 추천하여 hits 개 적중)
-                p_val = 1.0 if hits == 0 else float(hypergeom.sf(hits - 1, 45, 6, pred_cnt))
-                p_values.append(p_val)
-                
-            weighted_precision = float(np.sum(np.array(precisions) * weights))
-            mean_p_value = float(np.mean(p_values))
-            
-            # 노이즈 패널티 규제 적용
-            p_penalty = 1.0 if mean_p_value < alpha_sig else np.exp(-lambda_reg * (mean_p_value - alpha_sig) * 10)
-            
-            # 추천 개수가 너무 많은 과적합 엔진 패널티
-            current_pick_len = len(engine_picks[eng])
-            pick_penalty = 1.0
-            if current_pick_len > 15:
-                pick_penalty = np.exp(-0.02 * (current_pick_len - 15) ** 2)
-                
-            engine_weights[eng] = weighted_precision * p_penalty * pick_penalty
+        src_data = accuracy_data.get("by_source", {}).get(eng) or {}
+        per_round = src_data.get("per_round", []) if src_data.get("available") else []
+        hits_sum = exp_sum = var_sum = 0.0
+        for r_info in per_round:
+            k = len(r_info.get("predicted", []))
+            if k <= 0 or k >= 45:
+                continue
+            hits_sum += r_info.get("hits", 0)
+            exp_sum += k * 6 / 45
+            var_sum += k * (6 / 45) * (39 / 45) * ((45 - k) / 44)
+        n_r = len(per_round)
+        if var_sum > 0:
+            z = (hits_sum - exp_sum) / _math.sqrt(var_sum)
+            p_val = 0.5 * _math.erfc(z / _math.sqrt(2))
         else:
-            # 백테스트 불가능한 엔진 (photo, post 등)은 기본 가중치 적용
-            if eng == "photo":
-                engine_weights[eng] = 0.08  # 용지 기반 중립 가중치
-            elif eng == "post":
-                engine_weights[eng] = 0.12  # 후속출현 중립 가중치
-            else:
-                engine_weights[eng] = 0.05
-                
+            p_val = 1.0
+        significant = bool(n_r >= 5 and p_val < bonf_alpha and hits_sum > exp_sum)
+        engine_evidence[eng] = {
+            "available": bool(per_round),
+            "rounds": n_r,
+            "hits": int(hits_sum),
+            "expected_hits": round(exp_sum, 2),
+            "lift": round(hits_sum / exp_sum, 3) if exp_sum > 0 else 0.0,
+            "p_value": round(float(p_val), 4),
+            "significant": significant,
+        }
+        base = 1.0
+        if significant:
+            # 유의한 엔진만 관측 lift 만큼 가중(상한 2배 — 과신 방지)
+            base = float(min(2.0, hits_sum / exp_sum))
+        # 추천 개수가 너무 많은 엔진(넓은 그물)은 신호 집중도가 낮아 완만히 감쇠
+        cur = len(engine_picks[eng])
+        if cur > 15:
+            base *= float(np.exp(-0.02 * (cur - 15) ** 2))
+        engine_weights[eng] = base
+
     total_w = sum(engine_weights.values())
     if total_w > 0:
         engine_weights = {k: v / total_w for k, v in engine_weights.items()}
     else:
         engine_weights = {k: 1.0 / len(engine_weights) for k in engine_weights.keys()}
-        
+    any_engine_significant = any(v.get("significant") for v in engine_evidence.values())
+
     # 3. 번호별 확률 맵 (Probability Map) 연산
     prob_map = np.zeros(46)
     for eng, pick_set in engine_picks.items():
@@ -521,30 +520,96 @@ def generate_ensemble_sets(
             if _passes_ensemble_filters(selected_comb, extinct_sections=None, avoid_popular=False):
                 final_combinations.add(selected_comb)
 
+    # 6. 공동선택 회피 선별 — 모든 조합의 1등 확률은 동일하므로, 같은 후보 풀 안에서
+    #    '남들이 덜 고를' 조합(회피 점수↑)을 우선하고 세트 간 공유 번호를 ≤3 으로 제한해
+    #    다양성을 확보한다. 이는 확률이 아니라 당첨 시 기대수령액만 개선한다.
+    from .stats_engine import coselection
+    from .stats_engine.probability import tickets_probability as _tickets_probability
+
+    pool_set = set(final_combinations)
+    # 후보 풀 확장(요청 수의 4배) — 선별 여지를 주되 같은 가중 샘플링 분포·필터를 유지
+    extra_attempts = 0
+    while len(pool_set) < n_sets * 4 and extra_attempts < max_attempts:
+        extra_attempts += 1
+        picked = rng.choice(balls, size=6, replace=False, p=probabilities)
+        comb_t = tuple(sorted(picked.tolist()))
+        if _passes_ensemble_filters(comb_t, extinct_sections):
+            pool_set.add(comb_t)
+    scored = sorted(
+        ((c, coselection.assess(c)) for c in pool_set),
+        key=lambda t: (-t[1]["avoidance_score"], t[0]),
+    )
+    chosen: List[Tuple[Tuple[int, ...], Dict]] = []
+    for c, a_ in scored:
+        if len(chosen) >= n_sets:
+            break
+        if all(len(set(c) & set(x)) <= 3 for x, _ in chosen):
+            chosen.append((c, a_))
+    for c, a_ in scored:  # 다양성 제약으로 모자라면 점수 순으로 채움
+        if len(chosen) >= n_sets:
+            break
+        if all(c != x for x, _ in chosen):
+            chosen.append((c, a_))
+
     combinations_list = []
-    for comb in sorted(list(final_combinations)):
+    for comb, assess in sorted(chosen, key=lambda t: t[0]):
         nums = list(comb)
         combinations_list.append({
             "numbers": nums,
             "sum_total": int(sum(nums)),
             "odd_count": sum(1 for n in nums if n % 2 != 0),
             "even_count": sum(1 for n in nums if n % 2 == 0),
+            "coselection": {
+                "avoidance_score": assess["avoidance_score"],
+                "risk": assess["risk"],
+                "grade": assess["grade"],
+                "factors": [f["label"] for f in assess["factors"]],
+            },
+            "jackpot_probability": "1/8,145,060",
         })
-        
+
     # UI 대응용 기여도 메타
     engine_weights_pct = {k: round(v * 100, 1) for k, v in engine_weights.items()}
-    
-    return {
+    div = coselection.diversity([c["numbers"] for c in combinations_list])
+
+    result = {
         "target_round": target,
         "engine_weights": engine_weights_pct,
         "extinct_sections": [worst_section],
         "combinations": combinations_list,
-        "strategy": "가중 투표 앙상블 + 5대 스마트 필터 + 공간 압축 + 공동당첨 회피",
+        "strategy": "엔진 후보 풀(유의성 게이트 가중) + 5대 필터 + 공간 압축 + 공동선택 회피 선별",
+        "algorithm_version": ENSEMBLE_ALGORITHM_VERSION,
+        "rationale": {
+            "candidate_pool": "추첨데이터 5엔진(machine·post·classic·parallel·decade)의 추천 번호 합집합에서 가중 샘플링",
+            "engine_evidence": engine_evidence,
+            "weights_significant": any_engine_significant,
+            "weighting_rule": (
+                f"최근 {lookback}회 적중이 Bonferroni(α={round(bonf_alpha, 4)}) 보정 후 무작위를 유의하게 넘는 "
+                "엔진만 성능 가중. 그 외는 동일 가중(우연 변동을 신호로 쓰지 않음)."
+            ),
+            "selection_rule": "후보 중 공동선택 회피 점수 높은 순 + 세트 간 공유 번호 ≤3",
+        },
+        "diversity": div,
+        "uncertainty": {
+            "jackpot_probability_per_set": "1/8,145,060 (모든 조합 동일)",
+            "expected_main_matches_per_set": 0.8,
+            "engines_beating_random": [e for e, v in engine_evidence.items() if v.get("significant")],
+            "note": (
+                "엔진 적중률은 소표본(최근 회차) 기준이라 불확실성이 큽니다. 유의한 엔진이 없으면 "
+                "추천 번호는 무작위 선택과 적중 기대가 같습니다."
+            ),
+        },
+        "coselection_basis": coselection.ESTIMATE_BASIS,
+        # 수학적 확률(kind=mathematical) — 백테스트·회피 점수와 분리된 필드
+        "probability": _tickets_probability([c["numbers"] for c in combinations_list]),
         "disclaimer": (
-            f"대상: {target}회차 추천. 각 분석 엔진의 최근 {lookback}회차 실시간 적중 정밀도를 "
-            "기반으로 가중합산(Soft Voting)하여 통계적 다수 분포 영역 및 공간 압축 시뮬레이션을 거친 고밀도 조합입니다. "
-            "⚠️ 로또는 i.i.d.라 적중 '확률'은 어떤 선택으로도 올릴 수 없습니다. 본 추천은 인기 조합(생일대역·"
-            "등차·끝자리 동일)을 배제해 당첨 시 공동당첨으로 인한 상금 분할을 줄이는 '기대수령액' 최적화만 수행합니다."
-        )
+            f"대상: {target}회차 추천. ⚠️ 로또는 i.i.d.라 적중 '확률'은 어떤 선택으로도 올릴 수 없습니다"
+            "(모든 조합 1/8,145,060). 엔진 신호는 후보 풀을 정할 뿐 예측력이 검증되지 않았습니다. "
+            "본 추천이 실제로 개선하는 것은 인기 조합(생일대역·연속·등차·규칙 배열)을 피해 당첨 시 "
+            "공동당첨 분할을 줄이는 '기대수령액'뿐이며, 공동선택 점수는 실제 구매 데이터가 없는 추정치입니다."
+        ),
     }
+    if len(combinations_list) < n_sets:
+        result["warning"] = f"요청 {n_sets}조합 중 {len(combinations_list)}조합만 생성됐습니다."
+    return result
 

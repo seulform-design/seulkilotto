@@ -18,6 +18,9 @@ def get_meta():
     # 배포 스모크: Railway 가 옛 이미지를 남기면 이 값이 안 바뀐다.
     out["coverage_build"] = COVERAGE_BUILD_ID
     out["graft_build"] = GRAFT_BUILD_ID
+    from ..stats_engine import ENGINE_VERSION
+
+    out["stats_engine"] = ENGINE_VERSION
     return out
 
 

@@ -31,6 +31,8 @@ def warm_engine_caches(context: str = "warm") -> None:
         from .video_analysis.graft_coverage import build_graft_coverage
         from .video_analysis.carryover_learning import build_carryover_learning
         from .prediction_signals import build_prediction_signals
+        from .stats_engine.backtest import build_full_history_backtest
+        from .stats_engine.windows import build_window_stats
     except Exception as exc:  # noqa: BLE001
         logger.warning("[%s] 프리워밍 import 실패: %s", context, exc)
         return
@@ -42,6 +44,9 @@ def warm_engine_caches(context: str = "warm") -> None:
         ("carryover", build_carryover_learning),
         ("graft:review", lambda: build_graft_coverage(intent="review")),
         ("graft:current", lambda: build_graft_coverage(intent="current_round")),
+        # 회차 통계 엔진(당첨 이력 전용) — 전체 이력 백테스트·윈도우 통계
+        ("full_history_backtest", build_full_history_backtest),
+        ("window_stats", build_window_stats),
     ]
     for intent in ("current_round", "review"):
         calls.append((f"feature:{intent}", lambda i=intent: build_feature_learning(apply_intent=i)))

@@ -23,6 +23,7 @@ from .routers import (
     meta,
     patterns,
     parallel_round,
+    photo_analysis,
     post_occurrence,
     prediction_signals,
     recommend,
@@ -99,6 +100,10 @@ app.include_router(recommend.router)
 app.include_router(meta.router)
 app.include_router(data.router)
 app.include_router(post_occurrence.router)
+# 용지 입력 UI 는 폐지됐지만 이 라우터에는 회차 데이터 기반 학습·검증 API(round/feature/
+# pattern/overlap/graft/nested-cv/shap/carryover/full-history-backtest)와 보관 데이터 API 가
+# 함께 있다 — 기존 API 보존 원칙에 따라 다시 마운트한다(2026-11-10 복구).
+app.include_router(photo_analysis.router)
 app.include_router(prediction_signals.router)
 app.include_router(parallel_round.router)
 app.include_router(datasets.router)

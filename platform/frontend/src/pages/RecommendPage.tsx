@@ -25,13 +25,52 @@ import { v1Api } from '../api/v1Api';
 
 type Intent = 'current_round' | 'review';
 
+interface CoselectionInfo {
+  avoidance_score: number;
+  risk: number;
+  grade: 'excellent' | 'good' | 'fair' | 'poor';
+  factors: string[];
+}
+
+interface EngineEvidence {
+  available: boolean;
+  rounds?: number;
+  hits?: number;
+  expected_hits?: number;
+  lift?: number;
+  p_value?: number;
+  significant?: boolean;
+}
+
 interface EnsembleResult {
-  combinations: { numbers: number[]; sum_total?: number; odd_count?: number; even_count?: number }[];
+  combinations: {
+    numbers: number[];
+    sum_total?: number;
+    odd_count?: number;
+    even_count?: number;
+    coselection?: CoselectionInfo;
+  }[];
   engine_weights?: Record<string, number>;
   target_round?: number;
   strategy?: string | null;
   disclaimer?: string | null;
+  algorithm_version?: string;
+  rationale?: {
+    engine_evidence?: Record<string, EngineEvidence>;
+    weights_significant?: boolean;
+    weighting_rule?: string;
+    selection_rule?: string;
+  };
+  diversity?: { mean_shared: number; max_shared: number; unique_numbers: number; random_expected_shared?: number };
+  coselection_basis?: string;
 }
+
+const GRADE_LABEL: Record<CoselectionInfo['grade'], string> = {
+  excellent: '매우 희소',
+  good: '희소',
+  fair: '보통',
+  poor: '인기 편중',
+};
 
 const ENGINE_LABEL: Record<string, string> = {
   machine: '추첨기',
@@ -85,8 +124,8 @@ export default function RecommendPage() {
 
       <Alert severity="info" variant="outlined" sx={{ borderRadius: 2 }}>
         로또는 i.i.d.라 <strong>적중 확률(1등 1/8,145,060)은 어떤 방법으로도 올릴 수 없습니다.</strong> 이
-        추천은 인기 조합(생일대역·등차·끝자리 동일)을 배제해 <strong>당첨 시 공동당첨 분할을 줄이는 기대수령액
-        최적화</strong>만 수행합니다.
+        추천은 인기 조합(생일대역·연속·등차·규칙 배열)을 피해 <strong>당첨 시 공동당첨 분할을 줄이는 기대수령액
+        최적화</strong>만 수행합니다. 공동선택 회피 점수는 실제 구매 데이터가 없는 <strong>추정치</strong>입니다.
       </Alert>
 
       <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
@@ -126,6 +165,18 @@ export default function RecommendPage() {
         </Stack>
       )}
 
+      {data?.rationale?.engine_evidence && (
+        <Typography variant="caption" color="text.secondary" component="div">
+          {data.rationale.weights_significant
+            ? '일부 엔진이 다중검정 보정 후에도 무작위보다 유의하게 적중했습니다(소표본 — 재현 확인 필요).'
+            : '어떤 엔진도 최근 적중이 무작위보다 유의하지 않아 동일 가중을 사용했습니다(우연 변동을 신호로 쓰지 않음).'}{' '}
+          {Object.entries(data.rationale.engine_evidence)
+            .filter(([, e]) => e.available)
+            .map(([k, e]) => `${ENGINE_LABEL[k] ?? k} ${e.hits}/${e.expected_hits}(p=${e.p_value})`)
+            .join(' · ')}
+        </Typography>
+      )}
+
       {ensembleQuery.isError && (
         <Alert severity="error">추천 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.</Alert>
       )}
@@ -159,10 +210,27 @@ export default function RecommendPage() {
                 합 {c.sum_total} · 홀{c.odd_count}:짝{c.even_count}
               </Typography>
             )}
+            {c.coselection && (
+              <Chip
+                size="small"
+                color={c.coselection.grade === 'poor' ? 'warning' : c.coselection.grade === 'fair' ? 'default' : 'success'}
+                variant="outlined"
+                label={`공동선택 회피 ${c.coselection.avoidance_score} · ${GRADE_LABEL[c.coselection.grade]}`}
+                title={c.coselection.factors.join(', ') || '특이 인기 패턴 없음'}
+              />
+            )}
             <ComboActions numbers={c.numbers} source="recommend" label={`번호추천 ${idx + 1}세트`} />
           </Paper>
         ))}
       </Stack>
+
+      {data?.diversity && (
+        <Typography variant="caption" color="text.secondary">
+          세트 다양성: 세트 간 평균 공유 {data.diversity.mean_shared}개(최대 {data.diversity.max_shared}) · 고유 번호{' '}
+          {data.diversity.unique_numbers}개
+          {data.algorithm_version ? ` · 알고리즘 ${data.algorithm_version}` : ''}
+        </Typography>
+      )}
 
       {data?.disclaimer && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>

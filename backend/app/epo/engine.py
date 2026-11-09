@@ -185,9 +185,19 @@ def run(df: pd.DataFrame, config: EpoConfig) -> EpoResult:
 
     # ── 자기 검증 ──────────────────────────────────────────
     if config.enable_backtest:
+        # 학습/검증 분리(2026-11-10): 게이트용 predicate 는 홀드아웃 회차를 뺀 이력으로
+        # 만든 프로필로 구성해 '자기 자신을 포함한 분포로 자신을 검증'하는 인샘플 판정을
+        # 피한다(측정: 인샘플 HPR 39.0% vs 아웃오브샘플 43.5% — 판정은 동일). 실제 생성에
+        # 쓰는 epo_predicates 는 전체 이력 프로필 그대로다.
+        _ordered = df.sort_values("round") if "round" in df.columns else df
+        _h = int(config.backtest_holdout)
+        if len(_ordered) - _h >= 50:
+            _gate_preds, _, _ = _resolve_predicates(config, compute_profile(_ordered.iloc[:-_h]))
+        else:
+            _gate_preds = epo_predicates
         bt = evaluate_filters(
             df,
-            epo_predicates,
+            _gate_preds,
             holdout=config.backtest_holdout,
             pass_threshold=config.backtest_threshold,
         )

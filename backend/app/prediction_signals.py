@@ -11,6 +11,7 @@ from .machine_analytics import build_round_recommendation, predict_next_round
 from .post_occurrence_engine import run_post_occurrence_analysis
 from .parallel_round_analysis import analyze_parallel_rounds
 from .video_analysis.store import store_signature
+from .stats_engine.draws import history_signature
 
 RULES_VERSION = "1.1"
 STRONG_LIMIT = 18
@@ -335,8 +336,24 @@ def _source_top_numbers(df_prior, source: str, target_round: int, top_k: int) ->
     return ranked[:top_k]
 
 
-def backtest_signal_accuracy(df, latest_round: int, *, rounds: int = 12, top_k: int = _BACKTEST_TOP_K) -> Dict[str, Any]:
-    cache_key = (latest_round, rounds, top_k)
+def backtest_signal_accuracy(
+    df,
+    latest_round: int,
+    *,
+    rounds: int = 12,
+    top_k: int = _BACKTEST_TOP_K,
+    before_round: Optional[int] = None,
+) -> Dict[str, Any]:
+    """신호원별 walk-forward 적중률.
+
+    ⚠️ 누수 방지(2026-11-10 수정): `before_round` 를 주면 **그 회차 미만**만 평가한다.
+    이전 구현은 `latest_round` 인자를 무시하고 항상 전체 이력의 마지막 N회를 평가해,
+    복기(대상=이미 추첨된 회차)나 과거 target_round 추천에서 대상 회차 자신·이후 회차의
+    실제 당첨번호로 소스 가중치를 정했다(미래 데이터 참조). 가중치 산정 호출부는 반드시
+    before_round=대상회차 로 호출한다. 표시용(최근 성적표)은 None 으로 전체 사용.
+    """
+    # 과거 회차 번호 정정도 무효화되도록 원본 시그니처를 키에 포함(최신 회차만으론 못 잡음)
+    cache_key = (latest_round, rounds, top_k, before_round, history_signature())
     now = time.monotonic()
     cached = _ACCURACY_CACHE.get(cache_key)
     if cached is not None and now - cached[0] < _ACCURACY_CACHE_TTL_SEC:
@@ -348,7 +365,10 @@ def backtest_signal_accuracy(df, latest_round: int, *, rounds: int = 12, top_k: 
         return {"available": False, "by_source": {}, "rounds": 0}
     # 충분한 prior 데이터(≥50회차)가 있는 최근 rounds 회차만 평가
     floor_round = all_rounds[0] + 50
-    test_rounds = [r for r in all_rounds if r >= floor_round][-rounds:]
+    test_rounds = [
+        r for r in all_rounds
+        if r >= floor_round and (before_round is None or r < int(before_round))
+    ][-rounds:]
     random_baseline = round(top_k * 6 / 45, 3)  # top_k개 중 기대 적중 수
 
     per_source: Dict[str, Any] = {}
@@ -393,6 +413,8 @@ def backtest_signal_accuracy(df, latest_round: int, *, rounds: int = 12, top_k: 
         "weakest_source": weakest,
         "strongest_source": strongest,
         "excluded_sources": ["post_occurrence"],
+        "before_round": before_round,
+        "tested_rounds": test_rounds,
         "note": (
             "각 신호원이 과거 회차를 맞춘 정도(walk-forward). avg_hits 가 "
             f"무작위 기대치({random_baseline})보다 낮으면 약한 신호 → 이번회차 "
@@ -499,7 +521,7 @@ def build_prediction_signals(
     )
 
     # 캐시 조회 — intent·대상회차·저장소가 같으면 재사용
-    cache_key = (intent, seed, latest_round, target, machine_id, store_signature())
+    cache_key = (intent, seed, latest_round, target, machine_id, store_signature(), history_signature())
     now = time.monotonic()
     cached = _SIGNAL_CACHE.get(cache_key)
     if cached is not None and now - cached[0] < _SIGNAL_CACHE_TTL_SEC:
@@ -542,7 +564,8 @@ def build_prediction_signals(
     decade_src = _apply_decade_gap_signals(scores, sources, df_signal)
 
     # ── [엔진④ 보강] 백테스트 기반 동적 가중치 스케일링 & 다차원 합의 시너지 부스팅 ──
-    accuracy = backtest_signal_accuracy(df, latest_round, rounds=8)
+    # 가중치 산정은 대상 회차 '이전' 회차 성적만 사용(복기·과거 target 누수 차단).
+    accuracy = backtest_signal_accuracy(df, latest_round, rounds=8, before_round=int(target))
     multipliers = {}
     if accuracy.get("available"):
         rand_base = accuracy.get("random_baseline", 1.333) or 1.333
@@ -632,6 +655,15 @@ def build_prediction_signals(
             "machine": machine_src,
             "post_occurrence": post_src,
             "classic": classic_src,
+            # 응답 스키마 보존: 용지 신호는 2026-11-07 사용자 지시로 추천에서 분리됐다.
+            # 키는 유지하고 비활성 상태만 명시한다(번호 점수 기여 0).
+            "photo_sheet": {
+                "available": False,
+                "disabled": True,
+                "intent": intent,
+                "total_analyses": 0,
+                "reason": "용지(photo) 신호는 추천에서 분리됨 — 추첨 데이터 기반 신호만 사용",
+            },
             "parallel_round": parallel_src,
             "decade_gap": decade_src,
         },

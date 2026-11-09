@@ -744,6 +744,25 @@ export const v1Api = {
       { timeoutMs: 60_000, heavy: true },
     ),
 
+  /** 6개 1장 단위 백테스트 — 일치 분포(3/4/5/5+보너스/6)·기간별 성능·무작위 Monte Carlo 기준선. */
+  getTicketBacktest: (reps = 200) =>
+    fetchJson<Record<string, any>>(`/api/v1/stats/ticket-backtest?reps=${reps}`, {
+      timeoutMs: 90_000,
+      heavy: true,
+    }),
+
+  /** 표본 크기별(전체·100·50·30·10회) 통계 + 균등성 검정 + 다중비교 보정. */
+  getWindowStats: () =>
+    fetchJson<Record<string, any>>('/api/v1/stats/windows', { timeoutMs: 60_000, heavy: true }),
+
+  /** 회차 데이터 무결성(누락·중복·범위·보너스·날짜·집계 합계) + 캐시 상태. */
+  getDataIntegrity: () =>
+    fetchJson<Record<string, any>>('/api/v1/stats/integrity', { timeoutMs: 30_000 }),
+
+  /** 수학적 기준값 — C(45,6), 단일/복수 조합 1등 확률, 등수 확률. */
+  getProbability: (n = 1) =>
+    fetchJson<Record<string, any>>(`/api/v1/stats/probability?n=${n}`, { timeoutMs: 15_000 }),
+
   /** 복기 엔트리 회차 재귀속(관리자) — 라벨만 교정, 보관 정본 불변, 원본 회차 보존. */
   reattributeEntries: (fromRound: number, toRound: number, entryIds?: string[]) =>
     fetchJson<{

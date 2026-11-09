@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+from pydantic import BaseModel, Field
+from typing import List
 from fastapi import APIRouter, HTTPException, Query
 
 from .. import analytics, co_occurrence, temperature, walk_forward as wf
@@ -176,16 +178,81 @@ def get_walk_forward(
 def get_full_history_backtest(warmup: int = Query(50, ge=10, le=500)):
     """전체 당첨 이력 워크포워드 백테스트 — 흔한 전략(핫·콜드·미출·최근·페어·회피)이
     무작위를 이기는지 수백~1200+ 회차로 검정한다. 각 회차는 이전 회차만으로 예측하고 그
-    회차로 채점(누수 없음). 다중검정 보정(Bonferroni)으로 위양성(예: 콜드 top18)을 걸러낸다.
-    ⚠️ 로또 i.i.d. — 확률(1/8,145,060)은 어떤 전략으로도 불변. 큰 표본으로도 우위 없음을
-    정직하게 확정하는 도구다(회차 무관 전역 분석이라 캐시 가능).
+    회차로 채점(누수 없음). 다중검정 보정(Bonferroni)으로 위양성을 걸러낸다.
+    ⚠️ 로또 i.i.d. — 확률(1/8,145,060)은 어떤 전략으로도 불변.
 
-    (용지 폐지 전 /photo-analysis 에 있던 전역 백테스트를 회차 통계 라우터로 이관.)
+    독립 회차 통계 엔진(`app.stats_engine.backtest`) 사용 — 용지(photo) 모듈 비의존.
+    데이터 부족 시 200 + ok=false, 계산 오류 시 500 + 명확한 detail.
     """
     from ..json_utils import to_jsonable
-    from ..video_analysis.full_history_backtest import build_full_history_backtest
+    from ..stats_engine.backtest import build_full_history_backtest
 
-    return to_jsonable(build_full_history_backtest(warmup=warmup))
+    try:
+        return to_jsonable(build_full_history_backtest(warmup=warmup))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"전체 이력 백테스트 계산 실패: {exc}") from exc
+
+
+@router.get("/ticket-backtest")
+def get_ticket_backtest(
+    warmup: int = Query(50, ge=10, le=500),
+    reps: int = Query(200, ge=10, le=1000, description="무작위 기준선 Monte Carlo 반복 수"),
+):
+    """6개 1장 단위 전체 이력 walk-forward — 일치 개수(0~6)·3/4/5/5+보너스/6 횟수, 기간별
+    성능, 번호별 적중 빈도, 이론 초기하 분포·무작위 Monte Carlo 기준선 비교(다중검정 보정).
+    ⚠️ 백테스트(kind=backtest)는 수학적 확률(kind=mathematical)과 다르며 미래 확률을 바꾸지 않는다."""
+    from ..json_utils import to_jsonable
+    from ..stats_engine.backtest import RANDOM_SEED, build_ticket_backtest
+
+    try:
+        return to_jsonable(build_ticket_backtest(warmup=warmup, reps=reps, seed=RANDOM_SEED))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"티켓 백테스트 계산 실패: {exc}") from exc
+
+
+@router.get("/probability")
+def get_probability(n: int = Query(1, ge=0, le=8_145_060, description="서로 다른 조합 수")):
+    """수학적 기준값 — C(45,6)=8,145,060, 단일/서로 다른 n장 1등 확률, 일치 개수·등수 확률."""
+    from ..stats_engine.probability import summary
+
+    return summary(n)
+
+
+class _TicketsBody(BaseModel):
+    tickets: List[List[int]] = Field(..., max_length=10000)
+
+
+@router.post("/probability/tickets")
+def post_tickets_probability(body: _TicketsBody):
+    """구매 조합 목록의 1등 확률 — 유효성(6개·1~45·중복 없음) 검사 후 중복 조합 제거, n/8,145,060."""
+    from ..stats_engine.probability import tickets_probability
+
+    return tickets_probability(body.tickets)
+
+
+@router.get("/windows")
+def get_window_stats():
+    """표본 크기별(전체·최근 100/50/30/10회) 기술 통계 + 균등성 검정(카이제곱·효과크기)
+    + 번호쌍 동시출현 + 다중비교 보정(Bonferroni·BH). 소표본(기대도수<5)은 유의성 미주장."""
+    from ..json_utils import to_jsonable
+    from ..stats_engine.windows import build_window_stats
+
+    try:
+        return to_jsonable(build_window_stats())
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"윈도우 통계 계산 실패: {exc}") from exc
+
+
+@router.get("/integrity")
+def get_data_integrity():
+    """회차 데이터 무결성 — 중복·누락 회차, 번호 범위, 본번호 중복, 보너스 오류,
+    날짜 순서, 집계 합계(본번호 6×회차, 보너스 1×회차) 검증 + 데이터 시그니처."""
+    from ..stats_engine import cache as stats_cache
+    from ..stats_engine.draws import integrity_report
+
+    out = integrity_report()
+    out["cache"] = stats_cache.info()
+    return out
 
 
 @router.get("/snapshot")

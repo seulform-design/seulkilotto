@@ -58,10 +58,13 @@ def test_prediction_signals_uses_intent_photo_slice(monkeypatch, tmp_path):
     current_out = build_prediction_signals(intent="current_round")
 
     review_ranked = {x["number"]: x for x in review_out["ranked_numbers"]}
-    assert any(
-        "photo-vote" in (review_ranked.get(n, {}).get("sources") or [])
-        for n in review_nums
+    # 2026-11-07: 용지 신호는 추천에서 분리됨 — 보관 용지가 있어도 번호 점수에 섞이지 않는다.
+    assert not any(
+        str(s).startswith("photo")
+        for n in review_ranked
+        for s in (review_ranked[n].get("sources") or [])
     )
+    assert review_out["sources"]["photo_sheet"]["available"] is False
     assert review_out["sources"]["photo_sheet"]["intent"] == "review"
     assert current_out["sources"]["photo_sheet"]["intent"] == "current_round"
 

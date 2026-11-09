@@ -22,28 +22,51 @@ jobs:
     name: Trigger round upgrade
     runs-on: ubuntu-latest
     steps:
-      - name: POST /api/v1/data/upgrade
+      - name: Trigger verified pipeline and wait for result
         env:
           # 기본 URL. Actions 변수 PROD_BASE_URL 로 덮어쓸 수 있음.
           BASE_URL: ${{ vars.PROD_BASE_URL || 'https://lotto-analyzer-production-8678.up.railway.app' }}
-          # UPGRADE_API_KEY 가 서버에 설정돼 있으면 동일 값을 시크릿으로 넣어두면 됨(없으면 무시).
+          # 서버의 UPGRADE_API_KEY 와 같은 값(Repository secret). 헤더로만 전달하며 출력하지 않는다.
           UPGRADE_API_KEY: ${{ secrets.UPGRADE_API_KEY }}
         run: |
           set -euo pipefail
-          echo "Upgrading rounds at ${BASE_URL}"
-          # 컨테이너 웨이크업 여유를 두고 최대 3회 재시도.
-          for attempt in 1 2 3; do
-            code=$(curl -sS -o /tmp/upgrade.json -w "%{http_code}" \
-              --max-time 180 \
-              -X POST "${BASE_URL}/api/v1/data/upgrade" \
-              ${UPGRADE_API_KEY:+-H "X-Upgrade-Key: ${UPGRADE_API_KEY}"} || echo "000")
-            echo "attempt ${attempt}: HTTP ${code}"
-            cat /tmp/upgrade.json || true
-            echo
-            if [ "${code}" = "200" ]; then
-              exit 0
-            fi
-            sleep 30
+          echo "Base: ${BASE_URL}"
+          # 1) 컨테이너 웨이크업(최대 ~3분)
+          for i in $(seq 1 12); do
+            if curl -fsS --max-time 15 "${BASE_URL}/health" >/dev/null; then echo "server awake"; break; fi
+            sleep 15
           done
-          echo "Upgrade failed after retries"
+          # 2) 검증 파이프라인 백그라운드 시작 — 게이트웨이 60초 제한을 피하려고 동기 /data/upgrade 대신 사용
+          started_at=$(date -u +%Y-%m-%dT%H:%M:%S)
+          code=$(curl -sS -o /tmp/run.json -w "%{http_code}" --max-time 60             -X POST "${BASE_URL}/api/v1/pipeline/run"             ${UPGRADE_API_KEY:+-H "X-Upgrade-Key: ${UPGRADE_API_KEY}"} || echo "000")
+          echo "POST /api/v1/pipeline/run → HTTP ${code}"
+          cat /tmp/run.json || true; echo
+          if [ "${code}" = "401" ] || [ "${code}" = "403" ]; then
+            echo "::error::관리 키 인증 실패 — Repository secret UPGRADE_API_KEY 가 서버 값과 같은지 확인"
+            exit 1
+          fi
+          if [ "${code}" != "200" ]; then
+            echo "::error::파이프라인 시작 실패 (HTTP ${code})"
+            exit 1
+          fi
+          # 3) 결과 대기(최대 15분) — sync_rounds 작업이 시작 시각 이후에 끝났는지 확인
+          for i in $(seq 1 30); do
+            sleep 30
+            curl -fsS --max-time 30 "${BASE_URL}/api/v1/pipeline/status" -o /tmp/status.json || continue
+            res=$(python3 - "$started_at" <<'PY'
+          import json, sys
+          j = json.load(open('/tmp/status.json'))
+          s = (j.get('jobs') or {}).get('sync_rounds') or {}
+          reg = j.get('registry') or {}
+          done = bool(s.get('finished_at')) and s.get('started_at', '') >= sys.argv[1]
+          print(f"{'done' if done else 'wait'} {s.get('status')} latest={reg.get('latest_verified_round')}")
+          PY
+          )
+            echo "poll ${i}: ${res}"
+            case "${res}" in
+              "done success"*) exit 0 ;;
+              "done failed"*) echo "::error::sync_rounds 실패 — /api/v1/pipeline/status 의 recent_errors 확인"; exit 1 ;;
+            esac
+          done
+          echo "::error::15분 내에 파이프라인 결과를 확인하지 못함"
           exit 1

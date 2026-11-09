@@ -775,6 +775,14 @@ export const v1Api = {
   getCoselectionCalibration: () =>
     fetchJson<Record<string, any>>('/api/v1/pipeline/coselection-calibration', { timeoutMs: 30_000 }),
 
+  /** 기준(Seed) 영상 기반 용지 수집 현황. */
+  getSeedDashboard: () =>
+    fetchJson<Record<string, any>>('/api/v1/pipeline/seeds/dashboard', { timeoutMs: 30_000 }),
+
+  /** YouTube Data API 진단(키 존재·오류 분류, 키 값 비노출). */
+  getYoutubeApiCheck: () =>
+    fetchJson<Record<string, any>>('/api/v1/pipeline/youtube-api-check', { timeoutMs: 30_000 }),
+
   /** 유튜브 용지(자동/반자동 분리) 분석. */
   getTicketAnalysis: () =>
     fetchJson<Record<string, any>>('/api/v1/pipeline/tickets?limit=20', { timeoutMs: 30_000 }),

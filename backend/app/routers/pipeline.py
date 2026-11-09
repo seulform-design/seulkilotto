@@ -18,7 +18,9 @@ _RUNNING: Dict[str, threading.Thread] = {}
 
 
 def _auth(key: Optional[str]) -> None:
-    if settings.UPGRADE_API_KEY and key != settings.UPGRADE_API_KEY:
+    from ..security import key_matches
+
+    if not key_matches(key):
         raise HTTPException(status_code=401, detail="X-Upgrade-Key 가 필요합니다.")
 
 
@@ -205,4 +207,117 @@ def get_source_check(round_no: Optional[int] = Query(None, alias="round")):
     t0 = _t.time()
     sec = _secondary(rnd)
     out["secondary_lottis"] = {"ok": bool(sec), **(sec or {}), "seconds": round(_t.time() - t0, 2)}
+    return out
+
+
+# ─────────────────────────── 기준(Seed) 영상 기반 용지 수집 ───────────────────────────
+
+@router.get("/seeds/dashboard")
+def get_seed_dashboard():
+    """기준 영상·유사 영상 발견/중복/용지 탐지·자동/반자동 수·회차 미확정·OCR 오류·6종 엔진 반영 현황."""
+    from ..ingest import seeds
+
+    return to_jsonable(seeds.dashboard())
+
+
+@router.post("/seeds/register")
+def post_seed_register(url: str = Query(..., description="YouTube 영상 URL 또는 ID"),
+                       x_upgrade_key: Optional[str] = Header(default=None)):
+    _auth(x_upgrade_key)
+    from ..ingest import seeds
+
+    try:
+        return to_jsonable(seeds.register_seed(url))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/seeds/run")
+def post_seed_run(x_upgrade_key: Optional[str] = Header(default=None)):
+    """기준 영상 → 유사 영상 탐색 → 썸네일 용지 판독 → DB → 학습 연결(백그라운드)."""
+    _auth(x_upgrade_key)
+    from ..ingest import jobs, seeds
+
+    return _bg("seed_daily", lambda: jobs.run_job("seed_daily", seeds.daily, retries=1))
+
+
+@router.get("/seeds/videos")
+def get_seed_videos(category: Optional[str] = Query(None), limit: int = Query(50, ge=1, le=500)):
+    from ..ingest import db
+
+    sql = ("SELECT video_id,channel_title,title,published_at,similarity_score,video_category,duplicate_group_id,"
+           "collection_status,round_hint,discovered_via,processed_at FROM youtube_discovered_videos")
+    params: tuple = ()
+    if category:
+        sql += " WHERE video_category = ?"
+        params = (category,)
+    sql += " ORDER BY processed_at DESC LIMIT " + str(int(limit))
+    cols = ["video_id", "channel", "title", "published_at", "similarity", "category", "duplicate_of", "status",
+            "round_hint", "via", "processed_at"]
+    return {"items": [dict(zip(cols, r)) for r in db.query(sql, params)]}
+
+
+@router.get("/seeds/tickets")
+def get_seed_tickets(pick_type: str = Query("auto", pattern="^(auto|semi_auto)$"), limit: int = Query(50, ge=1, le=500)):
+    """자동/반자동 용지 데이터(분리 테이블) + 실제 당첨과의 일치(추첨 완료 회차·회차 확정분만)."""
+    from ..ingest import db
+    from ..stats_engine.draws import load_draws
+    from ..stats_engine.probability import prize_rank
+
+    table = "ticket_auto_data" if pick_type == "auto" else "ticket_semi_auto_data"
+    rows = db.query(f"SELECT ticket_id,video_id,draw_round,round_status,game_index,numbers,confidence,type_confidence,"
+                    f"verification_status,created_at FROM {table} ORDER BY created_at DESC LIMIT " + str(int(limit)))
+    win = {d.round: d for d in load_draws()}
+    items = []
+    for r in rows:
+        nums = db.loads(r[5])
+        it = {"ticket_id": r[0], "video_id": r[1], "draw_round": r[2], "round_status": r[3], "game": r[4],
+              "numbers": nums, "ocr_confidence": r[6], "type_confidence": r[7], "status": r[8], "created_at": r[9],
+              "observed_only": True}
+        d = win.get(r[2])
+        if d and r[3] == "ticket_printed":
+            it["matches"] = len(set(nums) & set(d.numbers))
+            it["prize_rank"] = prize_rank(nums, d.numbers, d.bonus)
+        else:
+            it["matches"] = None  # 미추첨 회차 또는 회차 미확정
+        items.append(it)
+    return {"pick_type": pick_type, "items": items,
+            "note": "영상에 보인 용지(관찰 데이터) — 실제 구매 완료 여부는 확인되지 않았습니다."}
+
+
+@router.get("/youtube-api-check")
+def get_youtube_api_check():
+    """YouTube Data API 진단 — 키 존재·형식, 실제 호출 결과를 오류 코드로 분류(키 값은 노출하지 않음)."""
+    import json as _json
+    import os as _os
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    key = (_os.environ.get("YOUTUBE_API_KEY") or "").strip()
+    out: Dict[str, Any] = {"env_var": "YOUTUBE_API_KEY", "present": bool(key),
+                           "format_ok": bool(key) and key.startswith("AIza") and len(key) == 39}
+    if not key:
+        out.update(status="missing_key", detail="환경변수 YOUTUBE_API_KEY 없음 — RSS/oEmbed/공개 썸네일 경로만 동작")
+        return out
+    url = "https://www.googleapis.com/youtube/v3/videos?" + urllib.parse.urlencode(
+        {"part": "snippet", "id": "LSYXNhnsvtc", "key": key})
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=15) as r:
+            j = _json.loads(r.read().decode("utf-8"))
+        out.update(status="ok", http=200, items=len(j.get("items", [])))
+    except urllib.error.HTTPError as exc:
+        reason = ""
+        try:
+            body = _json.loads(exc.read().decode("utf-8"))
+            errs = (body.get("error") or {}).get("errors") or [{}]
+            reason = errs[0].get("reason", "") or (body.get("error") or {}).get("status", "")
+        except Exception:  # noqa: BLE001
+            pass
+        kind = {"keyInvalid": "invalid_key", "badRequest": "invalid_key", "accessNotConfigured": "api_disabled",
+                "SERVICE_DISABLED": "api_disabled", "quotaExceeded": "quota_exceeded", "dailyLimitExceeded": "quota_exceeded",
+                "ipRefererBlocked": "key_restriction", "forbidden": "key_restriction_or_project"}.get(reason, "http_error")
+        out.update(status=kind, http=exc.code, reason=reason)
+    except Exception as exc:  # noqa: BLE001
+        out.update(status="network", detail=str(exc)[:200])
     return out

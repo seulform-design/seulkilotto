@@ -147,8 +147,18 @@ def extract_ticket_lines(image_path: Path, title: str = "") -> Dict[str, Any]:
     items = []
     for bbox, text, conf in boxes:
         cx, cy, h = _center(bbox)
-        items.append({"x": cx, "y": cy, "h": h, "text": (text or "").strip(), "conf": float(conf),
-                      "x0": min(p[0] for p in bbox)})
+        t = (text or "").strip()
+        x0b = min(p[0] for p in bbox)
+        x1b = max(p[0] for p in bbox)
+        toks = re.findall(r"(?<!\d)\d{2}(?!\d)", t)
+        # 한 상자에 번호가 여러 개('01 14 16')로 읽힌 경우 → 상자 폭을 균등 분할해 번호별 좌표 부여
+        if len(toks) >= 2 and re.fullmatch(r"[\d\s]+", t):
+            wstep = (x1b - x0b) / len(toks)
+            for j, tok in enumerate(toks):
+                items.append({"x": x0b + wstep * (j + 0.5), "y": cy, "h": h, "text": tok, "conf": float(conf),
+                              "x0": x0b + wstep * j, "split": True})
+            continue
+        items.append({"x": cx, "y": cy, "h": h, "text": t, "conf": float(conf), "x0": x0b})
     # 회차: '제 NNNN 회' 또는 4자리 숫자 + '회'
     rnd = None
     rounds_seen = []
@@ -230,10 +240,55 @@ def extract_ticket_lines(image_path: Path, title: str = "") -> Dict[str, Any]:
                 tconf = min(0.95, tconf + 0.1)
             elif ptype and hint and ptype != hint and hint != "manual":
                 tconf = min(tconf, 0.5)  # 라벨·제목 충돌 → 확정 안 함
-            lines.append({"game_label": game, "numbers": numbers, "valid_shape": valid,
+            lines.append({"_y": y, "_x": seg[0]["x"], "game_label": game, "numbers": numbers, "valid_shape": valid,
                           "ocr_confidence": round(ocr_conf, 3), "pick_type": ptype or "unknown",
                           "type_confidence": round(tconf, 3), "label_text": label_txt,
                           "column": int(seg[0]["x"] // (W / 2)) if W else 0})
+    # 격자(칸 단위) 판독으로 보강 — 같은 줄(y·묶음)이면 격자 결과가 형식 검증을 통과할 때 대체/추가
+    try:
+        grid = extract_grid_lines(img)
+    except Exception:  # noqa: BLE001
+        grid = []
+    for g in grid:
+        match = None
+        for ln in lines:
+            if abs(ln.get("_y", -1e9) - g["y"]) < g["step"] * 0.3 and ln.get("column") == g["column"]:
+                match = ln
+                break
+        label_txt = g.get("label_text") or ""
+        ptype, tconf = _label_type(label_txt)
+        if ptype is None and hint in ("auto", "semi_auto"):
+            ptype, tconf = hint, 0.6
+        elif ptype and hint and ptype == hint:
+            tconf = min(0.95, tconf + 0.1)
+        rec = {"game_label": next((m for m in re.findall(r"([A-E])", label_txt)), None), "numbers": g["numbers"],
+               "valid_shape": g["valid_shape"], "ocr_confidence": g["ocr_confidence"], "pick_type": ptype or "unknown",
+               "type_confidence": round(tconf, 3), "label_text": label_txt, "column": g["column"], "_y": g["y"],
+               "method": "grid"}
+        if match is None:
+            lines.append(rec)
+        elif g["valid_shape"] and (not match["valid_shape"] or g["ocr_confidence"] >= match["ocr_confidence"]):
+            match.update(rec)
+    # 격자가 유효 줄 3개 이상을 찾은 용지 영역에서는 줄 단위 1차 결과를 버린다(행 혼합 오인식 방지,
+    # 실측: 나란히 놓인 두 용지의 A/B 줄이 섞인 '형식은 맞지만 틀린' 줄이 나왔음)
+    strong = {}
+    for g in grid:
+        if g["valid_shape"]:
+            strong.setdefault(g["column"], []).append(g)
+    regions = [(min(x["x0"] for x in v) - v[0]["step"] * 0.6, max(x["x1"] for x in v) + v[0]["step"] * 0.6)
+               for v in strong.values() if len(v) >= 3]
+    lines = [ln for ln in lines if ln.get("method") == "grid"
+             or not any(a <= ln.get("_x", -1) <= b for a, b in regions)]
+    # 같은 번호 줄 중복 제거(두 방식이 같은 줄을 각각 찾은 경우)
+    seen_nums = set()
+    uniq = []
+    for ln in sorted(lines, key=lambda l: (not l["valid_shape"], -l["ocr_confidence"])):
+        key = (ln.get("column"), tuple(ln["numbers"]))
+        if key in seen_nums:
+            continue
+        seen_nums.add(key)
+        uniq.append(ln)
+    lines = uniq
     # 같은 이미지의 다른 줄 라벨로 유형 전파: 라벨로 '자동' 확인된 줄이 2개 이상이고 반자동/수동 라벨이 없으며
     # 제목 힌트도 자동이면, 라벨을 못 읽은 줄도 자동으로 본다(신뢰도 0.75).
     lab_auto = sum(1 for ln in lines if ln["valid_shape"] and _label_type(ln["label_text"])[0] == "auto")
@@ -249,6 +304,9 @@ def extract_ticket_lines(image_path: Path, title: str = "") -> Dict[str, Any]:
 def classify_line(line: Dict[str, Any], rnd: Optional[int]) -> str:
     if not line["valid_shape"]:
         return "rejected_shape"
+    # 라벨 칸에 게임 문자(A~E)가 둘 이상 → 판독 위치가 두 줄에 걸침(줄 혼합 의심) → 확정 금지
+    if len(set(re.findall(r"[A-E]", line.get("label_text") or ""))) >= 2:
+        return "pending_review"
     if line["pick_type"] == "manual":
         return "excluded_manual"
     if line["pick_type"] not in ("auto", "semi_auto"):
@@ -438,3 +496,138 @@ def analysis() -> Dict[str, Any]:
                         "출처·검증 수준이 달라 기존 보관 데이터에 섞지 않고 별도 DB 로 관리합니다(혼합 금지)."),
         "purchase_confirmed": "영상 속 용지의 실제 구매 완료 여부는 확인할 수 없어 구매 완료 데이터로 간주하지 않습니다.",
     }
+
+
+# ─────────────────────────── 격자(칸 단위) 판독 ───────────────────────────
+# 출력 용지는 게임 줄마다 같은 x 위치(6칸)에 번호가 찍힌다. 전체 이미지 검출은 일부 칸을 놓치므로
+# (실측: 선명한 기준 영상 썸네일에서도 5줄 중 2줄만 검출) 검출된 숫자로 행·열 격자를 세운 뒤
+# 칸마다 잘라 개별 판독한다.
+
+def _cluster(vals: List[float], tol: float) -> List[List[float]]:
+    out: List[List[float]] = []
+    for v in sorted(vals):
+        if out and abs(statistics.mean(out[-1]) - v) <= tol:
+            out[-1].append(v)
+        else:
+            out.append([v])
+    return out
+
+
+def _read_cell(img, cx: float, cy: float, half_w: float, half_h: float) -> Tuple[Optional[int], float]:
+    import cv2
+
+    H, W = img.shape[:2]
+    x0, x1 = int(max(0, cx - half_w)), int(min(W, cx + half_w))
+    y0, y1 = int(max(0, cy - half_h)), int(min(H, cy + half_h))
+    crop = img[y0:y1, x0:x1]
+    if crop.size == 0:
+        return None, 0.0
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+    up = cv2.resize(gray, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+    best: Tuple[Optional[int], float] = (None, 0.0)
+    for variant in (up, cv2.threshold(up, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]):
+        for _b, text, conf in _reader(("en",)).readtext(variant, allowlist="0123456789"):
+            t = (text or "").strip()
+            if re.fullmatch(r"\d{1,2}", t) and 1 <= int(t) <= 45 and conf > best[1]:
+                best = (int(t), float(conf))
+    return best
+
+
+def _read_label(img, x_first: float, y: float, step: float, h: float) -> str:
+    """첫 번호 왼쪽의 '게임문자 + 자동/반자동/수동' 라벨 칸만 잘라 한글 판독."""
+    import cv2
+
+    H, W = img.shape[:2]
+    x0 = int(max(0, x_first - step * 2.1))
+    x1 = int(max(0, x_first - step * 0.42))
+    y0, y1 = int(max(0, y - h * 0.7)), int(min(H, y + h * 0.7))
+    crop = img[y0:y1, x0:x1]
+    if crop.size == 0 or x1 <= x0:
+        return ""
+    up = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+    return " ".join((t or "").strip() for _b, t, c in _reader(("ko", "en")).readtext(up) if c >= 0.05)
+
+
+def extract_grid_lines(img) -> List[Dict[str, Any]]:
+    H, W = img.shape[:2]
+    det = []
+    for b, text, conf in _reader(("en",)).readtext(img, allowlist="0123456789"):
+        t = (text or "").strip()
+        if re.fullmatch(r"\d{2}", t) and 1 <= int(t) <= 45 and conf >= 0.3:
+            cx, cy, h = _center(b)
+            det.append((cx, cy, h))
+    if len(det) < 6:
+        return []
+    h_med = statistics.median(d[2] for d in det)
+    # 여러 줄이 합쳐 검출된 키 큰 상자는 행 위치를 왜곡하므로 격자 추정에서 제외
+    det = [d for d in det if d[2] <= h_med * 1.5]
+    if len(det) < 4:
+        return []
+    h_med = statistics.median(d[2] for d in det)
+    cols = [c for c in _cluster([d[0] for d in det], h_med * 0.9)]
+    col_x = [statistics.mean(c) for c in cols if len(c) >= 2]
+    singles = [statistics.mean(c) for c in cols if len(c) == 1]
+    if len(col_x) < 3:
+        return []
+    # 6칸씩 묶음(나란히 놓인 용지) — 칸 간격의 2배 넘는 틈에서 분할
+    gaps = [b - a for a, b in zip(col_x, col_x[1:])]
+    step = statistics.median(gaps)
+    groups: List[List[float]] = [[col_x[0]]]
+    for g, x in zip(gaps, col_x[1:]):
+        if g > step * 1.8:
+            groups.append([x])
+        else:
+            groups[-1].append(x)
+    lines = []
+    for gi, grp in enumerate(groups):
+        if len(grp) < 3 or len(grp) > 6:
+            continue
+        if len(grp) < 6:
+            # 놓친 칸을 등간격 격자로 복원: 관측 칸들을 모두 포함하는 6칸 등차 배치 중 오차 최소
+            best = None
+            for c in grp:
+                for k in range(6):
+                    start = c - k * step
+                    cand = [start + i * step for i in range(6)]
+                    if cand[0] < -step * 0.3 or cand[-1] > W + step * 0.3:
+                        continue
+                    err = sum(min(abs(x - q) for q in cand) for x in grp)
+                    # 동률이면 단일 검출 칸(놓친 칸의 흔적)과 더 많이 맞는 배치를 택한다
+                    support = sum(1 for x in singles if min(abs(x - q) for q in cand) < step * 0.3)
+                    score = (round(err / step, 1), -support)
+                    if all(min(abs(x - q) for q in cand) < step * 0.3 for x in grp) and (best is None or score < best[0]):
+                        best = (score, cand)
+            if best is None:
+                continue
+            grp = best[1]
+        # 행은 용지(묶음)별로 따로 추정 — 나란히 놓인 두 용지의 줄 높이가 어긋나도 섞이지 않게
+        gdet = [d for d in det if grp[0] - step * 0.5 <= d[0] <= grp[-1] + step * 0.5]
+        row_y = [statistics.mean(r) for r in _cluster([d[1] for d in gdet], h_med * 0.6) if len(r) >= 2]
+        if not row_y:
+            continue
+        if len(row_y) >= 2:
+            diffs = [b - a for a, b in zip(row_y, row_y[1:])]
+            rstep = min(diffs)
+            if rstep > h_med * 0.6:
+                filled = [row_y[0]]
+                for a, b in zip(row_y, row_y[1:]):
+                    n = max(1, round((b - a) / rstep))
+                    filled.extend(a + (b - a) * i / n for i in range(1, n + 1))
+                row_y = filled
+        for y in row_y:
+            near = [d for d in det if abs(d[1] - y) < h_med * 0.7 and grp[0] - step * 0.5 <= d[0] <= grp[-1] + step * 0.5]
+            interpolated = len(near) < 2
+            if interpolated and not (row_y[0] < y < row_y[-1]):
+                continue
+            vals, confs = [], []
+            for x in grp:
+                v, c = _read_cell(img, x, y, step * 0.42, h_med * 0.75)
+                vals.append(v)
+                confs.append(c)
+            if None in vals:
+                continue
+            ok = len(set(vals)) == 6 and all(a < b for a, b in zip(vals, vals[1:]))
+            lines.append({"numbers": vals, "valid_shape": ok, "ocr_confidence": round(min(confs), 3),
+                          "y": y, "x0": grp[0], "x1": grp[-1], "step": step, "column": gi,
+                          "label_text": _read_label(img, grp[0], y, step, h_med)})
+    return lines

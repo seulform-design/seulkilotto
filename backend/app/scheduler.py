@@ -175,9 +175,10 @@ def start_scheduler() -> None:
             return
         try:
             from .ingest import jobs as _ij
-            from .ingest import tickets as _tk
+            from .ingest import seeds as _sd
 
-            _ij.run_job("ticket_scan", lambda: _tk.scan(limit=8), retries=1)
+            # 기준 영상(LSYXNhnsvtc) → 유사 영상 탐색 → 썸네일 용지 판독 → 자동/반자동 DB → 학습 연결
+            _ij.run_job("seed_daily", _sd.daily, retries=1)
         except Exception:  # noqa: BLE001
             logger.exception("[ticket-scan] 실패")
 

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.security import require_admin_key, require_admin_key_strict
 from app.json_utils import to_jsonable
 from app.video_analysis.image_engine import analyze_image_files, vision_api_configured
 from app.video_analysis.manual_entry import analyze_manual_slips
@@ -177,7 +178,7 @@ class VisionConfigSaveRequest(BaseModel):
     model: str = Field("gpt-4o-mini")
 
 
-@router.post("/analyze")
+@router.post("/analyze", dependencies=[Depends(require_admin_key)])
 async def analyze_photos(
     files: List[UploadFile] = File(..., description="용지 사진"),
     sheet_intent: str = Form("current_round", description="review=전회차, current_round=이번회차"),
@@ -242,7 +243,7 @@ async def analyze_photos(
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-@router.post("/manual")
+@router.post("/manual", dependencies=[Depends(require_admin_key)])
 def analyze_manual(body: ManualAnalyzeRequest):
     """5천원 자동 용지 수기 등록 — A~E × 6번호."""
     if body.sheet_intent not in ("review", "current_round"):
@@ -331,7 +332,7 @@ class VisionConfigToggleRequest(BaseModel):
     use_vision_api: bool = False
 
 
-@router.post("/vision-config")
+@router.post("/vision-config", dependencies=[Depends(require_admin_key)])
 def save_vision_config(body: VisionConfigSaveRequest):
     try:
         save_vision_api_key(body.api_key, body.model)
@@ -347,7 +348,7 @@ def save_vision_config(body: VisionConfigSaveRequest):
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.delete("/vision-config")
+@router.delete("/vision-config", dependencies=[Depends(require_admin_key)])
 def disable_vision_config():
     clear_vision_api_key()
     set_photo_use_vision(False)
@@ -359,7 +360,7 @@ def disable_vision_config():
     }
 
 
-@router.patch("/vision-config")
+@router.patch("/vision-config", dependencies=[Depends(require_admin_key)])
 def toggle_vision_config(body: VisionConfigToggleRequest):
     set_photo_use_vision(body.use_vision_api)
     return {
@@ -564,7 +565,7 @@ class ReattributeRequest(BaseModel):
     )
 
 
-@router.post("/reattribute")
+@router.post("/reattribute", dependencies=[Depends(require_admin_key)])
 def reattribute_entries(body: ReattributeRequest):
     """복기 엔트리 소속 회차 교정(재귀속) — 관리자 도구.
 
@@ -588,7 +589,7 @@ def get_history(limit: int = Query(50, ge=1, le=200)):
     return to_jsonable({"entries": list_entries(limit=limit), "accumulated": _slim_accumulated()})
 
 
-@router.delete("/store")
+@router.delete("/store", dependencies=[Depends(require_admin_key_strict)])
 def delete_store(
     intent: str | None = Query(default=None),
     pick_type: str | None = Query(default=None),
@@ -616,7 +617,7 @@ def delete_store(
     return {"ok": True, "removed": removed}
 
 
-@router.delete("/store/{entry_id}")
+@router.delete("/store/{entry_id}", dependencies=[Depends(require_admin_key_strict)])
 def delete_store_entry(entry_id: str):
     if not delete_entry(entry_id):
         raise HTTPException(status_code=404, detail="분석 기록을 찾을 수 없습니다.")

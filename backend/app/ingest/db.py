@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 _LOCK = threading.RLock()
 
@@ -141,6 +141,96 @@ SCHEMA = [
         status TEXT NOT NULL,
         purchase_confirmed INTEGER NOT NULL DEFAULT 0,
         collected_at TEXT NOT NULL
+    )""",
+    # ── 기준(Seed) 영상 기반 용지 수집 (2026-11-10, 스키마 v2) ──
+    """CREATE TABLE IF NOT EXISTS youtube_seed_videos (
+        seed_id TEXT PRIMARY KEY,
+        video_id TEXT NOT NULL UNIQUE,
+        video_url TEXT NOT NULL,
+        title TEXT,
+        channel_id TEXT,
+        channel_title TEXT,
+        published_at TEXT,
+        analysis_status TEXT NOT NULL,
+        analysis_json TEXT,
+        registered_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS youtube_discovered_videos (
+        video_id TEXT PRIMARY KEY,
+        source_seed_id TEXT,
+        channel_id TEXT,
+        channel_title TEXT,
+        title TEXT,
+        video_url TEXT NOT NULL,
+        published_at TEXT,
+        similarity_score REAL,
+        video_category TEXT,
+        duplicate_group_id TEXT,
+        collection_status TEXT NOT NULL,
+        round_hint INTEGER,
+        discovered_via TEXT,
+        algorithm_version TEXT,
+        discovered_at TEXT NOT NULL,
+        processed_at TEXT,
+        error TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS youtube_video_frames (
+        frame_id TEXT PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        timestamp TEXT,
+        frame_source TEXT NOT NULL,
+        frame_hash TEXT NOT NULL,
+        ticket_detected INTEGER NOT NULL,
+        extraction_status TEXT NOT NULL,
+        ticket_round INTEGER,
+        lines_found INTEGER,
+        algorithm_version TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS ticket_auto_data (
+        ticket_id TEXT PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        frame_id TEXT,
+        draw_round INTEGER,
+        round_status TEXT NOT NULL,
+        game_index TEXT,
+        numbers TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        type_confidence REAL NOT NULL,
+        verification_status TEXT NOT NULL,
+        observed_only INTEGER NOT NULL DEFAULT 1,
+        algorithm_version TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS ticket_semi_auto_data (
+        ticket_id TEXT PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        frame_id TEXT,
+        draw_round INTEGER,
+        round_status TEXT NOT NULL,
+        game_index TEXT,
+        selected_numbers TEXT,
+        generated_numbers TEXT,
+        numbers TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        type_confidence REAL NOT NULL,
+        verification_status TEXT NOT NULL,
+        observed_only INTEGER NOT NULL DEFAULT 1,
+        algorithm_version TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS ticket_learning_history (
+        learning_id TEXT PRIMARY KEY,
+        video_id TEXT,
+        ticket_id TEXT,
+        engine_id TEXT NOT NULL,
+        algorithm_version TEXT NOT NULL,
+        learning_status TEXT NOT NULL,
+        pick_type TEXT,
+        draw_round INTEGER,
+        sample_count INTEGER,
+        result_json TEXT,
+        created_at TEXT NOT NULL
     )""",
     """CREATE TABLE IF NOT EXISTS reg_schema (
         version INTEGER PRIMARY KEY,

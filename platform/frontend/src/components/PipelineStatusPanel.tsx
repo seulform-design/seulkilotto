@@ -43,6 +43,8 @@ export default function PipelineStatusPanel() {
   const st = useQuery({ queryKey: ['v1-pipeline-status'], queryFn: v1Api.getPipelineStatus, refetchInterval: 60_000 });
   const cal = useQuery({ queryKey: ['v1-coselection-cal'], queryFn: v1Api.getCoselectionCalibration, staleTime: 3_600_000, enabled: open });
   const tk = useQuery({ queryKey: ['v1-ticket-analysis'], queryFn: v1Api.getTicketAnalysis, staleTime: 600_000, enabled: open });
+  const sd = useQuery({ queryKey: ['v1-seed-dashboard'], queryFn: v1Api.getSeedDashboard, staleTime: 300_000, enabled: open });
+  const yt = useQuery({ queryKey: ['v1-yt-api-check'], queryFn: v1Api.getYoutubeApiCheck, staleTime: 3_600_000, enabled: open });
   const d = st.data;
   const reg = d?.registry ?? {};
   const jobs = (d?.jobs ?? {}) as Record<string, any>;
@@ -201,6 +203,47 @@ export default function PipelineStatusPanel() {
                 {tk.data.analysis?.by_type?.auto?.sample_note} 바코드·QR·TR 번호·이미지는 저장하지 않습니다.
               </Typography>
             </Box>
+          )}
+
+          {sd.data && (
+            <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, p: 1 }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
+                기준 영상 기반 용지 수집 {sd.data.seeds?.[0] ? `· ${sd.data.seeds[0].channel} “${String(sd.data.seeds[0].title ?? '').trim()}” (${sd.data.seeds[0].status})` : '· 기준 영상 미등록'}
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))', gap: 0.5, mt: 0.5 }}>
+                {[
+                  ['수집 영상', sd.data.discovered_total],
+                  ['유사(용지) 영상', sd.data.similar_found],
+                  ['중복 제거', sd.data.duplicates_removed],
+                  ['용지 탐지', `${sd.data.frames_with_ticket}/${sd.data.frames_total}`],
+                  ['자동 확정', sd.data.auto?.accepted ?? 0],
+                  ['자동 검토대기', sd.data.auto?.pending_review ?? 0],
+                  ['반자동 확정', sd.data.semi_auto?.accepted ?? 0],
+                  ['학습 제외', sd.data.excluded],
+                  ['회차 미확정', sd.data.round_unconfirmed],
+                  ['OCR 오류', sd.data.ocr_errors],
+                ].map(([k, v]) => (
+                  <Box key={String(k)} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, px: 0.75, py: 0.25 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10 }}>{k}</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{String(v ?? 0)}</Typography>
+                  </Box>
+                ))}
+              </Box>
+              <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+                6종 엔진 반영: {Object.entries((sd.data.learning_link ?? {}) as Record<string, string>)
+                  .map(([k, v]) => `${k} ${v === 'connected' ? '연결' : '보관용지 전용'}`).join(' · ')}
+                {sd.data.channel_concentration?.top_share != null && ` · 최다 채널 비중 ${Math.round(sd.data.channel_concentration.top_share * 100)}%(편중 주의)`}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="div">
+                {sd.data.access_policy} 영상에 보인 용지는 관찰 데이터이며 구매 완료로 간주하지 않습니다.
+              </Typography>
+            </Box>
+          )}
+
+          {yt.data && (
+            <Typography variant="caption" color={yt.data.status === 'ok' ? 'success.main' : 'text.secondary'}>
+              YouTube Data API: {yt.data.status === 'ok' ? '정상' : yt.data.status === 'missing_key' ? '키 미설정(RSS·oEmbed·공개 썸네일만 사용, 과거 영상 전체 검색 불가)' : `오류 ${yt.data.status}${yt.data.http ? ` (HTTP ${yt.data.http})` : ''}`}
+            </Typography>
           )}
 
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>

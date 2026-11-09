@@ -98,6 +98,14 @@ def start_scheduler() -> None:
             logger.exception("[%s] 자동 업그레이드 실패: %s", context, exc)
 
     _scheduler = BackgroundScheduler()
+    try:  # 재배포 후 이전 컨테이너의 잠금·'실행 중' 기록 정리
+        from .ingest.jobs import release_locks_from_previous_containers
+
+        n = release_locks_from_previous_containers()
+        if n:
+            logger.info("이전 컨테이너 잠금 %d개 회수", n)
+    except Exception:  # noqa: BLE001
+        logger.exception("잠금 회수 실패")
 
     # ── 부팅 캐치업(핵심 자기치유) ─────────────────────────────────────────
     # 주간 크론만으로는 회차가 뒤처진다:

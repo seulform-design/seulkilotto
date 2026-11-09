@@ -775,6 +775,20 @@ export const v1Api = {
   getCoselectionCalibration: () =>
     fetchJson<Record<string, any>>('/api/v1/pipeline/coselection-calibration', { timeoutMs: 30_000 }),
 
+  /** 회차별 예측 기록 요약. */
+  getPredictionSummary: () =>
+    fetchJson<Record<string, any>>('/api/v1/pipeline/predictions/summary', { timeoutMs: 30_000 }),
+
+  /** 특정 회차의 엔진별 예측·실제 당첨·일치·등수. */
+  getPredictionRound: (round: number) =>
+    fetchJson<Record<string, any>>(`/api/v1/pipeline/predictions/round/${round}`, { timeoutMs: 30_000 }),
+
+  /** 엔진별 성적(일치 분포·평균·CI·무작위 대비). */
+  getPredictionPerformance: (ptype: string, common = true) =>
+    fetchJson<Record<string, any>>(`/api/v1/pipeline/predictions/performance?ptype=${ptype}&common=${common}`, {
+      timeoutMs: 60_000,
+    }),
+
   /** 기준(Seed) 영상 기반 용지 수집 현황. */
   getSeedDashboard: () =>
     fetchJson<Record<string, any>>('/api/v1/pipeline/seeds/dashboard', { timeoutMs: 30_000 }),

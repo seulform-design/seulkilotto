@@ -163,3 +163,62 @@ def fetch_range(first: int, last: int, *, delay: float = 1.0, timeout: float = 2
         r = max(nxt, r + 1)
         time.sleep(delay)
     return out
+
+
+def source_health(round_no: int = 1, timeout: float = 15.0) -> Dict[str, Any]:
+    """공식 출처 단계별 진단 — DNS → TCP → TLS → HTTP(상태·형식·크기·시간). 실패 단계를 그대로 보고."""
+    import socket
+    import ssl
+
+    host = "www.dhlottery.co.kr"
+    out: Dict[str, Any] = {"host": host}
+    t0 = time.time()
+    try:
+        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+        out["dns"] = {"ok": True, "ms": round((time.time() - t0) * 1000, 1), "addresses": sorted({i[4][0] for i in infos})[:4]}
+    except OSError as exc:
+        out["dns"] = {"ok": False, "error": str(exc)[:200]}
+        out["stage_failed"] = "dns"
+        return out
+    t1 = time.time()
+    try:
+        raw = socket.create_connection((host, 443), timeout=timeout)
+        out["tcp"] = {"ok": True, "ms": round((time.time() - t1) * 1000, 1)}
+        t2 = time.time()
+        ctx = ssl.create_default_context()
+        tls = ctx.wrap_socket(raw, server_hostname=host)
+        cert = tls.getpeercert() or {}
+        out["tls"] = {"ok": True, "ms": round((time.time() - t2) * 1000, 1), "version": tls.version(),
+                      "not_after": cert.get("notAfter")}
+        tls.close()
+    except ssl.SSLError as exc:
+        out["tls"] = {"ok": False, "error": str(exc)[:200]}
+        out["stage_failed"] = "tls"
+        return out
+    except OSError as exc:
+        out["tcp"] = {"ok": False, "error": str(exc)[:200]}
+        out["stage_failed"] = "tcp"
+        return out
+    t3 = time.time()
+    url = ENDPOINT + "?" + urllib.parse.urlencode({"srchDir": "center", "srchLtEpsd": str(int(round_no))})
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=_HEADERS), timeout=timeout) as resp:
+            body = resp.read()
+            out["http"] = {"ok": True, "status": resp.status, "ms": round((time.time() - t3) * 1000, 1),
+                           "bytes": len(body), "content_type": resp.headers.get("Content-Type")}
+        try:
+            items = (json.loads(body.decode("utf-8")).get("data") or {}).get("list") or []
+            out["parse"] = {"ok": bool(items), "items": len(items)}
+            if not items:
+                out["stage_failed"] = "parse"
+        except ValueError:
+            out["parse"] = {"ok": False, "error": "JSON 아님(형식 변경/차단 페이지 가능)"}
+            out["stage_failed"] = "parse"
+    except urllib.error.HTTPError as exc:
+        out["http"] = {"ok": False, "status": exc.code}
+        out["stage_failed"] = "http"
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        out["http"] = {"ok": False, "error": str(exc)[:200], "ms": round((time.time() - t3) * 1000, 1)}
+        out["stage_failed"] = "http_timeout" if "timed out" in str(exc) else "http"
+    out.setdefault("stage_failed", None)
+    return out

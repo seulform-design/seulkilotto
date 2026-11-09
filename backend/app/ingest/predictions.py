@@ -1,0 +1,539 @@
+"""회차별 예측 영구 기록 + 공식 결과 자동 평가 (round_prediction_history / round_prediction_evaluation).
+
+두 모드를 엄격히 구분한다(prediction_type)
+-----------------------------------------
+- live               : 추첨 '전'에 저장한 사전 예측. 추첨일 20:00 KST(cutoff) 이후에는 생성 거부, 저장 후 수정 불가.
+- backtest           : 과거 회차를 walk-forward 로 재현 — 회차 R 예측에는 R 이전 회차만 사용. 생성 시각은 '지금'이며
+                       사전 예측이 아니다(화면에서 별도 표기).
+- historical_replay  : 보관 용지(추첨 전 동결분, frozen_at)로 그 회차 번호를 재현 — 입력은 사전 데이터지만 기록은 사후.
+
+예측 1건 = 6개 번호 1조합(prediction_rank 로 같은 엔진·회차의 여러 조합 구분). 모든 엔진을 '회차당 1조합'으로
+맞춰 동일 조건에서 비교한다(무작위 기준선도 같은 회차·같은 조합 수).
+"""
+from __future__ import annotations
+
+import hashlib
+import math
+import random
+import uuid
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+from . import db
+
+FEATURE_VERSION = "draw-features-1.0"
+PRED_TABLES = [
+    """CREATE TABLE IF NOT EXISTS round_prediction_history (
+        prediction_id TEXT PRIMARY KEY,
+        draw_round INTEGER NOT NULL,
+        prediction_created_at TEXT NOT NULL,
+        prediction_cutoff_at TEXT,
+        engine_version TEXT NOT NULL,
+        model_version TEXT,
+        feature_version TEXT,
+        training_data_range TEXT,
+        training_sample_count INTEGER,
+        prediction_method TEXT NOT NULL,
+        predicted_numbers TEXT NOT NULL,
+        prediction_rank INTEGER NOT NULL,
+        prediction_score REAL,
+        prediction_type TEXT NOT NULL,
+        ensemble_weight_version TEXT,
+        prediction_status TEXT NOT NULL,
+        source_note TEXT
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS ux_pred_unique
+        ON round_prediction_history (draw_round, prediction_method, prediction_type, prediction_rank, engine_version)""",
+    "CREATE INDEX IF NOT EXISTS ix_pred_round ON round_prediction_history (draw_round)",
+    """CREATE TABLE IF NOT EXISTS round_prediction_evaluation (
+        evaluation_id TEXT PRIMARY KEY,
+        prediction_id TEXT NOT NULL UNIQUE,
+        draw_round INTEGER NOT NULL,
+        official_winning_numbers TEXT NOT NULL,
+        bonus_number INTEGER NOT NULL,
+        matched_numbers TEXT NOT NULL,
+        match_count INTEGER NOT NULL,
+        bonus_matched INTEGER NOT NULL,
+        prize_tier INTEGER,
+        evaluated_at TEXT NOT NULL,
+        evaluation_source TEXT NOT NULL,
+        evaluation_status TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_eval_round ON round_prediction_evaluation (draw_round)",
+]
+_READY: Dict[str, bool] = {}
+
+METHOD_LABELS = {
+    "stats_hot": "회차통계 · 핫(누적 최다)",
+    "stats_cold": "회차통계 · 콜드(누적 최소)",
+    "stats_overdue": "회차통계 · 미출(오래 안 나옴)",
+    "stats_recent": "회차통계 · 최근 출현",
+    "stats_pair_hot": "회차통계 · 직전 동반 최다",
+    "stats_last_avoid": "회차통계 · 직전 회피",
+    "engine_machine": "추첨기 엔진",
+    "engine_classic": "클래식 엔진",
+    "engine_parallel": "평행회차 엔진",
+    "engine_decade": "구간미출 엔진",
+    "ensemble": "앙상블(번호추천)",
+    "v3_round_learning": "V3 다회차 용지(자동+반자동 지지)",
+    "sheet_auto": "보관 자동 용지 지지 top6",
+    "sheet_semi": "보관 반자동 용지 지지 top6",
+    "youtube_auto": "유튜브 자동 용지 빈도 top6",
+    "youtube_semi": "유튜브 반자동 용지 빈도 top6",
+    "random_baseline": "무작위 기준선",
+}
+
+
+def _ensure() -> None:
+    key = db.backend()
+    if _READY.get(key):
+        return
+    with db.transaction() as c:
+        for stmt in PRED_TABLES:
+            c.execute(stmt)
+    _READY[key] = True
+
+
+def reset_for_tests() -> None:
+    _READY.clear()
+
+
+def draw_cutoff(round_no: int) -> datetime:
+    """추첨일 20:00 KST(=11:00 UTC) — 이 시각 이후엔 live 예측 생성 거부."""
+    d = date(2002, 12, 7) + timedelta(days=7 * (int(round_no) - 1))
+    return datetime(d.year, d.month, d.day, 11, 0, tzinfo=timezone.utc)
+
+
+def _pid(rnd: int, method: str, ptype: str, rank: int, ver: str) -> str:
+    return hashlib.sha1(f"{rnd}|{method}|{ptype}|{rank}|{ver}".encode()).hexdigest()[:24]
+
+
+def _valid(nums: Sequence[int]) -> bool:
+    return len(nums) == 6 and len(set(nums)) == 6 and all(1 <= int(n) <= 45 for n in nums)
+
+
+def save_prediction(c, *, rnd: int, method: str, ptype: str, numbers: Sequence[int], engine_version: str,
+                    rank: int = 1, score: Optional[float] = None, created_at: Optional[str] = None,
+                    cutoff_at: Optional[str] = None, training_range: Optional[str] = None,
+                    training_count: Optional[int] = None, model_version: Optional[str] = None,
+                    ensemble_weight_version: Optional[str] = None, note: Optional[str] = None) -> bool:
+    """중복이면 저장 안 함(기존 기록 불변). 새로 저장했으면 True."""
+    nums = sorted(int(n) for n in numbers)
+    if not _valid(nums):
+        return False
+    pid = _pid(rnd, method, ptype, rank, engine_version)
+    if c.execute("SELECT 1 FROM round_prediction_history WHERE prediction_id = ?", (pid,)):
+        return False
+    c.execute(
+        "INSERT INTO round_prediction_history (prediction_id,draw_round,prediction_created_at,prediction_cutoff_at,"
+        "engine_version,model_version,feature_version,training_data_range,training_sample_count,prediction_method,"
+        "predicted_numbers,prediction_rank,prediction_score,prediction_type,ensemble_weight_version,prediction_status,"
+        "source_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (pid, int(rnd), created_at or db.now_iso(), cutoff_at, engine_version, model_version, FEATURE_VERSION,
+         training_range, training_count, method, db.dumps(nums), int(rank), score, ptype, ensemble_weight_version,
+         "pending_evaluation", note),
+    )
+    return True
+
+
+# ─────────────────────────────── 생성: backtest ───────────────────────────────
+
+def backtest_stats(first: int = 51) -> Dict[str, Any]:
+    """회차통계 6전략 + 무작위 기준선 — 전 회차 walk-forward(회차 R 은 R 이전만)."""
+    from ..stats_engine.backtest import ALGORITHM_VERSION, STRATEGY_LABELS, _rankings
+    from ..stats_engine.draws import load_draws
+
+    _ensure()
+    draws = load_draws()
+    freq = [0] * 46
+    last_seen = [0] * 46
+    pair = [[0] * 46 for _ in range(46)]
+    written = 0
+    with db.transaction() as c:
+        have = {(int(r[0]), r[1]) for r in c.execute(
+            "SELECT draw_round, prediction_method FROM round_prediction_history WHERE prediction_type = 'backtest'")}
+        for idx, d in enumerate(draws):
+            if d.round >= first and idx > 0:
+                ranks = _rankings(freq, last_seen, pair, list(draws[idx - 1].numbers), idx)
+                rng_range = f"{draws[0].round}-{draws[idx - 1].round}"
+                for s in STRATEGY_LABELS:
+                    m = f"stats_{s}"
+                    if (d.round, m) in have:
+                        continue
+                    written += save_prediction(c, rnd=d.round, method=m, ptype="backtest", numbers=ranks[s][:6],
+                                               engine_version=ALGORITHM_VERSION, training_range=rng_range,
+                                               training_count=idx)
+                if (d.round, "random_baseline") not in have:
+                    rng = random.Random(f"baseline-{d.round}")  # 회차별 고정 시드(재현 가능)
+                    written += save_prediction(c, rnd=d.round, method="random_baseline", ptype="backtest",
+                                               numbers=rng.sample(range(1, 46), 6), engine_version="random-1.0",
+                                               training_range="none", training_count=0)
+            for w in d.numbers:
+                freq[w] += 1
+                last_seen[w] = idx + 1
+            for i in range(6):
+                for j in range(i + 1, 6):
+                    a, b = d.numbers[i], d.numbers[j]
+                    pair[a][b] += 1
+                    pair[b][a] += 1
+    return {"written": written}
+
+
+def backtest_engines(last_n: int = 100, sources: Iterable[str] = ("machine", "classic", "parallel", "decade")) -> Dict[str, Any]:
+    """기존 추천 엔진(추첨기·클래식·평행·구간미출) — 최근 last_n 회 walk-forward(무거움: 회차당 ~0.5s×엔진)."""
+    from ..database import load_history
+    from ..prediction_signals import RULES_VERSION, _source_top_numbers
+
+    _ensure()
+    df = load_history().sort_values("round")
+    rounds = [int(r) for r in df["round"].tolist()][-int(last_n):]
+    have = {(int(r[0]), r[1]) for r in db.query(
+        "SELECT draw_round, prediction_method FROM round_prediction_history WHERE prediction_type = 'backtest'")}
+    written = 0
+    for r in rounds:
+        prior = df[df["round"] < r]
+        if len(prior) < 50:
+            continue
+        for src in sources:
+            m = f"engine_{src}"
+            if (r, m) in have:
+                continue
+            top = _source_top_numbers(prior, src, r, 6)
+            if len(top) < 6:
+                continue
+            with db.transaction() as c:
+                written += save_prediction(c, rnd=r, method=m, ptype="backtest", numbers=top[:6],
+                                           engine_version=f"signals-{RULES_VERSION}",
+                                           training_range=f"{int(prior['round'].min())}-{int(prior['round'].max())}",
+                                           training_count=len(prior))
+    return {"written": written, "rounds": [rounds[0], rounds[-1]] if rounds else []}
+
+
+def replay_archived_sheets() -> Dict[str, Any]:
+    """보관 용지(추첨 전 동결분)로 V3·자동·반자동 지지 top6 재현 — 입력은 사전, 기록은 사후(historical_replay)."""
+    from ..video_analysis.round_learning import _number_support, _rank_key
+    from ..video_analysis.store import _load_historical_raw, _manual_saved_lines
+
+    _ensure()
+    hist = _load_historical_raw()
+    batches = hist.get("archived_current_rounds") or []
+    written = 0
+    rounds = []
+    with db.transaction() as c:
+        for b in batches:
+            rnd = b.get("round_no")
+            if rnd is None:
+                continue
+            rnd = int(rnd)
+            entries = list(b.get("entries") or [])
+            auto = _manual_saved_lines(entries, "자동", include_photo=True)
+            semi = _manual_saved_lines(entries, "반자동", include_photo=True)
+            if not auto and not semi:
+                continue
+            rounds.append(rnd)
+            for method, a, s_ in (("v3_round_learning", auto, semi), ("sheet_auto", auto, []), ("sheet_semi", [], semi)):
+                if not a and not s_:
+                    continue
+                sup = _number_support(a, s_)
+                top = sorted(range(1, 46), key=lambda n: _rank_key(sup[n]))[:6]
+                written += save_prediction(c, rnd=rnd, method=method, ptype="historical_replay", numbers=top,
+                                           engine_version="round-learning-support-1", cutoff_at=b.get("frozen_at"),
+                                           training_range=f"round {rnd} sheets only", training_count=len(a) + len(s_),
+                                           note=f"보관 용지 동결 시각 {b.get('frozen_at')} — 자동 {len(a)}줄·반자동 {len(s_)}줄")
+    return {"written": written, "rounds": sorted(rounds)}
+
+
+def youtube_ticket_predictions() -> Dict[str, Any]:
+    """유튜브 확정 용지(회차 인쇄 확인)의 번호 빈도 top6 — 자동/반자동 분리. 용지는 추첨 전 구매분."""
+    _ensure()
+    written = 0
+    with db.transaction() as c:
+        for method, table in (("youtube_auto", "ticket_auto_data"), ("youtube_semi", "ticket_semi_auto_data")):
+            rows = c.execute(f"SELECT draw_round, numbers FROM {table} WHERE verification_status = 'accepted' "
+                             "AND round_status = 'ticket_printed'")
+            by: Dict[int, List[List[int]]] = {}
+            for rnd, nums in rows:
+                by.setdefault(int(rnd), []).append(db.loads(nums))
+            for rnd, lines in by.items():
+                cnt = [0] * 46
+                for ln in lines:
+                    for n in ln:
+                        cnt[n] += 1
+                top = sorted(range(1, 46), key=lambda n: (-cnt[n], n))[:6]
+                ptype = "live" if datetime.now(timezone.utc) < draw_cutoff(rnd) else "historical_replay"
+                written += save_prediction(c, rnd=rnd, method=method, ptype=ptype, numbers=top,
+                                           engine_version="yt-ticket-freq-1", training_count=len(lines),
+                                           cutoff_at=draw_cutoff(rnd).isoformat(),
+                                           note=f"유튜브 관찰 용지 {len(lines)}줄(구매 완료 미확인)")
+    return {"written": written}
+
+
+# ─────────────────────────────── 생성: live ───────────────────────────────
+
+def create_live(next_round: int, *, include_ensemble: bool = True, now: Optional[datetime] = None) -> Dict[str, Any]:
+    """다음 회차 사전 예측 — cutoff 이전에만, 한 번 저장되면 변경 불가(ON 중복 무시)."""
+    from ..database import load_history
+    from ..prediction_signals import RULES_VERSION, _source_top_numbers
+    from ..stats_engine.backtest import ALGORITHM_VERSION, STRATEGY_LABELS, _rankings
+    from ..stats_engine.draws import load_draws
+
+    _ensure()
+    now = now or datetime.now(timezone.utc)
+    cutoff = draw_cutoff(next_round)
+    if now >= cutoff:
+        return {"status": "refused_after_cutoff", "round": next_round, "cutoff": cutoff.isoformat()}
+    draws = [d for d in load_draws() if d.round < next_round]
+    if not draws or draws[-1].round != next_round - 1:
+        return {"status": "refused_missing_previous_round", "round": next_round}
+    freq = [0] * 46
+    last_seen = [0] * 46
+    pair = [[0] * 46 for _ in range(46)]
+    for idx, d in enumerate(draws):
+        for w in d.numbers:
+            freq[w] += 1
+            last_seen[w] = idx + 1
+        for i in range(6):
+            for j in range(i + 1, 6):
+                a, b = d.numbers[i], d.numbers[j]
+                pair[a][b] += 1
+                pair[b][a] += 1
+    ranks = _rankings(freq, last_seen, pair, list(draws[-1].numbers), len(draws))
+    rng_range = f"{draws[0].round}-{draws[-1].round}"
+    written = 0
+    with db.transaction() as c:
+        for s in STRATEGY_LABELS:
+            written += save_prediction(c, rnd=next_round, method=f"stats_{s}", ptype="live", numbers=ranks[s][:6],
+                                       engine_version=ALGORITHM_VERSION, cutoff_at=cutoff.isoformat(),
+                                       training_range=rng_range, training_count=len(draws))
+        rng = random.Random(f"baseline-{next_round}")
+        written += save_prediction(c, rnd=next_round, method="random_baseline", ptype="live",
+                                   numbers=rng.sample(range(1, 46), 6), engine_version="random-1.0",
+                                   cutoff_at=cutoff.isoformat(), training_range="none", training_count=0)
+    df = load_history()
+    prior = df[df["round"] < next_round]
+    for src in ("machine", "classic", "parallel", "decade"):
+        top = _source_top_numbers(prior, src, next_round, 6)
+        with db.transaction() as c:
+            written += save_prediction(c, rnd=next_round, method=f"engine_{src}", ptype="live", numbers=top[:6],
+                                       engine_version=f"signals-{RULES_VERSION}", cutoff_at=cutoff.isoformat(),
+                                       training_range=rng_range, training_count=len(prior))
+    ens_note = None
+    if include_ensemble:
+        try:
+            from ..analytics import ENSEMBLE_ALGORITHM_VERSION, generate_ensemble_sets
+
+            r = generate_ensemble_sets(prior, n_sets=5, seed=next_round, target_round=next_round)
+            with db.transaction() as c:
+                for i, comb in enumerate(r.get("combinations", [])[:5], start=1):
+                    written += save_prediction(
+                        c, rnd=next_round, method="ensemble", ptype="live", numbers=comb["numbers"], rank=i,
+                        engine_version=ENSEMBLE_ALGORITHM_VERSION, cutoff_at=cutoff.isoformat(),
+                        training_range=rng_range, training_count=len(prior),
+                        ensemble_weight_version=db.dumps(r.get("engine_weights")),
+                        score=(comb.get("coselection") or {}).get("avoidance_score"))
+        except Exception as exc:  # noqa: BLE001
+            ens_note = f"ensemble 실패: {exc}"
+    return {"status": "ok", "round": next_round, "written": written, "cutoff": cutoff.isoformat(), "note": ens_note}
+
+
+# ─────────────────────────────── 평가 ───────────────────────────────
+
+def evaluate_pending() -> Dict[str, Any]:
+    """공식 당첨번호(레지스트리 검증분 우선, 없으면 CSV)가 있는 회차의 미평가 예측을 채점."""
+    from ..stats_engine.draws import load_draws
+    from ..stats_engine.probability import prize_rank
+
+    _ensure()
+    win = {d.round: d for d in load_draws()}
+    verified = {int(r[0]) for r in db.query("SELECT round FROM reg_draws WHERE verification_status = 'official_verified'")}
+    rows = db.query("SELECT h.prediction_id, h.draw_round, h.predicted_numbers FROM round_prediction_history h "
+                    "LEFT JOIN round_prediction_evaluation e ON e.prediction_id = h.prediction_id "
+                    "WHERE e.prediction_id IS NULL")
+    done = 0
+    with db.transaction() as c:
+        for pid, rnd, nums_s in rows:
+            d = win.get(int(rnd))
+            if d is None:
+                continue
+            nums = db.loads(nums_s)
+            matched = sorted(set(nums) & set(d.numbers))
+            c.execute(
+                "INSERT INTO round_prediction_evaluation (evaluation_id,prediction_id,draw_round,official_winning_numbers,"
+                "bonus_number,matched_numbers,match_count,bonus_matched,prize_tier,evaluated_at,evaluation_source,"
+                "evaluation_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (prediction_id) DO NOTHING",
+                (uuid.uuid4().hex, pid, int(rnd), db.dumps(list(d.numbers)), d.bonus, db.dumps(matched), len(matched),
+                 int(d.bonus in nums), prize_rank(nums, d.numbers, d.bonus), db.now_iso(),
+                 "official_verified" if int(rnd) in verified else "history_csv", "evaluated"),
+            )
+            c.execute("UPDATE round_prediction_history SET prediction_status = 'evaluated' WHERE prediction_id = ?", (pid,))
+            done += 1
+    return {"evaluated": done}
+
+
+# ─────────────────────────────── 조회·성능 ───────────────────────────────
+
+def round_detail(rnd: int) -> Dict[str, Any]:
+    from ..stats_engine.draws import load_draws
+
+    _ensure()
+    d = next((x for x in load_draws() if x.round == int(rnd)), None)
+    rows = db.query(
+        "SELECT h.prediction_id,h.prediction_method,h.prediction_type,h.prediction_rank,h.predicted_numbers,"
+        "h.prediction_created_at,h.prediction_cutoff_at,h.engine_version,h.training_data_range,h.training_sample_count,"
+        "h.source_note,e.matched_numbers,e.match_count,e.bonus_matched,e.prize_tier,e.evaluation_source "
+        "FROM round_prediction_history h LEFT JOIN round_prediction_evaluation e ON e.prediction_id = h.prediction_id "
+        "WHERE h.draw_round = ? ORDER BY h.prediction_type, h.prediction_method, h.prediction_rank", (int(rnd),))
+    items = []
+    for r in rows:
+        created, cutoff = r[5], r[6]
+        pre_draw = None
+        try:
+            if cutoff:
+                pre_draw = datetime.fromisoformat(created) < datetime.fromisoformat(cutoff)
+        except ValueError:
+            pre_draw = None
+        items.append({"prediction_id": r[0], "method": r[1], "label": METHOD_LABELS.get(r[1], r[1]), "type": r[2],
+                      "rank": r[3], "numbers": db.loads(r[4]), "created_at": created, "cutoff_at": cutoff,
+                      "created_before_cutoff": pre_draw, "engine_version": r[7], "training_range": r[8],
+                      "training_count": r[9], "note": r[10], "matched": db.loads(r[11]) if r[11] else None,
+                      "match_count": r[12], "bonus_matched": bool(r[13]) if r[13] is not None else None,
+                      "prize_tier": r[14], "evaluation_source": r[15]})
+    return {"round": int(rnd), "winning": list(d.numbers) if d else None, "bonus": d.bonus if d else None,
+            "draw_date": d.draw_date if d else None, "predictions": items}
+
+
+def _norm_sf(z: float) -> float:
+    return 0.5 * math.erfc(z / math.sqrt(2))
+
+
+def performance(ptype: str = "backtest", first_round: Optional[int] = None, last_round: Optional[int] = None,
+                common_only: bool = False) -> Dict[str, Any]:
+    """엔진별 일치 분포·등수·평균·CI·무작위 대비 z — 같은 회차 집합에서 비교(공통 회차 표기)."""
+    _ensure()
+    sql = ("SELECT h.prediction_method, e.draw_round, e.match_count, e.bonus_matched, e.prize_tier "
+           "FROM round_prediction_history h JOIN round_prediction_evaluation e ON e.prediction_id = h.prediction_id "
+           "WHERE h.prediction_type = ? AND h.prediction_rank = 1")
+    params: List[Any] = [ptype]
+    if first_round:
+        sql += " AND e.draw_round >= ?"
+        params.append(int(first_round))
+    if last_round:
+        sql += " AND e.draw_round <= ?"
+        params.append(int(last_round))
+    rows = db.query(sql, tuple(params))
+    by: Dict[str, List[Tuple[int, int, int, Optional[int]]]] = {}
+    for m, rnd, mc, bm, pt in rows:
+        by.setdefault(m, []).append((int(rnd), int(mc), int(bm), pt))
+    common_rounds: Optional[List[int]] = None
+    if common_only and by:
+        # 모든 엔진이 예측을 가진 회차만 — 같은 회차·같은 조합 수 조건 비교
+        sets = [set(r for r, *_ in v) for v in by.values()]
+        inter = set.intersection(*sets) if sets else set()
+        common_rounds = sorted(inter)
+        by = {m: [x for x in v if x[0] in inter] for m, v in by.items()}
+    exp_mean = 0.8
+    var1 = 6 * (6 / 45) * (39 / 45) * (39 / 44)  # 1장 일치 수 분산(초기하)
+    methods = [m for m in by if m != "random_baseline"]
+    alpha_b = 0.05 / max(1, len(methods))
+    out = []
+    for m, recs in by.items():
+        n = len(recs)
+        dist = [0] * 7
+        five_b = 0
+        tiers: Dict[str, int] = {}
+        for _r, mc, bm, pt in recs:
+            dist[mc] += 1
+            if mc == 5 and bm:
+                five_b += 1
+            if pt:
+                tiers[str(pt)] = tiers.get(str(pt), 0) + 1
+        mean = sum(k * dist[k] for k in range(7)) / n if n else 0.0
+        se = math.sqrt(var1 / n) if n else 0.0
+        z = (mean - exp_mean) / se if se else 0.0
+        p = _norm_sf(z)
+        out.append({
+            "method": m, "label": METHOD_LABELS.get(m, m), "rounds": n,
+            "first_round": min(r for r, *_ in recs) if recs else None,
+            "last_round": max(r for r, *_ in recs) if recs else None,
+            "combos_per_round": 1, "total_games": n,
+            "match_rates": {str(k): round(dist[k] / n, 4) if n else 0 for k in range(7)},
+            "five_plus_bonus_rate": round(five_b / n, 5) if n else 0,
+            "match_counts": dist, "prize_counts": tiers,
+            "mean_matches": round(mean, 4), "ci95": [round(mean - 1.96 * se, 4), round(mean + 1.96 * se, 4)],
+            "max_match": max((mc for _r, mc, *_ in recs), default=0),
+            "rate_3plus": round(sum(dist[3:]) / n, 4) if n else 0,
+            "rate_4plus": round(sum(dist[4:]) / n, 4) if n else 0,
+            "rate_5plus": round(sum(dist[5:]) / n, 5) if n else 0,
+            "vs_random_mean_diff": round(mean - exp_mean, 4), "z": round(z, 3), "p_value": round(p, 4),
+            "significant_bonferroni": bool(n >= 30 and p < alpha_b and mean > exp_mean),
+            "small_sample": n < 30,
+        })
+    out.sort(key=lambda x: (-x["rounds"], -x["mean_matches"]))
+    from ..stats_engine.probability import match_pmf
+
+    pmf = [float(x) for x in match_pmf()]
+    return {
+        "prediction_type": ptype,
+        "common_only": common_only,
+        "common_rounds": ([common_rounds[0], common_rounds[-1], len(common_rounds)] if common_rounds else None),
+        "theoretical": {"kind": "mathematical", "mean_matches": exp_mean,
+                        "match_rates": {str(k): round(pmf[k], 6) for k in range(7)},
+                        "rate_3plus": round(sum(pmf[3:]), 5), "rate_4plus": round(sum(pmf[4:]), 6),
+                        "jackpot_per_combo": "1/8,145,060"},
+        "methods": out,
+        "multiple_testing": {"n_methods": len(methods), "bonferroni_alpha": round(alpha_b, 5)},
+        "honesty": ("과거 기록(관측 성적)이며 미래 당첨확률을 바꾸지 않습니다. 30회 미만 표본은 비교 결론을 내리지 않습니다. "
+                    "backtest·historical_replay 는 사후에 생성된 기록이고, 사전 예측은 live 뿐입니다."),
+    }
+
+
+def search(method: Optional[str] = None, ptype: Optional[str] = None, min_match: Optional[int] = None,
+           limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+    _ensure()
+    sql = ("SELECT h.draw_round,h.prediction_method,h.prediction_type,h.prediction_rank,h.predicted_numbers,"
+           "e.match_count,e.prize_tier,e.bonus_matched FROM round_prediction_history h LEFT JOIN round_prediction_evaluation e "
+           "ON e.prediction_id = h.prediction_id WHERE 1=1")
+    params: List[Any] = []
+    if method:
+        sql += " AND h.prediction_method = ?"
+        params.append(method)
+    if ptype:
+        sql += " AND h.prediction_type = ?"
+        params.append(ptype)
+    if min_match is not None:
+        sql += " AND e.match_count >= ?"
+        params.append(int(min_match))
+    sql += f" ORDER BY h.draw_round DESC, h.prediction_method LIMIT {int(limit)} OFFSET {int(offset)}"
+    return [{"round": r[0], "method": r[1], "label": METHOD_LABELS.get(r[1], r[1]), "type": r[2], "rank": r[3],
+             "numbers": db.loads(r[4]), "match_count": r[5], "prize_tier": r[6],
+             "bonus_matched": bool(r[7]) if r[7] is not None else None} for r in db.query(sql, tuple(params))]
+
+
+def summary() -> Dict[str, Any]:
+    _ensure()
+    rows = db.query("SELECT prediction_type, COUNT(*), MIN(draw_round), MAX(draw_round) FROM round_prediction_history "
+                    "GROUP BY prediction_type")
+    ev = db.query("SELECT COUNT(*) FROM round_prediction_evaluation")
+    return {"by_type": {r[0]: {"count": int(r[1]), "first_round": r[2], "last_round": r[3]} for r in rows},
+            "evaluated": int(ev[0][0]) if ev else 0}
+
+
+def run_all(engine_rounds: int = 100) -> Dict[str, Any]:
+    """정기 작업: 백테스트 보충 → 보관/유튜브 용지 재현 → 다음 회차 live → 평가."""
+    from ..stats_engine.draws import load_draws
+
+    out: Dict[str, Any] = {"stats": backtest_stats()}
+    for name, fn in (("engines", lambda: backtest_engines(engine_rounds)), ("archived", replay_archived_sheets),
+                     ("youtube", youtube_ticket_predictions)):
+        try:
+            out[name] = fn()
+        except Exception as exc:  # noqa: BLE001
+            out[name] = {"error": str(exc)[:300]}
+    draws = load_draws()
+    if draws:
+        try:
+            out["live"] = create_live(draws[-1].round + 1)
+        except Exception as exc:  # noqa: BLE001
+            out["live"] = {"error": str(exc)[:300]}
+    out["evaluate"] = evaluate_pending()
+    return out

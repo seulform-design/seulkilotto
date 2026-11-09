@@ -321,3 +321,73 @@ def get_youtube_api_check():
     except Exception as exc:  # noqa: BLE001
         out.update(status="network", detail=str(exc)[:200])
     return out
+
+
+# ─────────────────────────── 회차별 예측 기록·평가 ───────────────────────────
+
+@router.get("/predictions/summary")
+def get_predictions_summary():
+    from ..ingest import predictions as P
+
+    return P.summary()
+
+
+@router.get("/predictions/round/{round_no}")
+def get_prediction_round(round_no: int):
+    """특정 회차: 엔진별 예측 번호·생성 시각·데이터 범위·버전 + 실제 당첨·일치·등수."""
+    from ..ingest import predictions as P
+
+    return to_jsonable(P.round_detail(round_no))
+
+
+@router.get("/predictions/performance")
+def get_prediction_performance(ptype: str = Query("backtest", pattern="^(backtest|live|historical_replay)$"),
+                               first_round: Optional[int] = Query(None), last_round: Optional[int] = Query(None),
+                               common: bool = Query(True, description="모든 엔진이 예측한 공통 회차만 비교")):
+    from ..ingest import predictions as P
+
+    return to_jsonable(P.performance(ptype, first_round, last_round, common_only=common))
+
+
+@router.get("/predictions/search")
+def get_prediction_search(method: Optional[str] = Query(None), ptype: Optional[str] = Query(None),
+                          min_match: Optional[int] = Query(None, ge=0, le=6),
+                          limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
+    from ..ingest import predictions as P
+
+    return {"items": P.search(method, ptype, min_match, limit, offset), "labels": P.METHOD_LABELS}
+
+
+@router.post("/predictions/run")
+def post_predictions_run(x_upgrade_key: Optional[str] = Header(default=None),
+                         engine_rounds: int = Query(100, ge=10, le=1200)):
+    """백테스트 보충·용지 재현·다음 회차 사전 예측(cutoff 전만)·평가 — 백그라운드."""
+    _auth(x_upgrade_key)
+    from ..ingest import jobs
+    from ..ingest import predictions as P
+
+    return _bg("predictions", lambda: jobs.run_job("predictions", lambda: P.run_all(engine_rounds=engine_rounds), retries=1))
+
+
+@router.get("/official/health")
+def get_official_health(round_no: int = Query(1, alias="round", ge=1)):
+    """공식 출처 단계별 진단(DNS·TCP·TLS·HTTP·파싱) + 마지막 정상 검증 시각."""
+    from ..ingest import jobs, official
+
+    return {"source_health": official.source_health(round_no), "last_successful_verification": jobs.last_successful_verification()}
+
+
+@router.post("/official/verify-round/{round_no}")
+def post_verify_round(round_no: int, x_upgrade_key: Optional[str] = Header(default=None)):
+    _auth(x_upgrade_key)
+    from ..ingest import jobs
+
+    return jobs.verify_round(round_no)
+
+
+@router.post("/official/verify-all")
+def post_verify_all(x_upgrade_key: Optional[str] = Header(default=None)):
+    _auth(x_upgrade_key)
+    from ..ingest import jobs
+
+    return _bg("verify_all_history", lambda: jobs.run_job("verify_all_history", jobs.verify_all_history, retries=0))

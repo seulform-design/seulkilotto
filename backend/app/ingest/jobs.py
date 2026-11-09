@@ -59,6 +59,21 @@ def acquire_lock(name: str, ttl_sec: float = 1800.0) -> bool:
     return True
 
 
+def release_locks_from_previous_containers() -> int:
+    """부팅 시 — 이전 컨테이너(다른 호스트명)가 남긴 잠금을 회수(재배포로 프로세스가 사라져 영구 '실행 중' 방지).
+    운영은 단일 인스턴스라 다른 호스트의 잠금 = 죽은 프로세스의 잠금."""
+    host = socket.gethostname()
+    rows = db.query("SELECT name, owner FROM reg_locks")
+    stale = [n for n, o in rows if not str(o).startswith(host + ":")]
+    with db.transaction() as c:
+        for n in stale:
+            c.execute("DELETE FROM reg_locks WHERE name = ?", (n,))
+        # 같은 이유로 'running' 으로 멈춘 작업 기록을 중단 처리(재시도 대상임을 표시)
+        c.execute("UPDATE reg_jobs SET status = 'aborted_restart', finished_at = ? WHERE status = 'running'",
+                  (db.now_iso(),))
+    return len(stale)
+
+
 def release_lock(name: str) -> None:
     with db.transaction() as c:
         c.execute("DELETE FROM reg_locks WHERE name = ? AND owner = ?", (name, _OWNER))
@@ -260,6 +275,46 @@ def verify_history(first: int = 1, last: Optional[int] = None, max_rounds: int =
     if not offs and failures:
         raise official.OfficialError(failures[0]["kind"], f"공식 대조 전부 실패({len(failures)}창): {failures[0]['error']}")
     return res
+
+
+def verify_round(round_no: int) -> Dict[str, Any]:
+    """단일 회차 공식 대조(덮어쓰기 없음) — 네트워크 오류와 데이터 불일치를 구분해 반환."""
+    from . import official, registry
+
+    registry.seed_from_csv()
+    try:
+        off = official.fetch_round(int(round_no))
+    except official.OfficialError as exc:
+        return {"round": round_no, "ok": False, "error_class": "network" if exc.kind in ("network", "http", "blocked") else "data",
+                "kind": exc.kind, "error": str(exc)}
+    res = registry.verify_existing({off.round: off})
+    return {"round": round_no, "ok": not res["conflicts"], "error_class": "data" if res["conflicts"] else None, **res}
+
+
+def verify_all_history() -> Dict[str, Any]:
+    """남은 미대조 회차를 끝까지(300회차 단위 반복) — 각 묶음 실패는 기록하고 계속."""
+    total = {"newly_verified": 0, "conflicts": [], "failed_windows": 0, "batches": 0}
+    for _ in range(10):
+        r = verify_history(max_rounds=300)
+        total["batches"] += 1
+        total["newly_verified"] += r.get("newly_verified", 0)
+        total["conflicts"] += r.get("conflicts", [])
+        total["failed_windows"] += r.get("failed_window_count", 0)
+        total["remaining"] = r.get("remaining", 0)
+        if not r.get("remaining") or not r.get("newly_verified"):
+            break
+    return total
+
+
+retry_failed_history = verify_history  # 미대조(실패 포함) 회차만 다시 시도 — 동일 로직(점진·멱등)
+
+
+def last_successful_verification() -> Dict[str, Any]:
+    rows = db.query("SELECT name, finished_at, detail_json FROM reg_jobs WHERE status = 'success' AND name IN "
+                    "('verify_history','sync_rounds') ORDER BY finished_at DESC LIMIT 2")
+    last = db.query("SELECT MAX(last_verified_at) FROM reg_draws WHERE verification_status = 'official_verified'")
+    return {"jobs": [{"name": r[0], "finished_at": r[1]} for r in rows],
+            "last_round_verified_at": last[0][0] if last else None}
 
 
 # ─────────────────────────────── 2. 신규 회차 후속 작업 ───────────────────────────────
@@ -468,6 +523,10 @@ def daily_pipeline(force_followups: bool = False) -> Dict[str, Any]:
             report["ensemble_check"] = run_job("ensemble_check", ensemble_check, retries=0)
         else:
             report["followups"] = "신규 회차 없음 — 후속 작업 생략(이전 결과 유지)"
+        # 회차별 예측 기록(매일): 백테스트 보충·다음 회차 사전 예측(cutoff 전만)·공식 결과 자동 평가
+        from . import predictions as _pred
+
+        report["predictions"] = run_job("predictions", lambda: _pred.run_all(engine_rounds=100), retries=1)
         report["finished_at"] = db.now_iso()
         return report
     finally:

@@ -78,6 +78,7 @@ def start_scheduler() -> None:
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.cron import CronTrigger
+        from apscheduler.triggers.interval import IntervalTrigger
     except ImportError:
         logger.warning("APScheduler 미설치 — 자동 업그레이드 비활성")
         return
@@ -145,6 +146,27 @@ def start_scheduler() -> None:
         misfire_grace_time=3600,
     )
 
+    # ── 기존 회차 공식 전수 대조(점진) — 2시간마다 미대조 최신 300회차씩, 다 끝나면 즉시 종료 ──
+    def _verify_backfill():
+        try:
+            from .ingest import db as _db
+            from .ingest import jobs as _ij
+
+            left = _db.query("SELECT COUNT(*) FROM reg_draws WHERE verification_status = 'legacy_unverified'")
+            if left and int(left[0][0] or 0) > 0:
+                _ij.run_job("verify_history", _ij.verify_history, retries=1)
+        except Exception:  # noqa: BLE001
+            logger.exception("[verify-backfill] 실패")
+
+    _scheduler.add_job(
+        _verify_backfill,
+        IntervalTrigger(hours=2),
+        id="verify_backfill",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     # ── 유튜브 용지 썸네일 OCR(자동/반자동) — 매일 03:20 KST(UTC 18:20), 1회 최대 8개 영상 ──
     def _ticket_job():
         import os as _os
@@ -170,7 +192,6 @@ def start_scheduler() -> None:
     )
 
     # ── 엔진 캐시 프리워밍 (부팅 후 1회 + 10분 주기, 15분 TTL 아래로 유지) ──
-    from apscheduler.triggers.interval import IntervalTrigger
 
     _scheduler.add_job(
         warm_engine_caches,

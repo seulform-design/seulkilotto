@@ -128,12 +128,35 @@ def fetch_latest_round(known_latest: int, *, timeout: float = 15.0) -> int:
     return max(rounds)
 
 
-def fetch_range(first: int, last: int, *, delay: float = 0.4, timeout: float = 15.0) -> Dict[int, OfficialDraw]:
-    """회차 범위 일괄 조회(10회차 창 단위) — 백필·전수 검증용."""
+def fetch_range(first: int, last: int, *, delay: float = 1.0, timeout: float = 20.0,
+                retries: int = 3, failures: Optional[List[Dict[str, Any]]] = None) -> Dict[int, OfficialDraw]:
+    """회차 범위 일괄 조회(10회차 창 단위) — 창별 재시도(지수 백오프), 실패 창은 건너뛰고 기록.
+
+    운영(Railway)에서 연속 대량 요청 시 타임아웃이 관측돼(2026-11-10) 요청 간격을 1초로 두고,
+    실패한 창은 `failures` 에 남긴 채 나머지를 계속 조회한다(부분 진행 보존)."""
     out: Dict[int, OfficialDraw] = {}
     r = int(first)
     while r <= last:
-        for d in fetch_window(min(r + 5, last), timeout=timeout):
+        center = min(r + 5, last)
+        got: List[OfficialDraw] = []
+        err: Optional[OfficialError] = None
+        for attempt in range(retries + 1):
+            try:
+                got = fetch_window(center, timeout=timeout)
+                err = None
+                break
+            except OfficialError as exc:
+                err = exc
+                if exc.kind == "parse":
+                    break
+                time.sleep(min(30.0, 2.0 * (2 ** attempt)))
+        if err is not None:
+            if failures is not None:
+                failures.append({"center": center, "kind": err.kind, "error": str(err)[:200]})
+            r = center + 5
+            time.sleep(delay)
+            continue
+        for d in got:
             if first <= d.round <= last:
                 out[d.round] = d
         nxt = max([k for k in out if k >= r] or [r]) + 1

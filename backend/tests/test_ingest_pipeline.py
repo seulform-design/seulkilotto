@@ -361,3 +361,27 @@ def test_pipeline_api(iso):
     assert c.get("/api/v1/pipeline/coselection-calibration").status_code == 200
     assert c.get("/api/v1/pipeline/tickets").status_code == 200
     assert c.get("/api/v1/pipeline/backtest-log").status_code == 200
+
+
+def test_verify_history_incremental_and_partial_failure(iso, monkeypatch):
+    from app.ingest import official
+
+    registry.seed_from_csv()
+    real = {r: registry.get_draw(r) for r in range(1, 61)}
+
+    def fake_range(first, last, failures=None, **kw):
+        out = {}
+        for r in range(first, last + 1):
+            if r in (55, 56):  # 일부 창 실패
+                continue
+            d = real[r]
+            out[r] = OfficialDraw(r, d["numbers"], d["bonus"], d["draw_date"], {})
+        if failures is not None:
+            failures.append({"center": 55, "kind": "network", "error": "timeout"})
+        return out
+
+    monkeypatch.setattr(official, "fetch_range", fake_range)
+    r1 = jobs.verify_history(max_rounds=20)
+    assert r1["range"] == [41, 60] and r1["newly_verified"] == 18 and r1["failed_window_count"] == 1
+    r2 = jobs.verify_history(max_rounds=100)  # 남은(실패 포함) 회차를 다음 실행에서 이어서
+    assert r2["newly_verified"] == 40 and 55 in range(r2["range"][0], r2["range"][1] + 1)

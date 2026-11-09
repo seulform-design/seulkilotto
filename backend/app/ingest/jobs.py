@@ -238,15 +238,27 @@ def _secondary(rnd: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def verify_history(first: int = 1, last: Optional[int] = None) -> Dict[str, Any]:
-    """기존 전 회차를 공식과 전수 대조(덮어쓰기 없음) — 1회성/주기적 정합성 감사."""
+def verify_history(first: int = 1, last: Optional[int] = None, max_rounds: int = 300) -> Dict[str, Any]:
+    """기존 회차를 공식과 대조(덮어쓰기 없음) — 실행당 최대 max_rounds 회차씩 '미대조 최신 회차부터'
+    점진 감사한다(운영에서 대량 연속 요청 타임아웃 대응). 부분 성공도 진행분은 저장된다."""
     from . import official, registry
 
     registry.seed_from_csv()
     last = last or max(registry.read_csv_rows() or {0: None})
-    offs = official.fetch_range(first, last)
+    pending = sorted((int(r[0]) for r in db.query(
+        "SELECT round FROM reg_draws WHERE verification_status = ? AND round BETWEEN ? AND ?",
+        (registry.STATUS_LEGACY, int(first), int(last)))), reverse=True)[:max_rounds]
+    if not pending:
+        return {"newly_verified": 0, "remaining": 0, "message": "미대조 회차 없음"}
+    failures: List[Dict[str, Any]] = []
+    offs = official.fetch_range(min(pending), max(pending), failures=failures)
+    offs = {k: v for k, v in offs.items() if k in set(pending)}
     res = registry.verify_existing(offs)
-    res.update(official_fetched=len(offs), range=[first, last])
+    remaining = db.query("SELECT COUNT(*) FROM reg_draws WHERE verification_status = ?", (registry.STATUS_LEGACY,))
+    res.update(official_fetched=len(offs), range=[min(pending), max(pending)], failed_windows=failures[:10],
+               failed_window_count=len(failures), remaining=int(remaining[0][0]) if remaining else None)
+    if not offs and failures:
+        raise official.OfficialError(failures[0]["kind"], f"공식 대조 전부 실패({len(failures)}창): {failures[0]['error']}")
     return res
 
 
@@ -413,8 +425,10 @@ def learning_engines(force: bool = False) -> Dict[str, Any]:
         t0 = time.time()
         try:
             res = fn() or {}
-            summ = {k: res.get(k) for k in ("ok", "samples", "rounds", "n_rounds", "verdict", "scoring_allowed",
-                                            "reason", "status") if isinstance(res, dict) and k in res}
+            summ = {k: res.get(k) for k in ("ok", "n_rounds", "verdict", "scoring_allowed", "reason", "status")
+                    if isinstance(res, dict) and k in res and not isinstance(res.get(k), (list, dict))}
+            if isinstance(res, dict) and isinstance(res.get("rounds"), list):
+                summ["result_rounds"] = len(res["rounds"])
             summ["samples"] = inp["samples"]
             summ["sample_rounds"] = [inp["rounds"][0], inp["rounds"][-1]] if inp["rounds"] else []
             set_engine(name, "sheet_dependent", S_DONE, input_signature=inp["signature"], last_run_at=db.now_iso(),

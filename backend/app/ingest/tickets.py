@@ -50,9 +50,21 @@ _READER = {}
 
 def _reader(langs: Tuple[str, ...]):
     if langs not in _READER:
+        import os
+
         import easyocr
 
-        _READER[langs] = easyocr.Reader(list(langs), gpu=False, verbose=False)
+        try:  # 웹 서버와 CPU 를 나눠 쓰므로 OCR 스레드 수 제한
+            import torch
+
+            torch.set_num_threads(int(os.environ.get("OCR_THREADS", "2")))
+        except Exception:  # noqa: BLE001
+            pass
+        kw = {}
+        mdir = os.environ.get("EASYOCR_MODULE_PATH")
+        if mdir and os.path.isdir(os.path.join(mdir, "model")):
+            kw = {"model_storage_directory": os.path.join(mdir, "model"), "download_enabled": False}
+        _READER[langs] = easyocr.Reader(list(langs), gpu=False, verbose=False, **kw)
     return _READER[langs]
 
 

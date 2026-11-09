@@ -18,6 +18,11 @@ COPY backend/requirements.txt /tmp/v1-requirements.txt
 COPY platform/backend/requirements.txt /tmp/v2-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/v1-requirements.txt -r /tmp/v2-requirements.txt
 
+# 용지 썸네일 OCR(easyocr ko+en) 모델을 빌드 시점에 내려받아 이미지에 포함 — 런타임 첫 실행 때
+# 모델 다운로드가 지연/정지되고 재배포마다 반복되던 문제 방지(2026-11-10 운영 관측).
+ENV EASYOCR_MODULE_PATH=/opt/easyocr
+RUN python -c "import easyocr; easyocr.Reader(['ko','en'], gpu=False, verbose=False, model_storage_directory='/opt/easyocr/model'); easyocr.Reader(['en'], gpu=False, verbose=False, model_storage_directory='/opt/easyocr/model')"     && ls -la /opt/easyocr/model
+
 COPY backend/ /app/backend/
 COPY platform/backend/ /app/platform/backend/
 COPY backend/data/lotto_history.csv /app/backend/data/lotto_history.csv

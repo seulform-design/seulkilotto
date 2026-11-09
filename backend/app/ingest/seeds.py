@@ -377,9 +377,11 @@ def process_video(vid: str, title: str = "", round_hint: Optional[int] = None) -
                 counts[st] = counts.get(st, 0) + 1
                 _store_typed(c, vid, frame_id, ln, rnd, round_status, st)
         c.execute("UPDATE youtube_discovered_videos SET video_category=?, duplicate_group_id=?, collection_status=?, "
-                  "processed_at=?, algorithm_version=?, similarity_score=MAX(COALESCE(similarity_score,0), ?) "
+                  "processed_at=?, algorithm_version=?, similarity_score=CASE WHEN COALESCE(similarity_score,0) > ? "
+                  "THEN COALESCE(similarity_score,0) ELSE ? END "
                   "WHERE video_id=?",
-                  (category, dup_of, "processed", db.now_iso(), ALGORITHM_VERSION, 0.2 if valid else 0.0, vid))
+                  (category, dup_of, "processed", db.now_iso(), ALGORITHM_VERSION, 0.2 if valid else 0.0,
+                   0.2 if valid else 0.0, vid))
     # 기존 reg_tickets 경로에도 기록(이전 분석 API 호환)
     if category == "C_same_format":
         tickets.store_lines({"video_id": vid, "url": f"https://www.youtube.com/watch?v={vid}", "round_hint": rnd},
@@ -390,7 +392,7 @@ def process_video(vid: str, title: str = "", round_hint: Optional[int] = None) -
 
 def process_queue(limit: int = 10) -> Dict[str, Any]:
     """미처리(또는 알고리즘 버전이 바뀐) 영상만 처리 — 이미 분석한 영상은 재처리하지 않는다."""
-    rows = db.query("SELECT video_id, title, round_hint FROM youtube_discovered_videos WHERE collection_status = 'queued' "
+    rows = db.query("SELECT video_id, title, round_hint FROM youtube_discovered_videos WHERE collection_status IN ('queued','failed') "
                     "OR (collection_status = 'processed' AND COALESCE(algorithm_version,'') <> ?) "
                     "ORDER BY CASE WHEN discovered_via = 'seed' THEN 0 ELSE 1 END, similarity_score DESC, published_at DESC "
                     "LIMIT " + str(int(limit)), (ALGORITHM_VERSION,))

@@ -527,6 +527,12 @@ def daily_pipeline(force_followups: bool = False) -> Dict[str, Any]:
         from . import predictions as _pred
 
         report["predictions"] = run_job("predictions", lambda: _pred.run_all(engine_rounds=100), retries=1)
+        # V8 자동 감사(매일) — 경고만 기록, 자동 교체 없음. 개선 실험은 신규 회차가 있을 때만(과도한 재학습 방지)
+        from . import engine_audit as _audit
+
+        report["engine_audit"] = run_job("engine_audit", _audit.run_audit, retries=0)
+        if new_rounds:
+            report["improvement_experiment"] = run_job("improvement_experiment", _audit.improvement_experiment, retries=0)
         report["finished_at"] = db.now_iso()
         return report
     finally:

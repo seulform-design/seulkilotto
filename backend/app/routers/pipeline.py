@@ -424,3 +424,47 @@ def post_youtube_run(x_upgrade_key: Optional[str] = Header(default=None), max_jo
     from ..ingest import jobs, yt_collect
 
     return _bg("youtube_collect", lambda: jobs.run_job("youtube_collect", lambda: yt_collect.daily(max_jobs), retries=0))
+
+
+# ─────────────────────────── 엔진 감사·공통번호·앙상블 검증 ───────────────────────────
+
+@router.get("/audit/report")
+def get_audit_report():
+    """엔진 성능 순위(기간별)·저성과 진단·공통번호(V5)·독립성·앙상블(V7)·버전·감사(V8) + 최종 질문 답변."""
+    from ..ingest import engine_audit as A
+
+    return to_jsonable(A.full_report())
+
+
+@router.get("/audit/numbers")
+def get_audit_numbers():
+    """V6 번호별 통계(기간별 출현·z·변동성·Bonferroni) + 엔진 선택 이력."""
+    from ..ingest import engine_audit as A
+
+    cons = A.consensus()
+    return to_jsonable({"stats": A.number_stats(), "selection": cons["number_selection"],
+                        "latest_consensus": cons["latest_consensus"]})
+
+
+@router.get("/audit/number/{n}")
+def get_audit_number(n: int):
+    from ..ingest import engine_audit as A
+
+    if not 1 <= n <= 45:
+        raise HTTPException(status_code=400, detail="1~45")
+    return A.number_detail(n)
+
+
+@router.post("/audit/run")
+def post_audit_run(x_upgrade_key: Optional[str] = Header(default=None), experiment: bool = Query(False)):
+    _auth(x_upgrade_key)
+    from ..ingest import engine_audit as A
+    from ..ingest import jobs
+
+    def _go():
+        out = {"audit": A.run_audit()}
+        if experiment:
+            out["experiment"] = A.improvement_experiment()
+        return out
+
+    return _bg("engine_audit", lambda: jobs.run_job("engine_audit", _go, retries=0))

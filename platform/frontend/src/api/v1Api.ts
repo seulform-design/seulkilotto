@@ -775,6 +775,15 @@ export const v1Api = {
   getCoselectionCalibration: () =>
     fetchJson<Record<string, any>>('/api/v1/pipeline/coselection-calibration', { timeoutMs: 30_000 }),
 
+  /** 엔진 감사 종합 보고(성능·진단·공통번호·독립성·앙상블·버전·감사). */
+  getAuditReport: () => fetchJson<Record<string, any>>('/api/v1/pipeline/audit/report', { timeoutMs: 60_000 }),
+
+  /** 번호별 통계 + 엔진 선택 이력. */
+  getAuditNumbers: () => fetchJson<Record<string, any>>('/api/v1/pipeline/audit/numbers', { timeoutMs: 60_000 }),
+
+  /** 번호 상세 — 그 번호를 고른 엔진·회차. */
+  getAuditNumber: (n: number) => fetchJson<Record<string, any>>(`/api/v1/pipeline/audit/number/${n}`, { timeoutMs: 30_000 }),
+
   /** 회차별 예측 기록 요약. */
   getPredictionSummary: () =>
     fetchJson<Record<string, any>>('/api/v1/pipeline/predictions/summary', { timeoutMs: 30_000 }),

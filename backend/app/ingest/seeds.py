@@ -481,10 +481,18 @@ def run_learning() -> Dict[str, Any]:
 
 def daily() -> Dict[str, Any]:
     reg = register_seed(DEFAULT_SEED)
+    # 전 회차 검색(키 있을 때)·채널 스캔 → 용지 단서 있는 영상은 판독 큐에 들어온다
+    try:
+        from . import yt_collect
+
+        collect = yt_collect.daily()
+    except Exception as exc:  # noqa: BLE001
+        collect = {"error": str(exc)[:300]}
     disc = discover(DEFAULT_SEED)
     proc = process_queue(limit=int(os.environ.get("TICKET_SCAN_LIMIT", "10")))
     learn = run_learning() if proc["processed"] else {"skipped": "신규 처리 영상 없음"}
-    return {"seed": reg["status"], "discover": disc, "process": proc, "learning": learn}
+    return {"seed": reg["status"], "collect": {k: collect.get(k) for k in ("search", "enrich", "channels")}
+            if isinstance(collect, dict) else collect, "discover": disc, "process": proc, "learning": learn}
 
 
 def dashboard() -> Dict[str, Any]:

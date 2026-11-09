@@ -789,6 +789,10 @@ export const v1Api = {
       timeoutMs: 60_000,
     }),
 
+  /** 전 회차 YouTube 수집 현황(API 상태·회차 진행률·영상·채널). */
+  getYoutubeCoverage: () =>
+    fetchJson<Record<string, any>>('/api/v1/pipeline/youtube/coverage', { timeoutMs: 30_000 }),
+
   /** 기준(Seed) 영상 기반 용지 수집 현황. */
   getSeedDashboard: () =>
     fetchJson<Record<string, any>>('/api/v1/pipeline/seeds/dashboard', { timeoutMs: 30_000 }),

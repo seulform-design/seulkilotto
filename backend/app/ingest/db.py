@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 _LOCK = threading.RLock()
 
@@ -232,6 +232,72 @@ SCHEMA = [
         result_json TEXT,
         created_at TEXT NOT NULL
     )""",
+    # ── 전 회차 YouTube 수집 (스키마 v3) ──
+    """CREATE TABLE IF NOT EXISTS youtube_search_jobs (
+        job_id TEXT PRIMARY KEY,
+        draw_round INTEGER,
+        search_query TEXT NOT NULL,
+        search_type TEXT NOT NULL,
+        published_after TEXT,
+        published_before TEXT,
+        page_token TEXT,
+        priority INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        discovered_count INTEGER NOT NULL DEFAULT 0,
+        result_count INTEGER,
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_ysj_status ON youtube_search_jobs (status, priority)",
+    """CREATE TABLE IF NOT EXISTS youtube_videos (
+        video_id TEXT PRIMARY KEY,
+        video_url TEXT NOT NULL,
+        title TEXT,
+        description TEXT,
+        channel_id TEXT,
+        channel_title TEXT,
+        published_at TEXT,
+        duration TEXT,
+        view_count INTEGER,
+        privacy_status TEXT,
+        collection_status TEXT NOT NULL,
+        first_collected_at TEXT NOT NULL,
+        last_checked_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS youtube_video_rounds (
+        video_id TEXT NOT NULL,
+        draw_round INTEGER NOT NULL,
+        mapping_confidence REAL NOT NULL,
+        mapping_method TEXT NOT NULL,
+        verification_status TEXT NOT NULL,
+        PRIMARY KEY (video_id, draw_round)
+    )""",
+    """CREATE TABLE IF NOT EXISTS youtube_channels (
+        channel_id TEXT PRIMARY KEY,
+        channel_title TEXT,
+        channel_url TEXT,
+        discovery_source TEXT,
+        first_discovered_at TEXT NOT NULL,
+        last_scanned_at TEXT,
+        videos_found INTEGER NOT NULL DEFAULT 0
+    )""",
+    """CREATE TABLE IF NOT EXISTS youtube_collection_logs (
+        log_id TEXT PRIMARY KEY,
+        video_id TEXT,
+        draw_round INTEGER,
+        operation TEXT NOT NULL,
+        status TEXT NOT NULL,
+        error_code TEXT,
+        error_message TEXT,
+        http_status INTEGER,
+        response_ms REAL,
+        items INTEGER,
+        quota_units INTEGER,
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_ycl_created ON youtube_collection_logs (created_at)",
     """CREATE TABLE IF NOT EXISTS reg_schema (
         version INTEGER PRIMARY KEY,
         applied_at TEXT NOT NULL

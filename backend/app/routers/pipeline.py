@@ -246,14 +246,14 @@ def get_seed_videos(category: Optional[str] = Query(None), limit: int = Query(50
     from ..ingest import db
 
     sql = ("SELECT video_id,channel_title,title,published_at,similarity_score,video_category,duplicate_group_id,"
-           "collection_status,round_hint,discovered_via,processed_at FROM youtube_discovered_videos")
+           "collection_status,round_hint,discovered_via,processed_at,error FROM youtube_discovered_videos")
     params: tuple = ()
     if category:
         sql += " WHERE video_category = ?"
         params = (category,)
     sql += " ORDER BY processed_at DESC LIMIT " + str(int(limit))
     cols = ["video_id", "channel", "title", "published_at", "similarity", "category", "duplicate_of", "status",
-            "round_hint", "via", "processed_at"]
+            "round_hint", "via", "processed_at", "error"]
     return {"items": [dict(zip(cols, r)) for r in db.query(sql, params)]}
 
 
@@ -391,3 +391,36 @@ def post_verify_all(x_upgrade_key: Optional[str] = Header(default=None)):
     from ..ingest import jobs
 
     return _bg("verify_all_history", lambda: jobs.run_job("verify_all_history", jobs.verify_all_history, retries=0))
+
+
+# ─────────────────────────── 전 회차 YouTube 수집 ───────────────────────────
+
+@router.get("/youtube/diagnose")
+def get_youtube_diagnose():
+    """키 상태(값 비노출) + 키 없는 접속 시험(네트워크) + (키 있으면) search/videos/channels/playlistItems 실제 시험."""
+    from ..ingest import yt_collect
+
+    return to_jsonable(yt_collect.diagnose())
+
+
+@router.get("/youtube/coverage")
+def get_youtube_coverage():
+    from ..ingest import yt_collect
+
+    return to_jsonable(yt_collect.coverage())
+
+
+@router.get("/youtube/round/{round_no}")
+def get_youtube_round(round_no: int):
+    from ..ingest import yt_collect
+
+    return to_jsonable(yt_collect.round_detail(round_no))
+
+
+@router.post("/youtube/run")
+def post_youtube_run(x_upgrade_key: Optional[str] = Header(default=None), max_jobs: int = Query(80, ge=1, le=90)):
+    """회차 작업 보충 → 검색(할당량 내) → 메타데이터 → 채널 스캔 — 백그라운드."""
+    _auth(x_upgrade_key)
+    from ..ingest import jobs, yt_collect
+
+    return _bg("youtube_collect", lambda: jobs.run_job("youtube_collect", lambda: yt_collect.daily(max_jobs), retries=0))

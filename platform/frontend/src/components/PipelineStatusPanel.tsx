@@ -45,6 +45,7 @@ export default function PipelineStatusPanel() {
   const tk = useQuery({ queryKey: ['v1-ticket-analysis'], queryFn: v1Api.getTicketAnalysis, staleTime: 600_000, enabled: open });
   const sd = useQuery({ queryKey: ['v1-seed-dashboard'], queryFn: v1Api.getSeedDashboard, staleTime: 300_000, enabled: open });
   const yt = useQuery({ queryKey: ['v1-yt-api-check'], queryFn: v1Api.getYoutubeApiCheck, staleTime: 3_600_000, enabled: open });
+  const cov = useQuery({ queryKey: ['v1-yt-coverage'], queryFn: v1Api.getYoutubeCoverage, staleTime: 300_000, enabled: open });
   const d = st.data;
   const reg = d?.registry ?? {};
   const jobs = (d?.jobs ?? {}) as Record<string, any>;
@@ -236,6 +237,27 @@ export default function PipelineStatusPanel() {
               </Typography>
               <Typography variant="caption" color="text.secondary" component="div">
                 {sd.data.access_policy} 영상에 보인 용지는 관찰 데이터이며 구매 완료로 간주하지 않습니다.
+              </Typography>
+            </Box>
+          )}
+
+          {cov.data && (
+            <Box sx={{ border: 1, borderColor: cov.data.api?.key_status?.primary_present ? 'divider' : 'warning.main', borderRadius: 1.5, p: 1 }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
+                전 회차 YouTube 검색 · API {cov.data.api?.key_status?.primary_present ? '키 설정됨' : '키 미설정 — 검색 중지(RSS·썸네일만)'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="div">
+                회차 {cov.data.rounds?.total ?? 0}개 중 검색함 {cov.data.rounds?.searched_any ?? 0} · 대기 {cov.data.rounds?.pending ?? 0} ·
+                영상 발견 회차 {cov.data.rounds?.with_videos ?? 0} · 검색했지만 영상 없음 {cov.data.rounds?.without_videos_after_search ?? 0}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="div">
+                고유 영상 {cov.data.videos?.unique ?? 0} · 채널 {cov.data.channels?.total ?? 0} · 판독 대기 {cov.data.videos?.queued_for_ticket_ocr ?? 0} ·
+                판독 완료 {cov.data.videos?.ocr_processed ?? 0} · 접근 불가 {cov.data.videos?.unavailable ?? 0}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="div">
+                할당량 {cov.data.api?.quota_used_today ?? 0}/{cov.data.api?.quota_budget ?? 0} units · 마지막 정상 호출 {fmt(cov.data.api?.last_ok_call)} ·
+                마지막 오류 {cov.data.api?.last_error ? `${cov.data.api.last_error.error_code} (HTTP ${cov.data.api.last_error.http ?? '-'})` : '없음'}
+                {cov.data.estimated_days_remaining ? ` · 남은 검색 약 ${cov.data.estimated_days_remaining}일` : ''}
               </Typography>
             </Box>
           )}

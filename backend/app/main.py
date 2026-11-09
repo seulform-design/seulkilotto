@@ -24,6 +24,7 @@ from .routers import (
     patterns,
     parallel_round,
     photo_analysis,
+    pipeline,
     post_occurrence,
     prediction_signals,
     recommend,
@@ -104,6 +105,7 @@ app.include_router(post_occurrence.router)
 # pattern/overlap/graft/nested-cv/shap/carryover/full-history-backtest)와 보관 데이터 API 가
 # 함께 있다 — 기존 API 보존 원칙에 따라 다시 마운트한다(2026-11-10 복구).
 app.include_router(photo_analysis.router)
+app.include_router(pipeline.router)
 app.include_router(prediction_signals.router)
 app.include_router(parallel_round.router)
 app.include_router(datasets.router)

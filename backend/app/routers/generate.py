@@ -216,8 +216,8 @@ def generate_ensemble(
     intent: str = Query(default="current_round", description="review | current_round"),
     target_round: int | None = Query(default=None, description="대상 회차 (선택)"),
     seed: int | None = Query(default=None, description="난수 시드"),
-    decay_factor: float = Query(default=0.9, ge=0.5, le=1.0, description="지수 시간 감쇄 계수"),
-    lambda_reg: float = Query(default=0.2, ge=0.0, le=1.0, description="규제 가중치 강도"),
+    decay_factor: float = Query(default=0.9, ge=0.5, le=1.0, description="엔진 성능 증거(최근 lookback 회 백테스트 적중)의 지수 시간 감쇠. 1.0=감쇠 없음. 번호 최근성 가정이 아님"),
+    lambda_reg: float = Query(default=0.2, ge=0.0, le=1.0, description="엔진 가중치 L2형 수축 강도 — 기여 엔진 균등 가중 쪽으로 λ 만큼 수축(0=없음, 1=완전 균등)"),
     alpha_sig: float = Query(default=0.05, ge=0.01, le=0.2, description="초기하 유의수준 임계치"),
 ):
     """실시간 가중 투표 앙상블 및 스마트 필터 기반 번호 추천 조합 생성"""

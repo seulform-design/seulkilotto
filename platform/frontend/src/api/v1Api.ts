@@ -759,6 +759,26 @@ export const v1Api = {
   getDataIntegrity: () =>
     fetchJson<Record<string, any>>('/api/v1/stats/integrity', { timeoutMs: 30_000 }),
 
+  /** 자동 수집·공식 검증 파이프라인 상태(최신 회차·수집/검증 시각·엔진 6종·오류·재시도). */
+  getPipelineStatus: () =>
+    fetchJson<Record<string, any>>('/api/v1/pipeline/status', { timeoutMs: 30_000 }),
+
+  /** 파이프라인 수동 실행(백그라운드). 서버에 UPGRADE_API_KEY 가 있으면 키 필요. */
+  runPipeline: (upgradeKey?: string) =>
+    fetchJson<Record<string, any>>('/api/v1/pipeline/run', {
+      method: 'POST',
+      headers: upgradeKey ? { 'X-Upgrade-Key': upgradeKey } : {},
+      timeoutMs: 30_000,
+    }),
+
+  /** 공동선택 회피 점수 실측 검증(공식 판매액·등수별 당첨자 수). */
+  getCoselectionCalibration: () =>
+    fetchJson<Record<string, any>>('/api/v1/pipeline/coselection-calibration', { timeoutMs: 30_000 }),
+
+  /** 유튜브 용지(자동/반자동 분리) 분석. */
+  getTicketAnalysis: () =>
+    fetchJson<Record<string, any>>('/api/v1/pipeline/tickets?limit=20', { timeoutMs: 30_000 }),
+
   /** 수학적 기준값 — C(45,6), 단일/복수 조합 1등 확률, 등수 확률. */
   getProbability: (n = 1) =>
     fetchJson<Record<string, any>>(`/api/v1/stats/probability?n=${n}`, { timeoutMs: 15_000 }),

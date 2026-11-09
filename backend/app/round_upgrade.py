@@ -112,9 +112,7 @@ def ensure_rounds_synced_async(*, reason: str = "on-demand") -> Dict[str, Any]:
     def _run() -> None:
         logger = __import__("logging").getLogger(__name__)
         try:
-            st = get_upgrade_status()  # 느린 크롤 — 백그라운드에서만
-            if not st.get("can_upgrade"):
-                return
+            # 공식 검증 파이프라인이 최신 회차 확인·수집·검증을 모두 수행(신규 없으면 즉시 종료)
             result = upgrade_rounds()
             logger.info(
                 "[%s] 회차 캐치업: before=%s after=%s new=%s",
@@ -131,7 +129,11 @@ def ensure_rounds_synced_async(*, reason: str = "on-demand") -> Dict[str, Any]:
 
 
 def upgrade_rounds(force: bool = False) -> Dict[str, Any]:
-    """누락 회차를 크롤링해 CSV에 반영한다 (동시 실행 직렬화)."""
+    """누락 회차를 반영한다 (동시 실행 직렬화).
+
+    2026-11-10: 기본 경로는 **공식 검증 파이프라인**(app.ingest) — 유튜브 수집 + 동행복권 공식
+    결과 대조 후 일치한 회차만 정식 레지스트리·CSV 에 추가한다. force=True(관리자 전체 재크롤)만
+    기존 크롤러 경로를 그대로 쓴다(기존 기능 보존)."""
     if not _UPGRADE_LOCK.acquire(blocking=False):
         return {
             "ok": False,
@@ -139,9 +141,67 @@ def upgrade_rounds(force: bool = False) -> Dict[str, Any]:
             "message": "이미 회차 업그레이드가 진행 중입니다. 잠시 후 다시 시도하세요.",
         }
     try:
-        return _upgrade_rounds_locked(force)
+        if force:
+            return _upgrade_rounds_locked(force)
+        return _verified_upgrade_locked()
     finally:
         _UPGRADE_LOCK.release()
+
+
+def _verified_upgrade_locked() -> Dict[str, Any]:
+    from .ingest import jobs as ingest_jobs
+
+    latest_before = int(get_history_meta().get("latest_round") or 0)
+    report = ingest_jobs.daily_pipeline()
+    invalidate_history_cache()
+    after_meta = get_history_meta()
+    latest_after = int(after_meta.get("latest_round") or 0)
+    sync = (report.get("sync_rounds") or {}).get("detail") or {}
+    result: Dict[str, Any] = {
+        "ok": (report.get("sync_rounds") or {}).get("status") == "success" or report.get("status") == "skipped_locked",
+        "mode": "verified_pipeline",
+        "before_latest": latest_before,
+        "after_latest": latest_after,
+        "api_latest_round": sync.get("official_latest"),
+        "new_rounds": max(0, latest_after - latest_before),
+        "updated_rounds": 0,
+        "failed_rounds": sum(1 for r in sync.get("results", []) if r.get("status") in ("unverified", "pending_review")),
+        "synced_rounds": list(range(latest_before + 1, latest_after + 1)) if latest_after > latest_before else [],
+        "current_round": after_meta.get("current_round"),
+        "pipeline": report,
+    }
+    # 이번회차 샌드박스 자기치유 정렬은 신규 회차 유무와 무관하게 매번(멱등) — 기존 동작 보존
+    result["photo_rollover"] = _align_sandbox(latest_after)
+    if latest_after > latest_before:
+        result.update(_post_sync(latest_after, result))
+    return result
+
+
+def _align_sandbox(after_latest: int) -> Optional[Dict[str, Any]]:
+    try:
+        target_current = after_latest + 1
+        current_state = get_current_dataset_state()
+        sandbox_round = int(current_state.get("current_round") or 0)
+        if after_latest > 0 and 0 < sandbox_round < target_current:
+            return align_current_sandbox_to_round(target_current)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+    return None
+
+
+def _post_sync(after_latest: int, result: Dict[str, Any]) -> Dict[str, Any]:
+    """CSV 에 신규 회차가 들어간 뒤의 기존 후속 처리(v2 동기화·파이프라인 롤오버)."""
+    out: Dict[str, Any] = {}
+    out["v2_sync"] = _sync_v2_database()
+    try:
+        from .pipeline.rollover import maybe_rollover_after_upgrade
+
+        rollover = maybe_rollover_after_upgrade({**result, **out})
+        if rollover is not None:
+            out["pipeline_rollover"] = rollover.to_dict()
+    except Exception as exc:  # noqa: BLE001
+        out["pipeline_rollover"] = {"ok": False, "error": str(exc)}
+    return out
 
 
 def _upgrade_rounds_locked(force: bool = False) -> Dict[str, Any]:

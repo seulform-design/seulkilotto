@@ -131,6 +131,44 @@ def start_scheduler() -> None:
         id="weekly_upgrade_sun_retry",
         replace_existing=True,
     )
+    # ── 하루 1회 최신 회차 확인(공식 검증 파이프라인) — 매일 08:10 KST(UTC 23:10) ──
+    # 토요일 추첨 결과는 위 토/일 슬롯이 먼저 잡고, 이 일일 작업이 놓친 회차·재시작 후 공백을 메운다.
+    # 같은 회차를 반복 수집해도 레지스트리가 중복을 차단하고, reg_locks 로 다중 실행을 막는다.
+    _scheduler.add_job(
+        _job,
+        CronTrigger(hour=23, minute=10, timezone="UTC"),
+        args=["daily-sync"],
+        id="daily_verified_sync",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
+    # ── 유튜브 용지 썸네일 OCR(자동/반자동) — 매일 03:20 KST(UTC 18:20), 1회 최대 8개 영상 ──
+    def _ticket_job():
+        import os as _os
+
+        if _os.environ.get("TICKET_SCAN_ENABLED", "1") in ("0", "false", "False"):
+            return
+        try:
+            from .ingest import jobs as _ij
+            from .ingest import tickets as _tk
+
+            _ij.run_job("ticket_scan", lambda: _tk.scan(limit=8), retries=1)
+        except Exception:  # noqa: BLE001
+            logger.exception("[ticket-scan] 실패")
+
+    _scheduler.add_job(
+        _ticket_job,
+        CronTrigger(hour=18, minute=20, timezone="UTC"),
+        id="daily_ticket_scan",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
     # ── 엔진 캐시 프리워밍 (부팅 후 1회 + 10분 주기, 15분 TTL 아래로 유지) ──
     from apscheduler.triggers.interval import IntervalTrigger
 

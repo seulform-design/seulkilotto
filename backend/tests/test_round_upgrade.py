@@ -35,6 +35,11 @@ def _patch_upgrade_common(monkeypatch, *, latest_round, api_latest, crawl_ret, m
     monkeypatch.setattr(
         "app.round_upgrade.CSV_DATA_PATH", __import__("pathlib").Path("/tmp/nonexistent.csv")
     )
+    # 2026-11-10: 기본 경로는 공식 검증 파이프라인 — 네트워크 없이 성공 보고로 스텁
+    monkeypatch.setattr(
+        "app.ingest.jobs.daily_pipeline",
+        lambda **_kw: {"sync_rounds": {"status": "success", "detail": {"official_latest": api_latest, "results": []}}},
+    )
 
 
 def test_upgrade_rounds_self_heals_stale_sandbox(monkeypatch):
@@ -97,3 +102,20 @@ def test_upgrade_rounds_skips_align_when_sandbox_already_current(monkeypatch):
     assert result["ok"] is True
     assert aligned == []  # 13 >= 13 → 스킵
     assert result["photo_rollover"] is None
+
+
+def test_upgrade_rounds_force_keeps_legacy_crawler(monkeypatch):
+    """force=True(관리자 전체 재크롤)는 기존 크롤러 경로를 그대로 사용한다(기능 보존)."""
+    from app.round_upgrade import upgrade_rounds
+
+    _patch_upgrade_common(
+        monkeypatch,
+        latest_round=12,
+        api_latest=12,
+        crawl_ret=(0, 1, 0),
+        meta={"latest_round": 12, "current_round": 13},
+        sandbox={"current_round": 13, "entries": []},
+    )
+    monkeypatch.setattr("app.round_upgrade.align_current_sandbox_to_round", lambda target_round: {"ok": True})
+    result = upgrade_rounds(force=True)
+    assert result["updated_rounds"] == 1 and "mode" not in result

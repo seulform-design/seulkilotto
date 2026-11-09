@@ -33,3 +33,11 @@ backend/data/datasets/
 platform/frontend/src/**/*.js
 platform/frontend/src/**/*.js.map
 !platform/frontend/src/**/*.config.js
+
+# SQLite 런타임 파일(WAL/SHM)과 백업은 커밋하지 않는다 — 스키마는 app/ingest/db.py 로 관리
+*.db-wal
+*.db-shm
+*.db-journal
+backend/data/backups/
+backend/data/*.csv.bak
+backend/data/*.csv.tmp-*

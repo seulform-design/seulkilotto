@@ -17,6 +17,7 @@ import FullHistoryBacktestPanel from '../components/FullHistoryBacktestPanel';
 import WalkForwardPanel from '../components/WalkForwardPanel';
 import ParallelRoundPanel from '../components/ParallelRoundPanel';
 import MachineOverviewPanel from '../components/MachineOverviewPanel';
+import PipelineStatusPanel from '../components/PipelineStatusPanel';
 
 const RoundRecommendPage = lazy(() => import('./RoundRecommendPage'));
 const PostOccurrencePage = lazy(() => import('./PostOccurrencePage'));
@@ -43,7 +44,12 @@ function MountOnOpen({ label, children }: { label: string; children: ReactNode }
   return open ? (
     <Suspense fallback={<Typography variant="caption">불러오는 중…</Typography>}>{children}</Suspense>
   ) : (
-    <Button variant="outlined" size="small" onClick={() => setOpen(true)} sx={{ alignSelf: 'flex-start' }}>
+    <Button
+      variant="outlined"
+      size="small"
+      onClick={() => setOpen(true)}
+      sx={{ alignSelf: 'flex-start', maxWidth: '100%', whiteSpace: 'normal', textAlign: 'left', textTransform: 'none' }}
+    >
       {label}
     </Button>
   );
@@ -56,6 +62,10 @@ export default function AnalysisEnginePage() {
         모든 분석은 공식 당첨 이력으로 계산됩니다. 수학적 1등 확률(1장 <strong>1/8,145,060</strong>)은 어떤 통계·백테스트로도 바뀌지
         않으며, 화면의 <strong>수학적 확률 · 과거 백테스트 · 관측 통계 · 공동선택 회피 점수</strong>는 서로 다른 종류의 수치입니다.
       </Alert>
+
+      <Group title="0. 자동 수집 · 검증 상태">
+        <PipelineStatusPanel />
+      </Group>
 
       <Group title="1. 데이터 · 수학적 기준값">
         <IntegrityProbabilityPanel />

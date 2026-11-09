@@ -341,6 +341,15 @@ def _passes_ensemble_filters(
 ENSEMBLE_ALGORITHM_VERSION = "ensemble-2.0-sig-gated-coselection"
 
 
+def _coselection_validation() -> Dict:
+    try:
+        from .stats_engine.coselection_calibration import cached_summary
+
+        return cached_summary()
+    except Exception as exc:  # noqa: BLE001
+        return {"kind": "heuristic_estimate", "validated": False, "confidence": "unverified", "reason": str(exc)[:200]}
+
+
 def generate_ensemble_sets(
     df: pd.DataFrame,
     n_sets: int = 15,
@@ -426,14 +435,25 @@ def generate_ensemble_sets(
             continue
         src_data = accuracy_data.get("by_source", {}).get(eng) or {}
         per_round = src_data.get("per_round", []) if src_data.get("available") else []
+        # decay_factor: '엔진 성능 증거'의 시간 감쇠 — 오래된 백테스트 회차의 적중을 덜 반영한다.
+        # (번호의 최근성이 아니라 모델 성적표에만 적용: 최근 번호가 더 잘 나온다는 가정 없음.)
+        # 가중 합 z = (Σw·hits − Σw·E) / sqrt(Σw²·Var) — decay=1 이면 기존 단순 합과 동일.
+        n_items = len(per_round)
         hits_sum = exp_sum = var_sum = 0.0
-        for r_info in per_round:
+        raw_hits = raw_exp = 0.0
+        for idx_r, r_info in enumerate(per_round):
             k = len(r_info.get("predicted", []))
             if k <= 0 or k >= 45:
                 continue
-            hits_sum += r_info.get("hits", 0)
-            exp_sum += k * 6 / 45
-            var_sum += k * (6 / 45) * (39 / 45) * ((45 - k) / 44)
+            w_t = float(decay_factor) ** (n_items - 1 - idx_r)
+            h = float(r_info.get("hits", 0))
+            e = k * 6 / 45
+            v = k * (6 / 45) * (39 / 45) * ((45 - k) / 44)
+            hits_sum += w_t * h
+            exp_sum += w_t * e
+            var_sum += w_t * w_t * v
+            raw_hits += h
+            raw_exp += e
         n_r = len(per_round)
         if var_sum > 0:
             z = (hits_sum - exp_sum) / _math.sqrt(var_sum)
@@ -444,9 +464,10 @@ def generate_ensemble_sets(
         engine_evidence[eng] = {
             "available": bool(per_round),
             "rounds": n_r,
-            "hits": int(hits_sum),
-            "expected_hits": round(exp_sum, 2),
-            "lift": round(hits_sum / exp_sum, 3) if exp_sum > 0 else 0.0,
+            "hits": int(raw_hits),
+            "expected_hits": round(raw_exp, 2),
+            "lift": round(raw_hits / raw_exp, 3) if raw_exp > 0 else 0.0,
+            "decayed_lift": round(hits_sum / exp_sum, 3) if exp_sum > 0 else 0.0,
             "p_value": round(float(p_val), 4),
             "significant": significant,
         }
@@ -465,6 +486,18 @@ def generate_ensemble_sets(
         engine_weights = {k: v / total_w for k, v in engine_weights.items()}
     else:
         engine_weights = {k: 1.0 / len(engine_weights) for k in engine_weights.keys()}
+    # lambda_reg: 가중치 정규화(수축) — 기여 엔진들 사이 균등 가중 쪽으로 λ 만큼 끌어당겨
+    # 한 엔진에 과도한 가중이 몰리는 것(소표본 과적합)을 막는다. λ=0 이면 수축 없음, λ=1 이면 완전 균등.
+    contributing = [k for k in engine_weights if engine_picks[k]]
+    weights_before_reg = {k: round(v * 100, 1) for k, v in engine_weights.items()}
+    if contributing and lambda_reg > 0:
+        uni = 1.0 / len(contributing)
+        engine_weights = {
+            k: ((1 - lambda_reg) * v + lambda_reg * uni) if k in contributing else 0.0
+            for k, v in engine_weights.items()
+        }
+        tot = sum(engine_weights.values())
+        engine_weights = {k: v / tot for k, v in engine_weights.items()}
     any_engine_significant = any(v.get("significant") for v in engine_evidence.values())
 
     # 3. 번호별 확률 맵 (Probability Map) 연산
@@ -590,6 +623,15 @@ def generate_ensemble_sets(
             "selection_rule": "후보 중 공동선택 회피 점수 높은 순 + 세트 간 공유 번호 ≤3",
         },
         "diversity": div,
+        "params": {
+            "lookback": lookback,
+            "decay_factor": decay_factor,
+            "decay_applies_to": "엔진 백테스트 적중(성능 증거)의 시간 가중 — 번호 최근성 가정 아님",
+            "lambda_reg": lambda_reg,
+            "lambda_applies_to": "엔진 가중치를 기여 엔진 균등 가중 쪽으로 수축(과도한 가중 방지)",
+            "alpha_sig": alpha_sig,
+            "weights_before_regularization": weights_before_reg,
+        },
         "uncertainty": {
             "jackpot_probability_per_set": "1/8,145,060 (모든 조합 동일)",
             "expected_main_matches_per_set": 0.8,
@@ -600,6 +642,8 @@ def generate_ensemble_sets(
             ),
         },
         "coselection_basis": coselection.ESTIMATE_BASIS,
+        # 회피 점수의 실측 검증 요약(공식 판매액·등수별 당첨자 수) — 추정치와 실측 검증을 분리 표기
+        "coselection_validation": _coselection_validation(),
         # 수학적 확률(kind=mathematical) — 백테스트·회피 점수와 분리된 필드
         "probability": _tickets_probability([c["numbers"] for c in combinations_list]),
         "disclaimer": (

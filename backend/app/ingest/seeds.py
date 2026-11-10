@@ -414,13 +414,15 @@ def process_queue(limit: int = 10) -> Dict[str, Any]:
 
 # ─────────────────────────────── 학습 연결 ───────────────────────────────
 
+# 2026-11-10: 6종 엔진 모두 video_analysis.ticket_source 를 통해 유튜브 확정 용지를 입력으로 읽는다
+# (TICKET_LEARNING_SOURCE=youtube 기본). 아래 nested_cv/shap_drift 는 자동·반자동을 '분리'한 추가 실행.
 LEARNING_LINK = {
-    "nested_cv": "connected",        # run_nested_feature_cv(samples) — 표본을 직접 받음
-    "shap_drift": "connected",       # build_shap_drift_report(samples)
-    "feature_learning": "store_only",  # 내부에서 보관 용지 저장소만 읽음(입력 주입 경로 없음)
-    "pattern_mining": "store_only",
-    "round_learning": "store_only",
-    "overlap_learning": "store_only",
+    "feature_learning": "connected",
+    "nested_cv": "connected",
+    "shap_drift": "connected",
+    "pattern_mining": "connected",
+    "round_learning": "connected",
+    "overlap_learning": "connected",
 }
 
 
@@ -447,20 +449,34 @@ def youtube_round_samples(pick_type: str) -> List[Any]:
 
 
 def run_learning() -> Dict[str, Any]:
-    """유튜브 용지 표본으로 '표본을 직접 받는' 엔진만 실행(자동/반자동 별도). 결과를 이력에 기록."""
+    """유튜브 확정 용지로 6종 엔진 본 실행(ticket_source 경유) + 자동/반자동 분리 실행. 결과를 이력에 기록."""
     from ..video_analysis.nested_cv import run_nested_feature_cv
     from ..video_analysis.shap_drift_stub import build_shap_drift_report
 
     out: Dict[str, Any] = {}
+    # 1) 6종 엔진 본 실행(자동+반자동, ticket_source 경유) — 입력이 바뀐 경우에만 재학습(jobs 쪽 시그니처 비교)
+    try:
+        from . import jobs as _jobs
+
+        main = _jobs.learning_engines()
+        out["engines"] = {k: v for k, v in main.items() if k not in ("input_rounds",)}
+        with db.transaction() as c:
+            for eng in LEARNING_LINK:
+                c.execute("INSERT INTO ticket_learning_history (learning_id,video_id,ticket_id,engine_id,algorithm_version,"
+                          "learning_status,pick_type,draw_round,sample_count,result_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                          (uuid.uuid4().hex, None, None, eng, ALGORITHM_VERSION, str(main.get(eng)), "auto+semi_auto",
+                           (main.get("input_rounds") or [None])[-1], main.get("input_samples"), db.dumps({"result": main.get(eng)}),
+                           db.now_iso()))
+    except Exception as exc:  # noqa: BLE001
+        out["engines"] = {"error": str(exc)[:300]}
+    # 2) 자동/반자동 분리 실행(표본을 직접 받는 엔진)
     runners = {"nested_cv": lambda s: run_nested_feature_cv(s, seed=42),
                "shap_drift": lambda s: build_shap_drift_report(s, seed=42)}
     for ptype in ("auto", "semi_auto"):
         samples = youtube_round_samples(ptype)
-        for eng, link in LEARNING_LINK.items():
+        for eng in ("nested_cv", "shap_drift"):
             key = f"{eng}:{ptype}"
-            if link != "connected":
-                status, result = "not_connected_store_only", {"reason": "엔진이 보관 용지 저장소만 읽음 — 유튜브 표본 주입 경로 없음"}
-            elif len(samples) < 3:
+            if len(samples) < 3:
                 status, result = "insufficient_data", {"samples": len(samples), "reason": "추첨 완료 회차의 확정 용지 회차 3개 미만"}
             else:
                 try:

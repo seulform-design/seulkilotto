@@ -123,7 +123,8 @@ export default function PipelineStatusPanel() {
           </Box>
 
           <Box>
-            <Typography variant="caption" sx={{ fontWeight: 700 }}>학습 엔진 6종 (입력: 보관 용지 + 당첨번호)</Typography>
+            <Typography variant="caption" sx={{ fontWeight: 700 }}>학습 엔진 6종 (입력: {d.ticket_learning_source?.mode === 'manual' ? '수동 보관 용지' : d.ticket_learning_source?.mode === 'both' ? '유튜브+수동 용지' : '유튜브 확정 용지'} + 당첨번호
+              {d.ticket_learning_source?.youtube ? ` · 유튜브 ${d.ticket_learning_source.youtube.rounds.length}개 회차 자동 ${d.ticket_learning_source.youtube.auto_lines}줄·반자동 ${d.ticket_learning_source.youtube.semi_lines}줄` : ''})</Typography>
             <Stack direction="row" flexWrap="wrap" useFlexGap spacing={0.5} sx={{ mt: 0.5 }}>
               {learning.length === 0 && <Typography variant="caption" color="text.secondary">아직 실행 전</Typography>}
               {learning.map((e) => (

@@ -100,8 +100,8 @@ export default function AnalysisEnginePage() {
       </Group>
 
       <Group
-        title="5. 보관 용지 학습 엔진 (기존)"
-        note="과거에 보관된 용지(자동/반자동) 데이터와 실제 당첨을 대조하는 학습·검증 엔진입니다. 용지 입력이 폐지돼 새 데이터는 쌓이지 않으며, 계산이 무거워 열 때만 실행합니다."
+        title="5. 용지 학습 엔진 (유튜브 확인 용지)"
+        note="유튜브 영상에서 확인한 자동·반자동 용지(검증 통과·용지에 회차 인쇄 확인·추첨 완료 회차)를 실제 당첨과 대조해 학습·검증합니다. 수동 입력 용지는 보존만 하고 학습에는 쓰지 않습니다(설정으로 전환 가능). 새 영상이 판독되면 자동으로 재학습되며, 화면은 열 때만 계산합니다."
       >
         <MountOnOpen label="🧠 학습 엔진 6종 열기 (Feature·NestedCV·SHAP/Drift·Pattern·Round·Overlap)">
           <Stack spacing={1.5}>

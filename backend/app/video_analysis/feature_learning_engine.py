@@ -256,7 +256,8 @@ def collect_round_samples() -> List[RoundSample]:
     from .store import _load_historical_raw, _manual_saved_lines
 
     historical = _load_historical_raw()
-    batches = historical.get("archived_current_rounds") or []
+    from .ticket_source import learning_batches  # 입력원 스위치(기본: 유튜브 확정 용지)
+    batches = learning_batches(historical)
     win_map = _winning_by_round()
     samples: List[RoundSample] = []
     for batch in batches:

@@ -115,7 +115,8 @@ def collect_rounds() -> List[RoundSheet]:
     from ..database import load_history
 
     historical = _load_historical_raw()
-    batches = historical.get("archived_current_rounds") or []
+    from .ticket_source import learning_batches  # 입력원 스위치(기본: 유튜브 확정 용지)
+    batches = learning_batches(historical)
     win_map: Dict[int, List[int]] = {}
     df = load_history()
     if df is not None and not getattr(df, "empty", True):

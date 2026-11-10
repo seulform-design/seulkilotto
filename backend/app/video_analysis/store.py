@@ -624,9 +624,11 @@ def store_signature() -> str:
     try:
         historical = _load_historical_raw()
         current = _load_current_raw()
+        from .ticket_source import signature as _ticket_sig
+
         return (
             f"{historical.get('updated_at', '')}|{len(historical.get('entries') or [])}|"
-            f"{current.get('updated_at', '')}|{len(current.get('entries') or [])}"
+            f"{current.get('updated_at', '')}|{len(current.get('entries') or [])}|yt:{_ticket_sig()}"
         )
     except Exception:  # noqa: BLE001
         return ""
@@ -2020,6 +2022,18 @@ def _manual_saved_lines(
     """
     from .line_overlap_patterns import extract_betting_lines
 
+    # 유튜브 확정 용지 배치(ticket_source) — 이미 검증된 6개 줄을 그대로 전달
+    yt_out: List[List[int]] = []
+    rest: List[Dict[str, Any]] = []
+    for e in group:
+        if isinstance(e, dict) and "_yt_lines" in e:
+            yt_out.extend(sorted(int(n) for n in ln) for ln in (e["_yt_lines"].get(want_pick_type) or []))
+        else:
+            rest.append(e)
+    if yt_out and not rest:
+        return yt_out
+    group = rest
+
     def _is_manual(e: Dict[str, Any]) -> bool:
         if str(e.get("entry_mode") or "") == "manual":
             return True
@@ -2032,10 +2046,10 @@ def _manual_saved_lines(
         if _entry_pick_type(e) == want_pick_type:
             details.extend(_entry_sheet_details(e))
     if not details:
-        return []
+        return yt_out
     details = _dedupe_sheet_details(details)
     lines = extract_betting_lines(details)
-    out: List[List[int]] = []
+    out: List[List[int]] = list(yt_out)
     for ln in lines:
         nums = [int(n) for n in (ln.get("numbers") or []) if 1 <= int(n) <= 45]
         if len(nums) >= 2:

@@ -94,8 +94,9 @@ def test_queue_skips_processed_and_learning_needs_data(iso, monkeypatch):
     assert seeds.process_queue(limit=5)["processed"] == 1
     assert seeds.process_queue(limit=5)["processed"] == 0  # 이미 분석한 영상 재처리 안 함
     out = seeds.run_learning()
-    assert out["nested_cv:auto"] == "insufficient_data" and out["feature_learning:auto"] == "not_connected_store_only"
-    assert db.query("SELECT COUNT(*) FROM ticket_learning_history")[0][0] == 12
+    assert out["nested_cv:auto"] == "insufficient_data"  # 자동/반자동 분리 실행: 추첨 완료 확정 회차 부족
+    assert "engines" in out and set(seeds.LEARNING_LINK.values()) == {"connected"}  # 6종 모두 유튜브 입력 연결
+    assert db.query("SELECT COUNT(*) FROM ticket_learning_history")[0][0] == 6 + 4
     d = seeds.dashboard()
     assert d["auto"].get("accepted") == 1 and d["frames_with_ticket"] == 1
 
@@ -163,3 +164,29 @@ def test_internal_scheduler_does_not_use_http_auth():
     """내부 스케줄러는 HTTP 보호 API 를 호출하지 않고 작업 함수를 직접 부른다."""
     src = Path(__file__).resolve().parents[1].joinpath("app", "scheduler.py").read_text(encoding="utf-8")
     assert "X-Upgrade-Key" not in src and "urlopen" not in src and "requests." not in src
+
+
+def test_engines_learn_from_youtube_tickets_via_source_switch(iso, monkeypatch):
+    """6종 엔진 입력원: youtube(기본) — 확정·회차인쇄 용지만, manual — 기존 보관만, 수동 데이터는 보존."""
+    from app.video_analysis import ticket_source
+    from app.video_analysis.feature_learning_engine import collect_round_samples
+    from app.video_analysis.store import _manual_saved_lines
+
+    for i, rnd in enumerate((1246, 1247, 1248)):
+        vid = f"vidY000000{i}"
+        seeds._upsert_discovered(vid, "seed-x", {"title": f"{rnd}자동"}, via="rss", similarity=0.5)
+        _fake_pipeline(monkeypatch, [_ln([1 + i, 9, 17, 25, 33, 41]), _ln([2, 10, 18, 26, 34, 42 - i], "semi_auto", "B 반자동")],
+                       rnd, thumb_seed=20 + i)
+        seeds.process_video(vid, f"{rnd}자동", rnd)
+    monkeypatch.setenv("TICKET_LEARNING_SOURCE", "youtube")
+    b = ticket_source.youtube_batches()
+    assert [x["round_no"] for x in b] == [1246, 1247, 1248]
+    assert _manual_saved_lines(b[0]["entries"], "자동") == [[1, 9, 17, 25, 33, 41]]
+    assert _manual_saved_lines(b[0]["entries"], "반자동") == [[2, 10, 18, 26, 34, 42]]
+    samples = collect_round_samples()
+    assert sorted(s.round_no for s in samples) == [1246, 1247, 1248]
+    assert all(s.auto_lines and s.semi_lines for s in samples)
+    sig1 = ticket_source.signature()
+    monkeypatch.setenv("TICKET_LEARNING_SOURCE", "manual")
+    assert ticket_source.learning_batches({"archived_current_rounds": [{"round_no": 1}]}) == [{"round_no": 1}]
+    assert ticket_source.signature() != sig1

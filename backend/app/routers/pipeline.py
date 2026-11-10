@@ -48,6 +48,13 @@ def get_status():
                      "note": ("운영 Postgres(재배포에도 영구)" if db.backend() == "postgres"
                               else "로컬 SQLite(draw_registry.db, WAL) — 컨테이너에서는 재배포 시 초기화")}
     st["running"] = [k for k, t in _RUNNING.items() if t.is_alive()]
+    try:
+        from ..video_analysis.store import _load_historical_raw
+        from ..video_analysis.ticket_source import summary as _ts
+
+        st["ticket_learning_source"] = _ts(_load_historical_raw())
+    except Exception as exc:  # noqa: BLE001
+        st["ticket_learning_source"] = {"error": str(exc)[:200]}
     return to_jsonable(st)
 
 

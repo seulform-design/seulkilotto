@@ -8,7 +8,12 @@
 """
 from __future__ import annotations
 
+import os
+
 import pytest
+
+# 기존 엔진 테스트는 수동 보관 용지 픽스처를 쓴다 — 테스트에선 두 입력원 모두 사용(운영 기본은 youtube)
+os.environ.setdefault("TICKET_LEARNING_SOURCE", "both")
 
 
 @pytest.fixture(autouse=True)

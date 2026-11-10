@@ -436,8 +436,10 @@ def _learning_inputs() -> Dict[str, Any]:
     from ..video_analysis.store import store_signature
     from ..stats_engine.draws import history_signature
 
+    from ..video_analysis.ticket_source import mode
+
     samples = collect_round_samples()
-    return {"samples": len(samples), "rounds": sorted({s.round_no for s in samples}),
+    return {"samples": len(samples), "rounds": sorted({s.round_no for s in samples}), "source": mode(),
             "signature": f"{store_signature()}|{history_signature()}|n={len(samples)}"}
 
 
@@ -469,7 +471,8 @@ def learning_engines(force: bool = False) -> Dict[str, Any]:
         prev = _engine_row(name)
         if inp["samples"] == 0:
             set_engine(name, "sheet_dependent", S_NODATA, input_signature=inp["signature"], last_run_at=db.now_iso(),
-                       summary={"reason": "보관 용지(자동/반자동) 표본 0 — 당첨번호만으로는 학습 불가", "samples": 0},
+                       summary={"reason": "학습 입력 용지(기본: 유튜브 확정 자동·반자동, 추첨 완료 회차) 표본 0 — "
+                                          "당첨번호만으로는 학습 불가", "samples": 0, "source": inp.get("source")},
                        error=None)
             out[name] = S_NODATA
             continue
@@ -485,6 +488,7 @@ def learning_engines(force: bool = False) -> Dict[str, Any]:
             if isinstance(res, dict) and isinstance(res.get("rounds"), list):
                 summ["result_rounds"] = len(res["rounds"])
             summ["samples"] = inp["samples"]
+            summ["source"] = inp.get("source")
             summ["sample_rounds"] = [inp["rounds"][0], inp["rounds"][-1]] if inp["rounds"] else []
             set_engine(name, "sheet_dependent", S_DONE, input_signature=inp["signature"], last_run_at=db.now_iso(),
                        duration_sec=round(time.time() - t0, 2), summary=summ, error=None,

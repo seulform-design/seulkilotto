@@ -292,7 +292,8 @@ def _build_overlap_learning_impl(apply_intent: str = "current_round") -> Dict[st
     from .draw_template import get_current_round_no
 
     historical = _load_historical_raw()
-    batches = historical.get("archived_current_rounds") or []
+    from .ticket_source import learning_batches  # 입력원 스위치(기본: 유튜브 확정 용지)
+    batches = learning_batches(historical)
     if not batches:
         return {"ok": False, "reason": "보관된 과거 회차 용지가 없습니다.", "round_count": 0}
 

@@ -106,3 +106,24 @@ def test_audit_api(iso):
     assert "answers" in j and "consensus_beats_random" in j["answers"]
     assert c.get("/api/v1/pipeline/audit/numbers").status_code == 200
     assert c.get("/api/v1/pipeline/audit/number/46").status_code == 400
+
+
+def test_pg_sql_escapes_literal_percent():
+    from app.ingest.db import to_pg_sql
+
+    assert to_pg_sql("SELECT 1 WHERE a LIKE 'api:%' AND b = ?") == "SELECT 1 WHERE a LIKE 'api:%%' AND b = %s"
+    assert to_pg_sql("SELECT 1 WHERE r LIKE '%-%'") == "SELECT 1 WHERE r LIKE '%%-%%'"
+
+
+def test_all_ingest_sql_is_pg_safe():
+    """ingest 모듈 SQL 이 psycopg2 포맷에서 깨지지 않는지 — 변환 후 '%s' 외의 단일 '%' 가 없어야 한다."""
+    import re
+    from pathlib import Path
+
+    from app.ingest.db import to_pg_sql
+
+    root = Path(__file__).resolve().parents[1] / "app" / "ingest"
+    for f in root.glob("*.py"):
+        for m in re.finditer(r'"((?:SELECT|INSERT|UPDATE|DELETE)[^"]*)"', f.read_text(encoding="utf-8")):
+            out = to_pg_sql(m.group(1))
+            assert not re.search(r"%(?![s%])", out.replace("%%", "")), (f.name, m.group(1)[:80])

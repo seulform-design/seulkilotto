@@ -329,6 +329,12 @@ def sqlite_path() -> Path:
     return Path(p) if p else _DATA_DIR / "draw_registry.db"
 
 
+def to_pg_sql(sql: str) -> str:
+    """'?' 플레이스홀더 → psycopg2 '%s'. 리터럴 '%'(예: LIKE 'api:%')는 '%%' 로 이스케이프한다.
+    (2026-11-10 운영 장애: psycopg2 가 LIKE '%-%' 의 '%' 를 파라미터 자리로 해석 → 'tuple index out of range')"""
+    return sql.replace("%", "%%").replace("?", "%s")
+
+
 class _Conn:
     """sqlite3 / psycopg2 공통 인터페이스 — SQL 은 '?' 플레이스홀더로 작성."""
 
@@ -346,7 +352,7 @@ class _Conn:
             self.raw.execute("PRAGMA foreign_keys=ON")
 
     def _sql(self, sql: str) -> str:
-        return sql.replace("?", "%s") if self.kind == "postgres" else sql
+        return to_pg_sql(sql) if self.kind == "postgres" else sql
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> List[tuple]:
         cur = self.raw.cursor()

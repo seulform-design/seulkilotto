@@ -52,7 +52,9 @@ export default function PipelineStatusPanel() {
   const engines = (d?.engines ?? []) as any[];
   const learning = engines.filter((e) => e.category === 'sheet_dependent');
   const statsEng = engines.filter((e) => e.category === 'draw_data');
-  const errors = (d?.recent_errors ?? []) as any[];
+  const allErrors = (d?.recent_errors ?? []) as any[];
+  const errors = allErrors.filter((e) => !e.resolved);
+  const resolvedErrors = allErrors.filter((e) => e.resolved);
   const sync = jobs.sync_rounds;
   const verified = reg.draws_by_status?.official_verified ?? 0;
   const legacy = reg.draws_by_status?.legacy_unverified ?? 0;
@@ -163,6 +165,12 @@ export default function PipelineStatusPanel() {
               )}
             </Stack>
           </Box>
+
+          {resolvedErrors.length > 0 && (
+            <Typography variant="caption" color="text.secondary" component="div">
+              해결된 과거 오류 {resolvedErrors.length}건(이후 같은 작업 성공): {resolvedErrors.slice(0, 3).map((e) => `${e.name}·${e.error_kind}`).join(', ')}
+            </Typography>
+          )}
 
           {errors.length > 0 && (
             <Alert severity="warning" sx={{ py: 0.25 }}>

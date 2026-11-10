@@ -559,11 +559,17 @@ def status() -> Dict[str, Any]:
                     "ORDER BY started_at DESC LIMIT 40")
     last_by_name: Dict[str, Any] = {}
     errors = []
+    last_success: Dict[str, str] = {}
+    for r in jobs:
+        if r[1] == "success" and r[0] not in last_success:
+            last_success[r[0]] = r[3]
     for r in jobs:
         rec = {"name": r[0], "status": r[1], "attempt": r[2], "started_at": r[3], "finished_at": r[4],
                "error_kind": r[5], "error": r[6]}
         last_by_name.setdefault(r[0], rec)
         if r[1] == "failed" and len(errors) < 8:
+            # 같은 작업이 이후 성공했으면 '해결됨'으로 표시(과거 오류가 현재 문제처럼 보이지 않게)
+            rec["resolved"] = bool(last_success.get(r[0]) and last_success[r[0]] > (r[3] or ""))
             errors.append(rec)
     return {"registry": registry.summary(), "jobs": last_by_name, "recent_errors": errors,
             "engines": engines(), "backtest_log": backtest_log_summary()}

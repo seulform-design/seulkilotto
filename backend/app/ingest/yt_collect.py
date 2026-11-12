@@ -36,6 +36,8 @@ QUERY_TEMPLATES = [
     "{n}회 로또 구매 인증", "{n}회 로또 복권 구매", "{n}회 로또 자동 구매", "{n}회 로또 반자동 구매", "{n}회 로또 방송",
     "{n}회 로또 번호", "{n}회 로또 복기", "{n}회 로또 구매 내역", "{n}회 로또 당첨 전 구매",
 ]
+# 이번 회차(판매 중) 검색어 — 매일 재검색하므로 할당량을 아끼려고 핵심만
+CURRENT_TEMPLATES = ["{n}회 로또 자동", "{n}회 로또 반자동", "{n}회 로또 구매", "{n}회 로또 용지", "제{n}회 로또"]
 SEED_ROUND = 1249
 _ROUND_RE = re.compile(r"(?:제\s*)?(?<![\d/])(\d{1,4})\s*(?:회|회차)")
 
@@ -235,7 +237,23 @@ def create_round_jobs(latest_round: int, *, templates: Optional[List[str]] = Non
                           "published_before,page_token,priority,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                           (jid, n, q, st, pa, pb, None, pr, "queued", now, now))
                 created += 1
-    return {"created": created, "rounds": latest_round, "templates": len(templates) + 1}
+        # 이번 회차(latest+1, 판매 중) — 최우선, 매일 다시 검색(주중에 새 영상이 계속 올라오므로 날짜별 작업 ID)
+        cur = int(latest_round) + 1
+        today = datetime.now(timezone.utc).date().isoformat()
+        start = (_draw_date(latest_round) + timedelta(days=1)).isoformat() + "T00:00:00Z" if latest_round else None
+        cur_jobs = [(t.format(n=cur), "round_query", None, None, -1_000_000 + ti) for ti, t in enumerate(CURRENT_TEMPLATES)]
+        cur_jobs.append(("로또 자동 용지", "period", start, None, -1_000_000 + 900))
+        cur_jobs.append(("로또 반자동 용지", "period", start, None, -1_000_000 + 901))
+        for q, st, pa, pb, pr in cur_jobs:
+            jid = hashlib.sha1(f"{cur}|{q}|{st}|{pa}|{today}".encode()).hexdigest()[:20]
+            if jid in have:
+                continue
+            c.execute("INSERT INTO youtube_search_jobs (job_id,draw_round,search_query,search_type,published_after,"
+                      "published_before,page_token,priority,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                      (jid, cur, q, st, pa, pb, None, pr, "queued", now, now))
+            created += 1
+    return {"created": created, "rounds": latest_round, "current_round": int(latest_round) + 1,
+            "templates": len(templates) + 1}
 
 
 def _store_video(c, item: Dict[str, Any], via: str) -> bool:
@@ -308,7 +326,7 @@ def run_jobs(max_jobs: int = 40) -> Dict[str, Any]:
         try:
             data = call("search", {"part": "snippet", "q": q, "type": "video", "maxResults": 50, "regionCode": "KR",
                                    "relevanceLanguage": "ko", "publishedAfter": pa, "publishedBefore": pb,
-                                   "pageToken": tok}, draw_round=rnd)
+                                   "pageToken": tok, "order": "date" if st == "period" else None}, draw_round=rnd)
         except YTError as exc:
             out["errors"][exc.kind] = out["errors"].get(exc.kind, 0) + 1
             fatal = exc.kind in ("missing_key", "invalid_key", "api_disabled", "key_restriction", "forbidden")

@@ -98,10 +98,13 @@ def test_quota_budget_stops_before_spending(iso, monkeypatch):
 
 def test_jobs_cover_all_rounds_with_priorities(iso):
     r = Y.create_round_jobs(1249)
-    assert r["created"] == 1249 * 16
-    assert Y.create_round_jobs(1249)["created"] == 0  # 중복 생성 없음
-    first = db.query("SELECT draw_round, search_type FROM youtube_search_jobs ORDER BY priority LIMIT 8")
-    assert {x[0] for x in first} <= {1249, 1248, 1247, 1246}  # 최근 완료 회차 먼저
+    cur_n = len(Y.CURRENT_TEMPLATES) + 2
+    assert r["created"] == 1249 * 16 + cur_n and r["current_round"] == 1250
+    assert Y.create_round_jobs(1249)["created"] == 0  # 같은 날 중복 생성 없음
+    first = db.query("SELECT draw_round FROM youtube_search_jobs ORDER BY priority LIMIT ?", (cur_n,))
+    assert {x[0] for x in first} == {1250}  # 이번 회차(판매 중) 최우선
+    nxt = db.query("SELECT draw_round FROM youtube_search_jobs ORDER BY priority LIMIT 8 OFFSET ?", (cur_n,))
+    assert {x[0] for x in nxt} <= {1249, 1248, 1247, 1246}  # 그다음 최근 완료 회차
     seed_pos = db.query("SELECT MIN(priority) FROM youtube_search_jobs WHERE draw_round = 1240")[0][0]
     assert db.query("SELECT MIN(priority) FROM youtube_search_jobs WHERE draw_round = 1249")[0][0] < seed_pos
 

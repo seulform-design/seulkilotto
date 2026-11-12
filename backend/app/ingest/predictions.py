@@ -80,6 +80,7 @@ METHOD_LABELS = {
     "sheet_semi": "보관 반자동 용지 지지 top6",
     "youtube_auto": "유튜브 자동 용지 빈도 top6",
     "youtube_semi": "유튜브 반자동 용지 빈도 top6",
+    "youtube_v3_support": "V3 용지 학습 · 유튜브 용지 지지 top6",
     "random_baseline": "무작위 기준선",
     "v12_integrated": "V12 통합 후보(10조합: 핵심3·분산4·실험3)",
 }
@@ -246,8 +247,11 @@ def replay_archived_sheets() -> Dict[str, Any]:
 
 def youtube_ticket_predictions() -> Dict[str, Any]:
     """유튜브 확정 용지(회차 인쇄 확인)의 번호 빈도 top6 — 자동/반자동 분리. 용지는 추첨 전 구매분."""
+    from ..video_analysis.round_learning import _number_support, _rank_key
+
     _ensure()
     written = 0
+    both: Dict[int, Dict[str, List[List[int]]]] = {}
     with db.transaction() as c:
         for method, table in (("youtube_auto", "ticket_auto_data"), ("youtube_semi", "ticket_semi_auto_data")):
             rows = c.execute(f"SELECT draw_round, numbers FROM {table} WHERE verification_status = 'accepted' "
@@ -256,6 +260,7 @@ def youtube_ticket_predictions() -> Dict[str, Any]:
             for rnd, nums in rows:
                 by.setdefault(int(rnd), []).append(db.loads(nums))
             for rnd, lines in by.items():
+                both.setdefault(rnd, {"auto": [], "semi": []})["auto" if method == "youtube_auto" else "semi"] = lines
                 cnt = [0] * 46
                 for ln in lines:
                     for n in ln:
@@ -266,6 +271,15 @@ def youtube_ticket_predictions() -> Dict[str, Any]:
                                            engine_version="yt-ticket-freq-1", training_count=len(lines),
                                            cutoff_at=draw_cutoff(rnd).isoformat(),
                                            note=f"유튜브 관찰 용지 {len(lines)}줄(구매 완료 미확인)")
+        # V3 용지 학습(자동+반자동 지지 점수)을 유튜브 용지에 그대로 적용 — 이번 회차(추첨 전)면 사전 예측(live)으로 기록
+        for rnd, g in both.items():
+            sup = _number_support(g["auto"], g["semi"])
+            top = sorted(range(1, 46), key=lambda n: _rank_key(sup[n]))[:6]
+            ptype = "live" if datetime.now(timezone.utc) < draw_cutoff(rnd) else "historical_replay"
+            written += save_prediction(c, rnd=rnd, method="youtube_v3_support", ptype=ptype, numbers=top,
+                                       engine_version="round-learning-support-1", training_count=len(g["auto"]) + len(g["semi"]),
+                                       cutoff_at=draw_cutoff(rnd).isoformat(), training_range=f"round {rnd} youtube sheets only",
+                                       note=f"유튜브 용지 자동 {len(g['auto'])}줄·반자동 {len(g['semi'])}줄에 V3 지지 점수 적용")
     return {"written": written}
 
 

@@ -299,7 +299,7 @@ export default function FeatureLearningPanel({
         검증 Feature 기반 번호 점수 · 기여도
         {` · ${sheetIntent === 'review' ? '복기 소급' : '이번회차 예상'}`}
         {rec?.source && rec.source !== 'current_round' && rec.source !== 'review_saved' && rec.source !== 'archived'
-          ? ` (${rec.source})`
+          ? ` (${rec.source === 'youtube_current_round' ? '유튜브에서 확인한 이번 회차 용지' : rec.source})`
           : ''}
       </Typography>
       {!rec?.ok ? (
@@ -316,7 +316,7 @@ export default function FeatureLearningPanel({
           {typeof rec.source === 'string' && rec.source.startsWith('archived_demo_') && (
             <Alert severity="warning" sx={{ py: 0.5, mb: 1 }}>
               <Typography variant="caption">
-                시연 추천({rec.source}) — 이번회차 용지가 없어 보관 회차로 표시만 합니다.
+                시연 추천({rec.source}) — 이번 회차 유튜브 용지가 아직 수집되지 않아 지난 보관 회차로 표시만 합니다(수집되면 자동 전환).
                 <strong> 점수·검증학습에는 주입되지 않습니다.</strong>
               </Typography>
             </Alert>

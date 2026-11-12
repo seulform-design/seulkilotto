@@ -60,6 +60,16 @@ def youtube_batches() -> List[Dict[str, Any]]:
     return out
 
 
+def youtube_lines_for_round(round_no: int) -> Dict[str, Any]:
+    """특정 회차(보통 아직 추첨 전인 '이번 회차')의 유튜브 확정 용지 줄 — 엔진 '적용(예상 후보)' 입력."""
+    for b in youtube_batches():
+        if int(b["round_no"]) == int(round_no):
+            lines = b["entries"][0]["_yt_lines"]
+            return {"lines": lines, "auto": len(lines["자동"]), "semi": len(lines["반자동"]),
+                    "videos": b["video_count"], "first_seen": b["frozen_at"]}
+    return {"lines": {"자동": [], "반자동": []}, "auto": 0, "semi": 0, "videos": 0, "first_seen": None}
+
+
 def learning_batches(historical: Dict[str, Any]) -> List[Dict[str, Any]]:
     """엔진이 학습에 쓸 보관 배치 목록(입력원 스위치 반영)."""
     m = mode()

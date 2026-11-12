@@ -566,10 +566,26 @@ def _load_apply_sheet(apply_intent: str = "current_round") -> Dict[str, Any]:
         label = "복기"
     else:
         current = _load_current_raw()
-        group = list(current.get("entries") or [])
-        source = "current_round"
+        manual_group = list(current.get("entries") or [])
         round_no = int(get_current_round_no())
         label = "이번회차"
+        # 2026-11-13: 입력원이 유튜브면 '이번 회차' 적용 용지도 유튜브에서 확인한 그 회차 용지를 쓴다.
+        # (이전엔 수동 입력 용지만 읽어서 비어 있으면 지난 보관 회차 시연(archived_demo)으로 떨어졌음)
+        from .ticket_source import mode as _src_mode, youtube_lines_for_round
+
+        m = _src_mode()
+        yt = youtube_lines_for_round(round_no) if m in ("youtube", "both") else {"auto": 0, "semi": 0}
+        yt_entry = ([{"_yt_lines": yt["lines"], "entry_mode": "youtube", "source": "youtube", "video_intent": "current_round"}]
+                    if (yt["auto"] or yt["semi"]) else [])
+        if m == "youtube":
+            group = yt_entry or manual_group
+            source = "youtube_current_round" if yt_entry else ("current_round" if manual_group else "current_round")
+        elif m == "both":
+            group = manual_group + yt_entry
+            source = "current_round+youtube" if yt_entry else "current_round"
+        else:
+            group = manual_group
+            source = "current_round"
 
     auto = _manual_saved_lines(group, "자동", include_photo=True)
     semi = _manual_saved_lines(group, "반자동", include_photo=True)
@@ -578,6 +594,7 @@ def _load_apply_sheet(apply_intent: str = "current_round") -> Dict[str, Any]:
         "label": label,
         "round_no": round_no,
         "source": source,
+        "youtube_videos": (yt.get("videos") if intent == "current_round" and "yt" in locals() else None),
         "entries": group,
         "auto_lines": auto,
         "semi_lines": semi,

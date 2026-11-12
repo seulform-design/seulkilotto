@@ -190,3 +190,26 @@ def test_engines_learn_from_youtube_tickets_via_source_switch(iso, monkeypatch):
     monkeypatch.setenv("TICKET_LEARNING_SOURCE", "manual")
     assert ticket_source.learning_batches({"archived_current_rounds": [{"round_no": 1}]}) == [{"round_no": 1}]
     assert ticket_source.signature() != sig1
+
+
+def test_current_round_apply_uses_youtube_tickets_not_past_demo(iso, monkeypatch):
+    """이번 회차(추첨 전) 유튜브 확정 용지가 있으면 엔진 '적용' 입력이 그 용지 — 지난 회차 시연으로 떨어지지 않는다."""
+    from app.ingest import predictions as P
+    from app.video_analysis import draw_template, store
+
+    cur = draw_template.get_current_round_no()
+    seeds._upsert_discovered("vidCUR00001", "seed-x", {"title": f"{cur}자동"}, via="rss", similarity=0.5)
+    _fake_pipeline(monkeypatch, [_ln([3, 11, 19, 27, 35, 43]), _ln([4, 12, 20, 28, 36, 44], "semi_auto", "B 반자동")],
+                   cur, thumb_seed=77)
+    seeds.process_video("vidCUR00001", f"{cur}자동", cur)
+    monkeypatch.setenv("TICKET_LEARNING_SOURCE", "youtube")
+    ap = store._load_apply_sheet("current_round")
+    assert ap["round_no"] == cur and ap["source"] == "youtube_current_round"
+    assert ap["auto_lines"] == [[3, 11, 19, 27, 35, 43]] and ap["semi_lines"] == [[4, 12, 20, 28, 36, 44]]
+    P.reset_for_tests()
+    P.youtube_ticket_predictions()
+    rows = db.query("SELECT prediction_type FROM round_prediction_history WHERE draw_round = ? "
+                    "AND prediction_method = 'youtube_v3_support'", (cur,))
+    assert rows and rows[0][0] in ("live", "historical_replay")
+    monkeypatch.setenv("TICKET_LEARNING_SOURCE", "manual")
+    assert store._load_apply_sheet("current_round")["source"] == "current_round"

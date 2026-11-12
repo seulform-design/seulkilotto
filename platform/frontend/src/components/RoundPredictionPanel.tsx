@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { EngineSection, EngineStatusChip } from './EngineSection';
 import { v1Api } from '../api/v1Api';
+import ConsensusRankingCard from './ConsensusRankingCard';
 
 const TYPE_LABEL: Record<string, { label: string; color: 'success' | 'default' | 'info' }> = {
   live: { label: '사전 예측', color: 'success' },
@@ -103,6 +104,8 @@ export default function RoundPredictionPanel() {
           d && <Typography variant="caption" color="text.secondary">아직 추첨 전이거나 공식 결과가 없는 회차입니다.</Typography>
         )}
       </Stack>
+
+      {round != null && open && <ConsensusRankingCard round={round} />}
 
       {d && d.predictions.length === 0 && <Alert severity="info" sx={{ py: 0.25 }}>이 회차의 예측 기록이 없습니다.</Alert>}
       <Stack spacing={0.75}>

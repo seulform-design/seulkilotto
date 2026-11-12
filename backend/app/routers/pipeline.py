@@ -515,3 +515,11 @@ def post_master_run(x_upgrade_key: Optional[str] = Header(default=None)):
     from ..ingest import master_engine as M
 
     return _bg("master_engine", lambda: jobs.run_job("master_engine", M.run_master, retries=0))
+
+
+@router.get("/predictions/consensus/{round_no}")
+def get_prediction_consensus(round_no: int):
+    """선택 회차의 엔진 중복 추천 번호 순위(백테스트·사전 예측) + 전체 회차 중복 수별 실제 적중률."""
+    from ..ingest import predictions as P
+
+    return to_jsonable(P.consensus_ranking(round_no))

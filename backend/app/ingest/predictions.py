@@ -550,3 +550,92 @@ def run_all(engine_rounds: int = 100) -> Dict[str, Any]:
             out["live"] = {"error": str(exc)[:300]}
     out["evaluate"] = evaluate_pending()
     return out
+
+
+# ─────────────────────────────── 엔진 중복 추천 번호 순위 ───────────────────────────────
+
+CONSENSUS_EXCLUDE = {"random_baseline", "v12_integrated"}  # 무작위·(엔진 추천을 다시 합친) V12 는 중복 집계에서 제외
+
+
+def consensus_ranking(rnd: int) -> Dict[str, Any]:
+    """선택 회차에서 여러 엔진이 함께 고른 번호 순위 + 전체 회차에서 'k개 엔진이 고른 번호'의 실제 적중률.
+
+    중복 수는 '엔진들이 같은 과거 데이터로 비슷하게 계산했다'는 뜻이며 당첨 확률이 아니다 — 그래서 전체 회차
+    실측(같은 중복 수 번호가 실제로 몇 % 당첨됐는지)을 무작위 6/45=13.3% 와 나란히 보여 준다."""
+    import math
+
+    from ..stats_engine.draws import load_draws
+
+    _ensure()
+    win = {d.round: set(d.numbers) for d in load_draws()}
+    rows = db.query("SELECT draw_round, prediction_method, prediction_type, predicted_numbers FROM round_prediction_history "
+                    "WHERE prediction_rank = 1 AND prediction_type IN ('backtest', 'live')")
+    by: Dict[Tuple[str, int], Dict[str, List[int]]] = {}
+    for r, m, t, nums in rows:
+        if m in CONSENSUS_EXCLUDE or m.startswith("v6_"):
+            continue
+        by.setdefault((t, int(r)), {})[m] = [int(x) for x in db.loads(nums)]
+
+    def rank_round(t: str, r: int) -> Optional[Dict[str, Any]]:
+        preds = by.get((t, r))
+        if not preds:
+            return None
+        sel: Dict[int, List[str]] = {}
+        for m, nums in preds.items():
+            for n in nums:
+                sel.setdefault(n, []).append(m)
+        ranked = sorted(sel.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        w = win.get(r)
+        items, pos, prev = [], 0, None
+        for i, (n, ms) in enumerate(ranked, start=1):
+            if len(ms) != prev:
+                pos, prev = i, len(ms)
+            items.append({"rank": pos, "number": n, "engines": len(ms), "methods": sorted(ms),
+                          "labels": [METHOD_LABELS.get(m, m) for m in sorted(ms)], "drawn": (n in w) if w else None})
+        top = [x for x in items if x["engines"] >= 2]
+        return {"type": t, "round": r, "engine_count": len(preds), "numbers": items,
+                "multi_engine_numbers": [x["number"] for x in top],
+                "multi_engine_hits": sum(1 for x in top if x["drawn"]) if w else None, "result_known": w is not None}
+
+    # 전체 회차(백테스트, 결과 확인된 회차) — 중복 수 k 별 실제 적중률
+    lvl: Dict[int, List[int]] = {}
+    num_top: Dict[int, List[int]] = {}
+    for (t, r), preds in by.items():
+        if t != "backtest" or r not in win or len(preds) < 2:
+            continue
+        cnt: Dict[int, int] = {}
+        for nums in preds.values():
+            for n in nums:
+                cnt[n] = cnt.get(n, 0) + 1
+        mx = max(cnt.values())
+        for n, k in cnt.items():
+            v = lvl.setdefault(min(k, 6), [0, 0])
+            v[0] += 1
+            v[1] += int(n in win[r])
+            if k >= 3 or (k == mx and k >= 2):
+                s = num_top.setdefault(n, [0, 0])
+                s[0] += 1
+                s[1] += int(n in win[r])
+    p0 = 6 / 45
+    levels = []
+    for k in sorted(lvl):
+        n, h = lvl[k]
+        rate = h / n
+        se = math.sqrt(rate * (1 - rate) / n) if n else 0
+        z = (h - n * p0) / math.sqrt(n * p0 * (1 - p0)) if n else 0
+        levels.append({"engines": f"{k}개 이상" if k == 6 else f"{k}개", "picks": n, "hits": h, "hit_rate": round(rate, 4),
+                       "ci95": [round(max(0, rate - 1.96 * se), 4), round(rate + 1.96 * se, 4)], "random_rate": round(p0, 4),
+                       "lift": round(rate / p0, 3), "p_two_sided": round(math.erfc(abs(z) / math.sqrt(2)), 4)})
+    alpha = 0.05 / max(1, len(levels))
+    sig = [x for x in levels if x["p_two_sided"] < alpha and x["picks"] >= 100]
+    all_rank = sorted(({"number": n, "times_top": v[0], "hits": v[1], "hit_rate": round(v[1] / v[0], 4)}
+                       for n, v in num_top.items()), key=lambda x: (-x["times_top"], x["number"]))
+    rounds_used = len({r for (t, r) in by if t == "backtest" and r in win})
+    out = {"round": int(rnd), "backtest": rank_round("backtest", int(rnd)), "live": rank_round("live", int(rnd)),
+           "all_rounds": {"rounds": rounds_used, "by_engine_count": levels, "bonferroni_alpha": round(alpha, 4),
+                          "top_consensus_numbers": all_rank[:15],
+                          "verdict": (f"중복 수가 많은 번호의 실제 적중률이 무작위 13.3%와 보정 후 다른 수준이 있음({', '.join(x['engines'] for x in sig)}) — 재현 확인 필요"
+                                      if sig else "여러 엔진이 겹쳐 고른 번호도 실제 적중률은 무작위(13.3%)와 통계적으로 같습니다 — "
+                                                  "중복은 엔진들이 같은 과거 데이터로 비슷하게 계산한 결과입니다.")},
+           "note": "순위는 '몇 개 엔진이 함께 골랐는지'이며 당첨 확률 순위가 아닙니다. 모든 번호의 당첨 확률은 6/45로 같습니다."}
+    return out

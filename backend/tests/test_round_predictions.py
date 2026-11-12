@@ -126,3 +126,24 @@ def test_boot_releases_locks_from_previous_container(iso):
     assert jobs.release_locks_from_previous_containers() == 1
     assert jobs.acquire_lock("job:x")
     assert db.query("SELECT status FROM reg_jobs WHERE id = 'j1'")[0][0] == "aborted_restart"
+
+
+def test_consensus_ranking_round_and_all_rounds(tmp_path, monkeypatch):
+    from app.ingest import db
+    from app.ingest import predictions as P
+
+    monkeypatch.setenv("INGEST_DB_PATH", str(tmp_path / "reg.db"))
+    db.reset_for_tests()
+    P.reset_for_tests()
+    P.backtest_stats(first=1150)
+    P.evaluate_pending()
+    out = P.consensus_ranking(1200)
+    b = out["backtest"]
+    assert b["engine_count"] == 6  # 회차통계 6전략(무작위 기준선 제외)
+    ranks = [x["engines"] for x in b["numbers"]]
+    assert ranks == sorted(ranks, reverse=True) and all(x["drawn"] is not None for x in b["numbers"])
+    lv = out["all_rounds"]["by_engine_count"]
+    assert lv and sum(x["picks"] for x in lv) > 0 and all(0 <= x["hit_rate"] <= 1 for x in lv)
+    assert "당첨 확률" in out["note"]
+    db.reset_for_tests()
+    P.reset_for_tests()

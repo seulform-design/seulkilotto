@@ -798,6 +798,10 @@ export const v1Api = {
   getPredictionRound: (round: number) =>
     fetchJson<Record<string, any>>(`/api/v1/pipeline/predictions/round/${round}`, { timeoutMs: 30_000 }),
 
+  /** 선택 회차의 엔진 중복 추천 번호 순위 + 전체 회차 중복 수별 실제 적중률. */
+  getPredictionConsensus: (round: number) =>
+    fetchJson<Record<string, any>>(`/api/v1/pipeline/predictions/consensus/${round}`, { timeoutMs: 60_000 }),
+
   /** 엔진별 성적(일치 분포·평균·CI·무작위 대비). */
   getPredictionPerformance: (ptype: string, common = true) =>
     fetchJson<Record<string, any>>(`/api/v1/pipeline/predictions/performance?ptype=${ptype}&common=${common}`, {

@@ -541,6 +541,10 @@ def daily_pipeline(force_followups: bool = False) -> Dict[str, Any]:
             from . import reverse_analysis as _rv
 
             report["self_optimize"] = run_job("self_optimize", _rv.self_optimize, retries=0)
+        # 통합 마스터(V8 누수·V9 신뢰도·V10 편향·V11 무작위·V12 현재 회차 후보) — 매일, V12 는 cutoff 전만 저장
+        from . import master_engine as _master
+
+        report["master_engine"] = run_job("master_engine", _master.run_master, retries=0)
         report["finished_at"] = db.now_iso()
         return report
     finally:

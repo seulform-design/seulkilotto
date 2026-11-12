@@ -81,6 +81,7 @@ METHOD_LABELS = {
     "youtube_auto": "유튜브 자동 용지 빈도 top6",
     "youtube_semi": "유튜브 반자동 용지 빈도 top6",
     "random_baseline": "무작위 기준선",
+    "v12_integrated": "V12 통합 후보(10조합: 핵심3·분산4·실험3)",
 }
 
 

@@ -495,3 +495,23 @@ def post_reverse_run(x_upgrade_key: Optional[str] = Header(default=None)):
     from ..ingest import reverse_analysis as R
 
     return _bg("self_optimize", lambda: jobs.run_job("self_optimize", R.run_all, retries=0))
+
+
+# ─────────────────────────── 통합 마스터 엔진 V8~V12 ───────────────────────────
+
+@router.get("/master/report")
+def get_master_report():
+    """엔진 진단·V8 누수·V9 신뢰도·V10 번호 편향·V11 무작위 시뮬레이션·V12 현재 회차 후보/검증(마지막 저장본)."""
+    from ..ingest import master_engine as M
+
+    return to_jsonable(M.full_report())
+
+
+@router.post("/master/run")
+def post_master_run(x_upgrade_key: Optional[str] = Header(default=None)):
+    """통합 실행(백그라운드): 진단 → 대조 → 누수 → 역분석 → 수정 → V9~V11 → V12 검증 → 현재 회차 후보(cutoff 전만 저장)."""
+    _auth(x_upgrade_key)
+    from ..ingest import jobs
+    from ..ingest import master_engine as M
+
+    return _bg("master_engine", lambda: jobs.run_job("master_engine", M.run_master, retries=0))

@@ -778,6 +778,9 @@ export const v1Api = {
   /** 엔진 감사 종합 보고(성능·진단·공통번호·독립성·앙상블·버전·감사). */
   getAuditReport: () => fetchJson<Record<string, any>>('/api/v1/pipeline/audit/report', { timeoutMs: 60_000 }),
 
+  /** V5 역분석 · V6 자동 보정 · V7 자기개선 · 모듈 재검증(마지막 저장본). */
+  getReverseReport: () => fetchJson<Record<string, any>>('/api/v1/pipeline/reverse/report', { timeoutMs: 60_000 }),
+
   /** 번호별 통계 + 엔진 선택 이력. */
   getAuditNumbers: () => fetchJson<Record<string, any>>('/api/v1/pipeline/audit/numbers', { timeoutMs: 60_000 }),
 

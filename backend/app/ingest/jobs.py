@@ -537,6 +537,10 @@ def daily_pipeline(force_followups: bool = False) -> Dict[str, Any]:
         report["engine_audit"] = run_job("engine_audit", _audit.run_audit, retries=0)
         if new_rounds:
             report["improvement_experiment"] = run_job("improvement_experiment", _audit.improvement_experiment, retries=0)
+            # V5 역분석 → V6 보정 후보 → V7 자기개선 기록(신규 회차가 있을 때만, 승인 모델만 다음 회차 적용)
+            from . import reverse_analysis as _rv
+
+            report["self_optimize"] = run_job("self_optimize", _rv.self_optimize, retries=0)
         report["finished_at"] = db.now_iso()
         return report
     finally:

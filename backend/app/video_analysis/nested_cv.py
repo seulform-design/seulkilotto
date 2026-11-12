@@ -72,6 +72,8 @@ def _run_nested_feature_cv_impl(
     min_outer: int = 3,
     inner_hold: int = 1,
 ) -> dict[str, Any]:
+    # 시간 순서 보장(누수 방지): outer 회차 R 의 train 은 반드시 R 이전 회차만
+    samples = sorted(samples, key=lambda s: int(s.round_no))
     n = len(samples)
     if n < min_outer + inner_hold + 1:
         return {

@@ -475,3 +475,23 @@ def post_audit_run(x_upgrade_key: Optional[str] = Header(default=None), experime
         return out
 
     return _bg("engine_audit", lambda: jobs.run_job("engine_audit", _go, retries=0))
+
+
+# ─────────────────────────── V5 역분석 · V6 자동 보정 · V7 자기개선 ───────────────────────────
+
+@router.get("/reverse/report")
+def get_reverse_report():
+    """마지막으로 저장된 V5(고성과·저성과 역분석)·V6(보정 후보 검증)·V7(자기개선 루프)·모듈 재검증·확률 검증."""
+    from ..ingest import reverse_analysis as R
+
+    return to_jsonable(R.full_report())
+
+
+@router.post("/reverse/run")
+def post_reverse_run(x_upgrade_key: Optional[str] = Header(default=None)):
+    """V7 루프 1회(강제) + V1~V4-A 모듈 재검증 — 백그라운드. 기존 모델은 덮어쓰지 않는다."""
+    _auth(x_upgrade_key)
+    from ..ingest import jobs
+    from ..ingest import reverse_analysis as R
+
+    return _bg("self_optimize", lambda: jobs.run_job("self_optimize", R.run_all, retries=0))

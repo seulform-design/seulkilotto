@@ -20,6 +20,7 @@ import MachineOverviewPanel from '../components/MachineOverviewPanel';
 import PipelineStatusPanel from '../components/PipelineStatusPanel';
 import RoundPredictionPanel from '../components/RoundPredictionPanel';
 import EngineAuditPanel from '../components/EngineAuditPanel';
+import ReverseAnalysisPanel from '../components/ReverseAnalysisPanel';
 
 const RoundRecommendPage = lazy(() => import('./RoundRecommendPage'));
 const PostOccurrencePage = lazy(() => import('./PostOccurrencePage'));
@@ -72,6 +73,7 @@ export default function AnalysisEnginePage() {
       <Group title="회차별 예측 기록" note="회차를 고르면 각 엔진이 예측한 번호와 실제 당첨번호·일치 개수·등수를 봅니다.">
         <RoundPredictionPanel />
         <EngineAuditPanel />
+        <ReverseAnalysisPanel />
       </Group>
 
       <Group title="1. 데이터 · 수학적 기준값">

@@ -317,6 +317,18 @@ def create_live(next_round: int, *, include_ensemble: bool = True, now: Optional
             written += save_prediction(c, rnd=next_round, method=f"engine_{src}", ptype="live", numbers=top[:6],
                                        engine_version=f"signals-{RULES_VERSION}", cutoff_at=cutoff.isoformat(),
                                        training_range=rng_range, training_count=len(prior))
+    # V7: V6에서 홀드아웃 승인(promoted)된 개선 모델만 '추가' 방식으로 적용(원본 전략은 그대로 유지)
+    try:
+        from . import reverse_analysis as _rv
+
+        for ap in _rv.approved_models():
+            with db.transaction() as c:
+                written += save_prediction(c, rnd=next_round, method=f"v6_{ap['candidate']}", ptype="live",
+                                           numbers=_rv.candidate_pick(ap["candidate"], draws),
+                                           engine_version=f"v6-{ap['version_id'][:8]}", cutoff_at=cutoff.isoformat(),
+                                           training_range=rng_range, training_count=len(draws))
+    except Exception:  # noqa: BLE001 — 승인 모델 적용 실패가 기존 예측을 막지 않게
+        pass
     ens_note = None
     if include_ensemble:
         try:

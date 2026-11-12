@@ -14,14 +14,15 @@ from __future__ import annotations
 import random
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 BASELINE_HIT = 6.0 / 45.0  # 임의 번호가 당첨 6개에 속할 확률
 BASELINE_TOP6_HITS = 6.0 * BASELINE_HIT  # ≈ 0.8
 N_BOOTSTRAP = 60
-N_PERMUTATION = 60
+N_PERMUTATION = 400  # 최소 p≈0.0025 — Feature 29개 BH 보정(q/29≈0.0034)을 통과할 수 있는 해상도
+FDR_Q = 0.10  # Benjamini-Hochberg 거짓 발견률(동시 검정 Feature 수만큼 보정)
 N_MONTE_CARLO = 100
 MIN_ROUNDS_FOR_ADOPT = 2
 LIFT_THRESHOLD = 1.08  # Random 대비 일관 향상 하한(보수)
@@ -325,34 +326,43 @@ def _bootstrap_mean_ci(values: List[float], rng: random.Random, n: int = N_BOOTS
     return float(arr.mean()), lo, hi
 
 
-def _permutation_pvalue(observed: float, samples: List[RoundSample], feature: str, rng: random.Random) -> float:
-    """당첨 라벨을 순열했을 때 관측 평균 이상인 비율.
+def _top6_mask(samples: List[RoundSample], feature: str) -> np.ndarray:
+    mask = np.zeros((len(samples), 46), dtype=bool)
+    for r, s in enumerate(samples):
+        top = sorted(range(1, 46), key=lambda n: (-_score_direction(feature, s.features[n].get(feature, 0.0)), n))[:6]
+        mask[r, top] = True
+    return mask
 
-    최적화: 회차별 top-6 랭킹은 Feature(그 회차 용지)만으로 결정되고 fake_win 과 무관하다.
-    기존엔 순열 200회 × 회차마다 45개를 재정렬(동일 결과)해 이 함수가 feature-learning
-    타임아웃(60s)의 주범이었다. 랭킹을 회차당 1회만 계산해 두고 순열 루프에선 무작위
-    당첨과의 교집합만 센다 — rng.sample 호출 순서·횟수 동일 → 결과 bitwise 동일, ~200× 단축.
-    """
+
+def _null_draws(n_rounds: int, seed: int, n_perm: int = N_PERMUTATION) -> np.ndarray:
+    """귀무가설 당첨(균등 6/45) — (순열 수, 회차 수, 6). 모든 Feature 가 같은 귀무 표본을 공유."""
+    g = np.random.default_rng(seed)
+    return np.argsort(g.random((n_perm, n_rounds, 45)), axis=2)[:, :, :6] + 1
+
+
+def _permutation_pvalue(observed: float, samples: List[RoundSample], feature: str, rng: random.Random,
+                        null: Optional[np.ndarray] = None) -> float:
+    """당첨 라벨을 무작위 당첨으로 바꿨을 때 관측 평균 이상인 비율((k+1)/(B+1)).
+
+    회차별 top-6 은 Feature(그 회차 용지)만으로 정해지므로 1회 계산 후, 귀무 당첨과의 교집합만 벡터로 센다."""
     if not samples:
         return 1.0
-    per_round_top6 = [
-        set(
-            sorted(
-                range(1, 46),
-                key=lambda n: (-_score_direction(feature, s.features[n].get(feature, 0.0)), n),
-            )[:6]
-        )
-        for s in samples
-    ]
-    count = 0
-    for _ in range(N_PERMUTATION):
-        hits = []
-        for top6 in per_round_top6:
-            fake_win = rng.sample(range(1, 46), 6)
-            hits.append(sum(1 for n in fake_win if n in top6))
-        if float(np.mean(hits)) >= observed - 1e-12:
-            count += 1
-    return (count + 1) / (N_PERMUTATION + 1)
+    if null is None:
+        null = _null_draws(len(samples), rng.randrange(2**31))
+    mask = _top6_mask(samples, feature)
+    hits = mask[np.arange(len(samples))[None, :, None], null].sum(axis=2).mean(axis=1)
+    count = int((hits >= observed - 1e-12).sum())
+    return (count + 1) / (null.shape[0] + 1)
+
+
+def _bh_thresholds(pvals: List[float], q: float = FDR_Q) -> float:
+    """Benjamini-Hochberg — 채택 가능한 최대 p 임계값(없으면 0)."""
+    m = len(pvals)
+    best = 0.0
+    for k, p in enumerate(sorted(pvals), start=1):
+        if p <= q * k / m:
+            best = p
+    return best
 
 
 def _monte_carlo_random_hits(n_rounds: int, rng: random.Random) -> Tuple[float, float, float]:
@@ -376,12 +386,19 @@ def validate_features(samples: List[RoundSample], seed: int = 42) -> List[Dict[s
     feature_names = list(FEATURE_LABELS.keys())
     mc_mean, mc_lo, mc_hi = _monte_carlo_random_hits(len(samples), rng)
 
+    null = _null_draws(len(samples), seed)
+    hits_by = {name: _walk_forward_feature_hits(samples, name) for name in feature_names}
+    p_by = {name: _permutation_pvalue(float(np.mean(h)) if h else 0.0, samples, name, rng, null=null)
+            for name, h in hits_by.items()}
+    # 다중검정 보정: Feature 29개를 동시에 검정하므로 BH-FDR 로 유의 임계값을 낮춘다(우연 채택 방지).
+    bh_cut = _bh_thresholds(list(p_by.values()))
+
     reports: List[Dict[str, Any]] = []
     for name in feature_names:
-        hits = _walk_forward_feature_hits(samples, name)
+        hits = hits_by[name]
         mean_hits = float(np.mean(hits)) if hits else 0.0
         boot_mean, boot_lo, boot_hi = _bootstrap_mean_ci(hits, rng)
-        p_perm = _permutation_pvalue(mean_hits, samples, name, rng)
+        p_perm = p_by[name]
         # Time split: 전반 학습 방향 확인용 — 후반 평균
         mid = max(1, len(hits) // 2)
         early = float(np.mean(hits[:mid])) if hits else 0.0
@@ -390,19 +407,20 @@ def validate_features(samples: List[RoundSample], seed: int = 42) -> List[Dict[s
         lift_vs_mc = mean_hits / mc_mean if mc_mean else 0.0
         consistent = late >= BASELINE_TOP6_HITS * LIFT_THRESHOLD and early >= BASELINE_TOP6_HITS * 0.95
         beats_random = mean_hits >= mc_mean * LIFT_THRESHOLD and boot_lo > BASELINE_TOP6_HITS * 0.9
-        # ── [엔진③ 피처 보강] 소표본 적응형 유의성 완화 (Small-Sample Adaptive Gate) ──
-        # 보관 회차가 적을 때(6회 이하)는 단일 Feature의 permutation p-value가 0.10 이하로 떨어지기 어렵습니다.
-        # 이에 따라 lift가 우수함에도 adopted가 거절되어 '학습연동 0'이 되는 현상을 완화합니다.
+        # 2026-11-13: 소표본 완화(p≤0.22·lift 1.04) 제거 — 무작위 당첨 대입 시 실행당 4.1개 거짓 채택이 측정됨.
+        # 표본이 적으면 채택하지 않는 것이 정직한 결과('데이터 부족')다.
         is_small_sample = len(samples) < 6
-        adjusted_p_threshold = 0.22 if is_small_sample else P_VALUE_THRESHOLD
-        adjusted_lift_threshold = 1.04 if is_small_sample else LIFT_THRESHOLD
+        adjusted_p_threshold = min(P_VALUE_THRESHOLD, bh_cut)
+        adjusted_lift_threshold = LIFT_THRESHOLD
+        passes_bh = bh_cut > 0 and p_perm <= bh_cut
 
         adopted = (
             len(samples) >= MIN_ROUNDS_FOR_ADOPT
             and lift_vs_base >= adjusted_lift_threshold
             and beats_random
-            and p_perm <= adjusted_p_threshold
-            and (late >= BASELINE_TOP6_HITS * 0.88 if is_small_sample else consistent)
+            and passes_bh
+            and p_perm <= P_VALUE_THRESHOLD
+            and consistent
         )
         reason_adopt = []
         reason_reject = []
@@ -410,8 +428,7 @@ def validate_features(samples: List[RoundSample], seed: int = 42) -> List[Dict[s
             reason_adopt.append(f"WF 평균 {mean_hits:.2f} > 기준 {BASELINE_TOP6_HITS:.2f}")
             reason_adopt.append(f"MC 대비 lift {lift_vs_mc:.2f}, permutation p={p_perm:.3f}")
             reason_adopt.append("전반·후반 모두 기준선 이상 유지")
-            if is_small_sample:
-                reason_adopt.append("소표본 완화 조건 적용 통과")
+            reason_adopt.append(f"BH-FDR q={FDR_Q} (Feature {len(feature_names)}개 동시 검정) 통과")
         else:
             if len(samples) < MIN_ROUNDS_FOR_ADOPT:
                 reason_reject.append(f"표본 회차 부족({len(samples)} < {MIN_ROUNDS_FOR_ADOPT})")
@@ -419,9 +436,10 @@ def validate_features(samples: List[RoundSample], seed: int = 42) -> List[Dict[s
                 reason_reject.append(f"기준선 대비 lift {lift_vs_base:.2f} < {adjusted_lift_threshold}")
             if not beats_random:
                 reason_reject.append("Random/MC 대비 일관된 향상 없음")
-            if p_perm > adjusted_p_threshold:
-                reason_reject.append(f"Permutation p={p_perm:.3f} > {adjusted_p_threshold}")
-            if not (late >= BASELINE_TOP6_HITS * 0.88 if is_small_sample else consistent):
+            if not passes_bh or p_perm > P_VALUE_THRESHOLD:
+                reason_reject.append(f"Permutation p={p_perm:.4f} — 다중검정(BH-FDR q={FDR_Q}, {len(feature_names)}개) 미통과"
+                                     + (" · 표본 6회 미만" if is_small_sample else ""))
+            if not consistent:
                 reason_reject.append("Time-split 전반/후반 재현성 부족")
 
         reports.append(
@@ -429,7 +447,8 @@ def validate_features(samples: List[RoundSample], seed: int = 42) -> List[Dict[s
                 "key": name,
                 "label": FEATURE_LABELS.get(name, name),
                 "adopted": adopted,
-                "reproducible": (late >= BASELINE_TOP6_HITS * 0.88 if is_small_sample else consistent) and p_perm <= adjusted_p_threshold,
+                "reproducible": consistent and passes_bh,
+                "multiple_testing": {"method": "BH-FDR", "q": FDR_Q, "m": len(feature_names), "p_cut": round(bh_cut, 5)},
                 "walk_forward_mean_hits": round(mean_hits, 4),
                 "walk_forward_hits": [round(h, 3) for h in hits],
                 "bootstrap_mean": round(boot_mean, 4),

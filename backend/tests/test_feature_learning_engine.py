@@ -59,3 +59,36 @@ def test_build_and_validate():
 if __name__ == "__main__":
     test_build_and_validate()
     print("ok")
+
+
+def _mk(n, rng, signal=False):
+    out = []
+    for r in range(n):
+        auto = [sorted(rng.sample(range(1, 46), 6)) for _ in range(12)]
+        semi = [sorted(rng.sample(range(1, 46), 6)) for _ in range(6)]
+        f = build_number_features(auto, semi)
+        if signal:
+            top = sorted(range(1, 46), key=lambda k: (-f[k].get("support", 0), k))[:10]
+            win = sorted(rng.sample(top, 5) + rng.sample([k for k in range(1, 46) if k not in top], 1))
+        else:
+            win = sorted(rng.sample(range(1, 46), 6))
+        out.append(RoundSample(r + 1, auto, semi, win, f))
+    return out
+
+
+def test_gate_rarely_adopts_under_null_with_multiple_testing():
+    """무작위 당첨(귀무)에서 29개 Feature 중 거짓 채택이 거의 없어야 한다(구 게이트: 50~90% 실행에서 채택)."""
+    import random
+
+    rng = random.Random(3)
+    runs_any = sum(1 for i in range(12) if any(r["adopted"] for r in validate_features(_mk(5, rng), seed=i)))
+    assert runs_any <= 2
+    rep = validate_features(_mk(5, rng), seed=99)
+    assert all(r["multiple_testing"]["method"] == "BH-FDR" for r in rep)
+
+
+def test_gate_still_detects_real_signal():
+    import random
+
+    rep = validate_features(_mk(10, random.Random(7), signal=True), seed=1)
+    assert any(r["adopted"] for r in rep)

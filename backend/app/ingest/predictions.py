@@ -255,7 +255,7 @@ def youtube_ticket_predictions() -> Dict[str, Any]:
     with db.transaction() as c:
         for method, table in (("youtube_auto", "ticket_auto_data"), ("youtube_semi", "ticket_semi_auto_data")):
             rows = c.execute(f"SELECT draw_round, numbers FROM {table} WHERE verification_status = 'accepted' "
-                             "AND round_status = 'ticket_printed'")
+                             "AND round_status IN ('ticket_printed', 'title_date_confirmed')")
             by: Dict[int, List[List[int]]] = {}
             for rnd, nums in rows:
                 by.setdefault(int(rnd), []).append(db.loads(nums))

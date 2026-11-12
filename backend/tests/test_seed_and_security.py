@@ -213,3 +213,41 @@ def test_current_round_apply_uses_youtube_tickets_not_past_demo(iso, monkeypatch
     assert rows and rows[0][0] in ("live", "historical_replay")
     monkeypatch.setenv("TICKET_LEARNING_SOURCE", "manual")
     assert store._load_apply_sheet("current_round")["source"] == "current_round"
+
+
+
+def test_title_round_confirmed_only_when_uploaded_in_draw_week(iso, monkeypatch):
+    assert seeds._title_round_matches_upload(1249, "2026-11-05T10:00:00Z")  # 1249회 추첨 11-07 직전
+    assert seeds._title_round_matches_upload(1249, "2026-11-09T10:00:00Z")  # 추첨 +2일(결과 인증)
+    assert not seeds._title_round_matches_upload(1249, "2026-10-20T10:00:00Z")  # 3주 전 — 다른 회차일 수 있음
+    assert not seeds._title_round_matches_upload(None, "2026-11-05T10:00:00Z")
+    # 용지에 회차 인쇄가 안 읽혀도(제목+업로드 주간 일치) 확정 → 학습 입력
+    seeds._upsert_discovered("vidTD000001", "seed-x", {"title": "1248회 자동 5게임", "published_at": "2026-10-30T09:00:00Z"},
+                             via="rss", similarity=0.5)
+    _fake_pipeline(monkeypatch, [_ln([5, 11, 19, 27, 35, 43])], None, thumb_seed=91)
+    r = seeds.process_video("vidTD000001", "1248회 자동 5게임", 1248, "2026-10-30T09:00:00Z")
+    assert r["round_status"] == "title_date_confirmed"
+    st = db.query("SELECT verification_status FROM ticket_auto_data WHERE video_id = 'vidTD000001'")[0][0]
+    assert st == "accepted"
+    # 업로드 주간이 안 맞으면 보류(pending_review) — 학습 제외
+    seeds._upsert_discovered("vidTD000002", "seed-x", {"title": "1248회 자동"}, via="rss", similarity=0.5)
+    _fake_pipeline(monkeypatch, [_ln([6, 12, 20, 28, 36, 44])], None, thumb_seed=92)
+    r2 = seeds.process_video("vidTD000002", "1248회 자동", 1248, "2026-09-01T09:00:00Z")
+    assert r2["round_status"] == "title_only_unconfirmed"
+
+
+def test_queue_order_current_round_then_uncovered_rounds(iso, monkeypatch):
+    from app.video_analysis import draw_template
+
+    cur = draw_template.get_current_round_no()
+    for vid, rh in (("vidQ0000001", 1100), ("vidQ0000002", cur), ("vidQ0000003", 1200), ("vidQ0000004", None),
+                    ("vidQ0000005", 1200)):
+        seeds._upsert_discovered(vid, "seed-x", {"title": f"{rh}회 자동" if rh else "로또 자동"}, via="rss", similarity=0.5)
+        with db.transaction() as c:
+            c.execute("UPDATE youtube_discovered_videos SET round_hint = ? WHERE video_id = ?", (rh, vid))
+    monkeypatch.setattr(seeds, "_covered_rounds", lambda: {1100})
+    order = [r[0] for r in seeds.queue_order(10)]
+    assert order[0] == "vidQ0000002"  # 이번 회차
+    assert order.index("vidQ0000003") < order.index("vidQ0000001")  # 확정 없는 1200회 > 이미 있는 1100회
+    assert order.index("vidQ0000005") > order.index("vidQ0000001") or order.index("vidQ0000005") > order.index("vidQ0000003")
+    assert order[-1] == "vidQ0000004"  # 회차 단서 없음 마지막

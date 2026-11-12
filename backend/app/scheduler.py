@@ -190,6 +190,31 @@ def start_scheduler() -> None:
         except Exception:  # noqa: BLE001
             logger.exception("[ticket-scan] 실패")
 
+    # ── 판독 큐 처리(매시간 35분) — 하루 1회·10개로는 수백 건이 밀려 '최신 회차만' 남았음.
+    #    회차 공백 우선으로 시간 예산(기본 25분) 안에서 처리 → 새 확정 용지가 생기면 6종 엔진 자동 재학습.
+    def _ocr_batch_job():
+        import os as _os
+
+        if _os.environ.get("TICKET_SCAN_ENABLED", "1") in ("0", "false", "False"):
+            return
+        try:
+            from .ingest import jobs as _ij
+            from .ingest import seeds as _sd
+
+            _ij.run_job("ticket_ocr_batch", _sd.ocr_batch, retries=0)
+        except Exception:  # noqa: BLE001
+            logger.exception("[ticket-ocr] 실패")
+
+    _scheduler.add_job(
+        _ocr_batch_job,
+        CronTrigger(minute=35, timezone="UTC"),
+        id="hourly_ticket_ocr",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
+    )
+
     _scheduler.add_job(
         _ticket_job,
         CronTrigger(hour=18, minute=20, timezone="UTC"),

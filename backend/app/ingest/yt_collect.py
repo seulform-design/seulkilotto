@@ -209,6 +209,19 @@ def _draw_date(n: int) -> date:
     return date(2002, 12, 7) + timedelta(days=7 * (int(n) - 1))
 
 
+PRIMARY_TEMPLATE = "{n}회 로또 자동"
+
+
+def _priority(ti: int, search_type: str, age: int, templates: List[str]) -> int:
+    """작을수록 먼저. ① 모든 회차의 핵심 검색어 1개(최근→과거) ② 모든 회차 기간 검색 ③ 나머지 검색어.
+    (이전: 최근 4회차 × 15검색어를 먼저 돌려 하루 할당량을 4개 회차가 다 썼음)"""
+    if search_type == "period":
+        return 2_000_000 + age
+    if templates[ti] == PRIMARY_TEMPLATE:
+        return 1_000_000 + age
+    return 3_000_000 + ti * 10_000 + age
+
+
 def create_round_jobs(latest_round: int, *, templates: Optional[List[str]] = None) -> Dict[str, Any]:
     """1~latest 회차 × 검색어 + 회차 기간 검색(제목에 회차 없는 영상) 작업 생성(중복 없음).
 
@@ -218,20 +231,22 @@ def create_round_jobs(latest_round: int, *, templates: Optional[List[str]] = Non
     now = db.now_iso()
     created = 0
     with db.transaction() as c:
-        have = {r[0] for r in c.execute("SELECT job_id FROM youtube_search_jobs")}
+        have = {r[0]: r[1] for r in c.execute("SELECT job_id, priority FROM youtube_search_jobs WHERE status IN ('queued','retry')")}
+        have_all = {r[0] for r in c.execute("SELECT job_id FROM youtube_search_jobs")}
         for n in range(int(latest_round), 0, -1):
             age = latest_round - n
-            base = 0 if age < 4 else (1 if n == SEED_ROUND else 2)
             d = _draw_date(n)
             jobs: List[Tuple[str, str, Optional[str], Optional[str], int]] = []
             for ti, t in enumerate(templates):
-                jobs.append((t.format(n=n), "round_query", None, None, base * 1_000_000 + ti * 10_000 + age))
+                jobs.append((t.format(n=n), "round_query", None, None, _priority(ti, "round_query", age, templates)))
             # 기간 검색: 추첨일 -7일 ~ +3일 업로드, 회차 번호 없는 검색어
             jobs.append(("로또 자동 용지", "period", (d - timedelta(days=7)).isoformat() + "T00:00:00Z",
-                         (d + timedelta(days=3)).isoformat() + "T00:00:00Z", base * 1_000_000 + 5_000 + age))
+                         (d + timedelta(days=3)).isoformat() + "T00:00:00Z", _priority(0, "period", age, templates)))
             for q, st, pa, pb, pr in jobs:
                 jid = hashlib.sha1(f"{n}|{q}|{st}|{pa}".encode()).hexdigest()[:20]
-                if jid in have:
+                if jid in have and have[jid] != pr:  # 대기 작업 우선순위 재배치(회차 전반 우선)
+                    c.execute("UPDATE youtube_search_jobs SET priority = ? WHERE job_id = ?", (pr, jid))
+                if jid in have_all:
                     continue
                 c.execute("INSERT INTO youtube_search_jobs (job_id,draw_round,search_query,search_type,published_after,"
                           "published_before,page_token,priority,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -320,9 +335,20 @@ def run_jobs(max_jobs: int = 40) -> Dict[str, Any]:
         out["queued"] = int(n[0][0]) if n else 0
         return out
     rows = db.query("SELECT job_id, draw_round, search_query, search_type, published_after, published_before, page_token, "
-                    "attempts FROM youtube_search_jobs WHERE status IN ('queued','retry') ORDER BY priority LIMIT "
-                    + str(int(max_jobs)))
-    for jid, rnd, q, st, pa, pb, tok, att in rows:
+                    "attempts, priority FROM youtube_search_jobs WHERE status IN ('queued','retry') ORDER BY priority LIMIT "
+                    + str(int(max_jobs) * 3))
+    covered = _rounds_with_tickets()
+    out["skipped_covered"] = 0
+    for jid, rnd, q, st, pa, pb, tok, att, pr in rows:
+        if out["ran"] >= max_jobs:
+            break
+        # 이미 확정 용지가 있는 회차의 '추가 검색어'는 할당량 낭비 → 건너뜀(핵심 검색어·기간·이번 회차는 유지)
+        if pr is not None and int(pr) >= 3_000_000 and rnd in covered and not tok:
+            with db.transaction() as c:
+                c.execute("UPDATE youtube_search_jobs SET status = 'skipped_covered', updated_at = ? WHERE job_id = ?",
+                          (db.now_iso(), jid))
+            out["skipped_covered"] += 1
+            continue
         try:
             data = call("search", {"part": "snippet", "q": q, "type": "video", "maxResults": 50, "regionCode": "KR",
                                    "relevanceLanguage": "ko", "publishedAfter": pa, "publishedBefore": pb,
@@ -397,19 +423,55 @@ def enrich_videos(limit: int = 200) -> Dict[str, Any]:
     return {"enriched": done}
 
 
-def scan_channels(limit: int = 20) -> Dict[str, Any]:
-    """발견된 채널의 과거 업로드(키 있으면 playlistItems 전체 페이지, 없으면 RSS 최근 15개)."""
+def _rounds_with_tickets() -> set:
+    out: set = set()
+    for t in ("ticket_auto_data", "ticket_semi_auto_data"):
+        try:
+            out |= {int(r[0]) for r in db.query(f"SELECT DISTINCT draw_round FROM {t} WHERE verification_status = 'accepted' "
+                                                  "AND round_status IN ('ticket_printed', 'title_date_confirmed') "
+                                                  "AND draw_round IS NOT NULL")}
+        except Exception:  # noqa: BLE001 — 테이블 없음
+            pass
+    return out
+
+
+def _channel_order(limit: int) -> List[Tuple[str, str]]:
+    """용지 채널 우선: ① 확정 용지가 나온 채널(수율 순) ② 알려진 용지 채널 ③ 아직 스캔 안 한 채널 ④ 오래전 스캔."""
+    from .tickets import DEFAULT_TICKET_CHANNELS
+
+    rows = db.query("SELECT channel_id, channel_title, last_scanned_at FROM youtube_channels")
+    yield_by: Dict[str, int] = {}
+    for t in ("ticket_auto_data", "ticket_semi_auto_data"):
+        try:
+            for cid, n in db.query(f"SELECT d.channel_id, COUNT(*) FROM {t} x JOIN youtube_discovered_videos d "
+                                   "ON d.video_id = x.video_id WHERE x.verification_status = 'accepted' GROUP BY d.channel_id"):
+                yield_by[cid] = yield_by.get(cid, 0) + int(n)
+        except Exception:  # noqa: BLE001
+            pass
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    def key(r):
+        cid, _t, last = r
+        scanned_today = bool(last) and str(last)[:10] == today
+        tier = 0 if yield_by.get(cid) else (1 if cid in DEFAULT_TICKET_CHANNELS else (2 if not last else 3))
+        return (scanned_today, tier, -yield_by.get(cid, 0), str(last or ""))
+
+    return [(r[0], r[1]) for r in sorted(rows, key=key)[: int(limit)]]
+
+
+def scan_channels(limit: int = 20, max_pages: int = 40) -> Dict[str, Any]:
+    """채널 업로드 전체(키 있으면 playlistItems 50개당 1 unit — 검색 100 unit 대비 100배 저렴, 없으면 RSS 최근 15개).
+    용지 채널의 과거 업로드를 통째로 받아 제목·업로드일로 회차를 매핑 → 전 회차 판독 큐를 채운다."""
     from . import youtube
 
-    rows = db.query("SELECT channel_id, channel_title FROM youtube_channels ORDER BY COALESCE(last_scanned_at,'') LIMIT "
-                    + str(int(limit)))
+    rows = _channel_order(limit)
     out = {"channels": 0, "videos_new": 0, "errors": []}
     for cid, title in rows:
         items: List[Dict[str, Any]] = []
         try:
             if keys():
                 tok = None
-                for _ in range(10):  # 채널당 최대 500개
+                for _ in range(max_pages):  # 채널당 최대 50×max_pages 개
                     data = call("playlistItems", {"part": "snippet", "playlistId": "UU" + cid[2:], "maxResults": 50,
                                                   "pageToken": tok})
                     for it in data.get("items", []):
@@ -499,15 +561,16 @@ def coverage() -> Dict[str, Any]:
 
 
 def daily(max_jobs: Optional[int] = None) -> Dict[str, Any]:
-    """정기: 채널 등록 → 회차 작업 보충 → (키 있으면) 검색·메타데이터 → 채널 스캔 → OCR 큐는 seeds 가 처리."""
+    """정기: 채널 등록 → 회차 작업 보충 → 용지 채널 업로드 전체 스캔(저렴, 먼저) → 회차별 검색(남은 할당량)
+    → 메타데이터. OCR 판독은 seeds.ocr_batch(매시간)가 회차 공백 우선으로 처리."""
     from ..stats_engine.draws import load_draws
 
     draws = load_draws()
     latest = draws[-1].round if draws else 0
     out = {"channels_seeded": seed_known_channels(), "jobs": create_round_jobs(latest)}
-    out["search"] = run_jobs(max_jobs or int(_clean(os.environ.get("YOUTUBE_JOBS_PER_RUN")) or 80))
+    out["channels"] = scan_channels(limit=int(_clean(os.environ.get("YOUTUBE_CHANNELS_PER_RUN")) or 40))
+    out["search"] = run_jobs(max_jobs or int(_clean(os.environ.get("YOUTUBE_JOBS_PER_RUN")) or 70))
     out["enrich"] = enrich_videos()
-    out["channels"] = scan_channels()
     out["coverage"] = coverage()
     return out
 

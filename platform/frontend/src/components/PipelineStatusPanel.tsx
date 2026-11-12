@@ -218,7 +218,17 @@ export default function PipelineStatusPanel() {
           {sd.data && (
             <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, p: 1 }}>
               <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
-                기준 영상 기반 용지 수집 {sd.data.seeds?.[0] ? `· ${sd.data.seeds[0].channel} “${String(sd.data.seeds[0].title ?? '').trim()}” (${sd.data.seeds[0].status})` : '· 기준 영상 미등록'}
+                전 회차 유튜브 용지 수집 · 확정 용지 {(sd.data.confirmed_rounds ?? []).length}개 회차
+                {sd.data.queue_waiting != null && ` · 판독 대기 ${sd.data.queue_waiting}편(${sd.data.queue_rounds_waiting ?? 0}개 회차)`}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="div">
+                {(sd.data.confirmed_rounds ?? []).length
+                  ? `확정 회차: ${(sd.data.confirmed_rounds as number[]).slice(-12).join(', ')}${(sd.data.confirmed_rounds as number[]).length > 12 ? ` 외 ${(sd.data.confirmed_rounds as number[]).length - 12}개` : ''}`
+                  : '아직 확정 회차 없음'}
+                {sd.data.seeds?.[0] ? ` · 시작 기준 영상: ${sd.data.seeds[0].channel} “${String(sd.data.seeds[0].title ?? '').trim()}”(수집 출발점일 뿐, 회차 제한 없음)` : ''}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="div">
+                판독 순서: 이번 회차 → 확정 용지가 없는 회차(최근→과거) → 나머지 · 매시간 자동 판독 후 6종 엔진 자동 재학습. {sd.data.round_rule}
               </Typography>
               <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))', gap: 0.5, mt: 0.5 }}>
                 {[

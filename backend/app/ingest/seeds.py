@@ -36,6 +36,10 @@ ALGORITHM_VERSION = "thumb-grid-1.0"
 _VID_RE = re.compile(r"(?:v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})")
 _ROUND_IN_TITLE = re.compile(r"(?<![\d/])(\d{3,4})\s*(?:회)?\s*(?:자동|반자동|수동|회)")
 FIRST_DRAW = (2002, 12, 7)
+# 회차 확정 상태: 용지에 인쇄된 '제 N 회'(ticket_printed) 또는 제목 회차 + 업로드 시점이 그 회차 판매·추첨 주간과
+# 일치(title_date_confirmed). 제목과 용지 인쇄 회차가 다르면(conflict) 계속 제외.
+CONFIRMED_ROUND_SQL = "round_status IN ('ticket_printed', 'title_date_confirmed')"
+CONFIRMED_ROUND_STATUSES = ("ticket_printed", "title_date_confirmed")
 
 
 def video_id_from(url_or_id: str) -> str:
@@ -275,8 +279,11 @@ def discover(seed_video_id: str = DEFAULT_SEED, *, include_ticket_channels: bool
             errors.append({"source": f"api_uploads:{cid}", "kind": "api_error", "error": str(exc)[:200]})
     # 검색어 — 기준 영상 제목·채널에서 생성(API 키 있을 때만)
     queries = []
-    rh = _round_hint(s_title or "")
-    if rh:
+    # 기준 영상의 회차(예: 1249)에 고정하지 않고 '이번 회차·직전 회차'로 검색(전 회차는 yt_collect 회차별 작업이 담당)
+    from ..stats_engine.draws import load_draws as _ld
+
+    _dr = _ld()
+    for rh in ([_dr[-1].round + 1, _dr[-1].round] if _dr else []):
         queries += [f"{rh}자동 용지", f"로또 {rh}회 자동 용지", f"로또 {rh}회 반자동"]
     queries += ["로또 자동 용지 공유", "로또 반자동 용지", "로또 첫자동 용지"]
     for q in queries:
@@ -309,6 +316,9 @@ def _store_typed(c, vid: str, frame_id: str, line: Dict[str, Any], rnd: Optional
     tid = hashlib.sha1(f"{vid}|{line.get('column')}|{line.get('game_label')}|{line['numbers']}".encode()).hexdigest()[:20]
     table = "ticket_auto_data" if ptype == "auto" else "ticket_semi_auto_data"
     if c.execute(f"SELECT ticket_id FROM {table} WHERE ticket_id = ?", (tid,)):
+        # 같은 줄 재판독: '제목 회차만'으로 보류됐던 행만 새 회차 판정으로 갱신(확정 행은 그대로, 삭제 없음)
+        c.execute(f"UPDATE {table} SET round_status = ?, verification_status = ?, draw_round = ? "
+                  "WHERE ticket_id = ? AND round_status = 'title_only_unconfirmed'", (round_status, status, rnd, tid))
         return None
     if ptype == "auto":
         c.execute("INSERT INTO ticket_auto_data (ticket_id,video_id,frame_id,draw_round,round_status,game_index,numbers,"
@@ -326,7 +336,22 @@ def _store_typed(c, vid: str, frame_id: str, line: Dict[str, Any], rnd: Optional
     return tid
 
 
-def process_video(vid: str, title: str = "", round_hint: Optional[int] = None) -> Dict[str, Any]:
+def _title_round_matches_upload(round_hint: Optional[int], published_at: Optional[str]) -> bool:
+    """제목 회차 N 의 영상이 N회 추첨일 -7일 ~ +3일 사이에 올라왔는지(그 주 구매·인증 영상)."""
+    if not round_hint or not published_at:
+        return False
+    from datetime import date, datetime, timedelta
+
+    try:
+        pub = datetime.fromisoformat(str(published_at).replace("Z", "+00:00")).date()
+    except ValueError:
+        return False
+    d = date(*FIRST_DRAW) + timedelta(days=7 * (int(round_hint) - 1))
+    return d - timedelta(days=7) <= pub <= d + timedelta(days=3)
+
+
+def process_video(vid: str, title: str = "", round_hint: Optional[int] = None,
+                  published_at: Optional[str] = None) -> Dict[str, Any]:
     """썸네일 1장 판독 → 프레임·용지 DB. 카테고리 B/C/D 판정."""
     from . import tickets
 
@@ -344,6 +369,8 @@ def process_video(vid: str, title: str = "", round_hint: Optional[int] = None) -
         rnd, round_status = ticket_round, "conflict_title_vs_ticket"
     elif ticket_round:
         rnd, round_status = ticket_round, "ticket_printed"
+    elif round_hint and _title_round_matches_upload(round_hint, published_at):
+        rnd, round_status = round_hint, "title_date_confirmed"
     elif round_hint:
         rnd, round_status = round_hint, "title_only_unconfirmed"
     else:
@@ -390,16 +417,82 @@ def process_video(vid: str, title: str = "", round_hint: Optional[int] = None) -
             "lines": len(res.get("lines", [])), "valid_lines": len(valid), "counts": counts, "duplicate_of": dup_of}
 
 
-def process_queue(limit: int = 10) -> Dict[str, Any]:
-    """미처리(또는 알고리즘 버전이 바뀐) 영상만 처리 — 이미 분석한 영상은 재처리하지 않는다."""
-    rows = db.query("SELECT video_id, title, round_hint FROM youtube_discovered_videos WHERE collection_status IN ('queued','failed') "
-                    "OR (collection_status = 'processed' AND COALESCE(algorithm_version,'') <> ?) "
-                    "ORDER BY CASE WHEN discovered_via = 'seed' THEN 0 ELSE 1 END, similarity_score DESC, published_at DESC "
-                    "LIMIT " + str(int(limit)), (ALGORITHM_VERSION,))
-    out = {"processed": 0, "by_category": {}, "videos": [], "errors": []}
-    for vid, title, rh in rows:
+def _covered_rounds() -> set:
+    out = set()
+    for t in ("ticket_auto_data", "ticket_semi_auto_data"):
+        out |= {int(r[0]) for r in db.query(f"SELECT DISTINCT draw_round FROM {t} WHERE verification_status = 'accepted' "
+                                              f"AND {CONFIRMED_ROUND_SQL} AND draw_round IS NOT NULL")}
+    return out
+
+
+def queue_order(limit: int) -> List[Tuple[str, str, Optional[int], Optional[str]]]:
+    """판독 순서 — ① 이번 회차 ② 확정 용지가 아직 없는 회차(최근→과거, 회차당 1편씩 먼저) ③ 이미 있는 회차
+    ④ 회차 단서 없는 영상. 기준 영상 하나에 묶이지 않고 전 회차를 고르게 채운다."""
+    from ..stats_engine.draws import load_draws
+
+    rows = db.query("SELECT video_id, title, round_hint, published_at FROM youtube_discovered_videos "
+                    "WHERE collection_status IN ('queued','failed') "
+                    "OR (collection_status = 'processed' AND COALESCE(algorithm_version,'') <> ?)", (ALGORITHM_VERSION,))
+    draws = load_draws()
+    cur = (draws[-1].round + 1) if draws else 0
+    covered = _covered_rounds()
+    rows.sort(key=lambda r: (-(int(r[2]) if r[2] else 0), str(r[3] or "")))
+    seen_round: Dict[int, int] = {}
+    keyed = []
+    for r in rows:
+        rh = int(r[2]) if r[2] else None
+        if rh is None:
+            keyed.append(((4, 0, 0), r))
+            continue
+        k = seen_round.get(rh, 0)
+        seen_round[rh] = k + 1
+        tier = 0 if rh == cur else (1 if rh not in covered else 3)
+        keyed.append(((tier, k, -rh), r))
+    keyed.sort(key=lambda x: x[0])
+    return [r for _k, r in keyed[: int(limit)]]
+
+
+def requeue_title_rounds() -> int:
+    """제목 회차만 있어 보류됐던 영상을 새 규칙(제목 회차+업로드 주간 일치)으로 재판독하도록 큐에 되돌림. 데이터 삭제 없음."""
+    vids = set()
+    for t in ("ticket_auto_data", "ticket_semi_auto_data"):
+        vids |= {r[0] for r in db.query(f"SELECT DISTINCT video_id FROM {t} WHERE round_status = 'title_only_unconfirmed'")}
+    done = {r[0] for r in db.query("SELECT video_id FROM youtube_discovered_videos WHERE error = 'requeued_title_rule'")}
+    n = 0
+    with db.transaction() as c:
+        for v in vids - done:
+            c.execute("UPDATE youtube_discovered_videos SET collection_status = 'queued', error = 'requeued_title_rule' "
+                      "WHERE video_id = ? AND collection_status = 'processed'", (v,))
+            n += 1
+    return n
+
+
+def process_queue(limit: int = 10, time_budget_sec: Optional[float] = None) -> Dict[str, Any]:
+    """미처리(또는 알고리즘 버전이 바뀐) 영상만 처리 — 이미 분석한 영상은 재처리하지 않는다. 회차 공백 우선."""
+    import time as _t
+
+    from . import jobs as _jobs
+
+    out = {"processed": 0, "by_category": {}, "videos": [], "errors": [], "rounds_touched": []}
+    if not _jobs.acquire_lock("ticket:ocr", ttl_sec=(time_budget_sec or 1800) + 600):
+        out["stopped"] = "locked(다른 판독 실행 중)"
+        return out
+    try:
+        return _process_rows(queue_order(limit), out, time_budget_sec)
+    finally:
+        _jobs.release_lock("ticket:ocr")
+
+
+def _process_rows(rows, out: Dict[str, Any], time_budget_sec: Optional[float]) -> Dict[str, Any]:
+    import time as _t
+
+    t0 = _t.time()
+    for vid, title, rh, pub in rows:
+        if time_budget_sec and _t.time() - t0 > time_budget_sec:
+            out["stopped"] = "time_budget"
+            break
         try:
-            r = process_video(vid, title or "", rh)
+            r = process_video(vid, title or "", rh, pub)
         except Exception as exc:  # noqa: BLE001
             with db.transaction() as c:
                 c.execute("UPDATE youtube_discovered_videos SET collection_status='failed', error=? WHERE video_id=?",
@@ -409,6 +502,31 @@ def process_queue(limit: int = 10) -> Dict[str, Any]:
         out["processed"] += 1
         out["by_category"][r["category"]] = out["by_category"].get(r["category"], 0) + 1
         out["videos"].append(r)
+        if r.get("round") and r.get("category") == "C_same_format":
+            out["rounds_touched"].append(r["round"])
+    out["videos"] = out["videos"][-20:]
+    out["rounds_touched"] = sorted(set(out["rounds_touched"]))
+    return out
+
+
+def ocr_batch() -> Dict[str, Any]:
+    """정기(매시간): 판독 큐를 시간 예산 안에서 처리 → 새 확정 용지가 생기면 6종 엔진 자동 재학습·용지 예측 기록."""
+    limit = int(os.environ.get("TICKET_SCAN_LIMIT", "60"))
+    budget = float(os.environ.get("TICKET_SCAN_BUDGET_SEC", "1500"))
+    requeued = requeue_title_rounds()
+    proc = process_queue(limit=limit, time_budget_sec=budget)
+    out: Dict[str, Any] = {"requeued_title_rule": requeued,
+                           "process": {k: proc.get(k) for k in ("processed", "by_category", "rounds_touched", "stopped")},
+                           "errors": len(proc["errors"])}
+    if proc["processed"]:
+        out["learning"] = run_learning()
+        try:
+            from . import predictions as _P
+
+            out["ticket_predictions"] = _P.youtube_ticket_predictions()
+            out["evaluate"] = _P.evaluate_pending()
+        except Exception as exc:  # noqa: BLE001
+            out["ticket_predictions"] = {"error": str(exc)[:200]}
     return out
 
 
@@ -433,7 +551,7 @@ def youtube_round_samples(pick_type: str) -> List[Any]:
 
     table = "ticket_auto_data" if pick_type == "auto" else "ticket_semi_auto_data"
     rows = db.query(f"SELECT draw_round, numbers FROM {table} WHERE verification_status = 'accepted' "
-                    "AND round_status = 'ticket_printed'")
+                    f"AND {CONFIRMED_ROUND_SQL}")
     win = {d.round: list(d.numbers) for d in load_draws()}
     by_round: Dict[int, List[List[int]]] = {}
     for rnd, nums in rows:
@@ -507,9 +625,11 @@ def daily() -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         collect = {"error": str(exc)[:300]}
     disc = discover(DEFAULT_SEED)
-    proc = process_queue(limit=int(os.environ.get("TICKET_SCAN_LIMIT", "10")))
+    requeued = requeue_title_rounds()
+    proc = process_queue(limit=int(os.environ.get("TICKET_SCAN_LIMIT", "60")),
+                         time_budget_sec=float(os.environ.get("TICKET_SCAN_BUDGET_SEC", "1500")))
     learn = run_learning() if proc["processed"] else {"skipped": "신규 처리 영상 없음"}
-    return {"seed": reg["status"], "collect": {k: collect.get(k) for k in ("search", "enrich", "channels")}
+    return {"seed": reg["status"], "requeued_title_rule": requeued, "collect": {k: collect.get(k) for k in ("search", "enrich", "channels")}
             if isinstance(collect, dict) else collect, "discover": disc, "process": proc, "learning": learn}
 
 
@@ -541,13 +661,18 @@ def dashboard() -> Dict[str, Any]:
         "auto": auto_st,
         "semi_auto": semi_st,
         "excluded": one("SELECT COUNT(*) FROM reg_tickets WHERE status IN ('excluded_manual','rejected_shape')"),
-        "round_unconfirmed": one("SELECT COUNT(*) FROM ticket_auto_data WHERE round_status <> 'ticket_printed'")
-                             + one("SELECT COUNT(*) FROM ticket_semi_auto_data WHERE round_status <> 'ticket_printed'"),
+        "round_unconfirmed": one("SELECT COUNT(*) FROM ticket_auto_data WHERE round_status NOT IN ('ticket_printed', 'title_date_confirmed')")
+                             + one("SELECT COUNT(*) FROM ticket_semi_auto_data WHERE round_status NOT IN ('ticket_printed', 'title_date_confirmed')"),
         "ocr_errors": one("SELECT COUNT(*) FROM youtube_video_frames WHERE extraction_status = 'unreadable'"),
         "channel_concentration": {"by_channel": by_channel,
                                   "top_share": round(by_channel[0]["auto_accepted"] / total_acc, 3) if total_acc else None},
         "learning": learning,
         "learning_link": LEARNING_LINK,
+        "confirmed_rounds": sorted(_covered_rounds()),
+        "queue_waiting": one("SELECT COUNT(*) FROM youtube_discovered_videos WHERE collection_status IN ('queued','failed')"),
+        "queue_rounds_waiting": one("SELECT COUNT(DISTINCT round_hint) FROM youtube_discovered_videos "
+                                    "WHERE collection_status IN ('queued','failed') AND round_hint IS NOT NULL"),
+        "round_rule": "회차 확정 = 용지에 인쇄된 '제 N 회' 또는 (제목 N회 + N회 추첨 주간 업로드). 제목·용지 회차가 다르면 제외",
         "algorithm_version": ALGORITHM_VERSION,
         "access_policy": "공개 썸네일만 분석(영상 다운로드 없음). 바코드·QR·TR·후원자/판매점 자막·이미지는 저장하지 않음.",
         "api_key": bool(os.environ.get("YOUTUBE_API_KEY")),

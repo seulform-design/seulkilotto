@@ -103,8 +103,10 @@ def test_jobs_cover_all_rounds_with_priorities(iso):
     assert Y.create_round_jobs(1249)["created"] == 0  # 같은 날 중복 생성 없음
     first = db.query("SELECT draw_round FROM youtube_search_jobs ORDER BY priority LIMIT ?", (cur_n,))
     assert {x[0] for x in first} == {1250}  # 이번 회차(판매 중) 최우선
-    nxt = db.query("SELECT draw_round FROM youtube_search_jobs ORDER BY priority LIMIT 8 OFFSET ?", (cur_n,))
-    assert {x[0] for x in nxt} <= {1249, 1248, 1247, 1246}  # 그다음 최근 완료 회차
+    nxt = db.query("SELECT draw_round, search_query FROM youtube_search_jobs ORDER BY priority LIMIT 1249 OFFSET ?", (cur_n,))
+    # 그다음: 전 회차에 핵심 검색어 1개씩(최근→과거) — 최근 몇 회차가 할당량을 독점하지 않음
+    assert [x[0] for x in nxt[:5]] == [1249, 1248, 1247, 1246, 1245]
+    assert len({x[0] for x in nxt}) == 1249 and all("회 로또 자동" in x[1] for x in nxt)
     seed_pos = db.query("SELECT MIN(priority) FROM youtube_search_jobs WHERE draw_round = 1240")[0][0]
     assert db.query("SELECT MIN(priority) FROM youtube_search_jobs WHERE draw_round = 1249")[0][0] < seed_pos
 
@@ -149,3 +151,16 @@ def test_no_results_distinct_from_unsearched(iso, monkeypatch):
     assert st[5] == "done_no_results" and st[6] == "queued"
     cov = Y.coverage()
     assert cov["rounds"]["searched_any"] == 1 and cov["rounds"]["without_videos_after_search"] == 1
+
+
+
+def test_extra_queries_skipped_for_covered_rounds(iso, monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "AIza" + "x" * 35)
+    Y.create_round_jobs(3)
+    monkeypatch.setattr(Y, "_rounds_with_tickets", lambda: {1, 2, 3})
+    calls = []
+    monkeypatch.setattr(Y, "call", lambda ep, params, draw_round=None: calls.append(params["q"]) or {"items": []})
+    out = Y.run_jobs(max_jobs=100)
+    # 이번 회차(4)·핵심 검색어·기간 검색만 실행, 확정 회차의 추가 검색어 14개×3회차는 건너뜀
+    assert out["skipped_covered"] == 3 * (len(Y.QUERY_TEMPLATES) - 1)
+    assert all(("회 로또 자동" in q) or ("용지" in q) or q.startswith("4회") or q.startswith("제4회") for q in calls)

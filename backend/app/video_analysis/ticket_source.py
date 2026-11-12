@@ -38,7 +38,8 @@ def youtube_batches() -> List[Dict[str, Any]]:
     try:
         for table, ptype in (("ticket_auto_data", "auto"), ("ticket_semi_auto_data", "semi_auto")):
             rows = db.query(f"SELECT draw_round, numbers, video_id, created_at FROM {table} "
-                            "WHERE verification_status = 'accepted' AND round_status = 'ticket_printed' "
+                            "WHERE verification_status = 'accepted' "
+                            "AND round_status IN ('ticket_printed', 'title_date_confirmed') "
                             "AND draw_round IS NOT NULL")
             for rnd, nums, vid, created in rows:
                 b = by_round.setdefault(int(rnd), {"lines": {"자동": [], "반자동": []}, "videos": set(), "first": created})

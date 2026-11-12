@@ -282,7 +282,7 @@ def get_seed_tickets(pick_type: str = Query("auto", pattern="^(auto|semi_auto)$"
               "numbers": nums, "ocr_confidence": r[6], "type_confidence": r[7], "status": r[8], "created_at": r[9],
               "observed_only": True}
         d = win.get(r[2])
-        if d and r[3] == "ticket_printed":
+        if d and r[3] in ("ticket_printed", "title_date_confirmed"):
             it["matches"] = len(set(nums) & set(d.numbers))
             it["prize_rank"] = prize_rank(nums, d.numbers, d.bonus)
         else:

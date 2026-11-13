@@ -22,7 +22,13 @@ from . import reverse_analysis as R
 EXP = 0.8
 VAR1 = R.VAR1
 PERIODS = (("last20", 20), ("last50", 50), ("last100", 100), ("all", None))
-WEIGHTS_VERSION = "v12-w1"
+WEIGHTS_VERSION = "v12-w2"
+# w2(2026-11-13): 회차별 성적 감사에서 w1 10조합이 같은 번호를 많이 공유(상위 6개 번호 비중 42%)해 200회 중
+# '10조합 중 하나라도 3개 이상'인 회차가 34회로, 서로 독립인 무작위 10조합 기대치(41.9회)보다 적었다.
+# 기대 일치 수(0.8)는 조합 구성과 무관하지만, 조합끼리 겹칠수록 같이 맞고 같이 틀려 '회차당 하나라도 맞을 확률'이
+# 줄어든다(수학적 성질 — 결과를 보고 고른 조정이 아님). → 10조합 전체에서 번호 사용 ≤2회, 모든 조합 쌍 겹침 ≤2.
+MAX_NUMBER_USE = 2
+MAX_PAIR_OVERLAP = 2
 WEIGHTS = {"long": 0.15, "mid": 0.15, "recent": 0.15, "gap": 0.10, "votes": 0.20, "validated_votes": 0.10,
            "stability": 0.10, "bias_penalty": 0.05}
 TIER_LABEL = {1: "1등", 2: "2등", 3: "3등", 4: "4등", 5: "5등"}
@@ -359,11 +365,14 @@ def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 600
 
     chosen: List[Dict[str, Any]] = []
 
-    def take(pl, k, group, max_overlap):
+    def take(pl, k, group, max_overlap, max_use=MAX_NUMBER_USE):
         for tot, c, ns, st in pl:
             if len([x for x in chosen if x["group"] == group]) >= k:
                 return
             if any(len(set(c) & set(x["numbers"])) > max_overlap for x in chosen):
+                continue
+            use = Counter(n for x in chosen for n in x["numbers"])
+            if any(use[n] >= max_use for n in c):
                 continue
             if st["pass_rate"] < 6 / 7:
                 continue
@@ -377,8 +386,9 @@ def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 600
         c = tuple(sorted(rng.sample(A, 4) + rng.sample(B, 2)))
         core.add(c)
         core.add(tuple(sorted(rng.sample(A, 5) + rng.sample(B, 1))))
-    take(pool(core), 3, "core", 3)
-    take(pool({tuple(sorted(rng.sample(ab, 6))) for _ in range(sample_n)}), 4, "dispersion", 2)
+    take(pool(core), 3, "core", MAX_PAIR_OVERLAP)
+    disp_pool = pool({tuple(sorted(rng.sample(ab, 6))) for _ in range(sample_n)})
+    take(disp_pool, 4, "dispersion", MAX_PAIR_OVERLAP)
     abc = A + B + C
     exp = set()
     for _ in range(sample_n):
@@ -386,11 +396,13 @@ def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 600
         if len(set(c)) == 6:
             exp.add(c)
     exp_pool = pool(exp)
-    take(exp_pool, 3, "experimental", 3)
-    # 조합 간 중복 제한 때문에 개수를 못 채우면 겹침 한도만 1 늘려 한 번 더(구조 조건은 완화하지 않음)
-    for grp, k, ov, pl in (("core", 3, 4, None), ("dispersion", 4, 3, None), ("experimental", 3, 4, exp_pool)):
-        if len([x for x in chosen if x["group"] == grp]) < k and pl is not None:
-            take(pl, k, grp, ov)
+    take(exp_pool, 3, "experimental", MAX_PAIR_OVERLAP)
+    # 다양성 제한 때문에 개수를 못 채우면 겹침·사용 한도를 1씩만 늘려 한 번 더(구조 조건은 완화하지 않음)
+    core_pool = pool(core)
+    for relax in (1, 2):
+        for grp, k, pl in (("core", 3, core_pool), ("dispersion", 4, disp_pool), ("experimental", 3, exp_pool)):
+            if len([x for x in chosen if x["group"] == grp]) < k:
+                take(pl, k, grp, MAX_PAIR_OVERLAP + relax, MAX_NUMBER_USE + relax)
     chosen.sort(key=lambda x: ({"core": 0, "dispersion": 1, "experimental": 2}[x["group"]], -x["combo_score"]))
     for i, x in enumerate(chosen, start=1):
         x["rank"] = i
@@ -429,9 +441,10 @@ def v12_walk_forward(rounds: Optional[int] = None, store: bool = True) -> Dict[s
     draws = load_draws()
     ser = {m: v for (t, m), v in _series().items() if t == "backtest"}
     targets = [d for d in draws[-rounds:]]
+    wf_version = f"{WEIGHTS_VERSION}-wf"
     stored_rounds = {int(r[0]) for r in db.query(
         "SELECT DISTINCT draw_round FROM round_prediction_history WHERE prediction_method = 'v12_integrated' "
-        "AND prediction_type = 'backtest'")}
+        "AND prediction_type = 'backtest' AND engine_version = ?", (wf_version,))}
     written = 0
     idx_of = {d.round: i for i, d in enumerate(draws)}
     res = {"core": [], "dispersion": [], "experimental": [], "all": []}
@@ -451,10 +464,14 @@ def v12_walk_forward(rounds: Optional[int] = None, store: bool = True) -> Dict[s
         if store and d.round not in stored_rounds and len(_used) >= 3:
             # 그 회차 이전 데이터 + 그 회차용 백테스트 엔진 추천(각자 이전 데이터)만으로 만든 10조합 — 사후 생성 기록
             with db.transaction() as c:
+                # 이전 버전 백테스트는 지우지 않고 superseded 로 표시(번호 보존, 집계는 현재 버전만)
+                c.execute("UPDATE round_prediction_history SET prediction_status = 'superseded' WHERE draw_round = ? "
+                          "AND prediction_method = 'v12_integrated' AND prediction_type = 'backtest' AND engine_version <> ?",
+                          (d.round, wf_version))
                 for cb in combos:
                     written += P.save_prediction(c, rnd=d.round, method="v12_integrated", ptype="backtest",
                                                  numbers=cb["numbers"], rank=cb["rank"], score=cb["combo_score"],
-                                                 engine_version=f"{WEIGHTS_VERSION}-wf",
+                                                 engine_version=wf_version,
                                                  training_range=f"{prior[0].round}-{prior[-1].round}",
                                                  training_count=len(prior), note=cb["group"])
         ws = set(d.numbers)

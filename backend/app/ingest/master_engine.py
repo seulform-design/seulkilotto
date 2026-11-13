@@ -771,7 +771,8 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
         combos = [{"rank": int(rk), "group": grp or "-", "numbers": db.loads(nums), "combo_score": sco,
                    "number_score_mean": round(sum(sc_map[x]["score"] for x in db.loads(nums)) / 6, 4),
                    "structure": structure(db.loads(nums), sr),
-                   "tiers": "".join(sorted(sc_map[x]["tier"] for x in db.loads(nums)))} for rk, nums, sco, grp, _c in stored]
+                   "tiers": "".join(sorted(sc_map[x]["tier"] for x in db.loads(nums))),
+                   "popularity": popularity(db.loads(nums), {tuple(sorted(d.numbers)) for d in draws})} for rk, nums, sco, grp, _c in stored]
         frozen_at = stored[0][4]
     val_rep = R.last_report("v12_validation") or {}
     rep = {"kind": "v12", "latest_official_round": latest.round, "latest_draw_date": latest.draw_date,

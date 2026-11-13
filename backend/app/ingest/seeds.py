@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from . import db
 
 DEFAULT_SEED = "LSYXNhnsvtc"
-ALGORITHM_VERSION = "thumb-grid-1.0"
+ALGORITHM_VERSION = "thumb-frames-2.0"
 _VID_RE = re.compile(r"(?:v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})")
 _ROUND_IN_TITLE = re.compile(r"(?<![\d/])(\d{3,4})\s*(?:회)?\s*(?:자동|반자동|수동|회)")
 FIRST_DRAW = (2002, 12, 7)
@@ -143,6 +143,71 @@ def fetch_thumbnail(video_id: str, dest: Path) -> Tuple[Optional[Path], str]:
         p.write_bytes(data)
         return p, f"thumbnail:{q}"
     return None, "thumbnail:none"
+
+
+# YouTube 가 모든 공개 영상에 자동 제공하는 장면 이미지(영상 25%·50%·75% 지점) — 대표 썸네일과 같은 공개
+# 이미지 경로(i.ytimg.com)로, 영상 다운로드 없이 '용지가 화면 중간에 나오는' 영상도 판독할 수 있다.
+# 2026-11-13 실측: 1250회 쇼츠 다수가 대표 썸네일엔 제목 카드만, maxres1~3 에는 '제 1250 회' 용지 전체가 보였다.
+FRAME_SOURCES = (("maxresdefault", ("sddefault", "hqdefault")), ("maxres1", ("sd1", "hq1")),
+                 ("maxres2", ("sd2", "hq2")), ("maxres3", ("sd3", "hq3")))
+
+
+def fetch_frames(video_id: str, dest: Path) -> List[Tuple[Path, str]]:
+    """대표 썸네일 + 자동 장면 3장(공개 이미지). 거의 같은 이미지(해시 거리 4 이하)는 한 번만."""
+    out: List[Tuple[Path, str]] = []
+    hashes: List[str] = []
+    for main, fallbacks in FRAME_SOURCES:
+        for q in (main,) + fallbacks:
+            try:
+                data = _get(f"https://i.ytimg.com/vi/{video_id}/{q}.jpg")
+            except Exception:  # noqa: BLE001
+                continue
+            if len(data) < 2000:
+                continue
+            p = dest / f"{video_id}_{q}.jpg"
+            p.write_bytes(data)
+            try:
+                h = dhash(p)
+            except Exception:  # noqa: BLE001
+                break
+            if any(hamming(h, o) <= 4 for o in hashes):
+                p.unlink(missing_ok=True)
+                break
+            hashes.append(h)
+            out.append((p, f"{'thumbnail' if main == 'maxresdefault' else 'frame'}:{q}"))
+            break
+    return out
+
+
+def crop_vertical(path: Path, scale: float = 2.0) -> Tuple[Path, bool]:
+    """쇼츠(세로 영상)를 16:9 로 담은 이미지는 좌우가 같은 화면의 흐린 확대본이다 → 판독기가 큰 흐린 숫자를
+    번호 줄로 잘못 묶는다. 좌우가 중앙보다 뚜렷하게 흐리면 중앙 9:16 영역만 잘라 2배 확대."""
+    import cv2
+    import numpy as np
+
+    img = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return path, False
+    H, W = img.shape[:2]
+    if W < H * 1.5:
+        return path, False
+    cw = int(H * 9 / 16)
+    x0 = (W - cw) // 2
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    lap = cv2.Laplacian(gray, cv2.CV_64F)
+    center = float(lap[:, x0 + 4:x0 + cw - 4].var())
+    side = float(np.concatenate([lap[:, : max(1, x0 - 8)].ravel(), lap[:, x0 + cw + 8:].ravel()]).var())
+    if center <= 0 or side > center * 0.5:
+        return path, False
+    crop = img[:, max(0, x0 - 2): min(W, x0 + cw + 2)]
+    if scale != 1.0:
+        crop = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    outp = path.with_name(f"{path.stem}_v{int(scale * 10)}.png")
+    ok, buf = cv2.imencode(".png", crop)
+    if not ok:
+        return path, False
+    buf.tofile(str(outp))
+    return outp, True
 
 
 def dhash(path: Path) -> str:
@@ -350,20 +415,62 @@ def _title_round_matches_upload(round_hint: Optional[int], published_at: Optiona
     return d - timedelta(days=7) <= pub <= d + timedelta(days=3)
 
 
-def process_video(vid: str, title: str = "", round_hint: Optional[int] = None,
-                  published_at: Optional[str] = None) -> Dict[str, Any]:
-    """썸네일 1장 판독 → 프레임·용지 DB. 카테고리 B/C/D 판정."""
+def _read_frames(vid: str, title: str) -> List[Dict[str, Any]]:
+    """대표 썸네일 + 자동 장면 3장을 판독(쇼츠는 중앙 크롭) → 프레임별 결과."""
     from . import tickets
 
+    frames = []
     with tempfile.TemporaryDirectory() as td:
-        img, source = fetch_thumbnail(vid, Path(td))
-        if img is None:
-            return {"video_id": vid, "category": "D_low_relevance", "status": "no_thumbnail"}
-        fh = dhash(img)
-        res = tickets.extract_ticket_lines(img, title)
-        img.unlink(missing_ok=True)  # 이미지 비보관(식별정보 포함 가능)
-    valid = [ln for ln in res.get("lines", []) if ln["valid_shape"]]
-    ticket_round = res.get("round")
+        for img, source in fetch_frames(vid, Path(td)):
+            fh = dhash(img)
+            # 쇼츠: 원본 배율 중앙 크롭으로 먼저 빠르게(약 1/5 시간) 용지 단서(회차·번호 줄)를 보고, 단서가 있는데
+            # 줄이 형식 검증을 못 넘으면 2배 확대로 정밀 판독(실측: 1배 회차만 인식 → 2배 5줄 전부 정확)
+            use, cropped = crop_vertical(img, 1.0)
+            try:
+                res = tickets.extract_ticket_lines(use, title)
+                if cropped and not any(ln["valid_shape"] for ln in res.get("lines", [])) and (res.get("round") or res.get("lines")):
+                    use.unlink(missing_ok=True)
+                    use, _ = crop_vertical(img, 2.0)
+                    res2 = tickets.extract_ticket_lines(use, title)
+                    if any(ln["valid_shape"] for ln in res2.get("lines", [])):
+                        res2["round"] = res2.get("round") or res.get("round")
+                        res = res2
+            finally:
+                img.unlink(missing_ok=True)  # 이미지 비보관(식별정보 포함 가능)
+                if cropped:
+                    use.unlink(missing_ok=True)
+            frames.append({"source": source + (":vcrop" if cropped else ""), "hash": fh, "res": res,
+                           "valid": [ln for ln in res.get("lines", []) if ln["valid_shape"]]})
+    return frames
+
+
+def process_video(vid: str, title: str = "", round_hint: Optional[int] = None,
+                  published_at: Optional[str] = None) -> Dict[str, Any]:
+    """공개 이미지(대표 썸네일 + 자동 장면 3장) 판독 → 프레임·용지 DB. 카테고리 B/C/D 판정."""
+    from . import tickets
+
+    fr = _read_frames(vid, title)
+    if not fr:
+        with db.transaction() as c:
+            c.execute("UPDATE youtube_discovered_videos SET video_category=?, collection_status=?, processed_at=?, "
+                      "algorithm_version=? WHERE video_id=?", ("D_low_relevance", "processed", db.now_iso(), ALGORITHM_VERSION, vid))
+        return {"video_id": vid, "category": "D_low_relevance", "status": "no_thumbnail"}
+    # 프레임마다 '제 N 회' 를 다수결, 줄은 번호 기준으로 합침(같은 용지가 여러 장면에 나와도 1번만)
+    rounds_seen = [f["res"].get("round") for f in fr if f["res"].get("round")]
+    ticket_round = max(set(rounds_seen), key=rounds_seen.count) if rounds_seen else None
+    merged: List[Dict[str, Any]] = []
+    seen_nums: set = set()
+    for f in fr:
+        for ln in sorted(f["res"].get("lines", []), key=lambda l: (not l["valid_shape"], -l["ocr_confidence"])):
+            key = tuple(ln["numbers"])
+            if ln["valid_shape"] and key in seen_nums:
+                continue
+            if ln["valid_shape"]:
+                seen_nums.add(key)
+            ln = dict(ln)
+            ln["_frame"] = f["source"]
+            merged.append(ln)
+    valid = [ln for ln in merged if ln["valid_shape"]]
     # 회차 확인: 용지에 찍힌 '제 N 회' 를 우선, 제목 회차와 다르면 미확정
     if ticket_round and round_hint and ticket_round != round_hint:
         rnd, round_status = ticket_round, "conflict_title_vs_ticket"
@@ -375,12 +482,14 @@ def process_video(vid: str, title: str = "", round_hint: Optional[int] = None,
         rnd, round_status = round_hint, "title_only_unconfirmed"
     else:
         rnd, round_status = None, "unknown"
-    # 재업로드(B): 기존 프레임과 해시 거의 동일
-    # 재업로드는 '용지가 보이는' 같은 화면일 때만 — 매주 같은 썸네일 템플릿(용지 없음)을 쓰는 채널은
-    # 해시가 비슷해도 재업로드가 아니다(실측: 로또119 14개 오판 → 수정).
-    others = db.query("SELECT video_id, frame_hash FROM youtube_video_frames WHERE video_id <> ? AND ticket_detected = 1",
-                      (vid,))
-    dup_of = next((o[0] for o in others if hamming(o[1], fh) <= 5), None) if valid else None
+    # 재업로드(B): 용지가 보이는 프레임이 다른 영상의 용지 프레임과 해시 거의 동일
+    # (매주 같은 썸네일 템플릿(용지 없음)을 쓰는 채널은 해시가 비슷해도 재업로드가 아니다 — 실측 로또119 오판 수정)
+    tick_hashes = [f["hash"] for f in fr if f["valid"]]
+    dup_of = None
+    if tick_hashes:
+        others = db.query("SELECT video_id, frame_hash FROM youtube_video_frames WHERE video_id <> ? AND ticket_detected = 1",
+                          (vid,))
+        dup_of = next((o[0] for o in others for h in tick_hashes if o[1] and hamming(o[1], h) <= 5), None)
     if dup_of:
         category = "B_reupload"
     elif valid:
@@ -388,23 +497,23 @@ def process_video(vid: str, title: str = "", round_hint: Optional[int] = None,
     else:
         category = "D_low_relevance"
     counts: Dict[str, int] = {}
-    frame_id = f"{vid}:{source}"
     with db.transaction() as c:
-        c.execute("DELETE FROM youtube_video_frames WHERE frame_id = ?", (frame_id,))  # 알고리즘 재처리 시 교체
-        c.execute("INSERT INTO youtube_video_frames (frame_id,video_id,timestamp,frame_source,frame_hash,ticket_detected,"
-                  "extraction_status,ticket_round,lines_found,algorithm_version,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                  (frame_id, vid, None, source, fh, int(bool(valid)),
-                   "ok" if valid else ("no_ticket" if not res.get("lines") else "unreadable"),
-                   ticket_round, len(valid), ALGORITHM_VERSION, db.now_iso()))
+        c.execute("DELETE FROM youtube_video_frames WHERE video_id = ?", (vid,))  # 프레임 메타만 교체(용지 행은 보존)
+        for f in fr:
+            c.execute("INSERT INTO youtube_video_frames (frame_id,video_id,timestamp,frame_source,frame_hash,ticket_detected,"
+                      "extraction_status,ticket_round,lines_found,algorithm_version,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                      (f"{vid}:{f['source']}", vid, None, f["source"], f["hash"], int(bool(f["valid"])),
+                       "ok" if f["valid"] else ("no_ticket" if not f["res"].get("lines") else "unreadable"),
+                       f["res"].get("round"), len(f["valid"]), ALGORITHM_VERSION, db.now_iso()))
         if category == "C_same_format":
-            for ln in res["lines"]:
+            for ln in merged:
                 st = tickets.classify_line(ln, rnd if round_status != "unknown" else None)
                 if round_status in ("conflict_title_vs_ticket", "title_only_unconfirmed") and st == "accepted":
                     st = "pending_review"  # 회차 미확정이면 확정 데이터로 쓰지 않음
                 counts[st] = counts.get(st, 0) + 1
-                _store_typed(c, vid, frame_id, ln, rnd, round_status, st)
+                _store_typed(c, vid, f"{vid}:{ln['_frame']}", ln, rnd, round_status, st)
         c.execute("UPDATE youtube_discovered_videos SET video_category=?, duplicate_group_id=?, collection_status=?, "
-                  "processed_at=?, algorithm_version=?, similarity_score=CASE WHEN COALESCE(similarity_score,0) > ? "
+                  "processed_at=?, algorithm_version=?, error=NULL, similarity_score=CASE WHEN COALESCE(similarity_score,0) > ? "
                   "THEN COALESCE(similarity_score,0) ELSE ? END "
                   "WHERE video_id=?",
                   (category, dup_of, "processed", db.now_iso(), ALGORITHM_VERSION, 0.2 if valid else 0.0,
@@ -412,9 +521,10 @@ def process_video(vid: str, title: str = "", round_hint: Optional[int] = None,
     # 기존 reg_tickets 경로에도 기록(이전 분석 API 호환)
     if category == "C_same_format":
         tickets.store_lines({"video_id": vid, "url": f"https://www.youtube.com/watch?v={vid}", "round_hint": rnd},
-                            {"round": rnd, "lines": res["lines"]})
+                            {"round": rnd, "lines": merged})
     return {"video_id": vid, "category": category, "round": rnd, "round_status": round_status,
-            "lines": len(res.get("lines", [])), "valid_lines": len(valid), "counts": counts, "duplicate_of": dup_of}
+            "frames": [f["source"] for f in fr], "frames_with_ticket": sum(1 for f in fr if f["valid"]),
+            "lines": len(merged), "valid_lines": len(valid), "counts": counts, "duplicate_of": dup_of}
 
 
 def _covered_rounds() -> set:
@@ -674,6 +784,6 @@ def dashboard() -> Dict[str, Any]:
                                     "WHERE collection_status IN ('queued','failed') AND round_hint IS NOT NULL"),
         "round_rule": "회차 확정 = 용지에 인쇄된 '제 N 회' 또는 (제목 N회 + N회 추첨 주간 업로드). 제목·용지 회차가 다르면 제외",
         "algorithm_version": ALGORITHM_VERSION,
-        "access_policy": "공개 썸네일만 분석(영상 다운로드 없음). 바코드·QR·TR·후원자/판매점 자막·이미지는 저장하지 않음.",
+        "access_policy": "공개 이미지(대표 썸네일 + YouTube 자동 장면 25·50·75% 3장)만 분석(영상 다운로드 없음). 바코드·QR·TR·후원자/판매점 자막·이미지는 저장하지 않음.",
         "api_key": bool(os.environ.get("YOUTUBE_API_KEY")),
     }

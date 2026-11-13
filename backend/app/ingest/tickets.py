@@ -180,6 +180,10 @@ def extract_ticket_lines(image_path: Path, title: str = "") -> Dict[str, Any]:
             near = [o for o in items if abs(o["y"] - it["y"]) < max(20, it["h"]) and o["text"] in ("제", "회")]
             if near:
                 rounds_seen.append(int(m.group(1)))
+    for it in items:  # '제 1250 회' · '제1250회' 가 한 상자로 읽힌 경우
+        m = re.search(r"제\s*(1\d{3})\s*회", it["text"])
+        if m and it["conf"] >= 0.3:
+            rounds_seen.append(int(m.group(1)))
     if rounds_seen:
         rnd = max(set(rounds_seen), key=rounds_seen.count)
     # 게임 줄 후보: 두 자리 숫자 박스들을 y 로 군집

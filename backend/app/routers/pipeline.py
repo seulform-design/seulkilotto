@@ -477,6 +477,52 @@ def post_audit_run(x_upgrade_key: Optional[str] = Header(default=None), experime
     return _bg("engine_audit", lambda: jobs.run_job("engine_audit", _go, retries=0))
 
 
+# ─────────────────────────── 회차별 후보군 성적 감사(전 회차) ───────────────────────────
+
+@router.get("/round-audit/report")
+def get_round_audit_report():
+    """후보군(엔진)별 전 회차 성적 · 무작위 대비 하락 판정(Bonferroni) · 원인 진단 · 자동 보정(투표 제외)."""
+    from ..ingest import round_audit as RA
+
+    rep = RA.last_report()
+    if rep is None:
+        raise HTTPException(status_code=404, detail="아직 감사 기록이 없습니다 — POST /round-audit/run")
+    return to_jsonable(rep)
+
+
+@router.get("/round-audit/table")
+def get_round_audit_table(limit: int = Query(60, ge=5, le=300)):
+    """회차별 후보군 성적표(회차 × 후보군 최고 일치 수)."""
+    from ..ingest import round_audit as RA
+
+    return to_jsonable(RA.round_table(limit))
+
+
+@router.post("/round-audit/run")
+def post_round_audit_run(x_upgrade_key: Optional[str] = Header(default=None),
+                         engine_rounds: int = Query(200, ge=50, le=600),
+                         ensemble_budget_sec: float = Query(0, ge=0, le=3000)):
+    """전 회차 후보 백필(엔진 walk-forward·V12 10조합·선택 시 앙상블) → 공식 결과 채점 → 감사(백그라운드)."""
+    _auth(x_upgrade_key)
+    from ..ingest import jobs
+    from ..ingest import master_engine as M
+    from ..ingest import predictions as P
+    from ..ingest import round_audit as RA
+
+    def _go():
+        out = {"engines": P.backtest_engines(engine_rounds), "v12": {}}
+        wf = M.v12_walk_forward(engine_rounds)
+        out["v12"] = {"status": wf["status"], "stored": wf.get("stored_backtest_predictions")}
+        if ensemble_budget_sec:
+            out["ensemble"] = P.backtest_ensemble(engine_rounds, ensemble_budget_sec)
+        out["evaluate"] = P.evaluate_pending()
+        ra = RA.audit()
+        out["audit"] = {"summary": ra["summary"], "actions": ra["actions"]}
+        return out
+
+    return _bg("round_audit", lambda: jobs.run_job("round_audit", _go, retries=0))
+
+
 # ─────────────────────────── V5 역분석 · V6 자동 보정 · V7 자기개선 ───────────────────────────
 
 @router.get("/reverse/report")

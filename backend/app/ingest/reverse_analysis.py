@@ -176,7 +176,7 @@ def _load(ptype: str = "backtest") -> Dict[str, Dict[int, Tuple[List[int], int]]
     rows = db.query(
         "SELECT h.prediction_id, h.prediction_method, h.draw_round, h.predicted_numbers, e.match_count "
         "FROM round_prediction_history h JOIN round_prediction_evaluation e ON e.prediction_id = h.prediction_id "
-        "WHERE h.prediction_type = ? AND h.prediction_rank = 1", (ptype,))
+        "WHERE h.prediction_type = ? AND h.prediction_rank = 1 AND h.prediction_status <> 'superseded'", (ptype,))
     out: Dict[str, Dict[int, Tuple[List[int], int]]] = {}
     for pid, m, r, nums, mc in rows:
         if pid in q:

@@ -46,6 +46,7 @@ def _fake_pipeline(monkeypatch, lines, rnd, thumb_seed=0):
         return p, "thumbnail:maxresdefault"
 
     monkeypatch.setattr(seeds, "fetch_thumbnail", fake_thumb)
+    monkeypatch.setattr(seeds, "fetch_frames", lambda vid, dest: [fake_thumb(vid, dest)])
     monkeypatch.setattr(tickets, "extract_ticket_lines", lambda img, title="": {"round": rnd, "lines": lines})
 
 
@@ -251,3 +252,56 @@ def test_queue_order_current_round_then_uncovered_rounds(iso, monkeypatch):
     assert order.index("vidQ0000003") < order.index("vidQ0000001")  # 확정 없는 1200회 > 이미 있는 1100회
     assert order.index("vidQ0000005") > order.index("vidQ0000001") or order.index("vidQ0000005") > order.index("vidQ0000003")
     assert order[-1] == "vidQ0000004"  # 회차 단서 없음 마지막
+
+
+def test_crop_vertical_detects_shorts_letterbox(tmp_path):
+    import cv2
+    import numpy as np
+
+    H, W = 360, 640
+    rng = np.random.default_rng(3)
+    img = np.full((H, W, 3), 128, np.uint8)  # 좌우: 흐린 단색(쇼츠 배경), 중앙: 선명한 용지 영역
+    cw = int(H * 9 / 16)
+    x0 = (W - cw) // 2
+    img[:, x0:x0 + cw] = (rng.random((H, cw, 3)) * 255).astype(np.uint8)
+    p = tmp_path / "s.jpg"
+    cv2.imencode(".jpg", img)[1].tofile(str(p))
+    out, cropped = seeds.crop_vertical(p, 2.0)
+    assert cropped and out != p
+    w2 = cv2.imdecode(np.fromfile(str(out), dtype=np.uint8), cv2.IMREAD_COLOR).shape[1]
+    assert abs(w2 - (cw + 4) * 2) <= 4
+    full = (rng.random((H, W, 3)) * 255).astype(np.uint8)  # 일반 16:9 화면은 자르지 않음
+    p2 = tmp_path / "f.jpg"
+    cv2.imencode(".jpg", full)[1].tofile(str(p2))
+    assert seeds.crop_vertical(p2) == (p2, False)
+
+
+def test_youtube_prediction_revised_when_more_tickets(iso, monkeypatch):
+    from datetime import datetime, timezone
+
+    from app.ingest import predictions as P
+
+    P.reset_for_tests()
+    cur = 1250
+    monkeypatch.setattr(P, "draw_cutoff", lambda r: datetime(2099, 1, 1, tzinfo=timezone.utc))
+    P._ensure()
+
+    def add(i, nums):
+        with db.transaction() as c:
+            c.execute("INSERT INTO ticket_auto_data (ticket_id,video_id,frame_id,draw_round,round_status,game_index,numbers,"
+                      "confidence,type_confidence,verification_status,observed_only,algorithm_version,created_at) "
+                      "VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?)", (f"t{i}", "v", "f", cur, "ticket_printed", "A", db.dumps(nums),
+                                                          0.9, 0.9, "accepted", "x", db.now_iso()))
+    add(1, [1, 2, 3, 4, 5, 6])
+    add(2, [1, 2, 3, 4, 5, 7])
+    P.youtube_ticket_predictions()
+    rows = db.query("SELECT training_sample_count, prediction_status FROM round_prediction_history "
+                    "WHERE prediction_method = 'youtube_auto' AND draw_round = ?", (cur,))
+    assert rows == [(2, "pending_evaluation")]
+    assert P.youtube_ticket_predictions()["written"] == 0  # 줄 수 그대로면 개정 없음
+    for i in range(3, 8):
+        add(i, [10, 11, 12, 13, 14, 15])
+    P.youtube_ticket_predictions()
+    rows = sorted(db.query("SELECT training_sample_count, prediction_status, prediction_type FROM round_prediction_history "
+                           "WHERE prediction_method = 'youtube_auto' AND draw_round = ?", (cur,)))
+    assert rows == [(2, "superseded", "live"), (7, "pending_evaluation", "live")]  # 이전 개정본 보존, 최신만 집계

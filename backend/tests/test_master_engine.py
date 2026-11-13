@@ -91,3 +91,49 @@ def test_master_api(iso):
 
     j = TestClient(app).get("/api/v1/pipeline/master/report").json()
     assert "diagnosis" in j and "probability" in j
+
+
+def test_v12_backtest_stored_for_past_rounds_and_round_audit(iso):
+    from app.ingest import round_audit as RA
+
+    RA.reset_for_tests()
+    _seed(1180)
+    rep = M.v12_walk_forward(rounds=15)
+    assert rep["stored_backtest_predictions"] == 150  # 15회차 × 10조합 — 이번 회차만이 아니라 과거 회차에도 후보군 존재
+    rows = db.query("SELECT draw_round, COUNT(*), MAX(training_data_range) FROM round_prediction_history "
+                    "WHERE prediction_method = 'v12_integrated' AND prediction_type = 'backtest' GROUP BY draw_round")
+    for rnd, cnt, rng in rows:
+        assert cnt == 10 and int(rng.split("-")[1]) < int(rnd)  # 학습 범위는 대상 회차 이전
+    assert M.v12_walk_forward(rounds=15)["stored_backtest_predictions"] == 0  # 재실행해도 기록 불변(중복 저장 없음)
+    P.evaluate_pending()
+    a = RA.audit(min_rounds=10)
+    v12 = next(x for x in a["methods"] if x["method"] == "v12_integrated" and x["type"] == "backtest")
+    assert v12["combos_per_round"] == 10 and v12["games"] == 150 and v12["rounds"] == 15
+    assert v12["verdict"] in ("random_equivalent", "below_trend", "below_random", "above_random")
+    assert "random_baseline" not in {x["method"] for x in a["methods"]}
+    t = RA.round_table(limit=10)
+    assert len(t["rounds"]) == 10 and any(c["method"] == "v12_integrated" for c in t["columns"])
+
+
+def test_round_audit_flags_and_releases_below_random(iso, monkeypatch):
+    from app.ingest import round_audit as RA
+
+    RA.reset_for_tests()
+    _seed(1150)
+    from app.stats_engine.draws import load_draws
+
+    with db.transaction() as c:  # 일부러 당첨번호를 피한 엔진 — 전 회차 일치 0 → 하락 판정 → 투표 제외
+        for d in load_draws()[-80:]:
+            pick = [x for x in range(1, 46) if x not in d.numbers][:6]
+            P.save_prediction(c, rnd=d.round, method="engine_bad", ptype="backtest", numbers=pick, engine_version="t")
+    P.evaluate_pending()
+    a = RA.audit()
+    bad = next(x for x in a["methods"] if x["method"] == "engine_bad")
+    assert bad["verdict"] == "below_random" and "engine_bad" in a["actions"]["excluded_now"]
+    assert "engine_bad" in RA.excluded_methods()
+    with db.transaction() as c:
+        c.execute("DELETE FROM round_prediction_evaluation WHERE prediction_id IN (SELECT prediction_id FROM "
+                  "round_prediction_history WHERE prediction_method = 'engine_bad')")
+        c.execute("DELETE FROM round_prediction_history WHERE prediction_method = 'engine_bad'")
+    a2 = RA.audit()
+    assert "engine_bad" in a2["actions"]["released"] and "engine_bad" not in RA.excluded_methods()

@@ -211,6 +211,46 @@ def backtest_engines(last_n: int = 100, sources: Iterable[str] = ("machine", "cl
     return {"written": written, "rounds": [rounds[0], rounds[-1]] if rounds else []}
 
 
+def backtest_ensemble(last_n: int = 100, time_budget_sec: float = 900.0) -> Dict[str, Any]:
+    """앙상블(번호추천) 5조합 — 회차 R 은 R 이전 당첨 이력만(intent=review: 신호도 R 이전만 사용).
+    회차당 수십 초라 시간 예산 안에서 최근 회차부터 채우고, 다음 실행이 이어서 채운다."""
+    import time as _t
+
+    from ..analytics import ENSEMBLE_ALGORITHM_VERSION, generate_ensemble_sets
+    from ..database import load_history
+
+    _ensure()
+    t0 = _t.time()
+    df = load_history().sort_values("round")
+    rounds = [int(r) for r in df["round"].tolist()][-int(last_n):]
+    have = {int(r[0]) for r in db.query("SELECT DISTINCT draw_round FROM round_prediction_history "
+                                         "WHERE prediction_type = 'backtest' AND prediction_method = 'ensemble'")}
+    todo = [r for r in reversed(rounds) if r not in have]
+    written, done, errors = 0, [], []
+    for r in todo:
+        if _t.time() - t0 > time_budget_sec:
+            break
+        prior = df[df["round"] < r]
+        if len(prior) < 50:
+            continue
+        try:
+            res = generate_ensemble_sets(prior, n_sets=5, seed=r, target_round=r, intent="review")
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"round": r, "error": str(exc)[:160]})
+            continue
+        with db.transaction() as c:
+            for i, comb in enumerate(res.get("combinations", [])[:5], start=1):
+                written += save_prediction(c, rnd=r, method="ensemble", ptype="backtest", numbers=comb["numbers"], rank=i,
+                                           engine_version=f"{ENSEMBLE_ALGORITHM_VERSION}-wf",
+                                           training_range=f"{int(prior['round'].min())}-{int(prior['round'].max())}",
+                                           training_count=len(prior),
+                                           ensemble_weight_version=db.dumps(res.get("engine_weights")),
+                                           note="사후 백테스트: 대상 회차 이전 당첨 이력만 입력")
+        done.append(r)
+    return {"written": written, "rounds_done": len(done), "remaining": max(0, len(todo) - len(done)),
+            "errors": errors[:5], "seconds": round(_t.time() - t0, 1)}
+
+
 def replay_archived_sheets() -> Dict[str, Any]:
     """보관 용지(추첨 전 동결분)로 V3·자동·반자동 지지 top6 재현 — 입력은 사전, 기록은 사후(historical_replay)."""
     from ..video_analysis.round_learning import _number_support, _rank_key
@@ -245,8 +285,27 @@ def replay_archived_sheets() -> Dict[str, Any]:
     return {"written": written, "rounds": sorted(rounds)}
 
 
+def _save_revision(c, *, rnd: int, method: str, numbers: Sequence[int], base_version: str, n_lines: int,
+                   **kw) -> bool:
+    """같은 회차·방식의 '최신 개정본'만 집계에 쓰이게 저장. 용지 줄 수가 늘면 새 개정본(version@n줄)을 저장하고
+    이전 개정본은 prediction_status='superseded' 로 표시(번호·생성 시각은 그대로 보존 — 삭제·덮어쓰기 없음)."""
+    ptype = "live" if datetime.now(timezone.utc) < draw_cutoff(rnd) else "historical_replay"
+    ver = f"{base_version}@n{n_lines}"
+    prev = c.execute("SELECT prediction_id, engine_version, training_sample_count FROM round_prediction_history "
+                     "WHERE draw_round = ? AND prediction_method = ? AND prediction_status <> 'superseded'", (int(rnd), method))
+    if any((r[1] == ver) or (r[1] == base_version and int(r[2] or 0) >= n_lines) for r in prev):
+        return False  # 같은(또는 더 많은) 줄 수로 이미 저장됨
+    if not save_prediction(c, rnd=rnd, method=method, ptype=ptype, numbers=numbers, engine_version=ver,
+                           training_count=n_lines, cutoff_at=draw_cutoff(rnd).isoformat(), **kw):
+        return False
+    for r in prev:
+        c.execute("UPDATE round_prediction_history SET prediction_status = 'superseded' WHERE prediction_id = ?", (r[0],))
+    return True
+
+
 def youtube_ticket_predictions() -> Dict[str, Any]:
-    """유튜브 확정 용지(회차 인쇄 확인)의 번호 빈도 top6 — 자동/반자동 분리. 용지는 추첨 전 구매분."""
+    """유튜브 확정 용지(회차 인쇄 또는 제목+추첨 주간 확인)의 번호 빈도 top6 — 자동/반자동 분리 + V3 지지 점수.
+    용지가 새로 판독될 때마다 최신 줄 수로 개정본을 저장한다(추첨 전이면 사전 예측). 이전 개정본은 보존·표시만."""
     from ..video_analysis.round_learning import _number_support, _rank_key
 
     _ensure()
@@ -266,20 +325,16 @@ def youtube_ticket_predictions() -> Dict[str, Any]:
                     for n in ln:
                         cnt[n] += 1
                 top = sorted(range(1, 46), key=lambda n: (-cnt[n], n))[:6]
-                ptype = "live" if datetime.now(timezone.utc) < draw_cutoff(rnd) else "historical_replay"
-                written += save_prediction(c, rnd=rnd, method=method, ptype=ptype, numbers=top,
-                                           engine_version="yt-ticket-freq-1", training_count=len(lines),
-                                           cutoff_at=draw_cutoff(rnd).isoformat(),
-                                           note=f"유튜브 관찰 용지 {len(lines)}줄(구매 완료 미확인)")
+                written += _save_revision(c, rnd=rnd, method=method, numbers=top, base_version="yt-ticket-freq-1",
+                                          n_lines=len(lines), note=f"유튜브 관찰 용지 {len(lines)}줄(구매 완료 미확인)")
         # V3 용지 학습(자동+반자동 지지 점수)을 유튜브 용지에 그대로 적용 — 이번 회차(추첨 전)면 사전 예측(live)으로 기록
         for rnd, g in both.items():
             sup = _number_support(g["auto"], g["semi"])
             top = sorted(range(1, 46), key=lambda n: _rank_key(sup[n]))[:6]
-            ptype = "live" if datetime.now(timezone.utc) < draw_cutoff(rnd) else "historical_replay"
-            written += save_prediction(c, rnd=rnd, method="youtube_v3_support", ptype=ptype, numbers=top,
-                                       engine_version="round-learning-support-1", training_count=len(g["auto"]) + len(g["semi"]),
-                                       cutoff_at=draw_cutoff(rnd).isoformat(), training_range=f"round {rnd} youtube sheets only",
-                                       note=f"유튜브 용지 자동 {len(g['auto'])}줄·반자동 {len(g['semi'])}줄에 V3 지지 점수 적용")
+            written += _save_revision(c, rnd=rnd, method="youtube_v3_support", numbers=top,
+                                      base_version="round-learning-support-1", n_lines=len(g["auto"]) + len(g["semi"]),
+                                      training_range=f"round {rnd} youtube sheets only",
+                                      note=f"유튜브 용지 자동 {len(g['auto'])}줄·반자동 {len(g['semi'])}줄에 V3 지지 점수 적용")
     return {"written": written}
 
 
@@ -392,7 +447,8 @@ def evaluate_pending() -> Dict[str, Any]:
                  int(d.bonus in nums), prize_rank(nums, d.numbers, d.bonus), db.now_iso(),
                  "official_verified" if int(rnd) in verified else "history_csv", "evaluated"),
             )
-            c.execute("UPDATE round_prediction_history SET prediction_status = 'evaluated' WHERE prediction_id = ?", (pid,))
+            c.execute("UPDATE round_prediction_history SET prediction_status = 'evaluated' WHERE prediction_id = ? "
+                      "AND prediction_status <> 'superseded'", (pid,))
             done += 1
     return {"evaluated": done}
 
@@ -407,7 +463,7 @@ def round_detail(rnd: int) -> Dict[str, Any]:
     rows = db.query(
         "SELECT h.prediction_id,h.prediction_method,h.prediction_type,h.prediction_rank,h.predicted_numbers,"
         "h.prediction_created_at,h.prediction_cutoff_at,h.engine_version,h.training_data_range,h.training_sample_count,"
-        "h.source_note,e.matched_numbers,e.match_count,e.bonus_matched,e.prize_tier,e.evaluation_source "
+        "h.source_note,e.matched_numbers,e.match_count,e.bonus_matched,e.prize_tier,e.evaluation_source,h.prediction_status "
         "FROM round_prediction_history h LEFT JOIN round_prediction_evaluation e ON e.prediction_id = h.prediction_id "
         "WHERE h.draw_round = ? ORDER BY h.prediction_type, h.prediction_method, h.prediction_rank", (int(rnd),))
     items = []
@@ -424,7 +480,7 @@ def round_detail(rnd: int) -> Dict[str, Any]:
                       "created_before_cutoff": pre_draw, "engine_version": r[7], "training_range": r[8],
                       "training_count": r[9], "note": r[10], "matched": db.loads(r[11]) if r[11] else None,
                       "match_count": r[12], "bonus_matched": bool(r[13]) if r[13] is not None else None,
-                      "prize_tier": r[14], "evaluation_source": r[15]})
+                      "prize_tier": r[14], "evaluation_source": r[15], "superseded": r[16] == "superseded"})
     return {"round": int(rnd), "winning": list(d.numbers) if d else None, "bonus": d.bonus if d else None,
             "draw_date": d.draw_date if d else None, "predictions": items}
 
@@ -439,7 +495,7 @@ def performance(ptype: str = "backtest", first_round: Optional[int] = None, last
     _ensure()
     sql = ("SELECT h.prediction_method, e.draw_round, e.match_count, e.bonus_matched, e.prize_tier "
            "FROM round_prediction_history h JOIN round_prediction_evaluation e ON e.prediction_id = h.prediction_id "
-           "WHERE h.prediction_type = ? AND h.prediction_rank = 1")
+           "WHERE h.prediction_type = ? AND h.prediction_rank = 1 AND h.prediction_status <> 'superseded'")
     params: List[Any] = [ptype]
     if first_round:
         sql += " AND e.draw_round >= ?"
@@ -550,8 +606,12 @@ def run_all(engine_rounds: int = 100) -> Dict[str, Any]:
     from ..stats_engine.draws import load_draws
 
     out: Dict[str, Any] = {"stats": backtest_stats()}
+    import os
+
+    ens_budget = float(os.environ.get("ENSEMBLE_BACKTEST_BUDGET_SEC", "900"))
     for name, fn in (("engines", lambda: backtest_engines(engine_rounds)), ("archived", replay_archived_sheets),
-                     ("youtube", youtube_ticket_predictions)):
+                     ("youtube", youtube_ticket_predictions),
+                     ("ensemble_backtest", lambda: backtest_ensemble(engine_rounds, ens_budget))):
         try:
             out[name] = fn()
         except Exception as exc:  # noqa: BLE001
@@ -583,7 +643,7 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
     _ensure()
     win = {d.round: set(d.numbers) for d in load_draws()}
     rows = db.query("SELECT draw_round, prediction_method, prediction_type, predicted_numbers FROM round_prediction_history "
-                    "WHERE prediction_rank = 1 AND prediction_type IN ('backtest', 'live')")
+                    "WHERE prediction_rank = 1 AND prediction_type IN ('backtest', 'live') AND prediction_status <> 'superseded'")
     by: Dict[Tuple[str, int], Dict[str, List[int]]] = {}
     for r, m, t, nums in rows:
         if m in CONSENSUS_EXCLUDE or m.startswith("v6_"):

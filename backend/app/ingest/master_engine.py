@@ -39,7 +39,7 @@ def _rows(ptype: Optional[str] = None) -> List[tuple]:
     sql = ("SELECT h.prediction_id, h.prediction_method, h.prediction_type, h.draw_round, h.prediction_rank, "
            "h.predicted_numbers, e.match_count, e.bonus_matched, e.prize_tier FROM round_prediction_history h "
            "JOIN round_prediction_evaluation e ON e.prediction_id = h.prediction_id")
-    rows = db.query(sql + (" WHERE h.prediction_type = ?" if ptype else ""), (ptype,) if ptype else ())
+    rows = db.query(sql + " WHERE h.prediction_status <> 'superseded'" + (" AND h.prediction_type = ?" if ptype else ""), (ptype,) if ptype else ())
     return [r for r in rows if r[0] not in q]
 
 
@@ -398,15 +398,16 @@ def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 600
     return chosen
 
 
-def _votes_for(round_no: int, ptypes: Sequence[str], weights: Dict[str, float]) -> Tuple[Dict[int, float], Dict[int, float], List[str]]:
+def _votes_for(round_no: int, ptypes: Sequence[str], weights: Dict[str, float],
+               exclude: Sequence[str] = ()) -> Tuple[Dict[int, float], Dict[int, float], List[str]]:
     rows = db.query("SELECT prediction_method, predicted_numbers, prediction_type FROM round_prediction_history "
-                    "WHERE draw_round = ? AND prediction_rank = 1", (round_no,))
+                    "WHERE draw_round = ? AND prediction_rank = 1 AND prediction_status <> 'superseded'", (round_no,))
     votes: Dict[int, float] = {}
     val: Dict[int, float] = {}
     used = []
     seen = set()
     for m, nums, t in rows:
-        if t not in ptypes or m in EXCLUDE_VOTES or m.startswith("v12") or m in seen:
+        if t not in ptypes or m in EXCLUDE_VOTES or m.startswith("v12") or m in seen or m in exclude:
             continue
         seen.add(m)
         used.append(m)
@@ -416,14 +417,22 @@ def _votes_for(round_no: int, ptypes: Sequence[str], weights: Dict[str, float]) 
     return votes, val, used
 
 
-def v12_walk_forward(rounds: int = 100) -> Dict[str, Any]:
+def v12_walk_forward(rounds: Optional[int] = None, store: bool = True) -> Dict[str, Any]:
     """V12 절차 그대로(그 회차 이전 공식 결과 + 그 회차용 백테스트 엔진 추천 + 그 이전까지의 엔진 성과 가중)를
     최근 N회에 적용해 10조합의 실제 일치 수를 무작위(같은 10조합/회차)·기존 단일 엔진과 비교. 가중치 조정 없음."""
+    import os
+
+    from . import predictions as P
     from ..stats_engine.draws import load_draws
 
+    rounds = int(rounds or os.environ.get("V12_BACKTEST_ROUNDS", "200"))
     draws = load_draws()
     ser = {m: v for (t, m), v in _series().items() if t == "backtest"}
     targets = [d for d in draws[-rounds:]]
+    stored_rounds = {int(r[0]) for r in db.query(
+        "SELECT DISTINCT draw_round FROM round_prediction_history WHERE prediction_method = 'v12_integrated' "
+        "AND prediction_type = 'backtest'")}
+    written = 0
     idx_of = {d.round: i for i, d in enumerate(draws)}
     res = {"core": [], "dispersion": [], "experimental": [], "all": []}
     leak_violations = 0
@@ -439,6 +448,15 @@ def v12_walk_forward(rounds: int = 100) -> Dict[str, Any]:
         votes, val, _used = _votes_for(d.round, ("backtest",), w)
         sc = number_scores(prior, votes, val)
         combos = generate_combos(sc, seed=d.round, sample_n=1500)
+        if store and d.round not in stored_rounds and len(_used) >= 3:
+            # 그 회차 이전 데이터 + 그 회차용 백테스트 엔진 추천(각자 이전 데이터)만으로 만든 10조합 — 사후 생성 기록
+            with db.transaction() as c:
+                for cb in combos:
+                    written += P.save_prediction(c, rnd=d.round, method="v12_integrated", ptype="backtest",
+                                                 numbers=cb["numbers"], rank=cb["rank"], score=cb["combo_score"],
+                                                 engine_version=f"{WEIGHTS_VERSION}-wf",
+                                                 training_range=f"{prior[0].round}-{prior[-1].round}",
+                                                 training_count=len(prior), note=cb["group"])
         ws = set(d.numbers)
         for c in combos:
             k = len(set(c["numbers"]) & ws)
@@ -468,7 +486,8 @@ def v12_walk_forward(rounds: int = 100) -> Dict[str, Any]:
                "V12 10조합 성과는 같은 조건 무작위 구매와 통계적으로 구분되지 않음 → '후보 생성'만 하고 성능 우위는 주장하지 않음")
     rep = {"kind": "v12_validation", "rounds": len(targets), "from": targets[0].round if targets else None,
            "to": targets[-1].round if targets else None, "groups": out, "best_single_engine": best_single,
-           "leak_violations": leak_violations, "weights_version": WEIGHTS_VERSION, "status": status, "verdict": verdict}
+           "leak_violations": leak_violations, "weights_version": WEIGHTS_VERSION, "status": status, "verdict": verdict,
+           "stored_backtest_predictions": written}
     with db.transaction() as c:
         import uuid
 
@@ -493,7 +512,13 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
     cutoff = P.draw_cutoff(target)
     v9 = R.last_report("v9") or {}
     w = {x["method"]: (x["periods"]["all"].get("mean") or EXP) / EXP for x in v9.get("methods", []) if x["type"] == "backtest"}
-    votes, val, used = _votes_for(target, ("live",), w)
+    try:
+        from . import round_audit as _RA
+
+        audit_excluded = sorted(_RA.excluded_methods())
+    except Exception:  # noqa: BLE001
+        audit_excluded = []
+    votes, val, used = _votes_for(target, ("live",), w, exclude=audit_excluded)
     vote_source = "live(대상 회차 사전 예측)"
     if not used:  # 아직 live 예측이 없으면 회차통계 순위로 대체(같은 이전 데이터)
         from ..stats_engine.backtest import _rankings
@@ -540,7 +565,7 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
     rep = {"kind": "v12", "latest_official_round": latest.round, "latest_draw_date": latest.draw_date,
            "latest_numbers": list(latest.numbers), "latest_bonus": latest.bonus, "target_round": target,
            "draw_date": draw_day.isoformat(), "data_cutoff_utc": cutoff.isoformat(), "data_cutoff_kst": f"{draw_day.isoformat()} 20:00 KST",
-           "data_basis": f"1~{latest.round}회 공식 결과", "vote_source": vote_source, "engines_voting": used,
+           "data_basis": f"1~{latest.round}회 공식 결과", "vote_source": vote_source, "engines_voting": used, "engines_excluded_by_audit": audit_excluded,
            "numbers": sc, "groups": {"A": [r["number"] for r in sc if r["tier"] == "A"],
                                       "B": [r["number"] for r in sc if r["tier"] == "B"],
                                       "C": [r["number"] for r in sc if r["tier"] == "C"]},
@@ -567,7 +592,17 @@ def run_master() -> Dict[str, Any]:
     steps["v9"] = len(v9_reliability()["methods"])
     steps["v10"] = v10_number_bias()["most_over_recommended"]
     steps["v11"] = len(v11_random_sim()["methods"])
-    steps["v12_validation"] = v12_walk_forward()["status"]
+    wf = v12_walk_forward()
+    steps["v12_validation"] = wf["status"]
+    steps["v12_backtest_stored"] = wf.get("stored_backtest_predictions", 0)
+    steps["evaluate_backfill"] = P.evaluate_pending()
+    try:  # 전 회차 후보군 성적 감사 → 하락 후보군은 이번 회차 V12 투표에서 제외
+        from . import round_audit as _RA
+
+        ra = _RA.audit()
+        steps["round_audit"] = {"summary": ra["summary"], "excluded": ra["actions"]["excluded_now"]}
+    except Exception as exc:  # noqa: BLE001
+        steps["round_audit"] = {"error": str(exc)[:200]}
     cur = v12_current()
     steps["v12"] = {"target_round": cur["target_round"], "saved": cur["saved_live_predictions"], "note": cur["save_note"]}
     return steps

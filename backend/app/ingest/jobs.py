@@ -530,7 +530,10 @@ def daily_pipeline(force_followups: bool = False) -> Dict[str, Any]:
         # 회차별 예측 기록(매일): 백테스트 보충·다음 회차 사전 예측(cutoff 전만)·공식 결과 자동 평가
         from . import predictions as _pred
 
-        report["predictions"] = run_job("predictions", lambda: _pred.run_all(engine_rounds=100), retries=1)
+        import os as _os
+
+        _er = int(_os.environ.get("PRED_ENGINE_ROUNDS", "200"))
+        report["predictions"] = run_job("predictions", lambda: _pred.run_all(engine_rounds=_er), retries=1)
         # V8 자동 감사(매일) — 경고만 기록, 자동 교체 없음. 개선 실험은 신규 회차가 있을 때만(과도한 재학습 방지)
         from . import engine_audit as _audit
 

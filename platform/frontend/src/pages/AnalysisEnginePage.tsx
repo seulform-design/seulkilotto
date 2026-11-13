@@ -22,6 +22,7 @@ import RoundPredictionPanel from '../components/RoundPredictionPanel';
 import EngineAuditPanel from '../components/EngineAuditPanel';
 import ReverseAnalysisPanel from '../components/ReverseAnalysisPanel';
 import MasterEnginePanel from '../components/MasterEnginePanel';
+import RoundAuditPanel from '../components/RoundAuditPanel';
 
 const RoundRecommendPage = lazy(() => import('./RoundRecommendPage'));
 const PostOccurrencePage = lazy(() => import('./PostOccurrencePage'));
@@ -76,6 +77,7 @@ export default function AnalysisEnginePage() {
         <EngineAuditPanel />
         <ReverseAnalysisPanel />
         <MasterEnginePanel />
+        <RoundAuditPanel />
       </Group>
 
       <Group title="1. 데이터 · 수학적 기준값">

@@ -733,7 +733,7 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
     alpha = 0.05 / max(1, len(levels))
     sig = [x for x in levels if x["p_two_sided"] < alpha and x["picks"] >= 100]
     all_rank = sorted(({"number": n, "times_top": v[0], "hits": v[1], "hit_rate": round(v[1] / v[0], 4),
-                        "hit_rounds": v[2], "miss_rounds": v[3]}
+                        "hit_rounds": v[2][-8:], "miss_rounds": v[3]}
                        for n, v in num_top.items()), key=lambda x: (-x["times_top"], x["number"]))
     # 선택 회차에서 중복된 번호 각각의 '이전 회차들에서 중복 상위였을 때 실제 당첨' 회차별 기록
     sel = rank_round("backtest", int(rnd)) or rank_round("live", int(rnd))
@@ -754,7 +754,7 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
            "all_rounds": {"basis": "per_round_rows", "window": W, "range": rng_txt, "rounds": len(past),
                           "by_engine_count": levels, "bonferroni_alpha": round(alpha, 4),
                           "top_consensus_numbers": all_rank[:15], "selected_round_track": track,
-                          "per_round": list(reversed(history)),
+                          "per_round": list(reversed(history[-30:])),  # 화면은 선택 회차만 사용 — 응답 경량화
                           "recent_history": list(reversed(history[-15:])),
                           "verdict": (f"{rnd}회 이전 {len(past)}개 회차 합계 기준, 중복 수가 많은 번호의 실제 적중률이 무작위 13.3%와 보정 후 다른 수준이 있음"
                                       f"({', '.join(x['engines'] for x in sig)}) — 재현 확인 필요" if sig else

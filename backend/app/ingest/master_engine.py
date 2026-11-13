@@ -22,13 +22,22 @@ from . import reverse_analysis as R
 EXP = 0.8
 VAR1 = R.VAR1
 PERIODS = (("last20", 20), ("last50", 50), ("last100", 100), ("all", None))
-WEIGHTS_VERSION = "v12-w2"
+WEIGHTS_VERSION = "v12-w3"
+# w3(2026-11-13): 놓친 당첨번호 역추적(200회)에서 후보가 '미출 10회 이상' 번호를 실제 당첨 비율보다 10%p 많이(32.5% vs 22.6%),
+# '미출 1~4회' 번호를 8%p 적게(29.8% vs 37.7%) 고르는 편향 확인. 당첨번호의 미출 구간 비율은 45개 번호의 기준 비율과 같으므로
+# 10조합 전체(60칸)에서 미출 구간별 사용량을 그 회차 기준 비율의 GAP_TOLERANCE 배 이내로 제한한다(기준 비율은 그 회차 이전 데이터).
 # w2(2026-11-13): 회차별 성적 감사에서 w1 10조합이 같은 번호를 많이 공유(상위 6개 번호 비중 42%)해 200회 중
 # '10조합 중 하나라도 3개 이상'인 회차가 34회로, 서로 독립인 무작위 10조합 기대치(41.9회)보다 적었다.
 # 기대 일치 수(0.8)는 조합 구성과 무관하지만, 조합끼리 겹칠수록 같이 맞고 같이 틀려 '회차당 하나라도 맞을 확률'이
 # 줄어든다(수학적 성질 — 결과를 보고 고른 조정이 아님). → 10조합 전체에서 번호 사용 ≤2회, 모든 조합 쌍 겹침 ≤2.
 MAX_NUMBER_USE = 2
 MAX_PAIR_OVERLAP = 2
+GAP_TOLERANCE = 1.1
+
+
+def gap_bucket(gap: int) -> str:
+    """미출 구간 — 0: 직전 회차 당첨(이월) · 1~4 · 5~9 · 10 이상."""
+    return "carry" if gap <= 0 else "short" if gap <= 4 else "mid" if gap <= 9 else "long"
 WEIGHTS = {"long": 0.15, "mid": 0.15, "recent": 0.15, "gap": 0.10, "votes": 0.20, "validated_votes": 0.10,
            "stability": 0.10, "bias_penalty": 0.05}
 TIER_LABEL = {1: "1등", 2: "2등", 3: "3등", 4: "4등", 5: "5등"}
@@ -339,8 +348,38 @@ def structure(c: Sequence[int], sum_range: Tuple[int, int]) -> Dict[str, Any]:
             "sum": f["sum"], "consec": f["consec"], "last_digits": f["last_digits"], "max_decade": f["max_decade"], "max_gap": max(gaps)}
 
 
+def calibrate_tiers(scores: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """A/B/C(각 10개) 를 미출 구간별 기준 비율대로 배분 — 구간 안에서는 점수 순. 점수 자체는 바꾸지 않는다.
+    (엔진 투표·미출 가중이 '오래 안 나온 번호'에 몰리는 편향을 후보 단계에서 차단)"""
+    gb = {r["number"]: gap_bucket(int(r.get("gap", 1))) for r in scores}
+    base = Counter(gb.values())
+    remaining = sorted(scores, key=lambda r: (-r["score"], r["number"]))
+    taken: Dict[int, str] = {}
+    left = dict(base)
+    for tier in ("A", "B", "C"):
+        pool_n = sum(left.values())
+        raw = {b: 10 * left[b] / pool_n for b in left if left[b]}
+        quota = {b: int(v) for b, v in raw.items()}
+        for b in sorted(raw, key=lambda b: -(raw[b] - quota[b]))[: 10 - sum(quota.values())]:
+            quota[b] += 1
+        for r in remaining:
+            b = gb[r["number"]]
+            if r["number"] not in taken and quota.get(b, 0) > 0:
+                taken[r["number"]] = tier
+                quota[b] -= 1
+                left[b] -= 1
+    out = []
+    for r in scores:
+        r2 = dict(r)
+        r2["tier"] = taken.get(r["number"], "-")
+        r2["gap_bucket"] = gb[r["number"]]
+        out.append(r2)
+    return out
+
+
 def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 6000) -> List[Dict[str, Any]]:
     """핵심 1~3(A만) · 분산 4~7(A+B, 겹침≤2) · 실험 8~10(C 2개 이상). 조합 점수 = 0.6×번호 점수 평균 + 0.4×구조 통과율."""
+    scores = calibrate_tiers(scores)
     sc = {r["number"]: r["score"] for r in scores}
     tier = {r["number"]: r["tier"] for r in scores}
     A = [r["number"] for r in scores if r["tier"] == "A"]
@@ -365,7 +404,14 @@ def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 600
 
     chosen: List[Dict[str, Any]] = []
 
-    def take(pl, k, group, max_overlap, max_use=MAX_NUMBER_USE):
+    gb = {r["number"]: gap_bucket(int(r.get("gap", 1))) for r in scores}
+    base = Counter(gb.values())
+    slots = 60
+
+    def gap_cap(b: str, tol: float) -> int:
+        return int(math.ceil(slots * base.get(b, 0) / 45 * tol))
+
+    def take(pl, k, group, max_overlap, max_use=MAX_NUMBER_USE, tol=GAP_TOLERANCE):
         for tot, c, ns, st in pl:
             if len([x for x in chosen if x["group"] == group]) >= k:
                 return
@@ -373,6 +419,11 @@ def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 600
                 continue
             use = Counter(n for x in chosen for n in x["numbers"])
             if any(use[n] >= max_use for n in c):
+                continue
+            # 미출 구간 편향 방지: 이 조합을 더했을 때 구간별 사용량이 기준 비율 × tol 을 넘으면 제외
+            bu = Counter(gb[n] for x in chosen for n in x["numbers"])
+            bu.update(gb[n] for n in c)
+            if any(bu[b] > gap_cap(b, tol) for b in bu):
                 continue
             if st["pass_rate"] < 6 / 7:
                 continue
@@ -402,7 +453,11 @@ def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 600
     for relax in (1, 2):
         for grp, k, pl in (("core", 3, core_pool), ("dispersion", 4, disp_pool), ("experimental", 3, exp_pool)):
             if len([x for x in chosen if x["group"] == grp]) < k:
-                take(pl, k, grp, MAX_PAIR_OVERLAP + relax, MAX_NUMBER_USE + relax)
+                take(pl, k, grp, MAX_PAIR_OVERLAP + relax, MAX_NUMBER_USE + relax, GAP_TOLERANCE + 0.15 * relax)
+    # 그래도 못 채우면 미출 구간 제한만 해제(다양성 제한은 유지) — 조합 수 10개 보장
+    for grp, k, pl in (("core", 3, core_pool), ("dispersion", 4, disp_pool), ("experimental", 3, exp_pool)):
+        if len([x for x in chosen if x["group"] == grp]) < k:
+            take(pl, k, grp, MAX_PAIR_OVERLAP + 2, MAX_NUMBER_USE + 2, 99.0)
     chosen.sort(key=lambda x: ({"core": 0, "dispersion": 1, "experimental": 2}[x["group"]], -x["combo_score"]))
     for i, x in enumerate(chosen, start=1):
         x["rank"] = i
@@ -564,6 +619,7 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
         for i, r_ in enumerate(sc, start=1):
             r_["rank"] = i
             r_["tier"] = "A" if i <= 10 else "B" if i <= 20 else "C" if i <= 30 else "-"
+    sc = calibrate_tiers(sc)  # 화면의 A/B/C 도 미출 구간 보정된 등급으로(조합 생성과 동일)
     combos = generate_combos(sc, seed=target)
     now = datetime.now(timezone.utc)
     saved = 0

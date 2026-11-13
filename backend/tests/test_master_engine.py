@@ -158,3 +158,23 @@ def test_miss_analysis_uses_prior_data_and_requires_two_period_replication(iso):
     d = load_draws()
     f = RA._number_features(d[:100], d[99].numbers[0])
     assert f["carry"] and f["gap"] == 0  # 직전 회차 번호 → 이월, 미출 0
+
+
+def test_calibrate_tiers_matches_gap_base_rates():
+    from collections import Counter
+
+    from app.stats_engine.draws import load_draws
+
+    draws = load_draws()
+    # 오래 안 나온 번호에 투표가 몰린 상황을 만들어도 A/B/C 의 미출 구간 구성은 기준 비율을 따른다
+    sc0 = M.number_scores(draws[:-1], {}, {})
+    longs = [r["number"] for r in sc0 if M.gap_bucket(r["gap"]) == "long"]
+    sc = M.number_scores(draws[:-1], {n: 9 for n in longs}, {n: 9.0 for n in longs})
+    cal = M.calibrate_tiers(sc)
+    base = Counter(M.gap_bucket(r["gap"]) for r in cal)
+    got = Counter(r["gap_bucket"] for r in cal if r["tier"] in ("A", "B", "C"))
+    for b, n in base.items():
+        assert abs(got[b] - 30 * n / 45) <= 1.5
+    assert [r["tier"] for r in cal].count("A") == 10
+    combos = M.generate_combos(sc, seed=7)
+    assert len(combos) == 10

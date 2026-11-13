@@ -145,5 +145,12 @@ def test_consensus_ranking_round_and_all_rounds(tmp_path, monkeypatch):
     lv = out["all_rounds"]["by_engine_count"]
     assert lv and sum(x["picks"] for x in lv) > 0 and all(0 <= x["hit_rate"] <= 1 for x in lv)
     assert "당첨 확률" in out["note"]
+    a = out["all_rounds"]
+    # 회차별 기준: 선택 회차 이전만, 회차가 바뀌면 통계 범위도 바뀜(전체 누적 아님)
+    assert a["basis"] == "per_round_prior_window" and a["rounds"] == 50 and a["range"] == "1150~1199회"
+    assert all(h["round"] < 1200 for h in a["recent_history"]) and a["recent_history"][0]["round"] == 1199
+    assert a["selected_round_track"] and all("past_times_top" in x for x in a["selected_round_track"])
+    a2 = P.consensus_ranking(1180)["all_rounds"]
+    assert a2["rounds"] == 30 and a2["range"] == "1150~1179회"
     db.reset_for_tests()
     P.reset_for_tests()

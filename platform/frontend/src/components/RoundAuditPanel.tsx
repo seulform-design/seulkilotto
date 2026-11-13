@@ -24,6 +24,8 @@ export default function RoundAuditPanel() {
   const [open, setOpen] = useState(false);
   const rep = useQuery({ queryKey: ['v1-round-audit'], queryFn: v1Api.getRoundAudit, enabled: open, staleTime: 300_000, retry: false });
   const tbl = useQuery({ queryKey: ['v1-round-audit-table'], queryFn: () => v1Api.getRoundAuditTable(30), enabled: open, staleTime: 300_000 });
+  const ms = useQuery({ queryKey: ['v1-round-audit-misses'], queryFn: v1Api.getRoundAuditMisses, enabled: open, staleTime: 300_000, retry: false });
+  const mi = ms.data;
   const r = rep.data;
   const methods: any[] = r?.methods ?? [];
   const cols: any[] = (tbl.data?.columns ?? []).filter((c: any) => c.method !== 'random_baseline' || c.type === 'backtest');
@@ -102,6 +104,52 @@ export default function RoundAuditPanel() {
                   자주 고른 번호(실제 출현율, 기대 13.3%): {(m.diagnostics?.favorite_numbers ?? []).map((f: any) => `${f.number}(${pct(f.hit_rate, 0)})`).join(' · ')}
                 </Typography>
               </Box>
+            ))}
+          </Stack>
+        </>
+      )}
+
+      {mi && mi.rounds > 0 && (
+        <>
+          <Typography variant="subtitle2" sx={{ fontWeight: 800, mt: 2, mb: 0.5 }}>
+            놓친 당첨번호 역추적 · 당첨 패턴 학습 ({mi.from}~{mi.to}회, {mi.rounds}회)
+          </Typography>
+          {(mi.why_missed as string[]).map((t, i) => <Typography key={i} variant="caption" component="div">· {t}</Typography>)}
+          <Box sx={{ overflowX: 'auto', mt: 0.5 }}>
+            <Table size="small" sx={{ minWidth: 640, '& td, & th': { px: 0.75, py: 0.3, fontSize: 12 } }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>당첨번호 유형(그 회차 이전 기준)</TableCell><TableCell align="right">당첨번호 중 비율</TableCell>
+                  <TableCell align="right">전체 번호 기준</TableCell><TableCell align="right">엔진 후보 중 비율</TableCell>
+                  <TableCell align="right">전반 / 후반 p</TableCell><TableCell>학습 채택</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(mi.patterns as any[]).map((p) => (
+                  <TableRow key={p.feature}>
+                    <TableCell>{p.label}</TableCell>
+                    <TableCell align="right">{pct(p.winning_share)}</TableCell>
+                    <TableCell align="right">{pct(p.base_share)}</TableCell>
+                    <TableCell align="right" sx={{ color: p.bias_note ? 'warning.main' : undefined }}>{pct(p.engine_pick_share)}</TableCell>
+                    <TableCell align="right">{p.halves?.[0]?.p} / {p.halves?.[1]?.p}</TableCell>
+                    <TableCell><Chip size="small" color={p.adopted ? 'success' : 'default'} label={p.adopted ? '채택' : '재현 안 됨'} /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Box>
+          <Alert severity={(mi.adopted_patterns ?? []).length ? 'success' : 'info'} sx={{ mt: 1 }}>{mi.verdict}</Alert>
+          <Typography variant="caption" component="div" color="text.secondary" sx={{ mt: 0.5 }}>
+            후보 풀 회차당 평균 {mi.coverage?.candidate_pool_mean}개 번호 · 당첨번호 포함 {mi.coverage?.winning_in_pool_per_round}개
+            (같은 크기 무작위 {mi.coverage?.expected_if_random_same_size}개) · V12 10조합 {mi.coverage?.v12_winning_in_pool_per_round}개
+            (무작위 {mi.coverage?.v12_expected_if_random_same_size}개)
+          </Typography>
+          <Stack spacing={0.25} sx={{ mt: 0.5 }}>
+            {(mi.recent_examples as any[]).slice(0, 6).map((e) => (
+              <Typography key={e.round} variant="caption" component="div">
+                {e.round}회 당첨 {e.winning.join(' ')} — 후보 풀 {e.candidate_pool}개, 놓친 번호 {e.missed.length ? e.missed.join(' ') : '없음'}
+                {e.missed_features.length ? ` (${e.missed_features.map((f: any) => `${f.number}: ${f.carry ? '이월' : `미출 ${f.gap}회`}`).join(', ')})` : ''}
+              </Typography>
             ))}
           </Stack>
         </>

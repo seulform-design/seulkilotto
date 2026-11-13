@@ -671,25 +671,31 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
                 "multi_engine_numbers": [x["number"] for x in top],
                 "multi_engine_hits": sum(1 for x in top if x["drawn"]) if w else None, "result_known": w is not None}
 
-    # 전체 회차(백테스트, 결과 확인된 회차) — 중복 수 k 별 실제 적중률
+    # 회차별 기준: 선택 회차 '이전' window 회차만(그 회차 시점에 알 수 있었던 실측) — 전체 누적이 아니라 회차마다 다름.
+    # 같은 엔진 구성으로 비교하도록 엔진이 2개 이상 기록된 백테스트 회차만 사용.
+    W = 100
+    past = sorted(r for (t, r) in by if t == "backtest" and r in win and r < int(rnd) and len(by[(t, r)]) >= 2)[-W:]
     lvl: Dict[int, List[int]] = {}
     num_top: Dict[int, List[int]] = {}
-    for (t, r), preds in by.items():
-        if t != "backtest" or r not in win or len(preds) < 2:
-            continue
+    history = []
+    for r in past:
+        preds = by[("backtest", r)]
         cnt: Dict[int, int] = {}
         for nums in preds.values():
             for n in nums:
                 cnt[n] = cnt.get(n, 0) + 1
         mx = max(cnt.values())
+        tops = sorted([n for n, k in cnt.items() if k >= 3 or (k == mx and k >= 2)])
         for n, k in cnt.items():
             v = lvl.setdefault(min(k, 6), [0, 0])
             v[0] += 1
             v[1] += int(n in win[r])
-            if k >= 3 or (k == mx and k >= 2):
-                s = num_top.setdefault(n, [0, 0])
-                s[0] += 1
-                s[1] += int(n in win[r])
+        for n in tops:
+            s_ = num_top.setdefault(n, [0, 0])
+            s_[0] += 1
+            s_[1] += int(n in win[r])
+        history.append({"round": r, "engines": len(preds), "max_overlap": mx, "top_numbers": tops,
+                        "top_hits": sorted(n for n in tops if n in win[r]), "winning": sorted(win[r])})
     p0 = 6 / 45
     levels = []
     for k in sorted(lvl):
@@ -704,12 +710,26 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
     sig = [x for x in levels if x["p_two_sided"] < alpha and x["picks"] >= 100]
     all_rank = sorted(({"number": n, "times_top": v[0], "hits": v[1], "hit_rate": round(v[1] / v[0], 4)}
                        for n, v in num_top.items()), key=lambda x: (-x["times_top"], x["number"]))
-    rounds_used = len({r for (t, r) in by if t == "backtest" and r in win})
+    # 선택 회차에서 중복된 번호 각각의 '직전 W회 동안 중복 상위였을 때 실제 당첨' 기록
+    sel = rank_round("backtest", int(rnd)) or rank_round("live", int(rnd))
+    track = []
+    if sel:
+        nt = dict((x["number"], x) for x in all_rank)
+        for x in sel["numbers"]:
+            if x["engines"] < 2:
+                continue
+            rec = nt.get(x["number"], {"times_top": 0, "hits": 0, "hit_rate": None})
+            track.append({"number": x["number"], "engines_now": x["engines"], "past_times_top": rec["times_top"],
+                          "past_hits": rec["hits"], "past_hit_rate": rec["hit_rate"], "drawn": x["drawn"]})
+    rng_txt = f"{past[0]}~{past[-1]}회" if past else "-"
     out = {"round": int(rnd), "backtest": rank_round("backtest", int(rnd)), "live": rank_round("live", int(rnd)),
-           "all_rounds": {"rounds": rounds_used, "by_engine_count": levels, "bonferroni_alpha": round(alpha, 4),
-                          "top_consensus_numbers": all_rank[:15],
-                          "verdict": (f"중복 수가 많은 번호의 실제 적중률이 무작위 13.3%와 보정 후 다른 수준이 있음({', '.join(x['engines'] for x in sig)}) — 재현 확인 필요"
-                                      if sig else "여러 엔진이 겹쳐 고른 번호도 실제 적중률은 무작위(13.3%)와 통계적으로 같습니다 — "
-                                                  "중복은 엔진들이 같은 과거 데이터로 비슷하게 계산한 결과입니다.")},
+           "all_rounds": {"basis": "per_round_prior_window", "window": W, "range": rng_txt, "rounds": len(past),
+                          "by_engine_count": levels, "bonferroni_alpha": round(alpha, 4),
+                          "top_consensus_numbers": all_rank[:15], "selected_round_track": track,
+                          "recent_history": list(reversed(history[-15:])),
+                          "verdict": (f"{rnd}회 직전 {len(past)}회 기준, 중복 수가 많은 번호의 실제 적중률이 무작위 13.3%와 보정 후 다른 수준이 있음"
+                                      f"({', '.join(x['engines'] for x in sig)}) — 재현 확인 필요" if sig else
+                                      f"{rnd}회 직전 {len(past)}회 기준, 여러 엔진이 겹쳐 고른 번호의 실제 적중률은 무작위(13.3%)와 "
+                                      "통계적으로 같습니다 — 중복은 엔진들이 같은 과거 데이터로 비슷하게 계산한 결과입니다.")},
            "note": "순위는 '몇 개 엔진이 함께 골랐는지'이며 당첨 확률 순위가 아닙니다. 모든 번호의 당첨 확률은 6/45로 같습니다."}
     return out

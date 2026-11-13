@@ -781,6 +781,9 @@ export const v1Api = {
   /** 회차별 후보군 성적 감사(전 회차 · 무작위 대비 하락 판정 · 원인 진단 · 자동 보정). */
   getRoundAudit: () => fetchJson<Record<string, any>>('/api/v1/pipeline/round-audit/report', { timeoutMs: 60_000 }),
 
+  /** 놓친 당첨번호 역추적 · 당첨 패턴 학습. */
+  getRoundAuditMisses: () => fetchJson<Record<string, any>>('/api/v1/pipeline/round-audit/misses', { timeoutMs: 60_000 }),
+
   /** 회차 × 후보군 최고 일치 수 성적표. */
   getRoundAuditTable: (limit = 40) =>
     fetchJson<Record<string, any>>(`/api/v1/pipeline/round-audit/table?limit=${limit}`, { timeoutMs: 60_000 }),

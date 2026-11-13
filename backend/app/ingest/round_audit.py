@@ -311,3 +311,170 @@ def last_report() -> Optional[Dict[str, Any]]:
     from . import reverse_analysis as R
 
     return R.last_report("round_audit")
+
+
+# ─────────────────────────── 놓친 당첨번호 역추적 · 당첨 패턴 학습(walk-forward) ───────────────────────────
+
+FEATURES = {
+    "carry": ("직전 회차 당첨번호(이월)", lambda f: f["carry"]),
+    "neighbor": ("직전 당첨번호 ±1(이웃)", lambda f: f["neighbor"] and not f["carry"]),
+    "gap_short": ("미출 1~4회", lambda f: 1 <= f["gap"] <= 4),
+    "gap_mid": ("미출 5~9회", lambda f: 5 <= f["gap"] <= 9),
+    "gap_long": ("미출 10회 이상", lambda f: f["gap"] >= 10),
+    "hot20": ("최근 20회 4번 이상 출현", lambda f: f["f20"] >= 4),
+    "cold20": ("최근 20회 0~1번 출현", lambda f: f["f20"] <= 1),
+    "low": ("1~22 저번호", lambda f: f["n"] <= 22),
+    "odd": ("홀수", lambda f: f["n"] % 2 == 1),
+}
+
+
+def _number_features(prior, n: int) -> Dict[str, Any]:
+    """대상 회차 이전 데이터(prior)만으로 번호 n 의 특징."""
+    prev = set(prior[-1].numbers)
+    gap = next((i for i, d in enumerate(reversed(prior)) if n in d.numbers), len(prior))
+    return {"n": n, "carry": n in prev, "neighbor": (n - 1 in prev) or (n + 1 in prev), "gap": gap,
+            "f20": sum(1 for d in prior[-20:] if n in d.numbers)}
+
+
+def _z(hit: float, n: float, base: float) -> float:
+    return (hit - n * base) / math.sqrt(n * base * (1 - base)) if n and 0 < base < 1 else 0.0
+
+
+def miss_analysis(window: int = 200) -> Dict[str, Any]:
+    """회차마다 당첨번호 6개가 후보(엔진 1순위 + V12 10조합)에 들어갔는지 역추적하고, 놓친 번호의 특징과
+    엔진 선택 편향을 비교한다. 당첨 패턴은 '그 회차 이전 데이터'로만 특징을 만들고, 전반/후반 두 기간에서
+    모두 보정 후 유의할 때만 학습 신호로 채택한다(우연한 패턴 채택 방지)."""
+    from ..stats_engine.draws import load_draws
+
+    _ensure()
+    draws = load_draws()
+    idx = {d.round: i for i, d in enumerate(draws)}
+    by_round: Dict[int, Dict[str, List[List[int]]]] = {}
+    for (t, m), rr in _records().items():
+        if t != "backtest" or m in NOT_AUDITED:
+            continue
+        for r, games in rr.items():
+            by_round.setdefault(r, {})[m] = [g[1] for g in games]
+    rounds = sorted(r for r in by_round if r in idx and idx[r] >= 50 and "v12_integrated" in by_round[r])[-int(window):]
+    if not rounds:
+        return {"kind": "miss_analysis", "rounds": 0, "note": "V12 백테스트가 있는 회차가 없습니다."}
+    covered, expected_cov, uniq_sizes, v12_cov, v12_exp = 0, 0.0, [], 0, 0.0
+    cnt = {k: {"win": [0, 0], "all": [0, 0], "picked": [0, 0], "missed": 0} for k in FEATURES}
+    halves = {k: [[0, 0, 0, 0], [0, 0, 0, 0]] for k in FEATURES}  # [win_hit, win_n, all_hit, all_n]
+    per_engine_miss: Dict[str, List[int]] = {}
+    examples = []
+    for j, r in enumerate(rounds):
+        prior = draws[: idx[r]]
+        winset = set(draws[idx[r]].numbers)
+        preds = by_round[r]
+        pool = {n for combos in preds.values() for c in combos for n in c}
+        v12pool = {n for c in preds["v12_integrated"] for n in c}
+        uniq_sizes.append(len(pool))
+        covered += len(winset & pool)
+        expected_cov += 6 * len(pool) / 45
+        v12_cov += len(winset & v12pool)
+        v12_exp += 6 * len(v12pool) / 45
+        feats = {n: _number_features(prior, n) for n in range(1, 46)}
+        h = 0 if j < len(rounds) // 2 else 1
+        for k, (_lab, fn) in FEATURES.items():
+            flag = {n: bool(fn(feats[n])) for n in range(1, 46)}
+            for n in range(1, 46):
+                cnt[k]["all"][0] += flag[n]
+                cnt[k]["all"][1] += 1
+                halves[k][h][2] += flag[n]
+                halves[k][h][3] += 1
+                if n in winset:
+                    cnt[k]["win"][0] += flag[n]
+                    cnt[k]["win"][1] += 1
+                    halves[k][h][0] += flag[n]
+                    halves[k][h][1] += 1
+                    if flag[n] and n not in pool:
+                        cnt[k]["missed"] += 1
+            for combos in preds.values():
+                for c in combos:
+                    for n in c:
+                        cnt[k]["picked"][0] += flag[n]
+                        cnt[k]["picked"][1] += 1
+        for m, combos in preds.items():
+            got = {n for c in combos for n in c} & winset
+            per_engine_miss.setdefault(m, []).append(6 - len(got))
+        if j >= len(rounds) - 12:
+            missed = sorted(winset - pool)
+            examples.append({"round": r, "winning": sorted(winset), "candidate_pool": len(pool), "missed": missed,
+                             "missed_features": [{"number": n, "carry": feats[n]["carry"], "gap": feats[n]["gap"],
+                                                  "f20": feats[n]["f20"]} for n in missed]})
+    n_r = len(rounds)
+    alpha = 0.05 / len(FEATURES)
+    patterns = []
+    for k, (lab, _fn) in FEATURES.items():
+        wh, wn = cnt[k]["win"]
+        ah, an = cnt[k]["all"]
+        ph, pn = cnt[k]["picked"]
+        base = ah / an if an else 0
+        rate = wh / wn if wn else 0
+        z = _z(wh, wn, base)
+        p = math.erfc(abs(z) / math.sqrt(2))
+        stable = []
+        for hv in halves[k]:
+            b2 = hv[2] / hv[3] if hv[3] else 0
+            z2 = _z(hv[0], hv[1], b2)
+            stable.append({"win_rate": round(hv[0] / hv[1], 4) if hv[1] else None, "base": round(b2, 4),
+                           "p": round(math.erfc(abs(z2) / math.sqrt(2)), 4), "z": round(z2, 2)})
+        adopt = bool(p < alpha and all(s["p"] < alpha and (s["z"] > 0) == (z > 0) for s in stable))
+        pick_rate = ph / pn if pn else 0
+        bias = pick_rate - rate
+        patterns.append({"feature": k, "label": lab, "winning_share": round(rate, 4), "base_share": round(base, 4),
+                         "lift": round(rate / base, 3) if base else None, "p": round(p, 4), "halves": stable,
+                         "adopted": adopt, "engine_pick_share": round(pick_rate, 4), "engine_bias": round(bias, 4),
+                         "missed_winning_numbers": cnt[k]["missed"],
+                         "bias_note": (f"엔진 후보가 이 유형을 당첨 실제 비율보다 {abs(bias) * 100:.0f}%p "
+                                       f"{'많이' if bias > 0 else '적게'} 고름" if abs(bias) >= 0.05 else None)})
+    adopted = [x for x in patterns if x["adopted"]]
+    biased = sorted([x for x in patterns if x["bias_note"]], key=lambda x: -abs(x["engine_bias"]))
+    eng = [{"method": m, "rounds": len(v), "mean_missed": round(sum(v) / len(v), 3),
+            "combos": max(len(by_round[r].get(m, [])) for r in rounds)} for m, v in per_engine_miss.items()]
+    eng.sort(key=lambda x: x["mean_missed"])
+    rep = {
+        "kind": "miss_analysis", "rounds": n_r, "from": rounds[0], "to": rounds[-1],
+        "coverage": {"candidate_pool_mean": round(sum(uniq_sizes) / n_r, 1),
+                     "winning_in_pool_per_round": round(covered / n_r, 3),
+                     "expected_if_random_same_size": round(expected_cov / n_r, 3),
+                     "v12_winning_in_pool_per_round": round(v12_cov / n_r, 3),
+                     "v12_expected_if_random_same_size": round(v12_exp / n_r, 3)},
+        "why_missed": [
+            f"후보 풀(엔진 1순위 + V12 10조합)은 회차당 평균 {sum(uniq_sizes) / n_r:.1f}개 번호 — 당첨 6개 중 평균 "
+            f"{covered / n_r:.2f}개가 풀 안에 있었고, 같은 크기 무작위 풀의 기대값은 {expected_cov / n_r:.2f}개입니다.",
+            "놓친 당첨번호의 특징(이월·미출 기간·최근 빈도)을 전체 번호 기준 비율과 비교했습니다(아래 표). "
+            "기준 비율과 같다면 엔진이 특정 유형을 체계적으로 놓친 것이 아니라 45개 중 6개를 맞혀야 하는 구조 때문입니다.",
+        ] + [f"편향: {x['label']} — {x['bias_note']} (당첨 실제 {x['winning_share'] * 100:.0f}%)" for x in biased[:4]],
+        "patterns": patterns, "adopted_patterns": [x["feature"] for x in adopted],
+        "alpha_bonferroni": round(alpha, 4), "engines_by_missed": eng, "recent_examples": list(reversed(examples)),
+        "verdict": (f"전반·후반 두 기간 모두에서 보정 후 유의한 당첨 패턴 {len(adopted)}개를 학습 신호로 채택: "
+                    + ", ".join(x["label"] for x in adopted) + " — V12 번호 점수에 반영" if adopted else
+                    "두 기간 모두에서 재현되는 당첨 패턴이 없습니다 — 당첨번호 특징은 무작위 기준 비율과 같아, "
+                    "패턴을 학습해 넣어도 적중이 오르지 않습니다. 대신 엔진 선택 편향을 줄이도록 V12 조합 다양성을 보정했습니다."),
+        "honesty": "역추적·패턴 학습은 과거 관측입니다. 공정 추첨에서 1등 확률은 조합마다 1/8,145,060 으로 같습니다.",
+    }
+    from . import reverse_analysis as R
+
+    R._ensure()
+    R._save("miss_analysis", rounds[-1], rep)
+    return rep
+
+
+def adopted_pattern_bonus(prior) -> Dict[int, float]:
+    """채택된 당첨 패턴(두 기간 재현)만 V12 번호 점수 보너스로 — 없으면 빈 dict(보정 없음)."""
+    from . import reverse_analysis as R
+
+    rep = R.last_report("miss_analysis") or {}
+    keys = [k for k in rep.get("adopted_patterns", []) if k in FEATURES]
+    if not keys or not prior:
+        return {}
+    lift = {x["feature"]: x["lift"] for x in rep.get("patterns", []) if x["feature"] in keys}
+    out: Dict[int, float] = {}
+    for n in range(1, 46):
+        f = _number_features(prior, n)
+        for k in keys:
+            if FEATURES[k][1](f):
+                out[n] = out.get(n, 0.0) + 0.05 * (1 if (lift.get(k) or 1) > 1 else -1)
+    return out

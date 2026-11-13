@@ -550,6 +550,20 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
                         val[x] = val.get(x, 0) + w.get(f"stats_{s}", 1.0)
         vote_source = "회차통계 6전략 즉시 계산(live 미생성)"
     sc = number_scores(draws, votes, val)
+    try:  # 두 기간에서 재현된 당첨 패턴만 점수 보정(없으면 변화 없음)
+        from . import round_audit as _RA
+
+        bonus = _RA.adopted_pattern_bonus(draws)
+    except Exception:  # noqa: BLE001
+        bonus = {}
+    if bonus:
+        for r_ in sc:
+            r_["score"] = round(r_["score"] + bonus.get(r_["number"], 0.0), 4)
+            r_["pattern_bonus"] = bonus.get(r_["number"], 0.0)
+        sc.sort(key=lambda r_: (-r_["score"], r_["number"]))
+        for i, r_ in enumerate(sc, start=1):
+            r_["rank"] = i
+            r_["tier"] = "A" if i <= 10 else "B" if i <= 20 else "C" if i <= 30 else "-"
     combos = generate_combos(sc, seed=target)
     now = datetime.now(timezone.utc)
     saved = 0
@@ -618,6 +632,7 @@ def run_master() -> Dict[str, Any]:
 
         ra = _RA.audit()
         steps["round_audit"] = {"summary": ra["summary"], "excluded": ra["actions"]["excluded_now"]}
+        steps["miss_analysis"] = _RA.miss_analysis().get("adopted_patterns")
     except Exception as exc:  # noqa: BLE001
         steps["round_audit"] = {"error": str(exc)[:200]}
     cur = v12_current()

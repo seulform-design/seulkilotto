@@ -498,6 +498,17 @@ def get_round_audit_table(limit: int = Query(60, ge=5, le=300)):
     return to_jsonable(RA.round_table(limit))
 
 
+@router.get("/round-audit/misses")
+def get_round_audit_misses():
+    """놓친 당첨번호 역추적 · 당첨 패턴 학습(두 기간 재현 시만 채택) · 엔진 선택 편향."""
+    from ..ingest import reverse_analysis as R
+
+    rep = R.last_report("miss_analysis")
+    if rep is None:
+        raise HTTPException(status_code=404, detail="아직 역추적 기록이 없습니다 — POST /round-audit/run")
+    return to_jsonable(rep)
+
+
 @router.post("/round-audit/run")
 def post_round_audit_run(x_upgrade_key: Optional[str] = Header(default=None),
                          engine_rounds: int = Query(200, ge=50, le=600),
@@ -518,6 +529,8 @@ def post_round_audit_run(x_upgrade_key: Optional[str] = Header(default=None),
         out["evaluate"] = P.evaluate_pending()
         ra = RA.audit()
         out["audit"] = {"summary": ra["summary"], "actions": ra["actions"]}
+        ma = RA.miss_analysis()
+        out["miss_analysis"] = {"adopted": ma.get("adopted_patterns"), "coverage": ma.get("coverage")}
         return out
 
     return _bg("round_audit", lambda: jobs.run_job("round_audit", _go, retries=0))

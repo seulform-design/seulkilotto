@@ -137,3 +137,24 @@ def test_round_audit_flags_and_releases_below_random(iso, monkeypatch):
         c.execute("DELETE FROM round_prediction_history WHERE prediction_method = 'engine_bad'")
     a2 = RA.audit()
     assert "engine_bad" in a2["actions"]["released"] and "engine_bad" not in RA.excluded_methods()
+
+
+def test_miss_analysis_uses_prior_data_and_requires_two_period_replication(iso):
+    from app.ingest import round_audit as RA
+
+    RA.reset_for_tests()
+    _seed(1180)
+    M.v12_walk_forward(rounds=20)
+    P.evaluate_pending()
+    rep = RA.miss_analysis(window=20)
+    assert rep["rounds"] == 20 and rep["coverage"]["candidate_pool_mean"] > 6
+    assert len(rep["patterns"]) == len(RA.FEATURES) and rep["why_missed"]
+    for p in rep["patterns"]:  # 채택은 두 기간 모두 보정 후 유의할 때만
+        if p["adopted"]:
+            assert all(h["p"] < rep["alpha_bonferroni"] for h in p["halves"])
+    assert len(rep["recent_examples"]) == 12
+    from app.stats_engine.draws import load_draws
+
+    d = load_draws()
+    f = RA._number_features(d[:100], d[99].numbers[0])
+    assert f["carry"] and f["gap"] == 0  # 직전 회차 번호 → 이월, 미출 0

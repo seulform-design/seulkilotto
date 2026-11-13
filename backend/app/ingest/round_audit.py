@@ -478,3 +478,177 @@ def adopted_pattern_bonus(prior) -> Dict[int, float]:
             if FEATURES[k][1](f):
                 out[n] = out.get(n, 0.0) + 0.05 * (1 if (lift.get(k) or 1) > 1 else -1)
     return out
+
+
+# ─────────────────────────── 중복 추천 번호: 잡은 회차 vs 못 잡은 회차 비교 · 규칙 학습 · 엔진별 약점 ───────────────────────────
+
+P0 = 6 / 45
+
+
+def _cond_keys(f: Dict[str, Any], k: Optional[int] = None) -> List[str]:
+    """번호 한 개의 그 회차 직전 상태 → 조건 키 목록."""
+    keys = [f"gap:{_gap_label(f['gap'])}", f"f20:{'hot' if f['f20'] >= 4 else 'cold' if f['f20'] <= 1 else 'mid'}"]
+    if f["carry"]:
+        keys.append("carry")
+    if f["neighbor"] and not f["carry"]:
+        keys.append("neighbor")
+    if k is not None:
+        keys.append(f"engines:{min(k, 5)}{'+' if k >= 5 else ''}")
+    return keys
+
+
+def _gap_label(g: int) -> str:
+    return "0" if g <= 0 else "1-4" if g <= 4 else "5-9" if g <= 9 else "10+"
+
+
+COND_LABEL = {"gap:0": "직전 회차 당첨(이월)", "gap:1-4": "미출 1~4회", "gap:5-9": "미출 5~9회", "gap:10+": "미출 10회 이상",
+              "f20:hot": "최근 20회 4번 이상", "f20:mid": "최근 20회 2~3번", "f20:cold": "최근 20회 0~1번",
+              "carry": "이월 번호", "neighbor": "직전 당첨 ±1"}
+
+
+def _rate_row(key: str, h: List[List[int]], alpha: float) -> Dict[str, Any]:
+    """h = [[hit, n] 전반, [hit, n] 후반] → 전체·기간별 적중률, 무작위 13.3% 대비 p, 두 기간 재현 여부."""
+    hit = h[0][0] + h[1][0]
+    n = h[0][1] + h[1][1]
+    rate = hit / n if n else 0.0
+    z = _z(hit, n, P0)
+    halves = []
+    for hh, nn in h:
+        z2 = _z(hh, nn, P0)
+        halves.append({"n": nn, "rate": round(hh / nn, 4) if nn else None, "p": round(math.erfc(abs(z2) / math.sqrt(2)), 4), "z": round(z2, 2)})
+    p = math.erfc(abs(z) / math.sqrt(2))
+    replicated = bool(n >= 200 and p < alpha and all(x["n"] >= 80 and x["p"] < alpha and (x["z"] > 0) == (z > 0) for x in halves))
+    return {"condition": key, "label": COND_LABEL.get(key, key.replace("engines:", "엔진 ") + "개 동시 추천"),
+            "picks": n, "hits": hit, "hit_rate": round(rate, 4), "lift": round(rate / P0, 3), "p": round(p, 4),
+            "halves": halves, "replicated": replicated,
+            "direction": "better" if z > 0 else "worse"}
+
+
+def consensus_learning(window: int = 300) -> Dict[str, Any]:
+    """① 여러 엔진이 같이 고른 번호가 '잡힌 회차'와 '못 잡힌 회차'를 비교(그 회차 직전 상태: 미출·빈도·이월·동시 추천 수)
+    ② 조건별 적중률이 두 기간 모두에서 보정 후 무작위(13.3%)와 다를 때만 규칙으로 채택 → V12 점수에 반영
+    ③ 엔진별로 '그 엔진이 고른 번호'의 조건별 적중률을 보고, 두 기간 모두 낮은 조건을 그 엔진의 약점으로 진단
+       → 약점 조건에 해당하는 그 엔진의 추천은 V12 투표에서 감쇠(엔진 원본·기록은 그대로)."""
+    from ..stats_engine.draws import load_draws
+
+    _ensure()
+    draws = load_draws()
+    idx = {d.round: i for i, d in enumerate(draws)}
+    by_round: Dict[int, Dict[str, List[int]]] = {}
+    for (t, m), rr in _records().items():
+        if t != "backtest" or m in NOT_AUDITED or m.startswith("v12"):
+            continue
+        for r, games in rr.items():
+            g1 = min(games)  # 1순위 조합
+            by_round.setdefault(r, {})[m] = g1[1]
+    rounds = sorted(r for r in by_round if r in idx and idx[r] >= 50 and len(by_round[r]) >= 2)[-int(window):]
+    if len(rounds) < 40:
+        return {"kind": "consensus_learning", "rounds": len(rounds), "note": "비교할 회차가 부족합니다."}
+    half_of = {r: (0 if i < len(rounds) // 2 else 1) for i, r in enumerate(rounds)}
+    cond: Dict[str, List[List[int]]] = {}
+    eng: Dict[str, Dict[str, List[List[int]]]] = {}
+    caught, missed = [], []
+    for r in rounds:
+        prior = draws[: idx[r]]
+        win = set(draws[idx[r]].numbers)
+        preds = by_round[r]
+        cnt = Counter(n for nums in preds.values() for n in nums)
+        h = half_of[r]
+        feats: Dict[int, Dict[str, Any]] = {}
+        for n, k in cnt.items():
+            feats[n] = _number_features(prior, n)
+            if k < 2:
+                continue
+            for key in _cond_keys(feats[n], k):
+                c = cond.setdefault(key, [[0, 0], [0, 0]])
+                c[h][0] += n in win
+                c[h][1] += 1
+        for m, nums in preds.items():
+            for n in nums:
+                for key in _cond_keys(feats[n]):
+                    c = eng.setdefault(m, {}).setdefault(key, [[0, 0], [0, 0]])
+                    c[h][0] += n in win
+                    c[h][1] += 1
+        mx = max(cnt.values())
+        tops = [n for n, k in cnt.items() if k >= 3 or (k == mx and k >= 2)]
+        hit = [n for n in tops if n in win]
+        row = {"round": r, "top": sorted(tops), "hit": sorted(hit), "winning": sorted(win), "max_engines": mx,
+               "top_gap_mean": round(sum(feats[n]["gap"] for n in tops) / len(tops), 2) if tops else None,
+               "top_carry": sum(1 for n in tops if feats[n]["carry"]),
+               "winning_gap_mean": round(sum(_number_features(prior, n)["gap"] for n in win) / 6, 2),
+               "winning_carry": sum(1 for n in win if n in set(prior[-1].numbers))}
+        (caught if len(hit) >= 2 else missed if not hit else []).append(row)
+
+    def avg(rows, k):
+        v = [x[k] for x in rows if x[k] is not None]
+        return round(sum(v) / len(v), 3) if v else None
+
+    alpha = 0.05 / max(1, len(cond))
+    rules = sorted((_rate_row(k, v, alpha) for k, v in cond.items()), key=lambda x: -x["picks"])
+    adopted = [x for x in rules if x["replicated"]]
+    weak: Dict[str, List[Dict[str, Any]]] = {}
+    strong: Dict[str, List[Dict[str, Any]]] = {}
+    n_eng_tests = sum(len(v) for v in eng.values())
+    alpha_e = 0.05 / max(1, n_eng_tests)
+    engine_rows = []
+    for m, cs in eng.items():
+        rows = [_rate_row(k, v, alpha_e) for k, v in cs.items()]
+        tot_h = sum(v[0][0] + v[1][0] for k, v in cs.items() if k.startswith("gap:"))
+        tot_n = sum(v[0][1] + v[1][1] for k, v in cs.items() if k.startswith("gap:"))
+        w = [x for x in rows if x["replicated"] and x["direction"] == "worse"]
+        s_ = [x for x in rows if x["replicated"] and x["direction"] == "better"]
+        if w:
+            weak[m] = w
+        if s_:
+            strong[m] = s_
+        worst = min((x for x in rows if x["picks"] >= 100), key=lambda x: x["hit_rate"], default=None)
+        engine_rows.append({"method": m, "picks": tot_n, "hit_rate": round(tot_h / tot_n, 4) if tot_n else None,
+                            "weak_conditions": [x["condition"] for x in w], "strong_conditions": [x["condition"] for x in s_],
+                            "lowest_condition": ({"condition": worst["condition"], "label": worst["label"], "hit_rate": worst["hit_rate"],
+                                                  "picks": worst["picks"], "p": worst["p"]} if worst else None),
+                            "conditions": rows})
+    engine_rows.sort(key=lambda x: (x["hit_rate"] or 0))
+    rep = {
+        "kind": "consensus_learning", "rounds": len(rounds), "from": rounds[0], "to": rounds[-1],
+        "random_rate": round(P0, 4), "alpha_bonferroni": round(alpha, 5),
+        "caught_vs_missed": {
+            "caught_rounds": len(caught), "missed_rounds": len(missed),
+            "caught": {"top_gap_mean": avg(caught, "top_gap_mean"), "top_carry": avg(caught, "top_carry"),
+                       "max_engines": avg(caught, "max_engines"), "winning_gap_mean": avg(caught, "winning_gap_mean"),
+                       "winning_carry": avg(caught, "winning_carry")},
+            "missed": {"top_gap_mean": avg(missed, "top_gap_mean"), "top_carry": avg(missed, "top_carry"),
+                       "max_engines": avg(missed, "max_engines"), "winning_gap_mean": avg(missed, "winning_gap_mean"),
+                       "winning_carry": avg(missed, "winning_carry")},
+            "recent_caught": list(reversed(caught[-6:])), "recent_missed": list(reversed(missed[-6:])),
+        },
+        "rules": rules, "adopted_rules": [x["condition"] for x in adopted],
+        "engines": engine_rows,
+        "engine_weak": {m: [x["condition"] for x in v] for m, v in weak.items()},
+        "engine_strong": {m: [x["condition"] for x in v] for m, v in strong.items()},
+        "verdict": ("두 기간 모두 재현된 규칙 " + ", ".join(x["label"] for x in adopted) + " — V12 점수에 반영" if adopted else
+                    "잡은 회차와 못 잡은 회차를 비교해도 두 기간 모두 재현되는 규칙이 없습니다 — 잡은 회차는 우연(무작위 13.3% 범위)으로 설명됩니다.")
+                   + (" · 엔진 약점(두 기간 재현): " + "; ".join(f"{m}: {', '.join(COND_LABEL.get(c, c) for c in v)}" for m, v in
+                                                     {m: [x["condition"] for x in w] for m, w in weak.items()}.items())
+                      + " → 해당 조건의 추천은 V12 투표에서 감쇠" if weak else " · 두 기간 모두 재현되는 엔진별 약점 조건도 없습니다."),
+        "honesty": "규칙·약점은 과거 백테스트 관측이며 두 기간 재현 + Bonferroni 보정을 통과할 때만 반영합니다. 1등 확률은 조합마다 1/8,145,060 으로 같습니다.",
+    }
+    from . import reverse_analysis as R
+
+    R._ensure()
+    R._save("consensus_learning", rounds[-1], rep)
+    return rep
+
+
+def consensus_adjustments(prior) -> Tuple[Dict[int, float], Dict[str, List[str]]]:
+    """채택된 규칙 → 번호 보너스, 엔진 약점 → (엔진, 조건) 감쇠 목록. 없으면 빈 값(보정 없음)."""
+    from . import reverse_analysis as R
+
+    rep = R.last_report("consensus_learning") or {}
+    rules = {x["condition"]: x for x in rep.get("rules", []) if x.get("replicated") and not x["condition"].startswith("engines:")}
+    bonus: Dict[int, float] = {}
+    if rules and prior:
+        for n in range(1, 46):
+            for key in _cond_keys(_number_features(prior, n)):
+                if key in rules:
+                    bonus[n] = bonus.get(n, 0.0) + (0.05 if rules[key]["direction"] == "better" else -0.05)
+    return bonus, dict(rep.get("engine_weak") or {})

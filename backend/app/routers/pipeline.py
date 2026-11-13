@@ -509,6 +509,17 @@ def get_round_audit_misses():
     return to_jsonable(rep)
 
 
+@router.get("/round-audit/consensus-learning")
+def get_round_audit_consensus_learning():
+    """중복 추천 번호를 잡은 회차 vs 못 잡은 회차 비교 · 두 기간 재현 규칙 · 엔진별 약점/강점 조건."""
+    from ..ingest import reverse_analysis as R
+
+    rep = R.last_report("consensus_learning")
+    if rep is None:
+        raise HTTPException(status_code=404, detail="아직 학습 기록이 없습니다 — POST /round-audit/run")
+    return to_jsonable(rep)
+
+
 @router.post("/round-audit/run")
 def post_round_audit_run(x_upgrade_key: Optional[str] = Header(default=None),
                          engine_rounds: int = Query(200, ge=50, le=600),
@@ -531,6 +542,8 @@ def post_round_audit_run(x_upgrade_key: Optional[str] = Header(default=None),
         out["audit"] = {"summary": ra["summary"], "actions": ra["actions"]}
         ma = RA.miss_analysis()
         out["miss_analysis"] = {"adopted": ma.get("adopted_patterns"), "coverage": ma.get("coverage")}
+        cl = RA.consensus_learning()
+        out["consensus_learning"] = {"rules": cl.get("adopted_rules"), "engine_weak": cl.get("engine_weak")}
         return out
 
     return _bg("round_audit", lambda: jobs.run_job("round_audit", _go, retries=0))

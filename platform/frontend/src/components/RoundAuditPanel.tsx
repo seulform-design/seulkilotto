@@ -26,6 +26,7 @@ export default function RoundAuditPanel() {
   const tbl = useQuery({ queryKey: ['v1-round-audit-table'], queryFn: () => v1Api.getRoundAuditTable(30), enabled: open, staleTime: 300_000 });
   const ms = useQuery({ queryKey: ['v1-round-audit-misses'], queryFn: v1Api.getRoundAuditMisses, enabled: open, staleTime: 300_000, retry: false });
   const mi = ms.data;
+  const cl = useQuery({ queryKey: ['v1-consensus-learning'], queryFn: v1Api.getConsensusLearning, enabled: open, staleTime: 300_000, retry: false }).data;
   const r = rep.data;
   const methods: any[] = r?.methods ?? [];
   const cols: any[] = (tbl.data?.columns ?? []).filter((c: any) => c.method !== 'random_baseline' || c.type === 'backtest');
@@ -152,6 +153,58 @@ export default function RoundAuditPanel() {
               </Typography>
             ))}
           </Stack>
+        </>
+      )}
+
+      {cl && cl.rounds > 0 && (
+        <>
+          <Typography variant="subtitle2" sx={{ fontWeight: 800, mt: 2, mb: 0.5 }}>
+            중복 추천 번호 — 잡은 회차 vs 못 잡은 회차 ({cl.from}~{cl.to}회, {cl.rounds}회)
+          </Typography>
+          <Box sx={{ overflowX: 'auto' }}>
+            <Table size="small" sx={{ minWidth: 560, '& td, & th': { px: 0.75, py: 0.3, fontSize: 12 } }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>구분</TableCell><TableCell align="right">회차 수</TableCell><TableCell align="right">중복 번호 평균 미출</TableCell>
+                  <TableCell align="right">중복 번호 중 이월</TableCell><TableCell align="right">최대 동시 엔진</TableCell>
+                  <TableCell align="right">당첨번호 평균 미출</TableCell><TableCell align="right">당첨 중 이월</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(['caught', 'missed'] as const).map((k) => {
+                  const v = cl.caught_vs_missed?.[k] ?? {};
+                  return (
+                    <TableRow key={k}>
+                      <TableCell sx={{ fontWeight: 700 }}>{k === 'caught' ? '잡은 회차(2개+ 적중)' : '못 잡은 회차(0개)'}</TableCell>
+                      <TableCell align="right">{cl.caught_vs_missed?.[k === 'caught' ? 'caught_rounds' : 'missed_rounds']}</TableCell>
+                      <TableCell align="right">{v.top_gap_mean}</TableCell><TableCell align="right">{v.top_carry}</TableCell>
+                      <TableCell align="right">{v.max_engines}</TableCell><TableCell align="right">{v.winning_gap_mean}</TableCell>
+                      <TableCell align="right">{v.winning_carry}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Box>
+          <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mt: 1 }}>조건별 중복 번호 실제 적중률 (무작위 13.3%, 전반 / 후반)</Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.25 }}>
+            {(cl.rules as any[]).map((x) => (
+              <Chip key={x.condition} size="small" variant={x.replicated ? 'filled' : 'outlined'}
+                color={x.replicated ? (x.direction === 'better' ? 'success' : 'error') : 'default'}
+                label={`${x.label} ${pct(x.hit_rate)} (${pct(x.halves?.[0]?.rate)} / ${pct(x.halves?.[1]?.rate)}) n=${x.picks}`} />
+            ))}
+          </Box>
+          <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mt: 1 }}>엔진별 고른 번호 적중률 · 가장 약한 조건</Typography>
+          <Stack spacing={0.25} sx={{ mt: 0.25 }}>
+            {(cl.engines as any[]).map((e) => (
+              <Typography key={e.method} variant="caption" component="div">
+                · {e.method}: {pct(e.hit_rate)} ({e.picks}개)
+                {e.lowest_condition ? ` — 가장 약한 조건 ${e.lowest_condition.label} ${pct(e.lowest_condition.hit_rate)} (n=${e.lowest_condition.picks}, p=${e.lowest_condition.p})` : ''}
+                {e.weak_conditions.length ? ` · 약점(두 기간 재현) → V12 투표 감쇠` : ''}
+              </Typography>
+            ))}
+          </Stack>
+          <Alert severity={(cl.adopted_rules ?? []).length || Object.keys(cl.engine_weak ?? {}).length ? 'success' : 'info'} sx={{ mt: 1 }}>{cl.verdict}</Alert>
         </>
       )}
 

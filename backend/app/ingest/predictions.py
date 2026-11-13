@@ -691,9 +691,10 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
             v[0] += 1
             v[1] += int(n in win[r])
         for n in tops:
-            s_ = num_top.setdefault(n, [0, 0])
+            s_ = num_top.setdefault(n, [0, 0, [], []])
             s_[0] += 1
             s_[1] += int(n in win[r])
+            s_[2 if n in win[r] else 3].append(r)
         history.append({"round": r, "engines": len(preds), "max_overlap": mx, "top_numbers": tops,
                         "top_hits": sorted(n for n in tops if n in win[r]), "winning": sorted(win[r])})
     p0 = 6 / 45
@@ -708,7 +709,8 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
                        "lift": round(rate / p0, 3), "p_two_sided": round(math.erfc(abs(z) / math.sqrt(2)), 4)})
     alpha = 0.05 / max(1, len(levels))
     sig = [x for x in levels if x["p_two_sided"] < alpha and x["picks"] >= 100]
-    all_rank = sorted(({"number": n, "times_top": v[0], "hits": v[1], "hit_rate": round(v[1] / v[0], 4)}
+    all_rank = sorted(({"number": n, "times_top": v[0], "hits": v[1], "hit_rate": round(v[1] / v[0], 4),
+                        "hit_rounds": v[2][-8:], "miss_rounds": v[3][-8:]}
                        for n, v in num_top.items()), key=lambda x: (-x["times_top"], x["number"]))
     # 선택 회차에서 중복된 번호 각각의 '직전 W회 동안 중복 상위였을 때 실제 당첨' 기록
     sel = rank_round("backtest", int(rnd)) or rank_round("live", int(rnd))
@@ -718,9 +720,10 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
         for x in sel["numbers"]:
             if x["engines"] < 2:
                 continue
-            rec = nt.get(x["number"], {"times_top": 0, "hits": 0, "hit_rate": None})
+            rec = nt.get(x["number"], {"times_top": 0, "hits": 0, "hit_rate": None, "hit_rounds": [], "miss_rounds": []})
             track.append({"number": x["number"], "engines_now": x["engines"], "past_times_top": rec["times_top"],
-                          "past_hits": rec["hits"], "past_hit_rate": rec["hit_rate"], "drawn": x["drawn"]})
+                          "past_hits": rec["hits"], "past_hit_rate": rec["hit_rate"], "drawn": x["drawn"],
+                          "hit_rounds": rec["hit_rounds"], "recent_miss_rounds": rec["miss_rounds"][-5:]})
     rng_txt = f"{past[0]}~{past[-1]}회" if past else "-"
     out = {"round": int(rnd), "backtest": rank_round("backtest", int(rnd)), "live": rank_round("live", int(rnd)),
            "all_rounds": {"basis": "per_round_prior_window", "window": W, "range": rng_txt, "rounds": len(past),

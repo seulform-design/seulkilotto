@@ -111,7 +111,7 @@ export default function ConsensusRankingCard({ round }: { round: number }) {
               <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mt: 0.75 }}>
                 {round}회 중복 번호의 직전 {all.rounds}회 기록 — 중복 상위였던 횟수 · 그때 실제 당첨 비율
               </Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))', gap: 0.5, mt: 0.25 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 0.5, mt: 0.25 }}>
                 {(all.selected_round_track as any[]).slice(0, 12).map((x) => (
                   <Box key={x.number} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 0.5, textAlign: 'center' }}>
                     <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>이번 {x.engines_now}개 엔진</Typography>
@@ -120,27 +120,17 @@ export default function ConsensusRankingCard({ round }: { round: number }) {
                     <Typography variant="caption" color={x.past_hit_rate != null && x.past_hit_rate > 0.1333 ? 'warning.main' : 'text.secondary'} sx={{ fontSize: 10, display: 'block' }}>
                       {x.past_hit_rate == null ? '기록 없음' : `실제 당첨 ${(x.past_hit_rate * 100).toFixed(1)}%`}
                     </Typography>
+                    {(x.hit_rounds ?? []).length > 0 && (
+                      <Typography variant="caption" color="warning.main" sx={{ fontSize: 9, display: 'block' }}>잡은 회차 {x.hit_rounds.join(', ')}</Typography>
+                    )}
+                    {(x.recent_miss_rounds ?? []).length > 0 && (
+                      <Typography variant="caption" color="text.disabled" sx={{ fontSize: 9, display: 'block' }}>최근 못 잡음 {x.recent_miss_rounds.join(', ')}</Typography>
+                    )}
                   </Box>
                 ))}
               </Box>
             </>
           )}
-          <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mt: 0.75 }}>회차별 중복 상위 번호와 실제 당첨 (최근 {(all.recent_history ?? []).length}회)</Typography>
-          <Stack spacing={0.25} sx={{ mt: 0.25 }}>
-            {(all.recent_history as any[] ?? []).map((h) => (
-              <Stack key={h.round} direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap' }}>
-                <Typography variant="caption" sx={{ minWidth: 120, fontWeight: 700 }}>
-                  {h.round}회 · {h.max_overlap}개 엔진 겹침
-                </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap' }}>
-                  {(h.top_numbers as number[]).map((n) => <Ball key={n} n={n} drawn={(h.top_hits as number[]).includes(n)} size={22} />)}
-                </Box>
-                <Typography variant="caption" color={h.top_hits.length ? 'warning.main' : 'text.secondary'}>
-                  적중 {h.top_hits.length}/{h.top_numbers.length}
-                </Typography>
-              </Stack>
-            ))}
-          </Stack>
         </Box>
       )}
       {data?.note && <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>ⓘ {data.note}</Typography>}

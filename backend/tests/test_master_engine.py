@@ -178,3 +178,35 @@ def test_calibrate_tiers_matches_gap_base_rates():
     assert [r["tier"] for r in cal].count("A") == 10
     combos = M.generate_combos(sc, seed=7)
     assert len(combos) == 10
+
+
+def test_consensus_learning_rules_need_two_period_replication(iso):
+    from app.ingest import round_audit as RA
+
+    RA.reset_for_tests()
+    _seed(1100)
+    rep = RA.consensus_learning(window=150)
+    assert rep["rounds"] == 150 and rep["rules"] and rep["engines"]
+    cv = rep["caught_vs_missed"]
+    assert cv["caught_rounds"] + cv["missed_rounds"] <= 150 and "top_gap_mean" in cv["caught"]
+    for r in rep["rules"]:
+        if r["replicated"]:
+            assert r["picks"] >= 200 and all(h["p"] < rep["alpha_bonferroni"] for h in r["halves"])
+    bonus, weak = RA.consensus_adjustments([])
+    assert bonus == {} and isinstance(weak, dict)
+    out = P.consensus_ranking(1200)["all_rounds"]
+    tr = out["selected_round_track"]
+    assert all(set(x["hit_rounds"]) | set(x["recent_miss_rounds"]) <= set(range(1100, 1200)) for x in tr)
+
+
+def test_votes_damped_for_engine_weak_condition(iso):
+    from app.stats_engine.draws import load_draws
+
+    _seed(1240)
+    d = load_draws()
+    rnd = d[-1].round
+    prior = d[:-1]
+    v0, _, _ = M._votes_for(rnd, ("backtest",), {})
+    v1, _, _ = M._votes_for(rnd, ("backtest",), {}, damp={m: ["gap:0", "gap:1-4", "gap:5-9", "gap:10+"] for m in
+                                                          ("stats_hot", "stats_cold")}, prior=prior)
+    assert sum(v1.values()) < sum(v0.values())

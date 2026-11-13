@@ -466,7 +466,9 @@ def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 600
 
 
 def _votes_for(round_no: int, ptypes: Sequence[str], weights: Dict[str, float],
-               exclude: Sequence[str] = ()) -> Tuple[Dict[int, float], Dict[int, float], List[str]]:
+               exclude: Sequence[str] = (), damp: Optional[Dict[str, List[str]]] = None,
+               prior=None) -> Tuple[Dict[int, float], Dict[int, float], List[str]]:
+    """damp: 엔진별 약점 조건(두 기간 재현) — 그 조건에 해당하는 번호에 대한 그 엔진의 표는 절반만 반영."""
     rows = db.query("SELECT prediction_method, predicted_numbers, prediction_type FROM round_prediction_history "
                     "WHERE draw_round = ? AND prediction_rank = 1 AND prediction_status <> 'superseded'", (round_no,))
     votes: Dict[int, float] = {}
@@ -479,8 +481,14 @@ def _votes_for(round_no: int, ptypes: Sequence[str], weights: Dict[str, float],
         seen.add(m)
         used.append(m)
         for x in db.loads(nums):
-            votes[int(x)] = votes.get(int(x), 0) + 1
-            val[int(x)] = val.get(int(x), 0) + weights.get(m, 1.0)
+            f = 1.0
+            if damp and m in damp and prior:
+                from . import round_audit as _RA
+
+                if set(_RA._cond_keys(_RA._number_features(prior, int(x)))) & set(damp[m]):
+                    f = 0.5
+            votes[int(x)] = votes.get(int(x), 0) + f
+            val[int(x)] = val.get(int(x), 0) + weights.get(m, 1.0) * f
     return votes, val, used
 
 
@@ -590,7 +598,13 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
         audit_excluded = sorted(_RA.excluded_methods())
     except Exception:  # noqa: BLE001
         audit_excluded = []
-    votes, val, used = _votes_for(target, ("live",), w, exclude=audit_excluded)
+    try:
+        from . import round_audit as _RA2
+
+        cons_bonus, eng_weak = _RA2.consensus_adjustments(draws)
+    except Exception:  # noqa: BLE001
+        cons_bonus, eng_weak = {}, {}
+    votes, val, used = _votes_for(target, ("live",), w, exclude=audit_excluded, damp=eng_weak, prior=draws)
     vote_source = "live(대상 회차 사전 예측)"
     if not used:  # 아직 live 예측이 없으면 회차통계 순위로 대체(같은 이전 데이터)
         from ..stats_engine.backtest import _rankings
@@ -611,6 +625,8 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
         bonus = _RA.adopted_pattern_bonus(draws)
     except Exception:  # noqa: BLE001
         bonus = {}
+    for n_, b_ in cons_bonus.items():  # 중복 추천 잡은/못 잡은 회차 비교에서 두 기간 재현된 규칙
+        bonus[n_] = bonus.get(n_, 0.0) + b_
     if bonus:
         for r_ in sc:
             r_["score"] = round(r_["score"] + bonus.get(r_["number"], 0.0), 4)
@@ -652,7 +668,8 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
     rep = {"kind": "v12", "latest_official_round": latest.round, "latest_draw_date": latest.draw_date,
            "latest_numbers": list(latest.numbers), "latest_bonus": latest.bonus, "target_round": target,
            "draw_date": draw_day.isoformat(), "data_cutoff_utc": cutoff.isoformat(), "data_cutoff_kst": f"{draw_day.isoformat()} 20:00 KST",
-           "data_basis": f"1~{latest.round}회 공식 결과", "vote_source": vote_source, "engines_voting": used, "engines_excluded_by_audit": audit_excluded,
+           "data_basis": f"1~{latest.round}회 공식 결과", "vote_source": vote_source, "engines_voting": used, "engines_excluded_by_audit": audit_excluded, "engine_weak_conditions": eng_weak,
+           "consensus_rule_bonus": {str(k): v for k, v in cons_bonus.items()},
            "numbers": sc, "groups": {"A": [r["number"] for r in sc if r["tier"] == "A"],
                                       "B": [r["number"] for r in sc if r["tier"] == "B"],
                                       "C": [r["number"] for r in sc if r["tier"] == "C"]},
@@ -689,6 +706,8 @@ def run_master() -> Dict[str, Any]:
         ra = _RA.audit()
         steps["round_audit"] = {"summary": ra["summary"], "excluded": ra["actions"]["excluded_now"]}
         steps["miss_analysis"] = _RA.miss_analysis().get("adopted_patterns")
+        cl = _RA.consensus_learning()
+        steps["consensus_learning"] = {"rules": cl.get("adopted_rules"), "engine_weak": cl.get("engine_weak")}
     except Exception as exc:  # noqa: BLE001
         steps["round_audit"] = {"error": str(exc)[:200]}
     cur = v12_current()

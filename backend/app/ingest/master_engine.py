@@ -22,7 +22,13 @@ from . import reverse_analysis as R
 EXP = 0.8
 VAR1 = R.VAR1
 PERIODS = (("last20", 20), ("last50", 50), ("last100", 100), ("all", None))
-WEIGHTS_VERSION = "v12-w3"
+WEIGHTS_VERSION = "v12-w4"
+# w4(2026-11-14): 10조합을 '하나의 통합 세트'로 설계. 진단: w1~w3 의 10조합은 상위 번호를 반복 사용해 서로 겹쳤고,
+# 8,145,060개 당첨 조합 전수 계산에서 '10조합 중 1장 이상 5등(3개+) 이상' 확률이 17.7~20.4% 였다(같은 번호를 덜 겹치게
+# 펼치면 23.0%). 기대 일치 수(0.8/조합)·1등 확률(10/8,145,060)은 조합 구성과 무관하므로 바꿀 수 있는 것은 '회차당 하나라도
+# 맞을 확률'과 '당첨 시 나눠 갖는 사람 수'뿐이다. → 45개 번호를 모두 덮고(점수 상위 15개는 2번, 나머지 30개는 1번 사용),
+# 조합 쌍 겹침을 최소화한 고정 설계(COVER_DESIGN)에 V12 점수 순위를 대입하고, 같은 사용 횟수 번호끼리 자리를 바꿔
+# 많이 사는 패턴(생일 숫자만·연속·등차·한 구간 몰림·과거 당첨 조합)을 피한다. 자리 바꿈은 확률을 바꾸지 않는다.
 # w3(2026-11-13): 놓친 당첨번호 역추적(200회)에서 후보가 '미출 10회 이상' 번호를 실제 당첨 비율보다 10%p 많이(32.5% vs 22.6%),
 # '미출 1~4회' 번호를 8%p 적게(29.8% vs 37.7%) 고르는 편향 확인. 당첨번호의 미출 구간 비율은 45개 번호의 기준 비율과 같으므로
 # 10조합 전체(60칸)에서 미출 구간별 사용량을 그 회차 기준 비율의 GAP_TOLERANCE 배 이내로 제한한다(기준 비율은 그 회차 이전 데이터).
@@ -33,6 +39,81 @@ WEIGHTS_VERSION = "v12-w3"
 MAX_NUMBER_USE = 2
 MAX_PAIR_OVERLAP = 2
 GAP_TOLERANCE = 1.1
+
+# 라벨 = V12 점수 순위(0=1위). 라벨 0~14 는 2번, 15~44 는 1번 사용. 8,145,060개 전수 계산(재현: scratch exact.py):
+# P(10장 중 1장 이상 3개+) = 0.230093 · 4개+ = 0.013935 · 5개+ = 0.000289 · 1등 = 10/8,145,060 · 기대 5등 이상 장수 = 0.2383
+COVER_DESIGN = [[0, 2, 4, 20, 21, 34], [0, 1, 3, 14, 38, 42], [2, 3, 11, 13, 24, 26], [9, 10, 11, 12, 15, 18],
+                [1, 5, 7, 12, 27, 30], [8, 16, 28, 29, 33, 41], [4, 7, 9, 13, 19, 31], [6, 17, 22, 36, 37, 43],
+                [6, 8, 10, 23, 25, 35], [5, 14, 32, 39, 40, 44]]
+COVER_EXACT = {"p_any_3plus": 0.230093, "p_any_4plus": 0.013935, "p_any_5plus": 0.000289, "p_first": "10/8,145,060",
+               "expected_prize_tickets": 0.2383}
+OVERLAP_REF = {"v12_w3_10combos_p_any_3plus": [0.1770, 0.2044], "independent_random_10": 0.2143}
+
+
+def popularity(c: Sequence[int], past: set) -> int:
+    """많은 사람이 사는 패턴 점수(높을수록 당첨 시 나눠 가질 가능성↑) — 당첨 확률과 무관, 당첨금 분할만 관련."""
+    c = sorted(c)
+    pen = 0
+    if c[-1] <= 31:
+        pen += 1  # 생일·날짜 숫자만
+    run = best = 1
+    for a, b in zip(c, c[1:]):
+        run = run + 1 if b == a + 1 else 1
+        best = max(best, run)
+    pen += best >= 3
+    d = {b - a for a, b in zip(c, c[1:])}
+    pen += 2 * (len(d) == 1)  # 등차(1,8,15,...)
+    pen += max(Counter((x - 1) // 10 for x in c).values()) >= 4
+    pen += max(Counter(x % 10 for x in c).values()) >= 4
+    pen += max(Counter((x - 1) % 7 for x in c).values()) >= 5  # 용지 세로줄
+    pen += 5 * (tuple(c) in past)
+    return pen
+
+
+def cover_combos(scores: List[Dict[str, Any]], seed: int, past: Optional[set] = None, tries: int = 1500) -> List[Dict[str, Any]]:
+    """통합 1세트: 점수 순위를 COVER_DESIGN 에 대입 → 같은 사용 횟수 번호끼리 자리 바꿈으로 인기 패턴 최소화."""
+    past = past or set()
+    order = [r["number"] for r in sorted(scores, key=lambda r: (-r["score"], r["number"]))]
+    sc = {r["number"]: r["score"] for r in scores}
+    tier = {r["number"]: r.get("tier", "-") for r in scores}
+    rng = random.Random(seed)
+    ref0 = R.reference()
+    sr0 = (int(ref0["sum_range95"][0]) + 15, int(ref0["sum_range95"][1]) - 15)
+
+    def cost(mp):  # 인기 패턴 + 구조 조건(7개 중 6개 미만 통과) — 둘 다 자리 바꿈이라 확률 불변
+        tot = 0
+        for tk in COVER_DESIGN:
+            c = [mp[i] for i in tk]
+            st = structure(c, sr0)
+            tot += popularity(c, past) + 3 * (st["pass_rate"] < 6 / 7)
+        return tot
+
+    # 지역 탐색: 같은 사용 횟수 그룹(상위 15 / 나머지 30) 안에서 두 번호 자리 교환 → 비용이 줄면 채택
+    best_map, best_pen = list(order), cost(order)
+    for t in range(tries):
+        if best_pen == 0:
+            break
+        mp = list(best_map)
+        lo, hi = (0, 15) if rng.random() < 0.35 else (15, 45)
+        i, j = rng.sample(range(lo, hi), 2)
+        mp[i], mp[j] = mp[j], mp[i]
+        pen = cost(mp)
+        if pen <= best_pen:
+            best_map, best_pen = mp, pen
+    ref = R.reference()
+    sr = (int(ref["sum_range95"][0]) + 15, int(ref["sum_range95"][1]) - 15)
+    out = []
+    for tk in COVER_DESIGN:
+        c = sorted(best_map[i] for i in tk)
+        st = structure(c, sr)
+        ns = sum(sc[x] for x in c) / 6
+        out.append({"numbers": c, "combo_score": round(0.6 * ns + 0.4 * st["pass_rate"], 4), "number_score_mean": round(ns, 4),
+                    "structure": st, "tiers": "".join(sorted(tier[x] for x in c)), "popularity": popularity(c, past)})
+    out.sort(key=lambda x: (-x["number_score_mean"], x["numbers"]))
+    for i, x in enumerate(out, start=1):
+        x["rank"] = i
+        x["group"] = "core" if i <= 3 else "dispersion" if i <= 7 else "experimental"
+    return out
 
 
 def gap_bucket(gap: int) -> str:
@@ -378,7 +459,26 @@ def calibrate_tiers(scores: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 6000) -> List[Dict[str, Any]]:
-    """핵심 1~3(A만) · 분산 4~7(A+B, 겹침≤2) · 실험 8~10(C 2개 이상). 조합 점수 = 0.6×번호 점수 평균 + 0.4×구조 통과율."""
+    """w4: 통합 1세트(전 번호 커버 설계). 이전 방식은 generate_combos_w3 로 보존."""
+    scores = calibrate_tiers(scores)
+    past = {tuple(sorted(d.numbers)) for d in _draws_cache()}
+    return cover_combos(scores, seed=seed, past=past)
+
+
+_DRAWS = {"n": None, "v": []}
+
+
+def _draws_cache():
+    from ..stats_engine.draws import load_draws
+
+    d = load_draws()
+    if _DRAWS["n"] != len(d):
+        _DRAWS["n"], _DRAWS["v"] = len(d), d
+    return _DRAWS["v"]
+
+
+def generate_combos_w3(scores: List[Dict[str, Any]], seed: int, sample_n: int = 6000) -> List[Dict[str, Any]]:
+    """(w3, 보존) 핵심 1~3(A만) · 분산 4~7(A+B, 겹침≤2) · 실험 8~10(C 2개 이상). 조합 점수 = 0.6×번호 점수 평균 + 0.4×구조 통과율."""
     scores = calibrate_tiers(scores)
     sc = {r["number"]: r["score"] for r in scores}
     tier = {r["number"]: r["tier"] for r in scores}
@@ -650,10 +750,19 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
                                                rank=cb["rank"], score=cb["combo_score"], engine_version=WEIGHTS_VERSION,
                                                cutoff_at=cutoff.isoformat(), training_range=f"{draws[0].round}-{latest.round}",
                                                training_count=len(draws), note=cb["group"])
-    # 이미 저장된 사전 예측이 있으면(불변) 그것을 정본으로 표시 — 재실행 결과로 바꾸지 않음
+                # 같은 회차의 이전 가중치 버전 사전 예측은 지우지 않고 superseded(마감 전 새 버전으로 교체 — 화면·집계는 현재 버전만)
+                c.execute("UPDATE round_prediction_history SET prediction_status = 'superseded' WHERE draw_round = ? "
+                          "AND prediction_method = 'v12_integrated' AND prediction_type = 'live' AND engine_version <> ?",
+                          (target, WEIGHTS_VERSION))
+    # 이미 저장된 사전 예측이 있으면(불변) 그것을 정본으로 표시 — 재실행 결과로 바꾸지 않음.
+    # 버그 수정(w4): 가중치 버전마다 10행씩 저장돼 w1~w3 30조합이 한꺼번에 표시되던 문제 → 가장 최근 버전 1세트만.
+    vers = db.query("SELECT engine_version, MAX(prediction_created_at) FROM round_prediction_history WHERE draw_round = ? "
+                    "AND prediction_method = 'v12_integrated' AND prediction_type = 'live' AND prediction_status <> 'superseded' "
+                    "GROUP BY engine_version ORDER BY 2 DESC", (target,))
     stored = db.query("SELECT prediction_rank, predicted_numbers, prediction_score, source_note, prediction_created_at "
                       "FROM round_prediction_history WHERE draw_round = ? AND prediction_method = 'v12_integrated' "
-                      "AND prediction_type = 'live' ORDER BY prediction_rank", (target,))
+                      "AND prediction_type = 'live' AND engine_version = ? ORDER BY prediction_rank",
+                      (target, vers[0][0])) if vers else []
     frozen_at = None
     if stored:
         sc_map = {r["number"]: r for r in sc}
@@ -675,6 +784,10 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
                                       "C": [r["number"] for r in sc if r["tier"] == "C"]},
            "combos": combos, "combos_frozen_at": frozen_at, "saved_live_predictions": saved, "save_note": note, "weights": WEIGHTS,
            "weights_version": WEIGHTS_VERSION, "validation": {k: val_rep.get(k) for k in ("status", "verdict", "groups", "from", "to")},
+           "combos_version": vers[0][0] if vers else WEIGHTS_VERSION,
+           "set_design": {"exact": COVER_EXACT, "compare": OVERLAP_REF,
+                          "rule": "45개 번호 모두 사용 · 점수 상위 15개는 2번 · 조합끼리 최대 1개만 겹침 · 많이 사는 패턴 회피",
+                          "popularity_total": sum(int(x.get("popularity", 0) or 0) for x in combos)},
            "probability": {"each_combo_first_prize": "1/8,145,060", "ten_combos_first_prize": "10/8,145,060 (서로 다른 10조합)",
                            "expected_matches_per_combo": EXP,
                            "statement": "번호·조합 점수는 과거 데이터 요약 지표이며 당첨 확률을 바꾸지 않습니다."}}

@@ -210,3 +210,40 @@ def test_votes_damped_for_engine_weak_condition(iso):
     v1, _, _ = M._votes_for(rnd, ("backtest",), {}, damp={m: ["gap:0", "gap:1-4", "gap:5-9", "gap:10+"] for m in
                                                           ("stats_hot", "stats_cold")}, prior=prior)
     assert sum(v1.values()) < sum(v0.values())
+
+
+def test_w4_cover_set_covers_all_numbers_and_avoids_popular_patterns():
+    from collections import Counter
+    from itertools import combinations
+
+    from app.stats_engine.draws import load_draws
+
+    draws = load_draws()
+    sc = M.number_scores(draws[:-1], {7: 3, 8: 1, 33: 2}, {7: 3.0})
+    combos = M.generate_combos(sc, seed=5)
+    use = Counter(n for c in combos for n in c["numbers"])
+    assert set(use) == set(range(1, 46)) and sum(use.values()) == 60
+    top15 = [r["number"] for r in sorted(M.calibrate_tiers(sc), key=lambda r: (-r["score"], r["number"]))][:15]
+    assert all(use[n] == 2 for n in top15)  # 점수 상위 15개만 2번 사용
+    assert max(len(set(a["numbers"]) & set(b["numbers"])) for a, b in combinations(combos, 2)) <= 1
+    past = {tuple(sorted(d.numbers)) for d in draws}
+    assert all(tuple(c["numbers"]) not in past for c in combos)
+    assert sum(c["popularity"] for c in combos) <= 2
+    assert M.COVER_EXACT["p_any_3plus"] > max(M.OVERLAP_REF["v12_w3_10combos_p_any_3plus"])
+    assert M.popularity([1, 2, 3, 4, 5, 6], set()) >= 3 and M.popularity([1, 8, 15, 22, 29, 36], set()) >= 3
+
+
+def test_v12_current_shows_only_latest_version_not_30(iso, monkeypatch):
+    _seed(1200)
+    from app.stats_engine.draws import load_draws
+
+    target = load_draws()[-1].round + 1
+    monkeypatch.setattr(P, "draw_cutoff", lambda r: datetime(2999, 1, 1, tzinfo=timezone.utc))
+    with db.transaction() as c:  # 이전 가중치 버전 사전 예측 10행(과거 버그 상황 재현)
+        for i in range(10):
+            P.save_prediction(c, rnd=target, method="v12_integrated", ptype="live", numbers=[1 + i, 12, 23, 34, 40, 45],
+                              rank=i + 1, engine_version="v12-w3", created_at="2026-11-12T00:00:00+00:00")
+    out = M.v12_current()
+    assert len(out["combos"]) == 10 and out["combos_version"] == M.WEIGHTS_VERSION
+    rows = db.query("SELECT prediction_status FROM round_prediction_history WHERE draw_round = ? AND engine_version = 'v12-w3'", (target,))
+    assert len(rows) == 10 and all(r[0] == "superseded" for r in rows)  # 지우지 않고 보존

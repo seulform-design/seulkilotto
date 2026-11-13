@@ -74,9 +74,26 @@ export default function MasterEnginePanel() {
               {(v12.groups?.[t] ?? []).map((n: number) => <Ball key={n} n={n} tier={t} />)}
             </Box>
           ))}
+          {v12.set_design && (
+            <Box sx={{ mt: 1, p: 0.75, border: 1, borderColor: 'success.main', borderRadius: 1.5 }}>
+              <Typography variant="caption" sx={{ fontWeight: 800, display: 'block' }}>
+                🎯 통합 1세트 ({v12.combos_version}) — {v12.set_design.rule}
+              </Typography>
+              <Typography variant="caption" component="div">
+                10장 중 1장 이상 5등(3개+) 이상: <b>{(v12.set_design.exact.p_any_3plus * 100).toFixed(1)}%</b>
+                {' '}(이전 V12 10조합 {(v12.set_design.compare.v12_w3_10combos_p_any_3plus[0] * 100).toFixed(1)}~{(v12.set_design.compare.v12_w3_10combos_p_any_3plus[1] * 100).toFixed(1)}%
+                · 무작위 10장 {(v12.set_design.compare.independent_random_10 * 100).toFixed(1)}%) · 4등 이상 {(v12.set_design.exact.p_any_4plus * 100).toFixed(2)}%
+                · 1등 {v12.set_design.exact.p_first} — 8,145,060개 당첨 조합 전수 계산
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="div">
+                조합끼리 겹치지 않게 펼쳐 '회차당 하나라도 맞을 확률'을 높인 것이며, 조합 1장의 당첨 확률·기대 일치 수(0.8개)는 그대로입니다.
+                생일 숫자만·연속·등차·한 구간 몰림·과거 당첨 조합 같은 많이 사는 패턴을 피해 당첨 시 나눠 가질 가능성을 줄였습니다(인기 패턴 점수 {v12.set_design.popularity_total}).
+              </Typography>
+            </Box>
+          )}
           <Stack spacing={0.5} sx={{ mt: 1 }}>
-            {(v12.combos as any[]).map((c) => (
-              <Box key={c.rank} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', border: 1, borderColor: 'divider', borderRadius: 1.5, p: 0.5 }}>
+            {(v12.combos as any[]).map((c, i) => (
+              <Box key={`${c.rank}-${i}`}sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', border: 1, borderColor: 'divider', borderRadius: 1.5, p: 0.5 }}>
                 <Chip size="small" color={GROUP[c.group]?.color ?? 'default'} label={`${c.rank}. ${GROUP[c.group]?.label ?? c.group}`} />
                 <Box>{c.numbers.map((n: number) => <Ball key={n} n={n} tier={tierOf[n]} />)}</Box>
                 <Typography variant="caption" color="text.secondary">

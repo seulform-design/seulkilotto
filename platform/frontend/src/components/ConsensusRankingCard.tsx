@@ -1,8 +1,8 @@
 /**
  * 엔진 중복 추천 번호 순위 — 선택 회차에서 여러 엔진이 함께 고른 번호를 '몇 개 엔진이 골랐는지' 순으로 묶어 보여 주고,
- * 전체 회차에서 같은 중복 수의 번호가 실제로 몇 % 당첨됐는지(무작위 13.3% 대비)를 함께 보여 준다.
+ * 회차마다 한 줄씩(그 회차 자체의 중복 수별 선택·당첨) 기록을 보여 준다. 이전 회차 합계 비율(무작위 13.3% 대비)은 참고로 둔다.
  */
-import { Box, Chip, LinearProgress, Stack, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from '@mui/material';
+import { Box, Button, Chip, LinearProgress, Stack, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from '@mui/material';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { v1Api } from '../api/v1Api';
@@ -11,7 +11,7 @@ function Ball({ n, drawn, size = 28 }: { n: number; drawn?: boolean | null; size
   return (
     <Box component="span" sx={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: size, height: size, borderRadius: '50%',
-      fontSize: 12, fontWeight: 800, mr: 0.5, mb: 0.4,
+      fontSize: size < 24 ? 10 : 12, fontWeight: 800, mr: 0.5, mb: 0.4, flexShrink: 0,
       bgcolor: drawn ? 'warning.main' : 'action.hover', color: drawn ? 'warning.contrastText' : 'text.primary',
       border: 1, borderColor: drawn ? 'warning.dark' : 'divider',
     }}>{n}</Box>
@@ -19,10 +19,22 @@ function Ball({ n, drawn, size = 28 }: { n: number; drawn?: boolean | null; size
 }
 
 const MEDAL = ['🥇', '🥈', '🥉'];
+const LV = ['2', '3', '4', '5+'];
+const PAGE = 15;
+
+function LevelCell({ v }: { v?: { picks: number; hits: number | null } }) {
+  if (!v) return <Typography variant="caption" color="text.disabled">-</Typography>;
+  return (
+    <Typography variant="caption" sx={{ fontWeight: v.hits ? 800 : 400 }} color={v.hits ? 'warning.main' : 'text.secondary'}>
+      {v.hits == null ? `${v.picks}개` : `${v.hits}/${v.picks}`}
+    </Typography>
+  );
+}
 
 export default function ConsensusRankingCard({ round }: { round: number }) {
   const q = useQuery({ queryKey: ['v1-pred-consensus', round], queryFn: () => v1Api.getPredictionConsensus(round), staleTime: 300_000 });
   const [view, setView] = useState<'backtest' | 'live'>('backtest');
+  const [page, setPage] = useState(0);
   const data = q.data;
   const cur = data?.[view] ?? data?.backtest ?? data?.live;
   const groups = useMemo(() => {
@@ -35,6 +47,10 @@ export default function ConsensusRankingCard({ round }: { round: number }) {
     return g;
   }, [cur]);
   const all = data?.all_rounds;
+  const tr = data?.this_round;
+  const rows = (all?.per_round ?? []) as any[];
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const pg = Math.min(page, pages - 1);
   const maxRate = Math.max(0.2, ...((all?.by_engine_count ?? []) as any[]).map((x) => x.ci95?.[1] ?? 0));
 
   return (
@@ -84,16 +100,111 @@ export default function ConsensusRankingCard({ round }: { round: number }) {
         </Typography>
       )}
 
-      {all && (
+      {tr && (
         <Box sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'divider' }}>
           <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mb: 0.5 }}>
-            {round}회 기준 · 직전 {all.rounds}회({all.range}) 실측 — 중복 수별 실제 당첨 비율 (무작위 13.3%)
+            {round}회 자체 결과 — 중복 수별 고른 번호 · 그중 실제 당첨 (이 회차 한 회 기준)
+          </Typography>
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+            {LV.filter((k) => tr.levels[k]).map((k) => {
+              const v = tr.levels[k];
+              return (
+                <Chip key={k} size="small" color={v.hits ? 'warning' : 'default'} variant={v.hits ? 'filled' : 'outlined'}
+                  label={`${k}개 엔진: ${v.picks}개 번호${v.hits == null ? ' · 추첨 전' : ` 중 ${v.hits}개 당첨`}`} />
+              );
+            })}
+            <Chip size="small" variant="outlined"
+              label={tr.result_known
+                ? `합계 ${tr.multi_hits}/${tr.multi_picks} (${((tr.multi_hits / Math.max(1, tr.multi_picks)) * 100).toFixed(1)}% · 무작위 13.3%)`
+                : `중복 ${tr.multi_picks}개 · 추첨 전`} />
+          </Stack>
+        </Box>
+      )}
+
+      {rows.length > 0 && (
+        <Box sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'divider' }}>
+          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+            <Typography variant="caption" sx={{ fontWeight: 800 }}>
+              회차별 기록 — {round}회 이전 {all.rounds}개 회차({all.range}), 회차마다 그 회차의 중복 번호 · 당첨/고른 수
+            </Typography>
+            <Box sx={{ flexGrow: 1 }} />
+            <Button size="small" sx={{ minWidth: 0, py: 0 }} disabled={pg <= 0} onClick={() => setPage(pg - 1)}>◀ 최근</Button>
+            <Typography variant="caption">{pg + 1}/{pages}</Typography>
+            <Button size="small" sx={{ minWidth: 0, py: 0 }} disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>과거 ▶</Button>
+          </Stack>
+          <Box sx={{ overflowX: 'auto' }}>
+            <Box component="table" sx={{
+              width: '100%', borderCollapse: 'collapse',
+              '& td, & th': { px: 0.5, py: 0.25, borderBottom: 1, borderColor: 'divider', fontSize: 11, textAlign: 'center', whiteSpace: 'nowrap' },
+            }}>
+              <thead>
+                <tr>
+                  <th>회차</th>
+                  {LV.map((k) => <th key={k}>{k}개 엔진</th>)}
+                  <th>합계</th>
+                  <th style={{ textAlign: 'left' }}>중복 상위 번호 (주황=당첨)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.slice(pg * PAGE, pg * PAGE + PAGE).map((r) => (
+                  <tr key={r.round}>
+                    <td><b>{r.round}</b></td>
+                    {LV.map((k) => <td key={k}><LevelCell v={r.levels[k]} /></td>)}
+                    <td>
+                      <Typography variant="caption" sx={{ fontWeight: 800 }} color={r.multi_hits ? 'warning.main' : 'text.secondary'}>
+                        {r.multi_hits}/{r.multi_picks}
+                      </Typography>
+                    </td>
+                    <td style={{ textAlign: 'left' }}>
+                      <Box sx={{ display: 'flex', flexWrap: 'nowrap' }}>
+                        {(r.top_numbers as number[]).map((n) => <Ball key={n} n={n} size={20} drawn={(r.top_hits as number[]).includes(n)} />)}
+                      </Box>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Box>
+          </Box>
+        </Box>
+      )}
+
+      {all && (all.selected_round_track ?? []).length > 0 && (
+        <Box sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'divider' }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, display: 'block' }}>
+            {round}회 중복 번호의 회차별 기록 — 이전 {all.rounds}개 회차 중 중복 상위였던 회차 · 그 회차에 당첨됐는지
+          </Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 0.5, mt: 0.25 }}>
+            {(all.selected_round_track as any[]).slice(0, 12).map((x) => (
+              <Box key={x.number} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 0.5, textAlign: 'center' }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>이번 {x.engines_now}개 엔진</Typography>
+                <Ball n={x.number} drawn={x.drawn} />
+                <Typography variant="caption" sx={{ fontSize: 10, display: 'block' }}>
+                  중복 상위 {x.past_times_top}개 회차 → 당첨 {x.past_hits}회{x.past_hit_rate != null ? ` (${(x.past_hit_rate * 100).toFixed(1)}%)` : ''}
+                </Typography>
+                {(x.hit_rounds ?? []).length > 0 && (
+                  <Typography variant="caption" color="warning.main" sx={{ fontSize: 9, display: 'block' }}>당첨 회차 {x.hit_rounds.join(', ')}</Typography>
+                )}
+                {(x.recent_miss_rounds ?? []).length > 0 && (
+                  <Typography variant="caption" color="text.disabled" sx={{ fontSize: 9, display: 'block' }}>
+                    미당첨 {x.miss_count ?? x.recent_miss_rounds.length}회 · 최근 {x.recent_miss_rounds.join(', ')}
+                  </Typography>
+                )}
+              </Box>
+            ))}
+          </Box>
+        </Box>
+      )}
+
+      {all && (all.by_engine_count ?? []).length > 0 && (
+        <Box sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'divider' }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mb: 0.5 }}>
+            참고 · 위 회차별 행의 합계 ({all.range}, {all.rounds}개 회차) — 중복 수별 실제 당첨 비율 (무작위 13.3%)
           </Typography>
           <Stack spacing={0.4}>
             {(all.by_engine_count as any[]).map((x) => (
               <Stack key={x.engines} direction="row" spacing={1} alignItems="center">
                 <Typography variant="caption" sx={{ minWidth: 64 }}>{x.engines} 엔진</Typography>
-                <Box sx={{ position: 'relative', flexGrow: 1, height: 14, bgcolor: 'action.hover', borderRadius: 1 }}>
+                <Box sx={{ position: 'relative', flexGrow: 1, height: 12, bgcolor: 'action.hover', borderRadius: 1 }}>
                   <Box sx={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${(x.hit_rate / maxRate) * 100}%`, bgcolor: 'primary.main', borderRadius: 1, opacity: 0.8 }} />
                   <Box sx={{ position: 'absolute', top: -2, bottom: -2, left: `${(x.random_rate / maxRate) * 100}%`, borderLeft: 2, borderColor: 'error.main' }} />
                 </Box>
@@ -106,31 +217,6 @@ export default function ConsensusRankingCard({ round }: { round: number }) {
           <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.25 }}>
             빨간 선 = 무작위(6/45=13.3%) · 막대 = 실제 당첨 비율. {all.verdict}
           </Typography>
-          {(all.selected_round_track ?? []).length > 0 && (
-            <>
-              <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mt: 0.75 }}>
-                {round}회 중복 번호의 직전 {all.rounds}회 기록 — 중복 상위였던 횟수 · 그때 실제 당첨 비율
-              </Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 0.5, mt: 0.25 }}>
-                {(all.selected_round_track as any[]).slice(0, 12).map((x) => (
-                  <Box key={x.number} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 0.5, textAlign: 'center' }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>이번 {x.engines_now}개 엔진</Typography>
-                    <Ball n={x.number} drawn={x.drawn} />
-                    <Typography variant="caption" sx={{ fontSize: 10, display: 'block' }}>직전 중복 {x.past_times_top}회</Typography>
-                    <Typography variant="caption" color={x.past_hit_rate != null && x.past_hit_rate > 0.1333 ? 'warning.main' : 'text.secondary'} sx={{ fontSize: 10, display: 'block' }}>
-                      {x.past_hit_rate == null ? '기록 없음' : `실제 당첨 ${(x.past_hit_rate * 100).toFixed(1)}%`}
-                    </Typography>
-                    {(x.hit_rounds ?? []).length > 0 && (
-                      <Typography variant="caption" color="warning.main" sx={{ fontSize: 9, display: 'block' }}>잡은 회차 {x.hit_rounds.join(', ')}</Typography>
-                    )}
-                    {(x.recent_miss_rounds ?? []).length > 0 && (
-                      <Typography variant="caption" color="text.disabled" sx={{ fontSize: 9, display: 'block' }}>최근 못 잡음 {x.recent_miss_rounds.join(', ')}</Typography>
-                    )}
-                  </Box>
-                ))}
-              </Box>
-            </>
-          )}
         </Box>
       )}
       {data?.note && <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>ⓘ {data.note}</Typography>}

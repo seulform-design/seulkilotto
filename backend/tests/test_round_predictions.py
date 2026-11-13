@@ -147,10 +147,19 @@ def test_consensus_ranking_round_and_all_rounds(tmp_path, monkeypatch):
     assert "당첨 확률" in out["note"]
     a = out["all_rounds"]
     # 회차별 기준: 선택 회차 이전만, 회차가 바뀌면 통계 범위도 바뀜(전체 누적 아님)
-    assert a["basis"] == "per_round_prior_window" and a["rounds"] == 50 and a["range"] == "1150~1199회"
+    assert a["basis"] == "per_round_rows" and a["rounds"] == 50 and a["range"] == "1150~1199회"
     assert all(h["round"] < 1200 for h in a["recent_history"]) and a["recent_history"][0]["round"] == 1199
     assert a["selected_round_track"] and all("past_times_top" in x for x in a["selected_round_track"])
+    # 회차별 행: 이전 모든 회차가 한 줄씩, 각 회차 자체의 중복 수별 선택/당첨 — 합계가 누적 비율과 일치
+    pr = a["per_round"]
+    assert len(pr) == 50 and pr[0]["round"] == 1199 and pr[-1]["round"] == 1150
+    tot = sum(v["picks"] for row in pr for v in row["levels"].values())
+    assert tot == sum(x["picks"] for x in a["by_engine_count"] if x["engines"] != "1개")
+    assert all(row["multi_hits"] == sum(v["hits"] for v in row["levels"].values()) for row in pr)
+    tr_ = out["this_round"]
+    assert tr_["round"] == 1200 and tr_["result_known"] and tr_["multi_picks"] == len(b["multi_engine_numbers"])
+    assert tr_["multi_hits"] == b["multi_engine_hits"]
     a2 = P.consensus_ranking(1180)["all_rounds"]
-    assert a2["rounds"] == 30 and a2["range"] == "1150~1179회"
+    assert a2["rounds"] == 30 and a2["range"] == "1150~1179회" and a2["per_round"][0]["round"] == 1179
     db.reset_for_tests()
     P.reset_for_tests()

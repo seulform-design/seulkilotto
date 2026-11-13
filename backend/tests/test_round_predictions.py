@@ -157,6 +157,13 @@ def test_consensus_ranking_round_and_all_rounds(tmp_path, monkeypatch):
     tr_ = out["this_round"]
     assert tr_["round"] == 1200 and tr_["result_known"] and tr_["multi_picks"] == len(b["multi_engine_numbers"])
     assert tr_["multi_hits"] == b["multi_engine_hits"]
+    t10 = out["top10"]
+    assert len(t10["backtest"]["numbers"]) == 10 and [x["rank"] for x in t10["backtest"]["numbers"]] == list(range(1, 11))
+    sc = [x["score"] for x in t10["backtest"]["numbers"]]
+    assert sc == sorted(sc, reverse=True) and t10["backtest"]["hits"] == sum(x["drawn"] for x in t10["backtest"]["numbers"])
+    v = t10["validation"]
+    assert v["rounds"] == 49 and v["random_mean_hits"] == 1.333 and all(h["round"] < 1200 for h in t10["recent"])
+    assert t10["engine_weights"] and "1/8,145,060" in t10["honesty"]
     a2 = P.consensus_ranking(1180)["all_rounds"]
     assert a2["rounds"] == 30 and a2["range"] == "1150~1179회" and a2["per_round"][0]["round"] == 1179
     db.reset_for_tests()

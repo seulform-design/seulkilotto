@@ -34,6 +34,8 @@ export default function ConsensusRankingCard({ round }: { round: number }) {
     });
     return g;
   }, [cur]);
+  const t10cur = data?.top10?.[view] ?? data?.top10?.backtest ?? data?.top10?.live;
+  const tv = data?.top10?.validation;
   // 선택 회차 한 회만: 중복 수(엔진 수)별 고른 번호 · 그중 당첨 — 다른 회차 누적·직전 N회 없음
   const levels = groups.map((g) => {
     const hits = g.items.filter((x: any) => x.drawn).length;
@@ -85,6 +87,36 @@ export default function ConsensusRankingCard({ round }: { round: number }) {
         <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.25 }}>
           주황 = 실제 당첨번호 · 번호에 마우스를 올리면 고른 엔진 목록 · 1개 엔진만 고른 번호 {cur.numbers.filter((x: any) => x.engines === 1).length}개는 생략
         </Typography>
+      )}
+
+      {t10cur && (
+        <Box sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'divider' }}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Typography variant="caption" sx={{ fontWeight: 800 }}>
+              🏆 {round}회 엔진별 유력 번호 TOP 10 — 엔진 과거 성적으로 가중 ({round}회 이전 회차만 학습)
+            </Typography>
+            {t10cur.hits != null && <Chip size="small" color={t10cur.hits >= 2 ? 'warning' : 'default'} label={`10개 중 ${t10cur.hits}개 당첨`} />}
+          </Stack>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: 0.5, mt: 0.5 }}>
+            {(t10cur.numbers as any[]).map((x) => (
+              <Tooltip key={x.number} arrow title={`${x.labels.join(' · ')} · 가중 점수 ${x.score}`}>
+                <Box sx={{ textAlign: 'center', border: 1, borderColor: x.drawn ? 'warning.main' : 'divider', borderRadius: 1, py: 0.25 }}>
+                  <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 800, display: 'block' }}>{x.rank}위</Typography>
+                  <Ball n={x.number} drawn={x.drawn} />
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: 9, display: 'block' }}>엔진 {x.engines}개</Typography>
+                </Box>
+              </Tooltip>
+            ))}
+          </Box>
+          {tv && tv.rounds > 0 && (
+            <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+              모든 이전 회차 검증({tv.range}, {tv.rounds}회 · 회차마다 그 이전만 학습): 학습 TOP10 평균 {tv.mean_hits}개 적중 ·
+              가중 없는 중복순 {tv.unweighted_mean_hits}개 · 무작위 10개 {tv.random_mean_hits}개 · 3개 이상 적중 {tv.rounds_3plus}회(무작위 기대 {tv.random_rounds_3plus}회).{' '}
+              {data?.top10?.verdict}
+            </Typography>
+          )}
+          <Typography variant="caption" color="text.disabled" component="div">ⓘ {data?.top10?.honesty}</Typography>
+        </Box>
       )}
 
       {levels.length > 0 && (

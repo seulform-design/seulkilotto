@@ -631,6 +631,94 @@ def run_all(engine_rounds: int = 100) -> Dict[str, Any]:
 CONSENSUS_EXCLUDE = {"random_baseline", "v12_integrated"}  # 무작위·(엔진 추천을 다시 합친) V12 는 중복 집계에서 제외
 
 
+TOP_K = 10
+SHRINK_K = 60  # 엔진 적중률 축소 추정(기록이 적은 엔진은 무작위 13.3% 쪽으로 당김)
+
+
+def _top10_from(preds: Dict[str, List[int]], wts: Dict[str, float]) -> List[Dict[str, Any]]:
+    """선택 회차 엔진 추천 → 번호 점수 = 그 번호를 고른 엔진들의 학습 가중치 합. 동점은 고른 엔진 수, 번호 순."""
+    sc: Dict[int, float] = {}
+    who: Dict[int, List[str]] = {}
+    for m, nums in preds.items():
+        for n in nums:
+            sc[n] = sc.get(n, 0.0) + wts.get(m, 1.0)
+            who.setdefault(n, []).append(m)
+    ranked = sorted(sc, key=lambda n: (-sc[n], -len(who[n]), n))[:TOP_K]
+    return [{"rank": i + 1, "number": n, "score": round(sc[n], 3), "engines": len(who[n]), "methods": sorted(who[n]),
+             "labels": [METHOD_LABELS.get(m, m) for m in sorted(who[n])]} for i, n in enumerate(ranked)]
+
+
+def learned_top10(by: Dict[Tuple[str, int], Dict[str, List[int]]], win: Dict[int, set], rnd: int) -> Dict[str, Any]:
+    """모든 회차 학습 TOP10 — 회차를 순서대로 지나며 '그 회차 이전' 백테스트 결과만으로 엔진별 적중률(축소 추정)을 학습하고,
+    가중치 = 엔진 적중률 / 13.3%. 각 과거 회차의 TOP10 을 그 시점 가중치로 만들어 실제 당첨과 대조(워크포워드, 미래 정보 없음).
+    비교: 가중 없는 '중복 수' TOP10, 무작위 10개(평균 1.333개 적중)."""
+    import math
+
+    p0 = 6 / 45
+    rounds = sorted(r for (t, r) in by if t == "backtest" and r in win and len(by[(t, r)]) >= 2)
+    stat: Dict[str, List[int]] = {}
+
+    def weights() -> Dict[str, float]:
+        return {m: ((h + p0 * SHRINK_K) / (n + SHRINK_K)) / p0 for m, (h, n) in stat.items()}
+
+    tot_l = tot_u = cnt = 0
+    hist: List[Dict[str, Any]] = []
+    for r in rounds:
+        if r >= rnd:
+            break
+        preds = by[("backtest", r)]
+        w = weights()
+        if stat:  # 학습 기록이 생긴 뒤부터 평가
+            lt = [x["number"] for x in _top10_from(preds, w)]
+            ut = [x["number"] for x in _top10_from(preds, {})]
+            hl = sum(1 for n in lt if n in win[r])
+            hu = sum(1 for n in ut if n in win[r])
+            tot_l += hl
+            tot_u += hu
+            cnt += 1
+            hist.append({"round": r, "hits": hl, "unweighted_hits": hu, "top10": lt, "hit_numbers": sorted(n for n in lt if n in win[r])})
+        for m, nums in preds.items():  # 이 회차 결과를 학습에 반영(다음 회차부터 사용)
+            s_ = stat.setdefault(m, [0, 0])
+            s_[0] += sum(1 for n in nums if n in win[r])
+            s_[1] += len(nums)
+    w = weights()
+    cur = {}
+    for t in ("backtest", "live"):
+        preds = by.get((t, rnd))
+        if preds:
+            items = _top10_from(preds, w)
+            for x in items:
+                x["drawn"] = (x["number"] in win[rnd]) if rnd in win else None
+            cur[t] = {"numbers": items, "hits": sum(1 for x in items if x["drawn"]) if rnd in win else None}
+    exp = TOP_K * p0
+    sd = math.sqrt(cnt * TOP_K * p0 * (1 - p0)) if cnt else 0
+    z = (tot_l - cnt * exp) / sd if sd else 0.0
+    eng = sorted(({"method": m, "label": METHOD_LABELS.get(m, m), "picks": n, "hits": h, "hit_rate": round(h / n, 4) if n else None,
+                   "weight": round(w[m], 3)} for m, (h, n) in stat.items()), key=lambda x: -x["weight"])
+    rate = tot_l / (cnt * TOP_K) if cnt else None
+    return {
+        **cur,
+        "engine_weights": eng,
+        "validation": {"rounds": cnt, "range": f"{hist[0]['round']}~{hist[-1]['round']}회" if hist else "-",
+                       "mean_hits": round(tot_l / cnt, 3) if cnt else None, "hit_rate": round(rate, 4) if rate is not None else None,
+                       "unweighted_mean_hits": round(tot_u / cnt, 3) if cnt else None, "random_mean_hits": round(exp, 3),
+                       "random_rate": round(p0, 4), "z": round(z, 2), "p_two_sided": round(math.erfc(abs(z) / math.sqrt(2)), 4),
+                       "rounds_3plus": sum(1 for x in hist if x["hits"] >= 3),
+                       "random_rounds_3plus": round(cnt * _p_at_least(3), 1)},
+        "recent": list(reversed(hist[-10:])),
+        "verdict": ("학습 TOP10 의 적중률이 무작위와 통계적으로 다릅니다 — 재현 확인 필요" if cnt and abs(z) >= 2.58 else
+                    "모든 이전 회차로 엔진 가중치를 학습해도 TOP10 적중률은 무작위(13.3%)와 통계적으로 같습니다."),
+        "honesty": "TOP10 은 엔진 과거 성적으로 가중한 '엔진 추천 정리'이며, 각 번호의 당첨 확률은 6/45, 조합 1등 확률은 1/8,145,060 으로 학습으로 바뀌지 않습니다.",
+    }
+
+
+def _p_at_least(k: int) -> float:
+    """무작위 10개 번호 중 당첨 6개와 k개 이상 겹칠 확률(초기하)."""
+    from math import comb
+
+    return sum(comb(6, i) * comb(39, TOP_K - i) for i in range(k, 7)) / comb(45, TOP_K)
+
+
 def consensus_ranking(rnd: int) -> Dict[str, Any]:
     """선택 회차에서 여러 엔진이 함께 고른 번호 순위 + 전체 회차에서 'k개 엔진이 고른 번호'의 실제 적중률.
 
@@ -749,8 +837,9 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
                           "hit_rounds": list(reversed(rec["hit_rounds"])), "recent_miss_rounds": list(reversed(rec["miss_rounds"][-8:])),
                           "miss_count": len(rec["miss_rounds"])})
     rng_txt = f"{past[0]}~{past[-1]}회" if past else "-"
+    top10 = learned_top10(by, win, int(rnd))
     out = {"round": int(rnd), "backtest": rank_round("backtest", int(rnd)), "live": rank_round("live", int(rnd)),
-           "this_round": this_round,
+           "this_round": this_round, "top10": top10,
            "all_rounds": {"basis": "per_round_rows", "window": W, "range": rng_txt, "rounds": len(past),
                           "by_engine_count": levels, "bonferroni_alpha": round(alpha, 4),
                           "top_consensus_numbers": all_rank[:15], "selected_round_track": track,

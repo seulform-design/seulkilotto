@@ -376,6 +376,26 @@ def post_predictions_run(x_upgrade_key: Optional[str] = Header(default=None),
     return _bg("predictions", lambda: jobs.run_job("predictions", lambda: P.run_all(engine_rounds=engine_rounds), retries=1))
 
 
+@router.post("/predictions/backfill")
+def post_predictions_backfill(x_upgrade_key: Optional[str] = Header(default=None),
+                              budget_sec: float = Query(900, ge=60, le=3000)):
+    """전 회차 통일 백필 1회(매시간 자동 실행과 동일) — 백그라운드."""
+    _auth(x_upgrade_key)
+    from ..ingest import jobs
+    from ..ingest import predictions as P
+
+    return _bg("prediction_backfill", lambda: jobs.run_job("prediction_backfill", lambda: P.backfill_all(budget_sec), retries=0))
+
+
+@router.get("/predictions/coverage")
+def get_predictions_coverage():
+    """엔진별 사후 백테스트 범위(51회~최신 통일 진행률)."""
+    from ..ingest import predictions as P
+
+    P._ensure()
+    return to_jsonable(P.coverage())
+
+
 @router.get("/official/health")
 def get_official_health(round_no: int = Query(1, alias="round", ge=1)):
     """공식 출처 단계별 진단(DNS·TCP·TLS·HTTP·파싱) + 마지막 정상 검증 시각."""

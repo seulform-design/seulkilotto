@@ -233,6 +233,35 @@ def start_scheduler() -> None:
         misfire_grace_time=3600,
     )
 
+    # ── 예측 기록 전 회차 통일 백필(매시간 50분, 기본 15분 예산) ──
+    #    51회~최신 모든 회차에 같은 엔진 구성(회차통계·추천 엔진 4·앙상블·V12)의 사후 백테스트를 최근 회차부터 채운다.
+    #    추첨일 수집(UTC 12:05·13:35)·일일 동기화(23:10)·OCR(:35)과 겹치지 않게 :50 에 시작. 다 채우면 확인만 하고 끝남.
+    def _prediction_backfill_job():
+        import os as _os
+
+        if _os.environ.get("PREDICTION_BACKFILL_ENABLED", "1") in ("0", "false", "False"):
+            return
+        try:
+            from .ingest import jobs as _ij
+            from .ingest import predictions as _pr
+
+            if not _ij.acquire_lock("job:predictions", ttl_sec=60):  # 정기 예측 작업이 도는 중이면 이번 회는 건너뜀
+                return
+            _ij.release_lock("job:predictions")
+            _ij.run_job("prediction_backfill", _pr.backfill_all, retries=0)
+        except Exception:  # noqa: BLE001
+            logger.exception("[prediction-backfill] 실패")
+
+    _scheduler.add_job(
+        _prediction_backfill_job,
+        CronTrigger(minute=50, timezone="UTC"),
+        id="hourly_prediction_backfill",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1200,
+    )
+
     # ── 엔진 캐시 프리워밍 (부팅 후 1회 + 10분 주기, 15분 TTL 아래로 유지) ──
 
     _scheduler.add_job(

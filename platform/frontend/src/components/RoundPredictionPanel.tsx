@@ -3,7 +3,7 @@
  * + 엔진별 성능(일치 분포·3+/4+ 비율·평균·95% CI·무작위 대비). 실제 저장된 기록만 표시.
  * 모드: live(추첨 전 저장된 사전 예측) / backtest(walk-forward 사후 재현) / historical_replay(보관 용지 재현).
  */
-import { Alert, Box, Chip, LinearProgress, MenuItem, Stack, Switch, TextField, Typography, FormControlLabel } from '@mui/material';
+import { Alert, Box, Chip, LinearProgress, MenuItem, Stack, Switch, Tab, Tabs, TextField, Typography, FormControlLabel } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { EngineSection, EngineStatusChip } from './EngineSection';
@@ -38,6 +38,8 @@ export default function RoundPredictionPanel() {
   const [round, setRound] = useState<number | null>(null);
   const [ptype, setPtype] = useState<'backtest' | 'live' | 'historical_replay'>('backtest');
   const [common, setCommon] = useState(true);
+  // 한 화면에 7개 블록이 세로로 쌓여 중복처럼 보이던 구성을 탭으로 분리(무거운 계산은 그 탭을 열 때만)
+  const [tab, setTab] = useState<'list' | 'consensus' | 'overlap' | 'perf'>('list');
   const sum = useQuery({ queryKey: ['v1-pred-summary'], queryFn: v1Api.getPredictionSummary, staleTime: 120_000 });
   useEffect(() => {
     if (round == null && sum.data?.by_type) {
@@ -53,7 +55,7 @@ export default function RoundPredictionPanel() {
   const perf = useQuery({
     queryKey: ['v1-pred-perf', ptype, common],
     queryFn: () => v1Api.getPredictionPerformance(ptype, common),
-    enabled: open,
+    enabled: open && tab === 'perf',
     staleTime: 300_000,
   });
   const d = det.data;
@@ -62,7 +64,12 @@ export default function RoundPredictionPanel() {
   const [sortBy, setSortBy] = useState<'default' | 'match' | 'overlap'>('default');
   const all: any[] = d?.predictions ?? [];
   const oldCount = all.filter((p) => p.superseded).length;
-  const shown = all.filter((p) => showOld || !p.superseded);
+  const [typeFilter, setTypeFilter] = useState<'all' | 'live' | 'backtest' | 'historical_replay'>('all');
+  const shown = all.filter((p) => (showOld || !p.superseded) && (typeFilter === 'all' || p.type === typeFilter));
+  const typeCount = (t: string) => all.filter((p) => !p.superseded && p.type === t).length;
+  const cov = sum.data?.coverage;
+  const liveSince: number | null = cov?.live_since ?? null;
+  const cons = d?.consistency;
   const [ovK, setOvK] = useState<'all' | 3 | 4 | 5>('all');
   const [ovSameEngine, setOvSameEngine] = useState(false);
   const [ovLimit, setOvLimit] = useState(20);
@@ -167,10 +174,61 @@ export default function RoundPredictionPanel() {
         )}
       </Stack>
 
-      {round != null && open && <ConsensusRankingCard round={round} />}
+      {d && round != null && (
+        <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, p: 0.75, mb: 1 }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, display: 'block' }}>
+            📋 {round}회 기록 구성 — 사전 예측 {typeCount('live')} · 사후 백테스트 {typeCount('backtest')} · 용지 재현 {typeCount('historical_replay')}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" component="div">
+            {typeCount('live') > 0
+              ? '추첨 전에 저장된 사전 예측과, 같은 이전 데이터로 다시 계산한 사후 백테스트가 함께 있는 회차입니다.'
+              : liveSince != null && round < liveSince
+                ? `사전 예측은 자동 예측 저장이 시작된 ${liveSince}회부터만 있습니다. 그 이전 회차는 추첨 전에 저장된 기록이 없어 사후 백테스트(그 회차 이전 데이터로 재현)만 있고, 과거 회차의 '사전 예측'은 만들지 않습니다(추첨 후에 만든 것을 사전 예측으로 표시하면 조작이 됨).`
+                : '사전 예측이 아직 없는 회차입니다.'}
+          </Typography>
+          {cons && cons.compared > 0 && (
+            <Typography variant="caption" component="div" color={cons.different.length ? 'warning.main' : 'success.main'} sx={{ mt: 0.25 }}>
+              사전 ↔ 사후 재현 대조: {cons.compared}개 중 {cons.same}개 번호 동일
+              {cons.different.length
+                ? ` · 다름 ${cons.different.length}개(${cons.different.join(', ')}) — 2026-11-14 이전 버전 사전 예측(시드 없는 클래식 엔진·V12 w4 가중치/투표 구성 차이)이라 그대로 보존합니다. 1251회부터는 같은 절차라 동일해야 합니다.`
+                : ' — 같은 데이터·같은 절차로 재현됩니다.'}
+            </Typography>
+          )}
+          {cov && !cov.complete && (
+            <Box sx={{ mt: 0.5 }}>
+              <Typography variant="caption" color="text.secondary" component="div">
+                전 회차 통일 백필 진행 중({cov.from}~{cov.to}회, {cov.eligible_rounds}회) — 매시간 자동으로 최근 회차부터 채웁니다. 아직 안 채워진 회차는 일부 엔진만 보입니다.
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.25 }}>
+                {(cov.methods as any[]).filter((m) => !m.complete).map((m) => (
+                  <Chip key={m.method} size="small" variant="outlined"
+                    label={`${m.label} ${m.rounds}/${cov.eligible_rounds}${m.first_round ? ` (${m.first_round}회~)` : ''}`} />
+                ))}
+              </Stack>
+            </Box>
+          )}
+        </Box>
+      )}
 
-      {d && d.predictions.length === 0 && <Alert severity="info" sx={{ py: 0.25 }}>이 회차의 예측 기록이 없습니다.</Alert>}
-      {d && d.predictions.length > 0 && (
+      <Tabs value={tab} onChange={(_e, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile
+        sx={{ minHeight: 36, mb: 1, borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { minHeight: 36, py: 0.5, textTransform: 'none', fontWeight: 700 } }}>
+        <Tab value="list" label={`예측 목록${d ? ` (${all.filter((p) => !p.superseded).length})` : ''}`} />
+        <Tab value="consensus" label="엔진 중복 번호" />
+        <Tab value="overlap" label={`조합 겹침 3·4·5개${d ? ` (${overlaps.length})` : ''}`} />
+        <Tab value="perf" label="엔진별 성적" />
+      </Tabs>
+
+      {tab === 'consensus' && round != null && open && (
+        <>
+          <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.5 }}>
+            번호 기준 — 여러 엔진이 함께 고른 번호·번호 쌍(2·3·4개)의 순위와 엔진 과거 성적으로 가중한 TOP10, 전 회차 검증.
+          </Typography>
+          <ConsensusRankingCard round={round} />
+        </>
+      )}
+
+      {tab === 'list' && d && d.predictions.length === 0 && <Alert severity="info" sx={{ py: 0.25 }}>이 회차의 예측 기록이 없습니다.</Alert>}
+      {tab === 'overlap' && d && d.predictions.length > 0 && (
         <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, p: 0.75, mb: 1 }}>
           <Typography variant="caption" sx={{ fontWeight: 800, display: 'block' }}>
             🧩 {round}회 예측끼리 겹친 번호 순위 — 여러 조합이 같은 번호 3·4·5개 이상을 함께 담은 묶음 (이전 버전·무작위 기준선 제외)
@@ -208,15 +266,22 @@ export default function RoundPredictionPanel() {
           )}
           <Typography variant="caption" color="text.disabled" component="div">
             순위 = 그 묶음을 담은 엔진 수 → 조합 수 → 묶음 크기 순. 같은 조합들이 공유하는 묶음은 가장 큰 것만 표시합니다(5개 공유 안의 3·4개 묶음 중복 제외).
-            겹침은 엔진들이 같은 과거 데이터로 비슷하게 계산했다는 뜻일 뿐 당첨 확률을 높이지 않습니다. 학습 기반 순위와 전 회차 검증은 위 '엔진 중복 묶음'(2·3·4개)에 있습니다.
+            겹침은 엔진들이 같은 과거 데이터로 비슷하게 계산했다는 뜻일 뿐 당첨 확률을 높이지 않습니다. 번호 기준 순위·학습 TOP10·전 회차 검증은 '엔진 중복 번호' 탭에 있습니다.
           </Typography>
         </Box>
       )}
+      {tab === 'list' && (<>
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
         <TextField select size="small" value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} sx={{ minWidth: 150 }}>
           <MenuItem value="default">엔진 순</MenuItem>
           <MenuItem value="match">일치 많은 순</MenuItem>
           <MenuItem value="overlap">겹침 많은 순</MenuItem>
+        </TextField>
+        <TextField select size="small" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)} sx={{ minWidth: 140 }}>
+          <MenuItem value="all">전체 유형</MenuItem>
+          <MenuItem value="live">사전 예측 ({typeCount('live')})</MenuItem>
+          <MenuItem value="backtest">사후 백테스트 ({typeCount('backtest')})</MenuItem>
+          <MenuItem value="historical_replay">용지 재현 ({typeCount('historical_replay')})</MenuItem>
         </TextField>
         {oldCount > 0 && (
           <FormControlLabel control={<Switch size="small" checked={showOld} onChange={(e) => setShowOld(e.target.checked)} />}
@@ -236,6 +301,12 @@ export default function RoundPredictionPanel() {
               {p.superseded && <Chip size="small" variant="outlined" label="이전 버전(대체됨)" />}
               {(maxOverlap.get(p.prediction_id) ?? 0) >= 3 && !p.superseded && (
                 <Chip size="small" color="secondary" variant="outlined" label={`다른 엔진과 ${maxOverlap.get(p.prediction_id)}개 겹침`} />
+              )}
+              {p.reproduced === true && !p.superseded && (
+                <Chip size="small" color="success" variant="outlined" label={p.type === 'live' ? '사후 재현과 동일' : '사전 예측과 동일'} />
+              )}
+              {p.reproduced === false && !p.superseded && (
+                <Chip size="small" color="warning" variant="outlined" label={p.type === 'live' ? '사후 재현과 다름' : '사전 예측과 다름'} />
               )}
               {(sameCount.get(sameKey(p)) ?? 0) > 1 && (
                 <Chip size="small" variant="outlined" label={`동일 조합 ×${sameCount.get(sameKey(p))}`} />
@@ -264,8 +335,10 @@ export default function RoundPredictionPanel() {
           </Box>
         ))}
       </Stack>
+      </>)}
 
-      <Box sx={{ mt: 2 }}>
+      {tab === 'perf' && (
+      <Box>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>엔진별 성적</Typography>
           <TextField select size="small" value={ptype} onChange={(e) => setPtype(e.target.value as any)} sx={{ minWidth: 140 }}>
@@ -309,7 +382,11 @@ export default function RoundPredictionPanel() {
             <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>{perf.data.honesty}</Typography>
           </>
         )}
+        <Typography variant="caption" color="text.disabled" component="div" sx={{ mt: 0.5 }}>
+          엔진 감사·진단(성능 순위·공통번호·저성과 개선)과 회차별 성적 감사는 아래 '엔진 성적 · 감사' 묶음에 있습니다.
+        </Typography>
       </Box>
+      )}
     </EngineSection>
   );
 }

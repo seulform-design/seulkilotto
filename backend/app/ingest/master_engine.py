@@ -22,7 +22,14 @@ from . import reverse_analysis as R
 EXP = 0.8
 VAR1 = R.VAR1
 PERIODS = (("last20", 20), ("last50", 50), ("last100", 100), ("all", None))
-WEIGHTS_VERSION = "v12-w4"
+WEIGHTS_VERSION = "v12-w5"
+# w5(2026-11-14): 사전 예측(v12_current)과 사후 재현(v12_walk_forward)을 '같은 함수·같은 입력 규칙'으로 통일.
+#  - 엔진 가중치: 둘 다 대상 회차 직전 V12_WEIGHT_WINDOW 회 백테스트 성적(이전엔 live=v9 전체 보고서, 백테스트=전체 과거 평균)
+#  - 투표 엔진: 51회~최신 전 회차에 존재하는 엔진만(회차통계 6·추천 엔진 4·앙상블). 유튜브 용지 방식은 용지가 있는
+#    회차에만 있어 회차마다 구성이 달라지므로 제외(이전엔 live 에만 섞여 백테스트와 달랐음)
+#  - 과거 당첨 조합 회피: 대상 회차 이전 당첨만(이전엔 백테스트도 전체 이력 → 대상·이후 회차 당첨 조합 참조 누수)
+#  조합 설계(COVER_DESIGN)·번호 점수 가중치(WEIGHTS)는 w4 와 동일.
+V12_WEIGHT_WINDOW = 100
 # w4(2026-11-14): 10조합을 '하나의 통합 세트'로 설계. 진단: w1~w3 의 10조합은 상위 번호를 반복 사용해 서로 겹쳤고,
 # 8,145,060개 당첨 조합 전수 계산에서 '10조합 중 1장 이상 5등(3개+) 이상' 확률이 17.7~20.4% 였다(같은 번호를 덜 겹치게
 # 펼치면 23.0%). 기대 일치 수(0.8/조합)·1등 확률(10/8,145,060)은 조합 구성과 무관하므로 바꿀 수 있는 것은 '회차당 하나라도
@@ -344,6 +351,7 @@ def v10_number_bias() -> Dict[str, Any]:
 def _random_portfolio(n_games: int, sims: int, seed: int) -> Tuple[np.ndarray, np.ndarray]:
     """같은 게임 수(회차×조합)의 무작위 구매 — 게임당 일치 수 ~ 초기하(6, 39, 6). (평균, 3+ 개수) 분포."""
     g = np.random.default_rng(seed)
+    sims = max(400, min(int(sims), 6_000_000 // max(1, int(n_games))))  # 전 회차(수만 게임)에서도 메모리 ~50MB 이내
     m = g.hypergeometric(6, 39, 6, size=(sims, n_games))
     return m.mean(axis=1), (m >= 3).sum(axis=1)
 
@@ -458,11 +466,44 @@ def calibrate_tiers(scores: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
-def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 6000) -> List[Dict[str, Any]]:
-    """w4: 통합 1세트(전 번호 커버 설계). 이전 방식은 generate_combos_w3 로 보존."""
+def generate_combos(scores: List[Dict[str, Any]], seed: int, sample_n: int = 6000, prior=None) -> List[Dict[str, Any]]:
+    """w4: 통합 1세트(전 번호 커버 설계). 이전 방식은 generate_combos_w3 로 보존.
+    prior(대상 회차 이전 당첨 목록)를 주면 그 회차들만 '과거 당첨 조합'으로 회피 — 사후 재현에서 미래 당첨 참조 차단."""
     scores = calibrate_tiers(scores)
-    past = {tuple(sorted(d.numbers)) for d in _draws_cache()}
+    past = {tuple(sorted(d.numbers)) for d in (prior if prior is not None else _draws_cache())}
     return cover_combos(scores, seed=seed, past=past)
+
+
+def v12_vote_methods() -> List[str]:
+    """V12 투표 엔진 — 전 회차 공통 구성(회차통계 6·추천 엔진 4·앙상블)."""
+    from . import predictions as P
+
+    return [m for m in P.uniform_methods() if m != "v12_integrated"]
+
+
+def _prior_weights(ser: Dict[str, Dict[int, Tuple]], target: int) -> Dict[str, float]:
+    """엔진 가중치 = 대상 회차 직전 V12_WEIGHT_WINDOW 회 평균 일치 / 0.8 (기록 20회 미만이면 1.0). 사전·사후 동일."""
+    w = {}
+    for m, recs in ser.items():
+        past = [v[1] for r, v in recs.items() if target - V12_WEIGHT_WINDOW <= r < target]
+        w[m] = (sum(past) / len(past) / EXP) if len(past) >= 20 else 1.0
+    return w
+
+
+def _v12_from_votes(target: int, prior, votes: Dict[int, float], val: Dict[int, float],
+                    bonus: Optional[Dict[int, float]] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """V12 공통 절차(사전 예측·사후 재현 모두 이 함수): 번호 점수 → (채택 규칙 보너스) → 등급 보정 → 10조합."""
+    sc = number_scores(prior, votes, val)
+    if bonus:
+        for r_ in sc:
+            r_["score"] = round(r_["score"] + bonus.get(r_["number"], 0.0), 4)
+            r_["pattern_bonus"] = bonus.get(r_["number"], 0.0)
+        sc.sort(key=lambda r_: (-r_["score"], r_["number"]))
+        for i, r_ in enumerate(sc, start=1):
+            r_["rank"] = i
+            r_["tier"] = "A" if i <= 10 else "B" if i <= 20 else "C" if i <= 30 else "-"
+    sc = calibrate_tiers(sc)
+    return sc, generate_combos(sc, seed=target, prior=prior)
 
 
 _DRAWS = {"n": None, "v": []}
@@ -567,16 +608,21 @@ def generate_combos_w3(scores: List[Dict[str, Any]], seed: int, sample_n: int = 
 
 def _votes_for(round_no: int, ptypes: Sequence[str], weights: Dict[str, float],
                exclude: Sequence[str] = (), damp: Optional[Dict[str, List[str]]] = None,
-               prior=None) -> Tuple[Dict[int, float], Dict[int, float], List[str]]:
-    """damp: 엔진별 약점 조건(두 기간 재현) — 그 조건에 해당하는 번호에 대한 그 엔진의 표는 절반만 반영."""
+               prior=None, only: Optional[Sequence[str]] = None) -> Tuple[Dict[int, float], Dict[int, float], List[str]]:
+    """damp: 엔진별 약점 조건(두 기간 재현) — 그 조건에 해당하는 번호에 대한 그 엔진의 표는 절반만 반영.
+    only: 이 엔진들만 투표(전 회차 공통 구성)."""
     rows = db.query("SELECT prediction_method, predicted_numbers, prediction_type FROM round_prediction_history "
-                    "WHERE draw_round = ? AND prediction_rank = 1 AND prediction_status <> 'superseded'", (round_no,))
+                    "WHERE draw_round = ? AND prediction_rank = 1 AND prediction_status <> 'superseded' "
+                    "ORDER BY prediction_method", (round_no,))
+    only_s = set(only) if only is not None else None
     votes: Dict[int, float] = {}
     val: Dict[int, float] = {}
     used = []
     seen = set()
     for m, nums, t in rows:
         if t not in ptypes or m in EXCLUDE_VOTES or m.startswith("v12") or m in seen or m in exclude:
+            continue
+        if only_s is not None and m not in only_s:
             continue
         seen.add(m)
         used.append(m)
@@ -592,56 +638,78 @@ def _votes_for(round_no: int, ptypes: Sequence[str], weights: Dict[str, float],
     return votes, val, used
 
 
-def v12_walk_forward(rounds: Optional[int] = None, store: bool = True) -> Dict[str, Any]:
-    """V12 절차 그대로(그 회차 이전 공식 결과 + 그 회차용 백테스트 엔진 추천 + 그 이전까지의 엔진 성과 가중)를
-    최근 N회에 적용해 10조합의 실제 일치 수를 무작위(같은 10조합/회차)·기존 단일 엔진과 비교. 가중치 조정 없음."""
-    import os
+def v12_walk_forward(rounds: Optional[int] = None, store: bool = True, time_budget_sec: Optional[float] = None,
+                     record: bool = True) -> Dict[str, Any]:
+    """V12 사후 재현 — 사전 예측(v12_current)과 같은 _v12_from_votes 절차를 51회~최신 전 회차에 적용.
+    회차 R: R 이전 공식 결과 + R 용 백테스트 엔진 추천(각자 R 이전 데이터) + R 직전 100회 엔진 성적 가중.
+    통일 조건: 투표 엔진 구성이 최신 회차와 같고(그 회차·직전 100회 모두), 아니면 엔진 백필을 기다린다.
+    이미 저장된 현재 버전 회차는 다시 계산하지 않고(불변) 검증 통계에 그대로 쓴다. 가중치 조정 없음."""
+    import time as _t
 
     from . import predictions as P
     from ..stats_engine.draws import load_draws
 
-    rounds = int(rounds or os.environ.get("V12_BACKTEST_ROUNDS", "200"))
+    t0 = _t.time()
     draws = load_draws()
-    ser = {m: v for (t, m), v in _series().items() if t == "backtest"}
-    targets = [d for d in draws[-rounds:]]
-    wf_version = f"{WEIGHTS_VERSION}-wf"
-    stored_rounds = {int(r[0]) for r in db.query(
-        "SELECT DISTINCT draw_round FROM round_prediction_history WHERE prediction_method = 'v12_integrated' "
-        "AND prediction_type = 'backtest' AND engine_version = ?", (wf_version,))}
-    written = 0
     idx_of = {d.round: i for i, d in enumerate(draws)}
-    res = {"core": [], "dispersion": [], "experimental": [], "all": []}
-    leak_violations = 0
-    for d in targets:
-        prior = draws[:idx_of[d.round]]
-        if prior and prior[-1].round >= d.round:
-            leak_violations += 1
+    targets = list(draws[P.MIN_PRIOR_ROUNDS:])
+    if rounds:
+        targets = targets[-int(rounds):]
+    ser = {m: v for (t, m), v in _series().items() if t == "backtest"}
+    wf_version = f"{WEIGHTS_VERSION}-wf"
+    vote_methods = v12_vote_methods()
+    have: Dict[int, set] = {}
+    for r, m in db.query("SELECT DISTINCT draw_round, prediction_method FROM round_prediction_history WHERE prediction_type = 'backtest' "
+                         "AND prediction_rank = 1 AND prediction_status <> 'superseded'"):
+        have.setdefault(int(r), set()).add(m)
+    latest_r = draws[-1].round if draws else 0
+    required = {m for m in vote_methods if m in have.get(latest_r, set())}  # 최신 회차의 엔진 구성 = 전 회차 기준
+    first_any = min(have) if have else 0
+
+    def ready(r: int) -> bool:
+        lo = max(first_any, r - V12_WEIGHT_WINDOW)
+        return bool(required) and all(required <= have.get(x, set()) for x in range(lo, r + 1) if x in idx_of)
+
+    stored: Dict[int, List[Tuple[List[int], Optional[str]]]] = {}
+    for r, nums, note in db.query("SELECT draw_round, predicted_numbers, source_note FROM round_prediction_history "
+                                  "WHERE prediction_method = 'v12_integrated' AND prediction_type = 'backtest' "
+                                  "AND engine_version = ? AND prediction_status <> 'superseded'", (wf_version,)):
+        stored.setdefault(int(r), []).append((db.loads(nums), note))
+    written, waiting, remaining = 0, 0, 0
+    for d in reversed(targets):  # 최근 회차부터
+        if d.round in stored:
             continue
-        w = {}
-        for m, recs in ser.items():
-            past = [v[1] for r, v in recs.items() if r < d.round]
-            w[m] = (sum(past) / len(past) / EXP) if len(past) >= 20 else 1.0
-        votes, val, _used = _votes_for(d.round, ("backtest",), w)
-        sc = number_scores(prior, votes, val)
-        combos = generate_combos(sc, seed=d.round, sample_n=1500)
-        if store and d.round not in stored_rounds and len(_used) >= 3:
-            # 그 회차 이전 데이터 + 그 회차용 백테스트 엔진 추천(각자 이전 데이터)만으로 만든 10조합 — 사후 생성 기록
+        if not ready(d.round):
+            waiting += 1
+            continue
+        if time_budget_sec is not None and _t.time() - t0 > time_budget_sec:
+            remaining += 1
+            continue
+        prior = draws[:idx_of[d.round]]
+        votes, val, _used = _votes_for(d.round, ("backtest",), _prior_weights(ser, d.round), only=vote_methods)
+        _sc, combos = _v12_from_votes(d.round, prior, votes, val)
+        if store:
             with db.transaction() as c:
-                # 이전 버전 백테스트는 지우지 않고 superseded 로 표시(번호 보존, 집계는 현재 버전만)
-                c.execute("UPDATE round_prediction_history SET prediction_status = 'superseded' WHERE draw_round = ? "
-                          "AND prediction_method = 'v12_integrated' AND prediction_type = 'backtest' AND engine_version <> ?",
-                          (d.round, wf_version))
                 for cb in combos:
                     written += P.save_prediction(c, rnd=d.round, method="v12_integrated", ptype="backtest",
                                                  numbers=cb["numbers"], rank=cb["rank"], score=cb["combo_score"],
                                                  engine_version=wf_version,
                                                  training_range=f"{prior[0].round}-{prior[-1].round}",
                                                  training_count=len(prior), note=cb["group"])
+                # 이전 버전 백테스트는 지우지 않고 superseded 로 표시(번호 보존, 집계는 현재 버전만)
+                c.execute("UPDATE round_prediction_history SET prediction_status = 'superseded' WHERE draw_round = ? "
+                          "AND prediction_method = 'v12_integrated' AND prediction_type = 'backtest' AND engine_version <> ?",
+                          (d.round, wf_version))
+        stored[d.round] = [(cb["numbers"], cb["group"]) for cb in combos]
+    done = [d for d in targets if d.round in stored]
+    res: Dict[str, List[int]] = {"core": [], "dispersion": [], "experimental": [], "all": []}
+    for d in done:
         ws = set(d.numbers)
-        for c in combos:
-            k = len(set(c["numbers"]) & ws)
-            res[c["group"]].append(k)
-            res["all"].append(k)
+        for nums, grp in stored[d.round]:
+            k = len(set(nums) & ws)
+            res.setdefault(grp or "all", []).append(k)
+            if grp:
+                res["all"].append(k)
     out = {}
     for g, ms in res.items():
         if not ms:
@@ -655,8 +723,8 @@ def v12_walk_forward(rounds: Optional[int] = None, store: bool = True) -> Dict[s
     for m, recs in ser.items():
         if m in EXCLUDE_VOTES:
             continue
-        ms = [recs[d.round][1] for d in targets if d.round in recs]
-        if len(ms) >= len(targets) * 0.9:
+        ms = [recs[d.round][1] for d in done if d.round in recs]
+        if done and len(ms) >= len(done) * 0.9:
             mean = sum(ms) / len(ms)
             if best_single is None or mean > best_single["mean"]:
                 best_single = {"method": m, "mean": round(mean, 4), "rounds": len(ms), "note": "사후에 고른 최고 단일 엔진(낙관적 비교 대상)"}
@@ -664,18 +732,20 @@ def v12_walk_forward(rounds: Optional[int] = None, store: bool = True) -> Dict[s
     status = "promoted" if p_all < 0.05 / 4 else "candidate_only"
     verdict = ("V12 10조합이 같은 조건 무작위보다 보정 후 유의하게 높음 — 독립 기간 재현 필요" if status == "promoted" else
                "V12 10조합 성과는 같은 조건 무작위 구매와 통계적으로 구분되지 않음 → '후보 생성'만 하고 성능 우위는 주장하지 않음")
-    rep = {"kind": "v12_validation", "rounds": len(targets), "from": targets[0].round if targets else None,
-           "to": targets[-1].round if targets else None, "groups": out, "best_single_engine": best_single,
-           "leak_violations": leak_violations, "weights_version": WEIGHTS_VERSION, "status": status, "verdict": verdict,
-           "stored_backtest_predictions": written}
-    with db.transaction() as c:
-        import uuid
+    rep = {"kind": "v12_validation", "rounds": len(done), "from": done[0].round if done else None,
+           "to": done[-1].round if done else None, "groups": out, "best_single_engine": best_single,
+           "leak_violations": 0, "weights_version": WEIGHTS_VERSION, "status": status, "verdict": verdict,
+           "stored_backtest_predictions": written, "remaining": remaining, "waiting_for_engine_backfill": waiting,
+           "eligible_rounds": len(targets), "vote_methods": sorted(required)}
+    if (record or written) and done:
+        with db.transaction() as c:
+            import uuid
 
-        c.execute("INSERT INTO engine_versions (version_id,engine,params_json,status,selection_range,holdout_range,metrics_json,"
-                  "reason,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                  (uuid.uuid4().hex, "v12:integrated", db.dumps({"weights": WEIGHTS, "version": WEIGHTS_VERSION}), status,
-                   "사전 고정(선택 없음)", f"{rep['from']}-{rep['to']}", db.dumps(out), verdict, db.now_iso()))
-    R._save("v12_validation", rep["to"], rep)
+            c.execute("INSERT INTO engine_versions (version_id,engine,params_json,status,selection_range,holdout_range,metrics_json,"
+                      "reason,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                      (uuid.uuid4().hex, "v12:integrated", db.dumps({"weights": WEIGHTS, "version": WEIGHTS_VERSION}), status,
+                       "사전 고정(선택 없음)", f"{rep['from']}-{rep['to']}", db.dumps(out), verdict, db.now_iso()))
+        R._save("v12_validation", rep["to"], rep)
     return rep
 
 
@@ -690,8 +760,8 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
     target = latest.round + 1
     draw_day = date(2002, 12, 7) + timedelta(days=7 * (target - 1))
     cutoff = P.draw_cutoff(target)
-    v9 = R.last_report("v9") or {}
-    w = {x["method"]: (x["periods"]["all"].get("mean") or EXP) / EXP for x in v9.get("methods", []) if x["type"] == "backtest"}
+    # w5: 사후 재현(v12_walk_forward)과 같은 가중치 규칙 — 대상 회차 직전 100회 백테스트 성적
+    w = _prior_weights({m: v for (t, m), v in _series().items() if t == "backtest"}, target)
     try:
         from . import round_audit as _RA
 
@@ -704,7 +774,8 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
         cons_bonus, eng_weak = _RA2.consensus_adjustments(draws)
     except Exception:  # noqa: BLE001
         cons_bonus, eng_weak = {}, {}
-    votes, val, used = _votes_for(target, ("live",), w, exclude=audit_excluded, damp=eng_weak, prior=draws)
+    votes, val, used = _votes_for(target, ("live",), w, exclude=audit_excluded, damp=eng_weak, prior=draws,
+                                  only=v12_vote_methods())
     vote_source = "live(대상 회차 사전 예측)"
     if not used:  # 아직 live 예측이 없으면 회차통계 순위로 대체(같은 이전 데이터)
         from ..stats_engine.backtest import _rankings
@@ -718,7 +789,6 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
                         votes[x] = votes.get(x, 0) + 1
                         val[x] = val.get(x, 0) + w.get(f"stats_{s}", 1.0)
         vote_source = "회차통계 6전략 즉시 계산(live 미생성)"
-    sc = number_scores(draws, votes, val)
     try:  # 두 기간에서 재현된 당첨 패턴만 점수 보정(없으면 변화 없음)
         from . import round_audit as _RA
 
@@ -727,16 +797,11 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
         bonus = {}
     for n_, b_ in cons_bonus.items():  # 중복 추천 잡은/못 잡은 회차 비교에서 두 기간 재현된 규칙
         bonus[n_] = bonus.get(n_, 0.0) + b_
-    if bonus:
-        for r_ in sc:
-            r_["score"] = round(r_["score"] + bonus.get(r_["number"], 0.0), 4)
-            r_["pattern_bonus"] = bonus.get(r_["number"], 0.0)
-        sc.sort(key=lambda r_: (-r_["score"], r_["number"]))
-        for i, r_ in enumerate(sc, start=1):
-            r_["rank"] = i
-            r_["tier"] = "A" if i <= 10 else "B" if i <= 20 else "C" if i <= 30 else "-"
-    sc = calibrate_tiers(sc)  # 화면의 A/B/C 도 미출 구간 보정된 등급으로(조합 생성과 동일)
-    combos = generate_combos(sc, seed=target)
+    # 사후 재현과 같은 공통 절차. 학습 보정(채택 규칙·감사 제외·약점 감쇠)은 전 이력에서 배운 것이라 과거 회차 재현에
+    # 쓰면 미래 참조가 되므로 사전 예측에만 적용된다 — 적용 건수를 기록해 사전≠사후 원인을 화면에서 확인 가능하게 함.
+    sc, combos = _v12_from_votes(target, draws, votes, val, bonus)
+    learned_adj = {"bonus_numbers": len([v for v in bonus.values() if v]), "audit_excluded": len(audit_excluded),
+                   "weak_engines": len(eng_weak)}
     now = datetime.now(timezone.utc)
     saved = 0
     note = None
@@ -780,6 +845,7 @@ def v12_current(save_live: bool = True) -> Dict[str, Any]:
            "draw_date": draw_day.isoformat(), "data_cutoff_utc": cutoff.isoformat(), "data_cutoff_kst": f"{draw_day.isoformat()} 20:00 KST",
            "data_basis": f"1~{latest.round}회 공식 결과", "vote_source": vote_source, "engines_voting": used, "engines_excluded_by_audit": audit_excluded, "engine_weak_conditions": eng_weak,
            "consensus_rule_bonus": {str(k): v for k, v in cons_bonus.items()},
+           "learned_adjustments": learned_adj, "procedure": "v12-w5 공통 절차(사후 재현과 동일 함수·동일 가중치·동일 투표 엔진)",
            "numbers": sc, "groups": {"A": [r["number"] for r in sc if r["tier"] == "A"],
                                       "B": [r["number"] for r in sc if r["tier"] == "B"],
                                       "C": [r["number"] for r in sc if r["tier"] == "C"]},
@@ -810,7 +876,9 @@ def run_master() -> Dict[str, Any]:
     steps["v9"] = len(v9_reliability()["methods"])
     steps["v10"] = v10_number_bias()["most_over_recommended"]
     steps["v11"] = len(v11_random_sim()["methods"])
-    wf = v12_walk_forward()
+    import os as _os
+
+    wf = v12_walk_forward(time_budget_sec=float(_os.environ.get("V12_BACKFILL_BUDGET_SEC", "600")))
     steps["v12_validation"] = wf["status"]
     steps["v12_backtest_stored"] = wf.get("stored_backtest_predictions", 0)
     steps["evaluate_backfill"] = P.evaluate_pending()

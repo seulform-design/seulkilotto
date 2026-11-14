@@ -181,39 +181,70 @@ def backtest_stats(first: int = 51) -> Dict[str, Any]:
     return {"written": written}
 
 
-def backtest_engines(last_n: int = 100, sources: Iterable[str] = ("machine", "classic", "parallel", "decade")) -> Dict[str, Any]:
-    """기존 추천 엔진(추첨기·클래식·평행·구간미출) — 최근 last_n 회 walk-forward(무거움: 회차당 ~0.5s×엔진)."""
+ENGINE_SOURCES = ("machine", "classic", "parallel", "decade")
+MIN_PRIOR_ROUNDS = 50  # 모든 엔진 공통 시작 조건: 대상 회차 이전 50회 이상(=51회부터) — 회차마다 같은 엔진 구성
+
+
+def engine_version(src: str) -> str:
+    """추천 엔진 기록 버전. classic 은 2026-11-14 부터 대상 회차 시드 고정(이전 기록은 무작위라 재현 불가 → 대체됨 표시)."""
+    from ..prediction_signals import RULES_VERSION
+
+    return f"signals-{RULES_VERSION}" + ("-seeded" if src == "classic" else "")
+
+
+def _supersede_other_versions(c, *, rnd: int, method: str, ptype: str, keep_version: str) -> None:
+    """같은 회차·방식·유형의 다른 버전 기록은 지우지 않고 superseded(번호·시각 보존, 화면·집계는 현재 버전만)."""
+    c.execute("UPDATE round_prediction_history SET prediction_status = 'superseded' WHERE draw_round = ? "
+              "AND prediction_method = ? AND prediction_type = ? AND engine_version <> ? AND prediction_status <> 'superseded'",
+              (int(rnd), method, ptype, keep_version))
+
+
+def _target_rounds(all_rounds: Sequence[int], last_n: Optional[int]) -> List[int]:
+    """walk-forward 대상 회차 — 이전 회차가 MIN_PRIOR_ROUNDS 이상인 모든 회차(last_n 이면 최근 last_n 회만)."""
+    rounds = list(all_rounds)[MIN_PRIOR_ROUNDS:]
+    return rounds[-int(last_n):] if last_n else rounds
+
+
+def backtest_engines(last_n: Optional[int] = None, sources: Iterable[str] = ENGINE_SOURCES,
+                     time_budget_sec: Optional[float] = None) -> Dict[str, Any]:
+    """기존 추천 엔진(추첨기·클래식·평행·구간미출) walk-forward — last_n 없으면 51회~최신 전 회차(회차당 ~0.7s).
+    최근 회차부터 채우고, 시간 예산을 넘으면 멈춘 뒤 다음 실행이 이어서 채운다."""
+    import time as _t
+
     from ..database import load_history
-    from ..prediction_signals import RULES_VERSION, _source_top_numbers
+    from ..prediction_signals import _source_top_numbers
 
     _ensure()
+    t0 = _t.time()
     df = load_history().sort_values("round")
-    rounds = [int(r) for r in df["round"].tolist()][-int(last_n):]
-    have = {(int(r[0]), r[1]) for r in db.query(
-        "SELECT draw_round, prediction_method FROM round_prediction_history WHERE prediction_type = 'backtest'")}
-    written = 0
-    for r in rounds:
+    rounds = _target_rounds([int(r) for r in df["round"].tolist()], last_n)
+    have = {(int(r[0]), r[1], r[2]) for r in db.query(
+        "SELECT draw_round, prediction_method, engine_version FROM round_prediction_history "
+        "WHERE prediction_type = 'backtest' AND prediction_status <> 'superseded'")}
+    todo = [(r, s) for r in reversed(rounds) for s in sources if (r, f"engine_{s}", engine_version(s)) not in have]
+    written, done = 0, 0
+    for r, src in todo:
+        if time_budget_sec is not None and _t.time() - t0 > time_budget_sec:
+            break
         prior = df[df["round"] < r]
-        if len(prior) < 50:
+        done += 1
+        top = _source_top_numbers(prior, src, r, 6)
+        if len(top) < 6:
             continue
-        for src in sources:
-            m = f"engine_{src}"
-            if (r, m) in have:
-                continue
-            top = _source_top_numbers(prior, src, r, 6)
-            if len(top) < 6:
-                continue
-            with db.transaction() as c:
-                written += save_prediction(c, rnd=r, method=m, ptype="backtest", numbers=top[:6],
-                                           engine_version=f"signals-{RULES_VERSION}",
-                                           training_range=f"{int(prior['round'].min())}-{int(prior['round'].max())}",
-                                           training_count=len(prior))
-    return {"written": written, "rounds": [rounds[0], rounds[-1]] if rounds else []}
+        m, ver = f"engine_{src}", engine_version(src)
+        with db.transaction() as c:
+            if save_prediction(c, rnd=r, method=m, ptype="backtest", numbers=top[:6], engine_version=ver,
+                               training_range=f"{int(prior['round'].min())}-{int(prior['round'].max())}",
+                               training_count=len(prior)):
+                written += 1
+                _supersede_other_versions(c, rnd=r, method=m, ptype="backtest", keep_version=ver)
+    return {"written": written, "rounds": [rounds[0], rounds[-1]] if rounds else [],
+            "remaining": max(0, len(todo) - done), "seconds": round(_t.time() - t0, 1)}
 
 
-def backtest_ensemble(last_n: int = 100, time_budget_sec: float = 900.0) -> Dict[str, Any]:
+def backtest_ensemble(last_n: Optional[int] = None, time_budget_sec: float = 900.0) -> Dict[str, Any]:
     """앙상블(번호추천) 5조합 — 회차 R 은 R 이전 당첨 이력만(intent=review: 신호도 R 이전만 사용).
-    회차당 수십 초라 시간 예산 안에서 최근 회차부터 채우고, 다음 실행이 이어서 채운다."""
+    last_n 없으면 51회~최신 전 회차. 회차당 수십 초라 시간 예산 안에서 최근 회차부터 채우고, 다음 실행이 이어서 채운다."""
     import time as _t
 
     from ..analytics import ENSEMBLE_ALGORITHM_VERSION, generate_ensemble_sets
@@ -222,9 +253,10 @@ def backtest_ensemble(last_n: int = 100, time_budget_sec: float = 900.0) -> Dict
     _ensure()
     t0 = _t.time()
     df = load_history().sort_values("round")
-    rounds = [int(r) for r in df["round"].tolist()][-int(last_n):]
+    rounds = _target_rounds([int(r) for r in df["round"].tolist()], last_n)
     have = {int(r[0]) for r in db.query("SELECT DISTINCT draw_round FROM round_prediction_history "
-                                         "WHERE prediction_type = 'backtest' AND prediction_method = 'ensemble'")}
+                                         "WHERE prediction_type = 'backtest' AND prediction_method = 'ensemble' "
+                                         "AND prediction_status <> 'superseded'")}
     todo = [r for r in reversed(rounds) if r not in have]
     written, done, errors = 0, [], []
     for r in todo:
@@ -381,12 +413,16 @@ def create_live(next_round: int, *, include_ensemble: bool = True, now: Optional
                                    cutoff_at=cutoff.isoformat(), training_range="none", training_count=0)
     df = load_history()
     prior = df[df["round"] < next_round]
-    for src in ("machine", "classic", "parallel", "decade"):
+    for src in ENGINE_SOURCES:
         top = _source_top_numbers(prior, src, next_round, 6)
+        ver = engine_version(src)
         with db.transaction() as c:
-            written += save_prediction(c, rnd=next_round, method=f"engine_{src}", ptype="live", numbers=top[:6],
-                                       engine_version=f"signals-{RULES_VERSION}", cutoff_at=cutoff.isoformat(),
-                                       training_range=rng_range, training_count=len(prior))
+            if save_prediction(c, rnd=next_round, method=f"engine_{src}", ptype="live", numbers=top[:6],
+                               engine_version=ver, cutoff_at=cutoff.isoformat(),
+                               training_range=rng_range, training_count=len(prior)):
+                written += 1
+                # 마감 전에만 여기 도달 — 이전 버전(예: 시드 없는 classic) 사전 예측은 보존하고 대체됨 표시
+                _supersede_other_versions(c, rnd=next_round, method=f"engine_{src}", ptype="live", keep_version=ver)
     # V7: V6에서 홀드아웃 승인(promoted)된 개선 모델만 '추가' 방식으로 적용(원본 전략은 그대로 유지)
     try:
         from . import reverse_analysis as _rv
@@ -400,6 +436,12 @@ def create_live(next_round: int, *, include_ensemble: bool = True, now: Optional
     except Exception:  # noqa: BLE001 — 승인 모델 적용 실패가 기존 예측을 막지 않게
         pass
     ens_note = None
+    if include_ensemble:
+        from ..analytics import ENSEMBLE_ALGORITHM_VERSION
+
+        if db.query("SELECT 1 FROM round_prediction_history WHERE draw_round = ? AND prediction_method = 'ensemble' "
+                    "AND prediction_type = 'live' AND engine_version = ?", (int(next_round), ENSEMBLE_ALGORITHM_VERSION)):
+            include_ensemble = False  # 이미 저장됨(불변) — 수십 초 재계산 생략
     if include_ensemble:
         try:
             from ..analytics import ENSEMBLE_ALGORITHM_VERSION, generate_ensemble_sets
@@ -481,8 +523,20 @@ def round_detail(rnd: int) -> Dict[str, Any]:
                       "training_count": r[9], "note": r[10], "matched": db.loads(r[11]) if r[11] else None,
                       "match_count": r[12], "bonus_matched": bool(r[13]) if r[13] is not None else None,
                       "prize_tier": r[14], "evaluation_source": r[15], "superseded": r[16] == "superseded"})
+    # 사전 예측 vs 사후 재현 — 같은 엔진·같은 순번(현재 버전)끼리 번호가 같은지. 같은 데이터·같은 절차면 같아야 한다.
+    cur = {(p["type"], p["method"], p["rank"]): p for p in items if not p["superseded"]}
+    same, diff = [], []
+    for (t, m, rk), p in cur.items():
+        if t != "live":
+            continue
+        b = cur.get(("backtest", m, rk))
+        p["reproduced"] = None if b is None else sorted(p["numbers"]) == sorted(b["numbers"])
+        if b is not None:
+            b["reproduced"] = p["reproduced"]
+            (same if p["reproduced"] else diff).append(f"{m}#{rk}")
     return {"round": int(rnd), "winning": list(d.numbers) if d else None, "bonus": d.bonus if d else None,
-            "draw_date": d.draw_date if d else None, "predictions": items}
+            "draw_date": d.draw_date if d else None, "predictions": items,
+            "consistency": {"compared": len(same) + len(diff), "same": len(same), "different": sorted(diff)}}
 
 
 def _norm_sf(z: float) -> float:
@@ -598,10 +652,77 @@ def summary() -> Dict[str, Any]:
                     "GROUP BY prediction_type")
     ev = db.query("SELECT COUNT(*) FROM round_prediction_evaluation")
     return {"by_type": {r[0]: {"count": int(r[1]), "first_round": r[2], "last_round": r[3]} for r in rows},
-            "evaluated": int(ev[0][0]) if ev else 0}
+            "evaluated": int(ev[0][0]) if ev else 0, "coverage": coverage()}
 
 
-def run_all(engine_rounds: int = 100) -> Dict[str, Any]:
+# 사후 백테스트를 51회~최신 전 회차에 같은 구성으로 만드는 엔진(데이터만으로 재현 가능한 것만).
+# 유튜브·보관 용지 방식은 용지가 있는 회차에만 존재하므로 여기에 넣지 않는다(회차마다 구성이 달라짐).
+def uniform_methods() -> List[str]:
+    from ..stats_engine.backtest import STRATEGY_LABELS
+
+    return [f"stats_{s}" for s in STRATEGY_LABELS] + [f"engine_{s}" for s in ENGINE_SOURCES] + ["ensemble", "v12_integrated"]
+
+
+def coverage() -> Dict[str, Any]:
+    """엔진별 사후 백테스트 범위(현재 버전) — 전 회차 백필 진행률 표시용."""
+    from ..stats_engine.draws import load_draws
+
+    draws = load_draws()
+    eligible = [d.round for d in draws][MIN_PRIOR_ROUNDS:]
+    rows = db.query("SELECT prediction_method, COUNT(DISTINCT draw_round), MIN(draw_round), MAX(draw_round) "
+                    "FROM round_prediction_history WHERE prediction_type = 'backtest' AND prediction_status <> 'superseded' "
+                    "GROUP BY prediction_method")
+    got = {r[0]: (int(r[1]), r[2], r[3]) for r in rows}
+    methods = []
+    for m in uniform_methods():
+        n, a, b = got.get(m, (0, None, None))
+        methods.append({"method": m, "label": METHOD_LABELS.get(m, m), "rounds": n, "first_round": a, "last_round": b,
+                        "complete": n >= len(eligible)})
+    return {"eligible_rounds": len(eligible), "from": eligible[0] if eligible else None,
+            "to": eligible[-1] if eligible else None, "methods": methods,
+            "complete": all(x["complete"] for x in methods),
+            "live_since": (db.query("SELECT MIN(draw_round) FROM round_prediction_history WHERE prediction_type = 'live'") or [[None]])[0][0]}
+
+
+def backfill_all(budget_sec: Optional[float] = None) -> Dict[str, Any]:
+    """전 회차 통일 백필(매시간): 회차통계 → 4개 엔진 → 앙상블 → V12 순으로 51회~최신 빈 회차를 최근부터 채운다.
+    시간 예산 안에서만 돌고 다음 실행이 이어서 채운다. 끝나면 채점·다음 회차 사전 예측을 현재 버전으로 맞춘다."""
+    import os
+    import time as _t
+
+    from . import master_engine as M
+    from ..stats_engine.draws import load_draws
+
+    t0 = _t.time()
+    budget = float(budget_sec if budget_sec is not None else os.environ.get("PREDICTION_BACKFILL_BUDGET_SEC", "900"))
+    left = lambda: max(0.0, budget - (_t.time() - t0))  # noqa: E731
+    out: Dict[str, Any] = {"stats": backtest_stats()}
+    out["engines"] = backtest_engines(time_budget_sec=max(30.0, left() - 240))
+    out["ensemble"] = backtest_ensemble(time_budget_sec=max(0.0, left() - 150))
+    out["evaluate"] = evaluate_pending()
+    out["v12"] = {k: v for k, v in M.v12_walk_forward(time_budget_sec=max(60.0, left())).items()
+                  if k in ("status", "stored_backtest_predictions", "remaining", "rounds", "from", "to")}
+    out["evaluate_v12"] = evaluate_pending()
+    draws = load_draws()
+    if draws:  # 다음 회차 사전 예측이 이전 버전(예: 시드 없는 classic)이면 마감 전에 현재 버전으로 다시 저장
+        try:
+            nxt = draws[-1].round + 1
+            live = create_live(nxt, include_ensemble=True)
+            out["live"] = {k: live.get(k) for k in ("status", "round", "written")}
+            has_v12 = db.query("SELECT 1 FROM round_prediction_history WHERE draw_round = ? AND prediction_method = 'v12_integrated' "
+                               "AND prediction_type = 'live' AND engine_version = ? AND prediction_status <> 'superseded'",
+                               (nxt, M.WEIGHTS_VERSION))
+            if live.get("status") == "ok" and (live.get("written") or not has_v12):
+                cur = M.v12_current()
+                out["v12_live"] = {"target_round": cur["target_round"], "saved": cur["saved_live_predictions"]}
+        except Exception as exc:  # noqa: BLE001
+            out["live"] = {"error": str(exc)[:300]}
+    out["coverage_complete"] = coverage()["complete"]
+    out["seconds"] = round(_t.time() - t0, 1)
+    return out
+
+
+def run_all(engine_rounds: Optional[int] = 100) -> Dict[str, Any]:
     """정기 작업: 백테스트 보충 → 보관/유튜브 용지 재현 → 다음 회차 live → 평가."""
     from ..stats_engine.draws import load_draws
 

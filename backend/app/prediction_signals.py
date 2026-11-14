@@ -325,7 +325,9 @@ def _source_top_numbers(df_prior, source: str, target_round: int, top_k: int) ->
             _, _, auto_machine = predict_next_round(df_prior)
             _apply_machine_signals(scores, srcs, build_round_recommendation(df_prior, machine_id=auto_machine, with_backtest=False))
         elif source == "classic":
-            _apply_classic_signals(scores, srcs, build_classic_recommendation(df_prior, method="blend"))
+            # 대상 회차로 시드 고정 — 시드가 없으면 같은 데이터로도 호출마다 번호가 달라져
+            # 사전 예측(live)과 사후 재현(backtest)이 어긋나고 재현이 불가능했다(2026-11-14 수정).
+            _apply_classic_signals(scores, srcs, build_classic_recommendation(df_prior, method="blend", seed=int(target_round)))
         elif source == "parallel":
             _apply_parallel_signals(scores, srcs, df_prior, target_round)
         elif source == "decade":

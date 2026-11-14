@@ -93,7 +93,7 @@ export default function RoundPredictionPanel() {
     for (const e of map.values()) {
       const methods = new Set(e.preds.map((p) => p.method)).size;
       const combos = new Set(e.preds.map((p) => [...p.numbers].sort((x: number, y: number) => x - y).join(','))).size; // 서로 다른 6개 조합 수(엔진이 달라도 번호가 같으면 1개)
-      if (ovSameEngine ? combos < 2 : methods < 2) continue;
+      if (methods < 2 && !(ovSameEngine && combos >= 2)) continue; // 기본: 엔진 2개+ · 스위치 켜면 같은 엔진의 서로 다른 조합끼리도
       out.push({ ...e, methods, combos, hits: e.nums.filter((x) => win.has(x)).length });
     }
     // 같은 예측 집합이 공유하는 묶음은 가장 큰 묶음만 남김(예: 두 조합이 5개 공유 → 그 안의 3·4개 묶음 10+5개 중복 표시 방지)

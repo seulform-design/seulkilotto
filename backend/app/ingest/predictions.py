@@ -185,6 +185,13 @@ ENGINE_SOURCES = ("machine", "classic", "parallel", "decade")
 MIN_PRIOR_ROUNDS = 50  # 모든 엔진 공통 시작 조건: 대상 회차 이전 50회 이상(=51회부터) — 회차마다 같은 엔진 구성
 
 
+def method_first_round(method: str) -> int:
+    """구조적으로 예측이 가능한 첫 회차. 평행회차 엔진은 끝2자리가 같은 과거 회차(r-100)가 있어야 하므로 101회부터."""
+    if method == "engine_parallel":
+        return max(MIN_PRIOR_ROUNDS + 1, 101)
+    return MIN_PRIOR_ROUNDS + 1
+
+
 def engine_version(src: str) -> str:
     """추천 엔진 기록 버전. classic 은 2026-11-14 부터 대상 회차 시드 고정(이전 기록은 무작위라 재현 불가 → 대체됨 표시)."""
     from ..prediction_signals import RULES_VERSION
@@ -676,8 +683,10 @@ def coverage() -> Dict[str, Any]:
     methods = []
     for m in uniform_methods():
         n, a, b = got.get(m, (0, None, None))
+        expected = sum(1 for r in eligible if r >= method_first_round(m))
         methods.append({"method": m, "label": METHOD_LABELS.get(m, m), "rounds": n, "first_round": a, "last_round": b,
-                        "complete": n >= len(eligible)})
+                        "expected_rounds": expected, "structural_first_round": method_first_round(m),
+                        "complete": n >= expected})
     return {"eligible_rounds": len(eligible), "from": eligible[0] if eligible else None,
             "to": eligible[-1] if eligible else None, "methods": methods,
             "complete": all(x["complete"] for x in methods),

@@ -668,7 +668,9 @@ def v12_walk_forward(rounds: Optional[int] = None, store: bool = True, time_budg
 
     def ready(r: int) -> bool:
         lo = max(first_any, r - V12_WEIGHT_WINDOW)
-        return bool(required) and all(required <= have.get(x, set()) for x in range(lo, r + 1) if x in idx_of)
+        # 구조적으로 불가능한 회차(예: 평행회차 엔진의 1~100회)는 그 엔진을 요구하지 않는다 — 영원히 대기하지 않게
+        return bool(required) and all({m for m in required if x >= P.method_first_round(m)} <= have.get(x, set())
+                                      for x in range(lo, r + 1) if x in idx_of)
 
     stored: Dict[int, List[Tuple[List[int], Optional[str]]]] = {}
     for r, nums, note in db.query("SELECT draw_round, predicted_numbers, source_note FROM round_prediction_history "

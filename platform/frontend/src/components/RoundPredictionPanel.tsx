@@ -202,7 +202,7 @@ export default function RoundPredictionPanel() {
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.25 }}>
                 {(cov.methods as any[]).filter((m) => !m.complete).map((m) => (
                   <Chip key={m.method} size="small" variant="outlined"
-                    label={`${m.label} ${m.rounds}/${cov.eligible_rounds}${m.first_round ? ` (${m.first_round}회~)` : ''}`} />
+                    label={`${m.label} ${m.rounds}/${m.expected_rounds ?? cov.eligible_rounds}${m.first_round ? ` (${m.first_round}회~)` : ''}`} />
                 ))}
               </Stack>
             </Box>

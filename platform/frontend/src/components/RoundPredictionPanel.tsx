@@ -92,7 +92,7 @@ export default function RoundPredictionPanel() {
     const out: { nums: number[]; preds: any[]; methods: number; combos: number; hits: number }[] = [];
     for (const e of map.values()) {
       const methods = new Set(e.preds.map((p) => p.method)).size;
-      const combos = new Set(e.preds.map((p) => `${p.method}|${[...p.numbers].sort((x: number, y: number) => x - y).join(',')}`)).size;
+      const combos = new Set(e.preds.map((p) => [...p.numbers].sort((x: number, y: number) => x - y).join(','))).size; // 서로 다른 6개 조합 수(엔진이 달라도 번호가 같으면 1개)
       if (ovSameEngine ? combos < 2 : methods < 2) continue;
       out.push({ ...e, methods, combos, hits: e.nums.filter((x) => win.has(x)).length });
     }
@@ -195,7 +195,7 @@ export default function RoundPredictionPanel() {
                   <Chip size="small" color={o.nums.length >= 4 ? 'secondary' : 'default'} label={`${o.nums.length}개 겹침`} />
                   <Box>{o.nums.map((n: number) => <Ball key={n} n={n} hit={win.has(n)} />)}</Box>
                   <Typography variant="caption" color="text.secondary">
-                    {o.methods}개 엔진 · {o.combos}개 조합 · {o.preds.map((p: any) => `${p.label}${p.rank > 1 ? ` #${p.rank}` : ''}`).join(' · ')}
+                    {o.methods}개 엔진 · 서로 다른 조합 {o.combos}개 — {o.preds.map((p: any) => `[${p.label}${p.rank > 1 ? ` #${p.rank}` : ''}]`).join(' ')}
                     {d?.winning ? ` · 그중 당첨 ${o.hits}개` : ''}
                   </Typography>
                 </Stack>

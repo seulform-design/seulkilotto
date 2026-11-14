@@ -125,8 +125,16 @@ def start_scheduler() -> None:
         replace_existing=True,
         misfire_grace_time=300,
     )
-    # 매주 토요일 22:35 KST (추첨 ~20:50, 결과 공개 ~21:xx 후 여유분)
-    # Railway 서버는 UTC 기준 → KST 22:35 = UTC 13:35
+    # 매주 토요일 21:05 KST 1차 수집 — 공식 JSON 은 추첨(~20:35) 직후 공개되므로 결과를 빨리 반영.
+    # 아직 미공개면 '신규 없음'으로 끝나고 아래 22:35 2차 수집이 다시 확인한다.
+    _scheduler.add_job(
+        _job,
+        CronTrigger(day_of_week="sat", hour=12, minute=5, timezone="UTC"),
+        args=["weekly-sat-early"],
+        id="weekly_upgrade_sat_early",
+        replace_existing=True,
+    )
+    # 매주 토요일 22:35 KST 2차 수집(여유분) — Railway 서버는 UTC 기준 → KST 22:35 = UTC 13:35
     _scheduler.add_job(
         _job,
         CronTrigger(day_of_week="sat", hour=13, minute=35, timezone="UTC"),

@@ -120,7 +120,7 @@ export default function ConsensusRankingCard({ round }: { round: number }) {
         </Box>
       )}
 
-      <ConsensusPairsSection round={round} pairs={data?.pairs} view={view} winning={data?.this_round?.winning} />
+      <ConsensusPairsSection round={round} sets={{ 2: data?.pairs, 3: data?.triples, 4: data?.quads }} view={view} winning={data?.this_round?.winning} />
 
       {levels.length > 0 && (
         <Box sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'divider' }}>

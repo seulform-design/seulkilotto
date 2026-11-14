@@ -58,6 +58,36 @@ export default function RoundPredictionPanel() {
   });
   const d = det.data;
   const win = new Set<number>(d?.winning ?? []);
+  const [showOld, setShowOld] = useState(false);
+  const [sortBy, setSortBy] = useState<'default' | 'match' | 'overlap'>('default');
+  const all: any[] = d?.predictions ?? [];
+  const oldCount = all.filter((p) => p.superseded).length;
+  const shown = all.filter((p) => showOld || !p.superseded);
+  // 이 회차 예측끼리 3개 이상 같은 번호 — 서로 다른 엔진(방법) 사이만, 현재 버전만
+  const overlaps = (() => {
+    const cur = all.filter((p) => !p.superseded && p.method !== 'random_baseline');
+    const map = new Map<string, { nums: number[]; preds: any[] }>();
+    for (let i = 0; i < cur.length; i++) {
+      for (let j = i + 1; j < cur.length; j++) {
+        if (cur[i].method === cur[j].method) continue;
+        const b = new Set<number>(cur[j].numbers);
+        const common = (cur[i].numbers as number[]).filter((x) => b.has(x)).sort((x, y) => x - y);
+        if (common.length < 3) continue;
+        const key = common.join(',');
+        const e = map.get(key) ?? { nums: common, preds: [] };
+        for (const p of [cur[i], cur[j]]) if (!e.preds.some((q) => q.prediction_id === p.prediction_id)) e.preds.push(p);
+        map.set(key, e);
+      }
+    }
+    return [...map.values()]
+      .map((e) => ({ ...e, methods: new Set(e.preds.map((p) => p.method)).size, hits: e.nums.filter((x) => win.has(x)).length }))
+      .sort((a, b) => b.nums.length - a.nums.length || b.methods - a.methods || b.preds.length - a.preds.length || a.nums[0] - b.nums[0]);
+  })();
+  const maxOverlap = new Map<string, number>();
+  overlaps.forEach((o) => o.preds.forEach((p) => maxOverlap.set(p.prediction_id, Math.max(maxOverlap.get(p.prediction_id) ?? 0, o.nums.length))));
+  const list = [...shown].sort((a, b) =>
+    sortBy === 'match' ? (b.match_count ?? -1) - (a.match_count ?? -1)
+      : sortBy === 'overlap' ? (maxOverlap.get(b.prediction_id) ?? 0) - (maxOverlap.get(a.prediction_id) ?? 0) : 0);
 
   return (
     <EngineSection
@@ -108,15 +138,53 @@ export default function RoundPredictionPanel() {
       {round != null && open && <ConsensusRankingCard round={round} />}
 
       {d && d.predictions.length === 0 && <Alert severity="info" sx={{ py: 0.25 }}>이 회차의 예측 기록이 없습니다.</Alert>}
+      {overlaps.length > 0 && (
+        <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, p: 0.75, mb: 1 }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, display: 'block' }}>
+            🧩 {round}회 예측끼리 3개 이상 겹친 번호 순위 — 서로 다른 엔진의 6개 조합이 같은 번호를 3·4·5개 공유 (이전 버전 제외)
+          </Typography>
+          <Stack spacing={0.4} sx={{ mt: 0.5, maxHeight: 320, overflowY: 'auto' }}>
+            {overlaps.slice(0, 20).map((o, i) => (
+              <Stack key={o.nums.join(',')} direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="caption" sx={{ fontWeight: 800, minWidth: 30 }}>{i + 1}위</Typography>
+                <Chip size="small" color={o.nums.length >= 4 ? 'secondary' : 'default'} label={`${o.nums.length}개 겹침`} />
+                <Box>{o.nums.map((n: number) => <Ball key={n} n={n} hit={win.has(n)} />)}</Box>
+                <Typography variant="caption" color="text.secondary">
+                  {o.methods}개 엔진 · {o.preds.map((p: any) => `${p.label}${p.rank > 1 ? ` #${p.rank}` : ''}`).join(' · ')}
+                  {d?.winning ? ` · 그중 당첨 ${o.hits}개` : ''}
+                </Typography>
+              </Stack>
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.disabled" component="div">
+            겹침은 엔진들이 같은 과거 데이터로 비슷하게 계산했다는 뜻입니다. 학습 기반 순위와 전 회차 검증은 위 '엔진 중복 묶음'(2·3·4개)에 있습니다.
+          </Typography>
+        </Box>
+      )}
+      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+        <TextField select size="small" value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} sx={{ minWidth: 150 }}>
+          <MenuItem value="default">엔진 순</MenuItem>
+          <MenuItem value="match">일치 많은 순</MenuItem>
+          <MenuItem value="overlap">겹침 많은 순</MenuItem>
+        </TextField>
+        {oldCount > 0 && (
+          <FormControlLabel control={<Switch size="small" checked={showOld} onChange={(e) => setShowOld(e.target.checked)} />}
+            label={<Typography variant="caption">이전 가중치 버전 {oldCount}건 보기(대체됨 · 집계 제외)</Typography>} />
+        )}
+      </Stack>
       <Stack spacing={0.75}>
-        {(d?.predictions ?? []).map((p: any) => (
-          <Box key={p.prediction_id} sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, p: 0.75 }}>
+        {list.map((p: any) => (
+          <Box key={p.prediction_id} sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, p: 0.75, opacity: p.superseded ? 0.55 : 1 }}>
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
               <Chip size="small" variant="outlined" color={TYPE_LABEL[p.type]?.color ?? 'default'} label={TYPE_LABEL[p.type]?.label ?? p.type} />
               <Typography variant="caption" sx={{ fontWeight: 700 }}>
                 {p.label}
                 {p.rank > 1 ? ` #${p.rank}` : ''}
               </Typography>
+              {p.superseded && <Chip size="small" variant="outlined" label="이전 버전(대체됨)" />}
+              {(maxOverlap.get(p.prediction_id) ?? 0) >= 3 && !p.superseded && (
+                <Chip size="small" color="secondary" variant="outlined" label={`다른 엔진과 ${maxOverlap.get(p.prediction_id)}개 겹침`} />
+              )}
               <Box sx={{ flexGrow: 1 }} />
               {p.match_count != null ? (
                 <Chip

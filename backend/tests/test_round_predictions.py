@@ -174,6 +174,13 @@ def test_consensus_ranking_round_and_all_rounds(tmp_path, monkeypatch):
     assert pv["rounds"] == 49 and pv["random_rate"] == 0.0152 and all(h["round"] < 1200 for h in pz["recent"])
     assert all(x["both_drawn"] <= x["times_consensus"] for x in pz["all_rounds"]["most_frequent"])
     assert "1/8,145,060" in pz["honesty"]
+    for key, k in (("triples", 3), ("quads", 4)):
+        q = out[key]
+        assert q["k"] == k and abs(q["random_all_drawn"] - P._p_all_drawn(k)) < 1e-6
+        assert all(len(x["set"]) == k and x["engines"] >= 2 for x in q["backtest"]["overlap_sets"])
+        assert all(len(x["set"]) == k and x["engines"] >= 2 for x in q["backtest"]["top10"])
+        assert q["validation"]["random_drawn_per_set"] == round(k * 6 / 45, 4) and all(h["round"] < 1200 for h in q["recent"])
+    assert abs(P._p_all_drawn(2) - P.PAIR_P) < 1e-12 and abs(P._p_all_drawn(3) - 120 / 85140) < 1e-12
     a2 = P.consensus_ranking(1180)["all_rounds"]
     assert a2["rounds"] == 30 and a2["range"] == "1150~1179회" and a2["per_round"][0]["round"] == 1179
     db.reset_for_tests()

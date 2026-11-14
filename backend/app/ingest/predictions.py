@@ -713,82 +713,101 @@ def learned_top10(by: Dict[Tuple[str, int], Dict[str, List[int]]], win: Dict[int
 
 
 PAIR_P = 30 / (45 * 44)  # 임의의 두 번호가 모두 당첨될 확률 = C(43,4)/C(45,6) = 1.515%
-PAIR_K_ENGINE = 300      # 엔진별 쌍 적중률 축소 강도
-PAIR_K_PAIR = 30         # 개별 쌍 기록 축소 강도(기록이 적으면 1.0 근처)
+SET_NAMES = {2: "쌍", 3: "3개 묶음", 4: "4개 묶음"}
 
 
-def _pairs_of(preds: Dict[str, List[int]]) -> Dict[Tuple[int, int], List[str]]:
-    from itertools import combinations
-
-    out: Dict[Tuple[int, int], List[str]] = {}
-    for m, nums in preds.items():
-        for a, b in combinations(sorted(set(nums)), 2):
-            out.setdefault((a, b), []).append(m)
+def _p_all_drawn(k: int) -> float:
+    """임의의 k개 번호가 모두 당첨될 확률: 2개 1.515% · 3개 0.1408% · 4개 0.01007%."""
+    out = 1.0
+    for i in range(k):
+        out *= (6 - i) / (45 - i)
     return out
 
 
-def learned_pairs(by: Dict[Tuple[str, int], Dict[str, List[int]]], win: Dict[int, set], rnd: int) -> Dict[str, Any]:
-    """엔진 중복 '쌍' 순위 + 학습 TOP10 쌍(워크포워드).
+def _sets_of(preds: Dict[str, List[int]], k: int) -> Dict[Tuple[int, ...], List[str]]:
+    from itertools import combinations
 
-    - 쌍 = 한 엔진의 6개 추천 안에 함께 들어 있는 두 번호. 여러 엔진이 같은 쌍을 고르면 중복 쌍.
-    - 학습(그 회차 '이전' 회차 결과만): (1) 엔진별 쌍 적중률(두 번호 모두 당첨) -> 가중치 = 축소 적중률 / 1.515%
-      (2) 개별 쌍 기록: 과거에 중복 쌍이었을 때 실제로 두 번호가 모두 나왔는지 -> 계수 = 축소 적중률 / 1.515%.
-      쌍 점수 = (고른 엔진 가중치 합) x 쌍 계수.
-    - 검증: 매 과거 회차의 TOP10 쌍을 그 시점 학습만으로 만들고 실제 당첨과 대조. 무작위 10쌍 기대 = 0.152쌍/회."""
+    out: Dict[Tuple[int, ...], List[str]] = {}
+    for m, nums in preds.items():
+        for c in combinations(sorted(set(nums)), k):
+            out.setdefault(c, []).append(m)
+    return out
+
+
+def _pairs_of(preds: Dict[str, List[int]]) -> Dict[Tuple[int, int], List[str]]:
+    return _sets_of(preds, 2)  # type: ignore[return-value]
+
+
+def learned_sets(by: Dict[Tuple[str, int], Dict[str, List[int]]], win: Dict[int, set], rnd: int, k: int = 2) -> Dict[str, Any]:
+    """엔진 중복 'k개 묶음'(k=2 쌍·3·4) 순위 + 학습 TOP10(워크포워드).
+
+    - 묶음 = 한 엔진의 6개 추천 안에 함께 들어 있는 k개 번호. 2개 이상 엔진이 같은 묶음을 고르면 중복 묶음.
+    - 학습(그 회차 '이전' 결과만): (1) 엔진별 묶음 적중률(k개 모두 당첨) -> 가중치 = 축소 적중률 / 무작위 확률
+      (2) 개별 묶음 기록: 과거 중복 묶음이었을 때 k개 모두 당첨됐는지 -> 계수. 점수 = (엔진 가중치 합) x 묶음 계수.
+      축소 강도는 '기대 적중 수'로 맞춘다(엔진 4.5회 · 묶음 0.45회) — k가 커도 우연 1회에 과민 반응하지 않게.
+    - 검증: 매 과거 회차 TOP10 을 그 시점 학습만으로 만들고 실제 당첨과 대조(모두 당첨 · 평균 당첨 개수)."""
     import math
+    from math import comb
 
+    pk = _p_all_drawn(k)
+    k_eng, k_set = 4.5 / pk, 0.45 / pk
+    per_engine = comb(6, k)
     rounds = sorted(r for (t, r) in by if t == "backtest" and r in win and len(by[(t, r)]) >= 2)
     eng: Dict[str, List[int]] = {}
-    pst: Dict[Tuple[int, int], List[Any]] = {}
+    pst: Dict[Tuple[int, ...], List[Any]] = {}
 
     def ew() -> Dict[str, float]:
-        return {m: ((h + PAIR_P * PAIR_K_ENGINE) / (n + PAIR_K_ENGINE)) / PAIR_P for m, (h, n) in eng.items()}
+        return {m: ((h + pk * k_eng) / (n + k_eng)) / pk for m, (h, n) in eng.items()}
 
-    def pf(pr: Tuple[int, int]) -> float:
-        h, n = pst.get(pr, [0, 0])[:2]
-        return ((h + PAIR_P * PAIR_K_PAIR) / (n + PAIR_K_PAIR)) / PAIR_P
+    def pf(st: Tuple[int, ...]) -> float:
+        h, n = pst.get(st, [0, 0])[:2]
+        return ((h + pk * k_set) / (n + k_set)) / pk
 
-    def top(prs: Dict[Tuple[int, int], List[str]], w: Optional[Dict[str, float]]) -> List[Tuple[Tuple[int, int], float]]:
-        cand = [(pr, ms) for pr, ms in prs.items() if len(ms) >= 2] or list(prs.items())
+    def top(sets: Dict[Tuple[int, ...], List[str]], w: Optional[Dict[str, float]]) -> List[Tuple[Tuple[int, ...], float]]:
+        cand = [(st, ms) for st, ms in sets.items() if len(ms) >= 2]
+        if not cand and k == 2:
+            cand = list(sets.items())
         if w is None:
-            sc = [(pr, float(len(ms))) for pr, ms in cand]
+            sc = [(st, float(len(ms))) for st, ms in cand]
         else:
-            sc = [(pr, sum(w.get(m, 1.0) for m in ms) * pf(pr)) for pr, ms in cand]
-        sc.sort(key=lambda x: (-x[1], -len(prs[x[0]]), x[0]))
+            sc = [(st, sum(w.get(m, 1.0) for m in ms) * pf(st)) for st, ms in cand]
+        sc.sort(key=lambda x: (-x[1], -len(sets[x[0]]), x[0]))
         return sc[:TOP_K]
 
     hist: List[Dict[str, Any]] = []
-    tl = tu = one_l = cnt = 0
+    tl = tu = cnt = n_sets = drawn_sum = 0
     for r in rounds:
         if r >= rnd:
             break
         preds = by[("backtest", r)]
-        prs = _pairs_of(preds)
+        sets = _sets_of(preds, k)
         W = win[r]
         if eng:
-            lt = top(prs, ew())
-            ut = top(prs, None)
-            hl = [pr for pr, _ in lt if pr[0] in W and pr[1] in W]
-            hu = sum(1 for pr, _ in ut if pr[0] in W and pr[1] in W)
-            tl += len(hl)
-            tu += hu
-            one_l += sum(1 for pr, _ in lt if (pr[0] in W) != (pr[1] in W))
-            cnt += 1
-            hist.append({"round": r, "pair_hits": len(hl), "unweighted_pair_hits": hu, "hit_pairs": [list(x) for x in hl],
-                         "top_pairs": [list(x) for x, _ in lt]})
+            lt = top(sets, ew())
+            ut = top(sets, None)
+            if lt:
+                hl = [st for st, _ in lt if all(x in W for x in st)]
+                tl += len(hl)
+                tu += sum(1 for st, _ in ut if all(x in W for x in st))
+                n_sets += len(lt)
+                drawn_sum += sum(sum(x in W for x in st) for st, _ in lt)
+                cnt += 1
+                hist.append({"round": r, "set_hits": len(hl), "pair_hits": len(hl), "hit_sets": [list(x) for x in hl],
+                             "best_drawn": max(sum(x in W for x in st) for st, _ in lt), "sets": len(lt)})
         for m, nums in preds.items():  # 학습 반영(다음 회차부터)
-            k = sum(1 for x in set(nums) if x in W)
+            h = sum(1 for x in set(nums) if x in W)
             e = eng.setdefault(m, [0, 0])
-            e[0] += k * (k - 1) // 2
-            e[1] += 15
-        for pr, ms in prs.items():
+            e[0] += comb(h, k)
+            e[1] += per_engine
+        for st, ms in sets.items():
             if len(ms) >= 2:
-                v = pst.setdefault(pr, [0, 0, [], 0])
-                both = pr[0] in W and pr[1] in W
-                v[0] += int(both)
+                v = pst.setdefault(st, [0, 0, [], 0, 0])
+                d = sum(x in W for x in st)
+                v[0] += int(d == k)
                 v[1] += 1
                 v[3] = max(v[3], len(ms))
-                if both:
+                v[4] += int(d == k - 1)
+                if d == k:
                     v[2].append(r)
     w = ew()
     cur: Dict[str, Any] = {}
@@ -796,58 +815,74 @@ def learned_pairs(by: Dict[Tuple[str, int], Dict[str, List[int]]], win: Dict[int
         preds = by.get((t, rnd))
         if not preds or len(preds) < 2:
             continue
-        prs = _pairs_of(preds)
+        sets = _sets_of(preds, k)
         W = win.get(rnd)
-        multi = sorted(((pr, ms) for pr, ms in prs.items() if len(ms) >= 2), key=lambda x: (-len(x[1]), x[0]))
+        multi = sorted(((st, ms) for st, ms in sets.items() if len(ms) >= 2), key=lambda x: (-len(x[1]), x[0]))
         ranked, pos, prev = [], 0, None
-        for i, (pr, ms) in enumerate(multi, start=1):
+        for i, (st, ms) in enumerate(multi, start=1):
             if len(ms) != prev:
                 pos, prev = i, len(ms)
-            h, n_ = pst.get(pr, [0, 0])[:2]
-            ranked.append({"rank": pos, "pair": list(pr), "engines": len(ms), "labels": [METHOD_LABELS.get(m, m) for m in sorted(ms)],
-                           "past_consensus": n_, "past_both_drawn": h, "drawn": (sum(x in W for x in pr) if W else None)})
+            v = pst.get(st, [0, 0, [], 0, 0])
+            ranked.append({"rank": pos, "set": list(st), "pair": list(st), "engines": len(ms),
+                           "labels": [METHOD_LABELS.get(m, m) for m in sorted(ms)],
+                           "past_consensus": v[1], "past_both_drawn": v[0], "past_all_drawn": v[0], "past_near": v[4],
+                           "drawn": (sum(x in W for x in st) if W else None)})
         learned = []
-        for i, (pr, scv) in enumerate(top(prs, w), start=1):
-            v = pst.get(pr, [0, 0, [], 0])
-            learned.append({"rank": i, "pair": list(pr), "score": round(scv, 3), "engines": len(prs[pr]),
-                            "labels": [METHOD_LABELS.get(m, m) for m in sorted(prs[pr])], "pair_factor": round(pf(pr), 3),
-                            "past_consensus": v[1], "past_both_drawn": v[0], "past_hit_rounds": list(reversed(v[2][-5:])),
-                            "drawn": (sum(x in W for x in pr) if W else None)})
+        for i, (st, scv) in enumerate(top(sets, w), start=1):
+            v = pst.get(st, [0, 0, [], 0, 0])
+            learned.append({"rank": i, "set": list(st), "pair": list(st), "score": round(scv, 3), "engines": len(sets[st]),
+                            "labels": [METHOD_LABELS.get(m, m) for m in sorted(sets[st])], "pair_factor": round(pf(st), 3),
+                            "past_consensus": v[1], "past_both_drawn": v[0], "past_all_drawn": v[0], "past_near": v[4],
+                            "past_hit_rounds": list(reversed(v[2][-5:])), "drawn": (sum(x in W for x in st) if W else None)})
         nums: Dict[int, int] = {}
         for x in learned:
-            for q in x["pair"]:
+            for q in x["set"]:
                 nums[q] = nums.get(q, 0) + 1
-        cur[t] = {"overlap_pairs": ranked[:40], "overlap_pairs_total": len(ranked),
-                  "top10": learned, "pair_hits": sum(1 for x in learned if x["drawn"] == 2) if W else None,
+        cur[t] = {"overlap_pairs": ranked[:40], "overlap_sets": ranked[:40], "overlap_pairs_total": len(ranked),
+                  "overlap_total": len(ranked), "max_engines": ranked[0]["engines"] if ranked else 0,
+                  "top10": learned, "pair_hits": sum(1 for x in learned if x["drawn"] == k) if W else None,
+                  "set_hits": sum(1 for x in learned if x["drawn"] == k) if W else None,
                   "numbers_from_pairs": sorted(nums, key=lambda q: (-nums[q], q)),
                   "number_hits": sorted(q for q in nums if q in W) if W else None}
-    exp = TOP_K * PAIR_P
-    sd = math.sqrt(cnt * TOP_K * PAIR_P * (1 - PAIR_P)) if cnt else 0
-    z = (tl - cnt * exp) / sd if sd else 0.0
-    best = sorted(({"pair": list(pr), "times_consensus": v[1], "both_drawn": v[0], "rate": round(v[0] / v[1], 4),
-                    "max_engines": v[3], "hit_rounds": list(reversed(v[2][-6:]))} for pr, v in pst.items() if v[1] >= 1),
-                  key=lambda x: (-x["times_consensus"], -x["both_drawn"], x["pair"]))
-    hitters = sorted((x for x in best if x["both_drawn"] > 0), key=lambda x: (-x["both_drawn"], -x["times_consensus"], x["pair"]))
+    exp = n_sets * pk
+    sd = math.sqrt(n_sets * pk * (1 - pk)) if n_sets else 0
+    z = (tl - exp) / sd if sd else 0.0
+    best = sorted(({"set": list(st), "pair": list(st), "times_consensus": v[1], "both_drawn": v[0], "all_drawn": v[0],
+                    "near": v[4], "rate": round(v[0] / v[1], 4), "max_engines": v[3], "hit_rounds": list(reversed(v[2][-6:]))}
+                   for st, v in pst.items() if v[1] >= 1),
+                  key=lambda x: (-x["times_consensus"], -x["both_drawn"], x["set"]))
+    hitters = sorted((x for x in best if x["both_drawn"] > 0 or (k >= 3 and x["near"] > 0)),
+                     key=lambda x: (-x["both_drawn"], -x["near"], -x["times_consensus"], x["set"]))
+    name = SET_NAMES.get(k, f"{k}개 묶음")
     return {
         **cur,
-        "all_rounds": {"rounds": len([r for r in rounds if r < rnd]), "distinct_pairs": len(pst),
+        "k": k, "name": name, "random_all_drawn": round(pk, 6),
+        "all_rounds": {"rounds": len([r for r in rounds if r < rnd]), "distinct_pairs": len(pst), "distinct_sets": len(pst),
                        "most_frequent": best[:15], "most_hit": hitters[:15],
                        "engine_pair_weights": sorted(({"label": METHOD_LABELS.get(m, m), "pairs": n_, "both_drawn": h,
-                                                       "rate": round(h / n_, 4) if n_ else None, "weight": round(w[m], 3)}
+                                                       "rate": round(h / n_, 5) if n_ else None, "weight": round(w[m], 3)}
                                                       for m, (h, n_) in eng.items()), key=lambda x: -x["weight"])[:12]},
         "validation": {"rounds": cnt, "range": f"{hist[0]['round']}~{hist[-1]['round']}회" if hist else "-",
-                       "pair_hits": tl, "mean_pair_hits": round(tl / cnt, 4) if cnt else None,
-                       "unweighted_pair_hits": tu, "random_expected": round(cnt * exp, 1), "random_mean": round(exp, 4),
-                       "pair_rate": round(tl / (cnt * TOP_K), 4) if cnt else None, "random_rate": round(PAIR_P, 4),
-                       "one_number_rate": round(one_l / (cnt * TOP_K), 4) if cnt else None,
-                       "random_one_rate": round(2 * (6 / 45) * (39 / 44), 4),
-                       "rounds_with_pair_hit": sum(1 for x in hist if x["pair_hits"]),
+                       "sets_evaluated": n_sets, "pair_hits": tl, "set_hits": tl,
+                       "mean_pair_hits": round(tl / cnt, 4) if cnt else None,
+                       "unweighted_pair_hits": tu, "random_expected": round(exp, 2), "random_mean": round(TOP_K * pk, 5),
+                       "pair_rate": round(tl / n_sets, 5) if n_sets else None, "random_rate": round(pk, 4 if k == 2 else 6),
+                       "mean_drawn_per_set": round(drawn_sum / n_sets, 4) if n_sets else None,
+                       "random_drawn_per_set": round(k * 6 / 45, 4),
+                       "rounds_with_pair_hit": sum(1 for x in hist if x["set_hits"]),
+                       "rounds_with_near": sum(1 for x in hist if x["best_drawn"] >= k - 1),
                        "z": round(z, 2), "p_two_sided": round(math.erfc(abs(z) / math.sqrt(2)), 4)},
         "recent": list(reversed(hist[-10:])),
-        "verdict": ("학습 TOP10 쌍의 '두 번호 모두 당첨' 비율이 무작위와 통계적으로 다릅니다 — 재현 확인 필요" if cnt and abs(z) >= 2.58 else
-                    "모든 이전 회차의 쌍 기록·엔진 쌍 적중률을 학습해도 TOP10 쌍의 적중은 무작위(쌍당 1.52%)와 통계적으로 같습니다."),
-        "honesty": "어떤 두 번호가 함께 당첨될 확률은 1.515%(=6x5 / 45x44)로 모든 쌍이 같고, 조합 1등 확률은 1/8,145,060 — 학습으로 바뀌지 않습니다.",
+        "verdict": (f"학습 TOP10 {name}의 '모두 당첨' 비율이 무작위와 통계적으로 다릅니다 — 재현 확인 필요" if cnt and abs(z) >= 2.58 else
+                    f"모든 이전 회차의 {name} 기록·엔진 적중률을 학습해도 TOP10 {name}의 적중은 무작위({_p_all_drawn(k) * 100:.4g}%)와 "
+                    "통계적으로 같습니다."),
+        "honesty": (f"어떤 {k}개 번호가 모두 당첨될 확률은 {pk * 100:.4g}%로 모든 {name}이 같고, 조합 1등 확률은 1/8,145,060 — "
+                    "학습으로 바뀌지 않습니다."),
     }
+
+
+def learned_pairs(by: Dict[Tuple[str, int], Dict[str, List[int]]], win: Dict[int, set], rnd: int) -> Dict[str, Any]:
+    return learned_sets(by, win, rnd, 2)
 
 
 def _p_at_least(k: int) -> float:
@@ -977,8 +1012,10 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
     rng_txt = f"{past[0]}~{past[-1]}회" if past else "-"
     top10 = learned_top10(by, win, int(rnd))
     pairs = learned_pairs(by, win, int(rnd))
+    triples = learned_sets(by, win, int(rnd), 3)
+    quads = learned_sets(by, win, int(rnd), 4)
     out = {"round": int(rnd), "backtest": rank_round("backtest", int(rnd)), "live": rank_round("live", int(rnd)),
-           "this_round": this_round, "top10": top10, "pairs": pairs,
+           "this_round": this_round, "top10": top10, "pairs": pairs, "triples": triples, "quads": quads,
            "all_rounds": {"basis": "per_round_rows", "window": W, "range": rng_txt, "rounds": len(past),
                           "by_engine_count": levels, "bonferroni_alpha": round(alpha, 4),
                           "top_consensus_numbers": all_rank[:15], "selected_round_track": track,

@@ -59,6 +59,27 @@ export default function ConsensusRankingCard({ round }: { round: number }) {
             label={`엔진 ${cur.engine_count}개 · 2개+ 중복 ${cur.multi_engine_numbers.length}개${cur.result_known ? ` · 그중 당첨 ${cur.multi_engine_hits}개` : ' · 추첨 전'}`} />
         )}
       </Stack>
+      {data?.comparison && (
+        <Box sx={{ mt: 0.5, px: 0.75, py: 0.5, borderRadius: 1, bgcolor: 'action.hover' }}>
+          <Typography variant="caption" component="div" sx={{ fontWeight: 700 }}>
+            {data.comparison.identical
+              ? `✅ 같은 엔진 ${data.comparison.common_count}개끼리 비교 — 사후 백테스트와 사전 예측 번호가 모두 동일합니다.`
+              : `⚖️ 같은 엔진 ${data.comparison.common_count}개끼리 비교 — ${data.comparison.common_count - data.comparison.differs.length}개 동일, ${data.comparison.differs.length}개만 다름`}
+          </Typography>
+          {(data.comparison.differs as any[]).map((d) => (
+            <Typography key={d.method} variant="caption" component="div" color="text.secondary">
+              · {d.label}: 사전 [{d.live.join(', ')}] ↔ 사후 [{d.backtest.join(', ')}]
+              {d.live_version && d.backtest_version && d.live_version !== d.backtest_version
+                ? ` — 사전 예측은 추첨 전 이전 버전(${d.live_version})으로 저장된 기록이라 바꾸지 않습니다. 현재 버전(${d.backtest_version})은 다음 회차부터 사전=사후로 같습니다.` : ''}
+            </Typography>
+          ))}
+          {data.comparison.only_live.length > 0 && (
+            <Typography variant="caption" component="div" color="text.secondary">
+              · 사전 예측에만 있는 {data.comparison.only_live_labels.join(', ')} 은(는) 실제 용지 기반이라 사후 백테스트가 없어 양쪽 순위에서 모두 뺐습니다.
+            </Typography>
+          )}
+        </Box>
+      )}
       {q.isLoading && <LinearProgress sx={{ mt: 0.5 }} />}
       {data && !cur && <Typography variant="caption" color="text.secondary">이 회차는 엔진 예측 기록이 없습니다.</Typography>}
 

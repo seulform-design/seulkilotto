@@ -112,3 +112,15 @@ def test_round_detail_reports_live_vs_backtest_consistency(iso, monkeypatch):
     P.create_live(r, include_ensemble=False)
     d = P.round_detail(r)
     assert d["consistency"]["compared"] >= 7 and not [x for x in d["consistency"]["different"] if x.startswith("stats_")]
+
+
+def test_consensus_compares_common_methods_only(tmp_path, monkeypatch):
+    from app.ingest import predictions as P
+
+    by = {("live", 9): {"engine_machine": [1, 2, 3, 4, 5, 6], "engine_classic": [1, 2, 3, 7, 8, 9], "youtube_auto": [1, 2, 3, 4, 5, 6]},
+          ("backtest", 9): {"engine_machine": [1, 2, 3, 4, 5, 6], "engine_classic": [10, 11, 12, 13, 14, 15]}}
+    monkeypatch.setattr(P.db, "query", lambda *a, **k: [])
+    c = P._consensus_comparison(by, 9)
+    assert c["only_live"] == ["youtube_auto"] and c["common_count"] == 2
+    assert [d["method"] for d in c["differs"]] == ["engine_classic"]
+    assert set(by[("live", 9)]) == set(by[("backtest", 9)]) == {"engine_machine", "engine_classic"}

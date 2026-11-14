@@ -1022,6 +1022,35 @@ def _p_at_least(k: int) -> float:
     return sum(comb(6, i) * comb(39, TOP_K - i) for i in range(k, 7)) / comb(45, TOP_K)
 
 
+def _consensus_comparison(by: Dict[Tuple[str, int], Dict[str, List[int]]], rnd: int) -> Optional[Dict[str, Any]]:
+    """선택 회차에 사전·사후 기록이 모두 있으면 양쪽을 공통 엔진으로 맞추고(by 를 제자리에서 줄임) 차이를 설명한다."""
+    lv, bt = by.get(("live", rnd)), by.get(("backtest", rnd))
+    if not lv or not bt:
+        return None
+    common = sorted(set(lv) & set(bt))
+    only_live = sorted(set(lv) - set(bt))
+    only_bt = sorted(set(bt) - set(lv))
+    if common:
+        by[("live", rnd)] = {m: lv[m] for m in common}
+        by[("backtest", rnd)] = {m: bt[m] for m in common}
+    differs = [m for m in common if sorted(lv[m]) != sorted(bt[m])]
+    vers: Dict[str, Dict[str, str]] = {}
+    if differs:
+        for m, t, v in db.query("SELECT prediction_method, prediction_type, engine_version FROM round_prediction_history "
+                                "WHERE draw_round = ? AND prediction_rank = 1 AND prediction_status <> 'superseded' "
+                                "AND prediction_type IN ('live', 'backtest')", (rnd,)):
+            if m in differs:
+                vers.setdefault(m, {})[t] = v
+    lab = lambda ms: [METHOD_LABELS.get(m, m) for m in ms]  # noqa: E731
+    return {"common_methods": common, "common_count": len(common),
+            "only_live": only_live, "only_live_labels": lab(only_live),
+            "only_backtest": only_bt, "only_backtest_labels": lab(only_bt),
+            "differs": [{"method": m, "label": METHOD_LABELS.get(m, m), "live": sorted(lv[m]), "backtest": sorted(bt[m]),
+                         "live_version": vers.get(m, {}).get("live"), "backtest_version": vers.get(m, {}).get("backtest")}
+                        for m in differs],
+            "identical": not differs}
+
+
 def consensus_ranking(rnd: int) -> Dict[str, Any]:
     """선택 회차에서 여러 엔진이 함께 고른 번호 순위 + 전체 회차에서 'k개 엔진이 고른 번호'의 실제 적중률.
 
@@ -1040,6 +1069,9 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
         if m in CONSENSUS_EXCLUDE or m.startswith("v6_"):
             continue
         by.setdefault((t, int(r)), {})[m] = [int(x) for x in db.loads(nums)]
+    # 사후 백테스트 ↔ 사전 예측 토글은 '같은 엔진끼리'만 비교한다 — 한쪽에만 있는 기록(예: 사전에만 있는 유튜브 용지 집계)을
+    # 섞으면 엔진 구성 자체가 달라 순위가 달라 보인다. 남는 차이는 그 엔진의 번호가 실제로 달랐던 경우뿐(아래 comparison).
+    comparison = _consensus_comparison(by, int(rnd))
 
     def rank_round(t: str, r: int) -> Optional[Dict[str, Any]]:
         preds = by.get((t, r))
@@ -1145,7 +1177,7 @@ def consensus_ranking(rnd: int) -> Dict[str, Any]:
     triples = learned_sets(by, win, int(rnd), 3)
     quads = learned_sets(by, win, int(rnd), 4)
     out = {"round": int(rnd), "backtest": rank_round("backtest", int(rnd)), "live": rank_round("live", int(rnd)),
-           "this_round": this_round, "top10": top10, "pairs": pairs, "triples": triples, "quads": quads,
+           "this_round": this_round, "top10": top10, "pairs": pairs, "triples": triples, "quads": quads, "comparison": comparison,
            "all_rounds": {"basis": "per_round_rows", "window": W, "range": rng_txt, "rounds": len(past),
                           "by_engine_count": levels, "bonferroni_alpha": round(alpha, 4),
                           "top_consensus_numbers": all_rank[:15], "selected_round_track": track,

@@ -63,31 +63,63 @@ export default function RoundPredictionPanel() {
   const all: any[] = d?.predictions ?? [];
   const oldCount = all.filter((p) => p.superseded).length;
   const shown = all.filter((p) => showOld || !p.superseded);
-  // 이 회차 예측끼리 3개 이상 같은 번호 — 서로 다른 엔진(방법) 사이만, 현재 버전만
+  const [ovK, setOvK] = useState<'all' | 3 | 4 | 5>('all');
+  const [ovSameEngine, setOvSameEngine] = useState(false);
+  const [ovLimit, setOvLimit] = useState(20);
+  useEffect(() => setOvLimit(20), [round, ovK, ovSameEngine]);
+  // 이 회차 예측끼리 공유하는 3·4·5·6개 번호 묶음 — 각 조합의 k-부분집합을 전수 열거해 몇 개 예측(엔진)이 같은 묶음을
+  // 담고 있는지 센다(쌍별 교집합 방식은 A∩B=5개면 그 안의 3개 묶음을 다른 예측과 공유해도 따로 세지 못했음).
+  // 기본: 서로 다른 엔진 ≥2 · 현재 버전만 · 무작위 기준선 제외 · 같은 엔진 안의 완전히 동일한 조합은 1건으로.
   const overlaps = (() => {
     const cur = all.filter((p) => !p.superseded && p.method !== 'random_baseline');
     const map = new Map<string, { nums: number[]; preds: any[] }>();
-    for (let i = 0; i < cur.length; i++) {
-      for (let j = i + 1; j < cur.length; j++) {
-        if (cur[i].method === cur[j].method) continue;
-        const b = new Set<number>(cur[j].numbers);
-        const common = (cur[i].numbers as number[]).filter((x) => b.has(x)).sort((x, y) => x - y);
-        if (common.length < 3) continue;
-        const key = common.join(',');
-        const e = map.get(key) ?? { nums: common, preds: [] };
-        for (const p of [cur[i], cur[j]]) if (!e.preds.some((q) => q.prediction_id === p.prediction_id)) e.preds.push(p);
-        map.set(key, e);
+    const subsets = (arr: number[], k: number, start = 0, acc: number[] = [], out: number[][] = []) => {
+      if (acc.length === k) { out.push([...acc]); return out; }
+      for (let i = start; i <= arr.length - (k - acc.length); i++) { acc.push(arr[i]); subsets(arr, k, i + 1, acc, out); acc.pop(); }
+      return out;
+    };
+    for (const p of cur) {
+      const nums = [...(p.numbers as number[])].sort((x, y) => x - y);
+      for (let k = 3; k <= nums.length; k++) {
+        for (const s of subsets(nums, k)) {
+          const key = s.join(',');
+          const e = map.get(key) ?? { nums: s, preds: [] };
+          e.preds.push(p);
+          map.set(key, e);
+        }
       }
     }
-    return [...map.values()]
-      .map((e) => ({ ...e, methods: new Set(e.preds.map((p) => p.method)).size, hits: e.nums.filter((x) => win.has(x)).length }))
-      .sort((a, b) => b.nums.length - a.nums.length || b.methods - a.methods || b.preds.length - a.preds.length || a.nums[0] - b.nums[0]);
+    const out: { nums: number[]; preds: any[]; methods: number; combos: number; hits: number }[] = [];
+    for (const e of map.values()) {
+      const methods = new Set(e.preds.map((p) => p.method)).size;
+      const combos = new Set(e.preds.map((p) => `${p.method}|${[...p.numbers].sort((x: number, y: number) => x - y).join(',')}`)).size;
+      if (ovSameEngine ? combos < 2 : methods < 2) continue;
+      out.push({ ...e, methods, combos, hits: e.nums.filter((x) => win.has(x)).length });
+    }
+    // 같은 예측 집합이 공유하는 묶음은 가장 큰 묶음만 남김(예: 두 조합이 5개 공유 → 그 안의 3·4개 묶음 10+5개 중복 표시 방지)
+    const sig = (o: { preds: any[] }) => o.preds.map((p) => p.prediction_id).sort().join('|');
+    const best = new Map<string, number>();
+    for (const o of out) best.set(sig(o), Math.max(best.get(sig(o)) ?? 0, o.nums.length));
+    return out
+      .filter((o) => best.get(sig(o)) === o.nums.length)
+      .sort((a, b) => b.methods - a.methods || b.combos - a.combos || b.nums.length - a.nums.length || a.nums.join(',').localeCompare(b.nums.join(','), undefined, { numeric: true }));
   })();
+  const ovCount = { 3: 0, 4: 0, 5: 0 } as Record<3 | 4 | 5, number>;
+  overlaps.forEach((o) => { ovCount[Math.min(o.nums.length, 5) as 3 | 4 | 5] += 1; });
+  const ovShown = overlaps.filter((o) => ovK === 'all' || (ovK === 5 ? o.nums.length >= 5 : o.nums.length === ovK));
   const maxOverlap = new Map<string, number>();
-  overlaps.forEach((o) => o.preds.forEach((p) => maxOverlap.set(p.prediction_id, Math.max(maxOverlap.get(p.prediction_id) ?? 0, o.nums.length))));
+  overlaps.forEach((o) => {
+    if (o.methods < 2) return; // 카드의 '다른 엔진과 N개 겹침' 칩은 서로 다른 엔진 기준만
+    o.preds.forEach((p) => maxOverlap.set(p.prediction_id, Math.max(maxOverlap.get(p.prediction_id) ?? 0, o.nums.length)));
+  });
+  const ov = (p: any) => maxOverlap.get(p.prediction_id) ?? 0;
   const list = [...shown].sort((a, b) =>
-    sortBy === 'match' ? (b.match_count ?? -1) - (a.match_count ?? -1)
-      : sortBy === 'overlap' ? (maxOverlap.get(b.prediction_id) ?? 0) - (maxOverlap.get(a.prediction_id) ?? 0) : 0);
+    sortBy === 'match' ? (b.match_count ?? -1) - (a.match_count ?? -1) || ov(b) - ov(a)
+      : sortBy === 'overlap' ? ov(b) - ov(a) || (b.match_count ?? -1) - (a.match_count ?? -1) : 0);
+  // 표시 중인 목록 안에서 6개가 완전히 같은 조합(예: 가중치 버전만 다른 V12 w1·w2·w3) 표시
+  const sameKey = (p: any) => [...p.numbers].sort((x: number, y: number) => x - y).join(',');
+  const sameCount = new Map<string, number>();
+  shown.forEach((p) => sameCount.set(sameKey(p), (sameCount.get(sameKey(p)) ?? 0) + 1));
 
   return (
     <EngineSection
@@ -138,26 +170,45 @@ export default function RoundPredictionPanel() {
       {round != null && open && <ConsensusRankingCard round={round} />}
 
       {d && d.predictions.length === 0 && <Alert severity="info" sx={{ py: 0.25 }}>이 회차의 예측 기록이 없습니다.</Alert>}
-      {overlaps.length > 0 && (
+      {d && d.predictions.length > 0 && (
         <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, p: 0.75, mb: 1 }}>
           <Typography variant="caption" sx={{ fontWeight: 800, display: 'block' }}>
-            🧩 {round}회 예측끼리 3개 이상 겹친 번호 순위 — 서로 다른 엔진의 6개 조합이 같은 번호를 3·4·5개 공유 (이전 버전 제외)
+            🧩 {round}회 예측끼리 겹친 번호 순위 — 여러 조합이 같은 번호 3·4·5개 이상을 함께 담은 묶음 (이전 버전·무작위 기준선 제외)
           </Typography>
-          <Stack spacing={0.4} sx={{ mt: 0.5, maxHeight: 320, overflowY: 'auto' }}>
-            {overlaps.slice(0, 20).map((o, i) => (
-              <Stack key={o.nums.join(',')} direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                <Typography variant="caption" sx={{ fontWeight: 800, minWidth: 30 }}>{i + 1}위</Typography>
-                <Chip size="small" color={o.nums.length >= 4 ? 'secondary' : 'default'} label={`${o.nums.length}개 겹침`} />
-                <Box>{o.nums.map((n: number) => <Ball key={n} n={n} hit={win.has(n)} />)}</Box>
-                <Typography variant="caption" color="text.secondary">
-                  {o.methods}개 엔진 · {o.preds.map((p: any) => `${p.label}${p.rank > 1 ? ` #${p.rank}` : ''}`).join(' · ')}
-                  {d?.winning ? ` · 그중 당첨 ${o.hits}개` : ''}
-                </Typography>
-              </Stack>
+          <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+            {([['all', `전체 ${overlaps.length}`], [3, `3개 ${ovCount[3]}`], [4, `4개 ${ovCount[4]}`], [5, `5개+ ${ovCount[5]}`]] as const).map(([k, lbl]) => (
+              <Chip key={String(k)} size="small" clickable color={ovK === k ? 'primary' : 'default'} variant={ovK === k ? 'filled' : 'outlined'}
+                label={lbl} onClick={() => setOvK(k)} />
             ))}
+            <FormControlLabel sx={{ ml: 0.5 }} control={<Switch size="small" checked={ovSameEngine} onChange={(e) => setOvSameEngine(e.target.checked)} />}
+              label={<Typography variant="caption">같은 엔진 안의 다른 조합끼리도 포함</Typography>} />
           </Stack>
+          {ovShown.length === 0 ? (
+            <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+              조건에 맞는 겹침 묶음이 없습니다.{!ovSameEngine ? ' (같은 엔진 안의 조합끼리 보려면 위 스위치를 켜세요)' : ''}
+            </Typography>
+          ) : (
+            <Stack spacing={0.4} sx={{ mt: 0.5, maxHeight: 360, overflowY: 'auto' }}>
+              {ovShown.slice(0, ovLimit).map((o, i) => (
+                <Stack key={o.nums.join(',')} direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Typography variant="caption" sx={{ fontWeight: 800, minWidth: 30 }}>{i + 1}위</Typography>
+                  <Chip size="small" color={o.nums.length >= 4 ? 'secondary' : 'default'} label={`${o.nums.length}개 겹침`} />
+                  <Box>{o.nums.map((n: number) => <Ball key={n} n={n} hit={win.has(n)} />)}</Box>
+                  <Typography variant="caption" color="text.secondary">
+                    {o.methods}개 엔진 · {o.combos}개 조합 · {o.preds.map((p: any) => `${p.label}${p.rank > 1 ? ` #${p.rank}` : ''}`).join(' · ')}
+                    {d?.winning ? ` · 그중 당첨 ${o.hits}개` : ''}
+                  </Typography>
+                </Stack>
+              ))}
+              {ovShown.length > ovLimit && (
+                <Chip size="small" clickable variant="outlined" sx={{ alignSelf: 'flex-start' }}
+                  label={`더 보기 (${ovShown.length - ovLimit}개 남음)`} onClick={() => setOvLimit((v) => v + 30)} />
+              )}
+            </Stack>
+          )}
           <Typography variant="caption" color="text.disabled" component="div">
-            겹침은 엔진들이 같은 과거 데이터로 비슷하게 계산했다는 뜻입니다. 학습 기반 순위와 전 회차 검증은 위 '엔진 중복 묶음'(2·3·4개)에 있습니다.
+            순위 = 그 묶음을 담은 엔진 수 → 조합 수 → 묶음 크기 순. 같은 조합들이 공유하는 묶음은 가장 큰 것만 표시합니다(5개 공유 안의 3·4개 묶음 중복 제외).
+            겹침은 엔진들이 같은 과거 데이터로 비슷하게 계산했다는 뜻일 뿐 당첨 확률을 높이지 않습니다. 학습 기반 순위와 전 회차 검증은 위 '엔진 중복 묶음'(2·3·4개)에 있습니다.
           </Typography>
         </Box>
       )}
@@ -173,9 +224,10 @@ export default function RoundPredictionPanel() {
         )}
       </Stack>
       <Stack spacing={0.75}>
-        {list.map((p: any) => (
+        {list.map((p: any, idx: number) => (
           <Box key={p.prediction_id} sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, p: 0.75, opacity: p.superseded ? 0.55 : 1 }}>
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+              {sortBy !== 'default' && <Typography variant="caption" sx={{ fontWeight: 800, minWidth: 26 }}>{idx + 1}위</Typography>}
               <Chip size="small" variant="outlined" color={TYPE_LABEL[p.type]?.color ?? 'default'} label={TYPE_LABEL[p.type]?.label ?? p.type} />
               <Typography variant="caption" sx={{ fontWeight: 700 }}>
                 {p.label}
@@ -184,6 +236,9 @@ export default function RoundPredictionPanel() {
               {p.superseded && <Chip size="small" variant="outlined" label="이전 버전(대체됨)" />}
               {(maxOverlap.get(p.prediction_id) ?? 0) >= 3 && !p.superseded && (
                 <Chip size="small" color="secondary" variant="outlined" label={`다른 엔진과 ${maxOverlap.get(p.prediction_id)}개 겹침`} />
+              )}
+              {(sameCount.get(sameKey(p)) ?? 0) > 1 && (
+                <Chip size="small" variant="outlined" label={`동일 조합 ×${sameCount.get(sameKey(p))}`} />
               )}
               <Box sx={{ flexGrow: 1 }} />
               {p.match_count != null ? (

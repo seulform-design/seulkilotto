@@ -589,6 +589,14 @@ def post_master_run(x_upgrade_key: Optional[str] = Header(default=None)):
     return _bg("master_engine", lambda: jobs.run_job("master_engine", M.run_master, retries=0))
 
 
+@router.get("/atlas/report")
+def get_pattern_atlas():
+    """전 회차 당첨 패턴 아틀라스: 회차별 조합 순번(1~8,145,060)·패턴 클래스·정확 확률 vs 관측·walk-forward 검증."""
+    from ..ingest import draw_atlas as DA
+
+    return to_jsonable(DA.report())
+
+
 @router.get("/predictions/consensus/{round_no}")
 def get_prediction_consensus(round_no: int):
     """선택 회차의 엔진 중복 추천 번호 순위(백테스트·사전 예측) + 전체 회차 중복 수별 실제 적중률."""

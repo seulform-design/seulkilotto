@@ -824,6 +824,12 @@ def run_master() -> Dict[str, Any]:
         steps["consensus_learning"] = {"rules": cl.get("adopted_rules"), "engine_weak": cl.get("engine_weak")}
     except Exception as exc:  # noqa: BLE001
         steps["round_audit"] = {"error": str(exc)[:200]}
+    try:  # 전 회차 당첨 패턴 아틀라스(1/8,145,060 공간 역산) 갱신 — 업서트, 삭제 없음
+        from . import draw_atlas as _DA
+
+        steps["pattern_atlas"] = _DA.build()
+    except Exception as exc:  # noqa: BLE001
+        steps["pattern_atlas"] = {"error": str(exc)[:200]}
     cur = v12_current()
     steps["v12"] = {"target_round": cur["target_round"], "saved": cur["saved_live_predictions"], "note": cur["save_note"]}
     return steps

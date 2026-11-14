@@ -23,6 +23,7 @@ import EngineAuditPanel from '../components/EngineAuditPanel';
 import ReverseAnalysisPanel from '../components/ReverseAnalysisPanel';
 import MasterEnginePanel from '../components/MasterEnginePanel';
 import RoundAuditPanel from '../components/RoundAuditPanel';
+import PatternAtlasPanel from '../components/PatternAtlasPanel';
 
 const RoundRecommendPage = lazy(() => import('./RoundRecommendPage'));
 const PostOccurrencePage = lazy(() => import('./PostOccurrencePage'));
@@ -77,6 +78,7 @@ export default function AnalysisEnginePage() {
         <EngineAuditPanel />
         <ReverseAnalysisPanel />
         <MasterEnginePanel />
+        <PatternAtlasPanel />
         <RoundAuditPanel />
       </Group>
 

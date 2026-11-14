@@ -815,6 +815,9 @@ export const v1Api = {
   getPredictionConsensus: (round: number) =>
     fetchJson<Record<string, any>>(`/api/v1/pipeline/predictions/consensus/${round}`, { timeoutMs: 60_000 }),
 
+  /** 당첨 패턴 아틀라스(1/8,145,060 역산 DB). */
+  getPatternAtlas: () => fetchJson<Record<string, any>>('/api/v1/pipeline/atlas/report', { timeoutMs: 90_000 }),
+
   /** 엔진별 성적(일치 분포·평균·CI·무작위 대비). */
   getPredictionPerformance: (ptype: string, common = true) =>
     fetchJson<Record<string, any>>(`/api/v1/pipeline/predictions/performance?ptype=${ptype}&common=${common}`, {

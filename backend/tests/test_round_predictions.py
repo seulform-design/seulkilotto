@@ -164,6 +164,16 @@ def test_consensus_ranking_round_and_all_rounds(tmp_path, monkeypatch):
     v = t10["validation"]
     assert v["rounds"] == 49 and v["random_mean_hits"] == 1.333 and all(h["round"] < 1200 for h in t10["recent"])
     assert t10["engine_weights"] and "1/8,145,060" in t10["honesty"]
+    pz = out["pairs"]
+    pb = pz["backtest"]
+    assert len(pb["top10"]) == 10 and [x["rank"] for x in pb["top10"]] == list(range(1, 11))
+    assert all(x["engines"] >= 2 for x in pb["overlap_pairs"]) and pb["overlap_pairs_total"] >= len(pb["overlap_pairs"])
+    assert [x["engines"] for x in pb["overlap_pairs"]] == sorted((x["engines"] for x in pb["overlap_pairs"]), reverse=True)
+    assert pb["pair_hits"] == sum(1 for x in pb["top10"] if x["drawn"] == 2)
+    pv = pz["validation"]
+    assert pv["rounds"] == 49 and pv["random_rate"] == 0.0152 and all(h["round"] < 1200 for h in pz["recent"])
+    assert all(x["both_drawn"] <= x["times_consensus"] for x in pz["all_rounds"]["most_frequent"])
+    assert "1/8,145,060" in pz["honesty"]
     a2 = P.consensus_ranking(1180)["all_rounds"]
     assert a2["rounds"] == 30 and a2["range"] == "1150~1179회" and a2["per_round"][0]["round"] == 1179
     db.reset_for_tests()

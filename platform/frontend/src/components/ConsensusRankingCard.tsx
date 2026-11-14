@@ -6,6 +6,7 @@ import { Box, Chip, LinearProgress, Stack, ToggleButton, ToggleButtonGroup, Tool
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { v1Api } from '../api/v1Api';
+import ConsensusPairsSection from './ConsensusPairsSection';
 
 function Ball({ n, drawn, size = 28 }: { n: number; drawn?: boolean | null; size?: number }) {
   return (
@@ -118,6 +119,8 @@ export default function ConsensusRankingCard({ round }: { round: number }) {
           <Typography variant="caption" color="text.disabled" component="div">ⓘ {data?.top10?.honesty}</Typography>
         </Box>
       )}
+
+      <ConsensusPairsSection round={round} pairs={data?.pairs} view={view} winning={data?.this_round?.winning} />
 
       {levels.length > 0 && (
         <Box sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'divider' }}>
